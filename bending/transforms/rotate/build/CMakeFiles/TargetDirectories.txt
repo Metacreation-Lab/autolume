@@ -1,0 +1,3 @@
+/home/olaf/PycharmProjects/Ray_Autolume/bending/transforms/rotate/build/CMakeFiles/rotate.dir
+/home/olaf/PycharmProjects/Ray_Autolume/bending/transforms/rotate/build/CMakeFiles/edit_cache.dir
+/home/olaf/PycharmProjects/Ray_Autolume/bending/transforms/rotate/build/CMakeFiles/rebuild_cache.dir

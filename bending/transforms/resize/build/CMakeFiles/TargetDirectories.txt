@@ -1,0 +1,3 @@
+/home/olaf/network-bending/transforms/resize/build/CMakeFiles/resize.dir
+/home/olaf/network-bending/transforms/resize/build/CMakeFiles/edit_cache.dir
+/home/olaf/network-bending/transforms/resize/build/CMakeFiles/rebuild_cache.dir
