@@ -61,13 +61,13 @@ class PerformanceWidget:
             imgui.same_line(viz.app.label_w + viz.app.font_size * 14)
             imgui.text(f'{1/t:.1f} FPS' if t > 0 else 'N/A')
             imgui.same_line(viz.app.label_w + viz.app.font_size * 18 + viz.app.spacing * 3)
-            _clicked, self.is_async = imgui.checkbox('Separate process', self.is_async)
+            _clicked, self.is_async = imgui.checkbox('Separate process', True)
             imgui.same_line(imgui.get_content_region_max()[0] - 1 - viz.app.button_w * 2 - viz.app.spacing)
             _clicked, self.force_fp32 = imgui.checkbox('Force FP32', self.force_fp32)
 
         viz.app.set_fps_limit(self.fps_limit)
         viz.app.set_vsync(self.use_vsync)
-        viz.set_async(self.is_async)
+        # viz.set_async(self.is_async)
         viz.args.force_fp32 = self.force_fp32
 
 #----------------------------------------------------------------------------

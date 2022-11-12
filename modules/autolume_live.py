@@ -11,6 +11,7 @@ class States(IntEnum):
 from modules.visualizer import Visualizer
 from modules.menu import Menu
 from modules.welcome import Welcome
+from modules.renderloop import AsyncRenderer
 
 
 class Autolume(imgui_window.ImguiWindow):
@@ -22,6 +23,7 @@ class Autolume(imgui_window.ImguiWindow):
         self.welcome = Welcome(self)
         self.menu = None
         self.viz = None
+        self.render_loop = None
         self.pkls = []
 
         # Initialize window.
@@ -47,7 +49,8 @@ class Autolume(imgui_window.ImguiWindow):
         self.menu = Menu(self)
 
     def start_renderer(self):
-        self.viz = Visualizer(self)
+        self.render_loop = AsyncRenderer()
+        self.viz = Visualizer(self, self.render_loop)
 
         # List pickles.
         if len(self.pkls) > 0:
