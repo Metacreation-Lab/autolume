@@ -264,7 +264,6 @@ class Renderer:
         if net is None:
             try:
                 net = copy.deepcopy(orig_net)
-                net = self._tweak_network(net, **tweak_kwargs)
                 net = net.to(self._device).eval().requires_grad_(False)
             except:
                 net = CapturedException()
@@ -274,16 +273,7 @@ class Renderer:
             raise net
         return net
 
-    def _tweak_network(self, net):
-        # Print diagnostics.
-        # for name, value in misc.named_params_and_buffers(net):
-        #    if name.endswith('.magnitude_ema'):
-        #        value = value.rsqrt().numpy()
-        #        print(f'{name:<50s}{np.min(value):<16g}{np.max(value):g}')
-        #    if name.endswith('.weight') and value.ndim == 4:
-        #        value = value.square().mean([1,2,3]).sqrt().numpy()
-        #        print(f'{name:<50s}{np.min(value):<16g}{np.max(value):g}')
-        return net
+
 
     def _get_pinned_buf(self, ref):
         key = (tuple(ref.shape), ref.dtype)
@@ -294,10 +284,10 @@ class Renderer:
         return buf
 
     def to_device(self, buf):
-        return self._get_pinned_buf(buf).copy_(buf).to(self._device)
+        return self._get_pinned_buf(buf).copy_(buf,non_blocking=True).to(self._device)
 
     def to_cpu(self, buf):
-        return self._get_pinned_buf(buf).copy_(buf).clone()
+        return self._get_pinned_buf(buf).copy_(buf,non_blocking=True).clone()
 
     def _ignore_timing(self):
         self._is_timing = False
@@ -346,8 +336,8 @@ class Renderer:
         # Run mapping network.
         else:
             w_avg = G.mapping.w_avg
-            all_zs = self.to_device(torch.from_numpy(all_zs))
-            all_cs = self.to_device(torch.from_numpy(all_cs))
+            all_zs = torch.from_numpy(all_zs).to(self._device)#self.to_device(torch.from_numpy(all_zs))
+            all_cs = torch.from_numpy(all_cs).to(self._device) #self.to_device(torch.from_numpy(all_cs))
             all_ws = G.mapping(z=all_zs, c=all_cs, truncation_psi=trunc_psi,
                                truncation_cutoff=trunc_cutoff) - w_avg
             all_ws = dict(zip(all_seeds, all_ws))
@@ -476,13 +466,23 @@ class Renderer:
             synthesis_kwargs = dnnlib.EasyDict(noise_mode=noise_mode, force_fp32=force_fp32)
             torch.manual_seed(random_seed)
             w += self.to_device(direction)
-            out, layers = self.run_synthesis_net(G.synthesis, w, capture_layer=layer_name, transforms=latent_transforms,
+            out, manip_layers = self.run_synthesis_net(G.synthesis, w, capture_layer=layer_name, transforms=latent_transforms,
                                                  adjustments=adjustments, noise_adjustments=noise_adjustments, ratios=ratios,
                                                  **synthesis_kwargs)
             res.snap = self.to_cpu(w).squeeze()[0]
 
-            # Update layer info
-            res.layers = layers
+            # Update layer list.
+            cache_key = (G.synthesis, tuple(sorted(synthesis_kwargs.items())))
+            if cache_key not in self._net_layers:
+                layers = manip_layers
+                if layer_name is not None:
+                    torch.manual_seed(random_seed)
+                    _out, layers = self.run_synthesis_net(G.synthesis, w, **synthesis_kwargs)
+                self._net_layers[cache_key] = layers
+                del layers
+
+            res.layers = self._net_layers[cache_key]
+            res.layers[:len(manip_layers)] = manip_layers
 
             # Untransform.
             if untransform and res.has_input_transform:
@@ -523,7 +523,9 @@ class Renderer:
                 fft = (fft / fft.mean()).log10() * 10  # dB
                 fft = self._apply_cmap((fft / fft_range_db + 1) / 2)
                 res.image = torch.cat([img.expand_as(fft), fft], dim=1)
-
+            del img
+            del manip_layers
+            del out # Free up GPU memory.
 
     def run_synthesis_net(self, net, *args, capture_layer=None, transforms=None, ratios=None, adjustments=None,
                           noise_adjustments=None, **kwargs):
@@ -613,9 +615,10 @@ class Renderer:
         hooks = [module.register_forward_hook(module_hook) for module in net.modules()]
         hooks.extend([module.register_forward_pre_hook(adjustment_hook) for module in net.modules()])
         try:
-            out, _ = net(*args, **kwargs)
-            if isinstance(out, tuple):
-                out = out[0]
+            with torch.no_grad():
+                out, _ = net(*args, **kwargs)
+                if isinstance(out, tuple):
+                    out = out[0]
         except CaptureSuccess as e:
             out = e.out
         for hook in hooks:

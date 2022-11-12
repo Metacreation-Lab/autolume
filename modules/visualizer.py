@@ -24,7 +24,6 @@ import dnnlib
 from utils.gui_utils import imgui_utils
 from utils.gui_utils import gl_utils
 from utils.gui_utils import text_utils
-from widgets import renderer
 from widgets import pickle_widget
 from widgets import latent_widget
 from widgets import trunc_noise_widget
@@ -43,7 +42,7 @@ import NDIlib as ndi
 #----------------------------------------------------------------------------
 
 class Visualizer:
-    def __init__(self, app):
+    def __init__(self, app, renderer):
         self.app = app
 
         #COMMUNICATIONS
@@ -68,7 +67,7 @@ class Visualizer:
 
         self.pane_w = 0
         self._last_error_print  = None
-        self._async_renderer    = AsyncRenderer()
+        self._async_renderer    = renderer
         self._defer_rendering   = 0
         self._tex_img           = None
         self._tex_obj           = None
@@ -112,13 +111,6 @@ class Visualizer:
     def clear_result(self):
         self._async_renderer.clear_result()
 
-    def set_async(self, is_async):
-        if is_async != self._async_renderer.is_async:
-            self._async_renderer.set_async(is_async)
-            self.clear_result()
-            if 'image' in self.result:
-                self.result.message = 'Switching rendering process...'
-                self.defer_rendering()
     @imgui_utils.scoped_by_object_id
     def __call__(self):
         self.pane_w = self.app.font_size * 45
@@ -140,7 +132,7 @@ class Visualizer:
         self.latent_widget(expanded)
         self.trunc_noise_widget(expanded)
         self.looping_widget(expanded)
-        expanded, _visible = imgui_utils.collapsing_header('Performance', default=True)
+        expanded, _visible = imgui_utils.collapsing_header('Performance & capture', default=True)
         self.perf_widget(expanded)
         expanded, _visible = imgui_utils.collapsing_header('Adjust Input', default=True)
         self.adjuster_widget(expanded)
@@ -189,108 +181,5 @@ class Visualizer:
 
 #----------------------------------------------------------------------------
 
-def compare_args(args, cur_args):
-    if args is None or cur_args is None:
-        return False
-    for key in args.keys():
-        a1 = args.get(key, "a")
-        a2 = cur_args.get(key, "b")
-        if not isinstance(a1, type(a2)):
-            return False
-        if isinstance(a1, dict):
-            if not compare_args(a1, a2):
-                return False
-        elif isinstance(a1, torch.Tensor):
-            if not(torch.equal(a1, a2)):
-                return False
-        else:
-            if not (a1 == a2):
-                return False
-    return True
-
-class AsyncRenderer:
-    def __init__(self):
-        self._closed        = False
-        self._is_async      = False
-        self._cur_args      = None
-        self._cur_result    = None
-        self._cur_stamp     = 0
-        self._renderer_obj  = None
-        self._args_queue    = None
-        self._result_queue  = None
-        self._process       = None
-
-    def close(self):
-        self._closed = True
-        self._renderer_obj = None
-        if self._process is not None:
-            self._process.terminate()
-        self._process = None
-        self._args_queue = None
-        self._result_queue = None
-
-    @property
-    def is_async(self):
-        return self._is_async
-
-    def set_async(self, is_async):
-        self._is_async = is_async
-
-    def set_args(self, **args):
-        assert not self._closed
-        if not compare_args(args, self._cur_args):
-            if self._is_async:
-                self._set_args_async(**args)
-            else:
-                self._set_args_sync(**args)
-            self._cur_args = args
-
-    def _set_args_async(self, **args):
-        if self._process is None:
-            self._args_queue = multiprocessing.Queue()
-            self._result_queue = multiprocessing.Queue()
-            try:
-                multiprocessing.set_start_method('spawn')
-            except RuntimeError:
-                pass
-            self._process = multiprocessing.Process(target=self._process_fn, args=(self._args_queue, self._result_queue), daemon=True)
-            self._process.start()
-        self._args_queue.put([args, self._cur_stamp])
-
-    def _set_args_sync(self, **args):
-        if self._renderer_obj is None:
-            self._renderer_obj = renderer.Renderer()
-        self._cur_result = self._renderer_obj.render(**args)
-
-    def get_result(self):
-        assert not self._closed
-        if self._result_queue is not None:
-            while self._result_queue.qsize() > 0:
-                result, stamp = self._result_queue.get()
-                if stamp == self._cur_stamp:
-                    self._cur_result = result
-        return self._cur_result
-
-    def clear_result(self):
-        assert not self._closed
-        self._cur_args = None
-        self._cur_result = None
-        self._cur_stamp += 1
-
-    @staticmethod
-    def _process_fn(args_queue, result_queue):
-        torch.set_grad_enabled(False)
-        renderer_obj = renderer.Renderer()
-        with torch.inference_mode():
-            while True:
-                args, stamp = args_queue.get()
-                while args_queue.qsize() > 0:
-                    args, stamp = args_queue.get()
-                # gc.collect()
-                torch.cuda.empty_cache()
-                result = renderer_obj.render(**args)
-                if 'error' in result:
-                    result.error = renderer.CapturedException(result.error)
-                result_queue.put([result, stamp])
 
 
