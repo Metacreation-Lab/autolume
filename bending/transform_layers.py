@@ -40,7 +40,8 @@ class Erode(nn.Module):
         if(not isinstance(params[0], int) or params[0] < 0):
             print('Erosion parameter must be a positive integer')
             # raise ValueError
-        x[:, indices] = kornia.morphology.erosion(x[:, indices], torch.ones(params, device=x.device).to(x.dtype), engine="convolution")
+        print(params)
+        x[:, indices] = kornia.morphology.erosion(x[:, indices], torch.ones((params[0],params[0]), device=x.device).to(x.dtype), engine="convolution")
         return x
 
 class Dilate(nn.Module):
@@ -51,7 +52,7 @@ class Dilate(nn.Module):
         if(not isinstance(params[0], int) or params[0] < 0):
             print('Dilation parameter must be a positive integer')
             # raise ValueError
-        x[:, indices] = kornia.morphology.dilation(x[:, indices], torch.ones(params, device=x.device).to(x.dtype), engine="convolution")
+        x[:, indices] = kornia.morphology.dilation(x[:, indices], torch.ones((params[0],params[0]), device=x.device).to(x.dtype), engine="convolution")
         return x
 
 class Translate(nn.Module):
@@ -131,7 +132,7 @@ class BinaryThreshold(nn.Module):
         if(not isinstance(params[0], float) or params[0] < -1 or params[0] > 1):
             print('Binary threshold parameter should be a float between -1 and 1.')
             # raise ValueError
-        x[:, indices] = (x[:, indices] > params[0])#.to(x.dtype)
+        x[:, indices] = (x[:, indices] > params[0]).to(x.dtype)
         return x
 
 class ScalarMultiply(nn.Module):

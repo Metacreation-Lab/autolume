@@ -284,10 +284,10 @@ class Renderer:
         return buf
 
     def to_device(self, buf):
-        return self._get_pinned_buf(buf).copy_(buf,non_blocking=True).to(self._device)
+        return buf.to(self._device) #self._get_pinned_buf(buf).copy_(buf,non_blocking=True).to(self._device)
 
     def to_cpu(self, buf):
-        return self._get_pinned_buf(buf).copy_(buf,non_blocking=True).clone()
+        return buf.detach().cpu() #self._get_pinned_buf(buf).copy_(buf,non_blocking=True).clone()
 
     def _ignore_timing(self):
         self._is_timing = False
@@ -523,9 +523,9 @@ class Renderer:
                 fft = (fft / fft.mean()).log10() * 10  # dB
                 fft = self._apply_cmap((fft / fft_range_db + 1) / 2)
                 res.image = torch.cat([img.expand_as(fft), fft], dim=1)
-            del img
-            del manip_layers
-            del out # Free up GPU memory.
+            # del img
+            # del manip_layers
+            # del out # Free up GPU memory.
 
     def run_synthesis_net(self, net, *args, capture_layer=None, transforms=None, ratios=None, adjustments=None,
                           noise_adjustments=None, **kwargs):
@@ -552,7 +552,6 @@ class Renderer:
         submodule_names = {mod: name for name, mod in net.named_modules()}
         unique_names = set()
         layers = []
-
         def adjustment_hook(module, inputs):
             #pre forward hook to add adjustments to the latent vector and resize input to fit ratio
             inps = []
@@ -590,7 +589,10 @@ class Renderer:
             if len(outputs) == 1:
                 for transform in transforms:
                     if name == transform["layerID"]:
-                        outputs = [self.manipulation(outputs[0], transform)]
+                        try:
+                            outputs = [self.manipulation(outputs[0], transform)]
+                        except Exception as e:
+                            print(e)
 
             for idx, out in enumerate(outputs):
                 if out.ndim == 5:  # G-CNN => remove group dimension.
