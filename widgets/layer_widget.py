@@ -96,7 +96,6 @@ class LayerWidget:
 
         self.cached_transforms = cached_transforms
         for i, trans in enumerate(self.cached_transforms):
-            print("mapping", i, len(self.cached_transforms))
             for j in range(len(trans.params)):
                 self.viz.osc_dispatcher.map(trans.osc_address[j],
                                             self.transform_osc(trans, param_idx=j))
@@ -108,10 +107,8 @@ class LayerWidget:
             except Exception as e:
                 print(e)
                 print(f"{noise['osc_address']} is not mapped")
-        print("unmapped")
         self.noises = noises
         for _, noise in self.noises.items():
-            print("mapping", noises)
             self.viz.osc_dispatcher.map(noise["osc_address"], self.noise_osc(noise))
 
     def save(self, path):
@@ -416,6 +413,7 @@ class LayerWidget:
 
         for idx in to_remove:
             del self.cached_transforms[idx]
+        self.viz.args.latent_transforms = copy.deepcopy(self.cached_transforms)
 
 
     @imgui_utils.scoped_by_object_id
