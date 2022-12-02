@@ -7,21 +7,26 @@
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
 import array
+import threading
+
 import numpy as np
 import imgui
 from utils.gui_utils import imgui_utils
+from pythonosc.osc_server import BlockingOSCUDPServer
+from pythonosc.udp_client import SimpleUDPClient
+import NDIlib as ndi
 
-#----------------------------------------------------------------------------
+
+# ----------------------------------------------------------------------------
 
 class PerformanceWidget:
     def __init__(self, viz):
-        self.viz            = viz
-        self.gui_times      = [float('nan')] * 60
-        self.render_times   = [float('nan')] * 30
-        self.fps_limit      = 60
-        self.use_vsync      = False
-        self.is_async       = False
-        self.force_fp32     = False
+        self.viz = viz
+        self.gui_times = [float('nan')] * 60
+        self.render_times = [float('nan')] * 30
+        self.fps_limit = 60
+        self.use_vsync = False
+        self.force_fp32 = False
 
     @imgui_utils.scoped_by_object_id
     def __call__(self, show=True):
@@ -39,12 +44,13 @@ class PerformanceWidget:
             imgui.same_line(viz.app.label_w + viz.app.font_size * 9)
             t = [x for x in self.gui_times if x > 0]
             t = np.mean(t) if len(t) > 0 else 0
-            imgui.text(f'{t*1e3:.1f} ms' if t > 0 else 'N/A')
+            imgui.text(f'{t * 1e3:.1f} ms' if t > 0 else 'N/A')
             imgui.same_line(viz.app.label_w + viz.app.font_size * 14)
-            imgui.text(f'{1/t:.1f} FPS' if t > 0 else 'N/A')
+            imgui.text(f'{1 / t:.1f} FPS' if t > 0 else 'N/A')
             imgui.same_line(viz.app.label_w + viz.app.font_size * 18 + viz.app.spacing * 3)
             with imgui_utils.item_width(viz.app.font_size * 6):
-                _changed, self.fps_limit = imgui.input_int('FPS limit', self.fps_limit, flags=imgui.INPUT_TEXT_ENTER_RETURNS_TRUE)
+                _changed, self.fps_limit = imgui.input_int('FPS limit', self.fps_limit,
+                                                           flags=imgui.INPUT_TEXT_ENTER_RETURNS_TRUE)
                 self.fps_limit = min(max(self.fps_limit, 5), 1000)
             imgui.same_line(imgui.get_content_region_max()[0] - 1 - viz.app.button_w * 2 - viz.app.spacing)
             _clicked, self.use_vsync = imgui.checkbox('Vertical sync', self.use_vsync)
@@ -57,17 +63,45 @@ class PerformanceWidget:
             imgui.same_line(viz.app.label_w + viz.app.font_size * 9)
             t = [x for x in self.render_times if x > 0]
             t = np.mean(t) if len(t) > 0 else 0
-            imgui.text(f'{t*1e3:.1f} ms' if t > 0 else 'N/A')
+            imgui.text(f'{t * 1e3:.1f} ms' if t > 0 else 'N/A')
             imgui.same_line(viz.app.label_w + viz.app.font_size * 14)
-            imgui.text(f'{1/t:.1f} FPS' if t > 0 else 'N/A')
-            imgui.same_line(viz.app.label_w + viz.app.font_size * 18 + viz.app.spacing * 3)
-            _clicked, self.is_async = imgui.checkbox('Separate process', True)
+            imgui.text(f'{1 / t:.1f} FPS' if t > 0 else 'N/A')
             imgui.same_line(imgui.get_content_region_max()[0] - 1 - viz.app.button_w * 2 - viz.app.spacing)
             _clicked, self.force_fp32 = imgui.checkbox('Force FP32', self.force_fp32)
 
+            imgui.text('Server')
+            imgui.same_line()
+            with imgui_utils.item_width(viz.app.font_size * 6):
+                changed_ip, self.viz.in_ip = imgui.input_text(f"OSC IP Addresse", self.viz.in_ip, 256,
+                                                              imgui.INPUT_TEXT_CHARS_NO_BLANK | imgui.INPUT_TEXT_ENTER_RETURNS_TRUE)
+                imgui.same_line()
+                changed_port, self.viz.in_port = imgui.input_int(f"OSC port", self.viz.in_port,
+                                                                 flags=imgui.INPUT_TEXT_ENTER_RETURNS_TRUE)
+
+                imgui.same_line()
+                # NDI parameters
+                changed_ndi, self.viz.ndi_name = imgui.input_text(f"NDI Name", self.viz.ndi_name,
+                                                                  256, imgui.INPUT_TEXT_CHARS_NO_BLANK | imgui.INPUT_TEXT_ENTER_RETURNS_TRUE)
+
+            if changed_port or changed_ip:
+                self.viz.server.shutdown()
+                self.viz.server_thread.join()
+                self.viz.server = BlockingOSCUDPServer((self.viz.in_ip, self.viz.in_port), self.viz.osc_dispatcher)
+                print("new server", self.viz.in_ip, self.viz.in_port)
+                self.viz.server_thread = threading.Thread(target=self.viz.server.serve_forever, daemon=True)
+                self.viz.server_thread.start()
+                self.viz.osc_client = SimpleUDPClient(self.viz.in_ip, self.viz.in_port)
+
+            if changed_ndi:
+                        send_settings = ndi.SendCreate()
+                        send_settings.ndi_name = self.viz.ndi_name
+                        ndi.send_destroy(self.viz.ndi_send)
+                        self.viz.ndi_send = ndi.send_create(send_settings)
+
+
+
         viz.app.set_fps_limit(self.fps_limit)
         viz.app.set_vsync(self.use_vsync)
-        # viz.set_async(self.is_async)
         viz.args.force_fp32 = self.force_fp32
 
-#----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
