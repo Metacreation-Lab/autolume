@@ -126,7 +126,7 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
         self._fps_limit = int(fps_limit)
 
     def should_close(self):
-        return glfw.window_should_close(self._glfw_window) or (self._close_on_esc and self._esc_pressed)
+        return glfw.window_should_close(self._glfw_window) # or (self._close_on_esc and self._esc_pressed)
 
     def stop(self):
         self.stopped = True

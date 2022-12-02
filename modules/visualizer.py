@@ -6,19 +6,10 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 import threading
-
-import click
-import os
-import gc
-
-import multiprocessing
-
-import glfw
 import numpy as np
 import imgui
+import cv2
 # import pyaudio
-import torch.cuda
-import ray
 
 import dnnlib
 from utils.gui_utils import imgui_utils
@@ -48,23 +39,21 @@ class Visualizer:
         #COMMUNICATIONS
         # self.pa = pyaudio.PyAudio()
         self.in_ip = "127.0.0.1"
-        self.in_port = 1337
-        self.out_ip = "127.0.0.1"
-        self.out_port = 1337
+        self.in_port = 1338
         self.osc_dispatcher = Dispatcher()
-        self.osc_client = SimpleUDPClient(self.out_ip, self.out_port)
+        self.osc_client = SimpleUDPClient(self.in_ip, self.in_port)
         self.server = BlockingOSCUDPServer((self.in_ip, self.in_port), self.osc_dispatcher)
         self.server_thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.server_thread.start()
 
         # NDI parameters
+        self.ndi_name = 'Autolume Live'
         send_settings = ndi.SendCreate()
-        send_settings.ndi_name = 'Autolume Live'
+        send_settings.ndi_name = self.ndi_name
         self.ndi_send = ndi.send_create(send_settings)
         self.video_frame = ndi.VideoFrameV2()
 
         # Internals.
-
         self.pane_w = 0
         self._last_error_print  = None
         self._async_renderer    = renderer
@@ -161,6 +150,10 @@ class Visualizer:
         if 'image' in self.result:
             if self._tex_img is not self.result.image:
                 self._tex_img = self.result.image
+                img = cv2.cvtColor(self._tex_img, cv2.COLOR_RGB2BGRA)
+                self.video_frame.data = img
+                self.video_frame.FourCC = ndi.FOURCC_VIDEO_TYPE_BGRX
+                ndi.send_send_video_v2(self.ndi_send, self.video_frame)
                 if self._tex_obj is None or not self._tex_obj.is_compatible(image=self._tex_img):
                     self._tex_obj = gl_utils.Texture(image=self._tex_img, bilinear=False, mipmap=False)
                 else:

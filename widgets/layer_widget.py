@@ -67,6 +67,7 @@ class LayerWidget:
         self.refocus = False
         self.mode = True
         self.cached_transforms = []
+        self.osc_funcs = {}
         self.names = []
         self.has_transforms = {}
         self.imgui_ids = set()
@@ -327,6 +328,8 @@ class LayerWidget:
                  "type": param_type[current].item()}, imgui_id=self.make_id(), use_osc=False,
                 osc_address=["osc address", ] * num_params[current].item(),
                 mapping=["x"] * num_params[current].item())
+            funcs = [self.transform_osc(transformation, param_idx) for param_idx in range(len(transformation.params))]
+            self.osc_funcs[transformation.imgui_id] = funcs
             self.cached_transforms.append(transformation)
 
         to_remove = []
@@ -384,7 +387,7 @@ class LayerWidget:
                                         changed, address = imgui.input_text(f"##osc_{j}_{u_id}",
                                                                             trans.osc_address[j],
                                                                             256,
-                                                                            imgui.INPUT_TEXT_CHARS_NO_BLANK |
+                                                                            imgui.INPUT_TEXT_CHARS_NO_BLANK | imgui.INPUT_TEXT_ENTER_RETURNS_TRUE |
                                                                             (
                                                                                 imgui.INPUT_TEXT_READ_ONLY) * (
                                                                                 not trans.use_osc))
@@ -392,14 +395,17 @@ class LayerWidget:
                                             imgui.same_line()
 
                                         if changed:
-
                                             try:
                                                 self.viz.osc_dispatcher.unmap(trans.osc_address[j],
-                                                                              self.transform_osc(trans, param_idx=j))
-                                            except:
+                                                                              self.osc_funcs[trans.imgui_id][j])
+                                                print(f"Unmapped",trans.osc_address[j])
+                                                print(self.viz.osc_dispatcher.mappings)
+                                            except Exception as e:
                                                 print(f"{trans.osc_address[j]} is not mapped")
+                                                print(e)
+                                                print(self.viz.osc_dispatcher._map)
                                             self.viz.osc_dispatcher.map(address,
-                                                                        self.transform_osc(trans, param_idx=j))
+                                                                        self.osc_funcs[trans.imgui_id][j])
                                             trans.osc_address[j] = address
                                     for j in range(len(trans.params)):
                                         changed, trans.mapping[j] = imgui.input_text(f"##mappings_{j}_{u_id}",
