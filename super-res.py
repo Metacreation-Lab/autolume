@@ -72,7 +72,8 @@ class SRVGGNetCompact(nn.Module):
         return out
 
 
-
+def check_width_height(args):
+  return args.out_width is not None and args.out_height is not None
 
 
 def get_resolution(video_path):
@@ -91,7 +92,13 @@ def get_audio(video_path):
 class Writer:
 
     def __init__(self, args, audio, height, width, video_save_path, fps):
-        out_width, out_height = int(width * args.outscale), int(height * args.outscale)
+        if args.out_width is None and args.out_height is None:
+          out_width, out_height = int(width * args.outscale), int(height * args.outscale)
+
+        else: 
+          assert (args.out_width is not None and args.out_height is not None) # width and height should be specify together
+
+          out_width, out_height = int(args.out_width), int(args.out_width)
 
         if audio is not None:
             self.stream_writer = (
@@ -123,32 +130,42 @@ class Writer:
         self.stream_writer.wait()
 
 
+
 def main():
   parser = argparse.ArgumentParser(description="video_super_resolution")
 
   parser.add_argument("--result_path", type=str, required=True, help="path of result")
   parser.add_argument("--input_path", type=str, required=True, help="path of input file, mp4")
   parser.add_argument("--model_path", type=str, required=True, help="path of model")
-  parser.add_argument("--outscale", type=float, default=4, help="scale_factor")
+  parser.add_argument("--outscale", type=float, choices=range(1,9), help="scale_factor")
+  parser.add_argument("--out_width", type=int, help="output_width")
+  parser.add_argument("--out_height", type=int, help="output_height")
   parser.add_argument("--sharpen_scale", type=float, default=4, help="sharpen scale factor")
   parser.add_argument("--fps", type=int, default=30, help="fps")
 
   args = parser.parse_args()
 
+
+
   width, height = get_resolution(args.input_path)
+
+  if args.outscale > 4 or (check_width_height(args) and (args.out_width > 4*width or args.out_height > 4*height)):
+    print('warning: Any super-res scale larger than x4 required non-model inference with interpolation and can be slower')
+
+
   audio = get_audio(args.input_path)
-  video_save_path = os.path.join(args.result_path, f'result_x{args.outscale}.mp4')
+  if check_width_height(args):
+    video_save_path = os.path.join(args.result_path, f'result_x{int(args.out_width)}x{int(args.out_height)}.mp4')
+  else: 
+    video_save_path = os.path.join(args.result_path, f'result_{int(width*args.outscale)}x{int(height*args.outscale)}.mp4')
+
   writer = Writer(args, audio, height, width, video_save_path, fps=30)
   outscale=args.outscale
 
   upsampler=SRVGGNetCompact(num_in_ch=3, num_out_ch=3, num_feat=64, num_conv=32, upscale=4, act_type='prelu').to('cuda')
   sd=torch.load(args.model_path)['params']
   upsampler.load_state_dict(sd)
-  #upsampler=upsampler.half()
   
-
-
-
   cap = cv2.VideoCapture(args.input_path)
   frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
   pbar = tqdm(total=frame_count, unit='frame', desc='inference')
@@ -164,10 +181,18 @@ def main():
         output = upsampler(input)
         output=F.adjust_sharpness(output,args.sharpen_scale)*255 
 
-        output = output[0].permute(1,2,0).cpu().numpy().astype(np.uint8) #speed improve
-
-        if args.outscale != 4:
+        output = output[0].permute(1,2,0).cpu().numpy().astype(np.uint8) 
+        
+        if check_width_height(args):
           output = cv2.resize( 
+                output, (
+                    int(args.out_width),
+                    int(args.out_height),
+                ), interpolation=cv2.INTER_LINEAR)
+
+        else:
+          if args.outscale != 4:
+            output = cv2.resize( 
                 output, (
                     int(width * outscale),
                     int(height * outscale),
