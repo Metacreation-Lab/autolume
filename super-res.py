@@ -106,14 +106,16 @@ class Writer:
                                      pipe_stdin=True, pipe_stdout=True,cmd='ffmpeg'))
         else:
             self.stream_writer = (
-                ffmpeg.input('pipe:', format='rawvideo', pix_fmt='bgr24', s=f'{out_width}x{out_height}',
+                ffmpeg.input('pipe:', format='rawvideo', 
+                pix_fmt='bgr24', 
+                s=f'{out_width}x{out_height}',
                              framerate=fps).output(
-                                 video_save_path, pix_fmt='yuv420p', vcodec='libx264',
+                                 video_save_path, pix_fmt='yuv420p',vcodec='libx264',
                                  loglevel='error').overwrite_output().run_async(
                                      pipe_stdin=True, pipe_stdout=True,cmd='ffmpeg'))
 
     def write_frame(self, frame):
-        frame = frame.astype(np.uint8).tobytes()
+        frame = frame.tobytes()
         self.stream_writer.stdin.write(frame)
 
     def close(self):
@@ -128,7 +130,7 @@ def main():
   parser.add_argument("--input_path", type=str, required=True, help="path of input file, mp4")
   parser.add_argument("--model_path", type=str, required=True, help="path of model")
   parser.add_argument("--outscale", type=float, default=4, help="scale_factor")
-  parser.add_argument("--sharpen_scale", type=float, default=3, help="sharpen scale factor")
+  parser.add_argument("--sharpen_scale", type=float, default=4, help="sharpen scale factor")
   parser.add_argument("--fps", type=int, default=30, help="fps")
 
   args = parser.parse_args()
@@ -142,6 +144,7 @@ def main():
   upsampler=SRVGGNetCompact(num_in_ch=3, num_out_ch=3, num_feat=64, num_conv=32, upscale=4, act_type='prelu').to('cuda')
   sd=torch.load(args.model_path)['params']
   upsampler.load_state_dict(sd)
+  #upsampler=upsampler.half()
   
 
 
@@ -155,21 +158,22 @@ def main():
       print('break')
       break
     else:
-      input=torch.tensor(img).permute(2,0,1).to('cuda').float()/255
+      input=torch.tensor(img).permute(2,0,1).float().to('cuda')/255
       input=torch.unsqueeze(input,0)
       with torch.inference_mode():
         output = upsampler(input)
-        output=F.adjust_sharpness(output,args.sharpen_scale)*255
-        output = output[0].permute(1,2,0).cpu().numpy()
-        
-        output_resized = cv2.resize(
+        output=F.adjust_sharpness(output,args.sharpen_scale)*255 
+
+        output = output[0].permute(1,2,0).cpu().numpy().astype(np.uint8) #speed improve
+
+        if args.outscale != 4:
+          output = cv2.resize( 
                 output, (
                     int(width * outscale),
                     int(height * outscale),
-                ), interpolation=cv2.INTER_LANCZOS4)
-        
+                ), interpolation=cv2.INTER_LINEAR)
+      
       writer.write_frame(output)
-      torch.cuda.synchronize('cuda')
       pbar.update(1)
       ret, img = cap.read()
 
