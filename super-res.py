@@ -131,22 +131,21 @@ class Writer:
 
 
 
-def main():
+def base_args():
   parser = argparse.ArgumentParser(description="video_super_resolution")
 
   parser.add_argument("--result_path", type=str, required=True, help="path of result")
   parser.add_argument("--input_path", type=str, required=True, help="path of input file, mp4")
   parser.add_argument("--model_path", type=str, required=True, help="path of model")
-  parser.add_argument("--outscale", type=float, choices=range(1,9), help="scale_factor")
+  parser.add_argument("--outscale", type=float, default=4, choices=range(1,9), help="scale_factor")
   parser.add_argument("--out_width", type=int, help="output_width")
   parser.add_argument("--out_height", type=int, help="output_height")
   parser.add_argument("--sharpen_scale", type=float, default=4, help="sharpen scale factor")
   parser.add_argument("--fps", type=int, default=30, help="fps")
 
-  args = parser.parse_args()
+  return parser
 
-
-
+def main(args):
   width, height = get_resolution(args.input_path)
 
   if args.outscale > 4 or (check_width_height(args) and (args.out_width > 4*width or args.out_height > 4*height)):
@@ -206,4 +205,6 @@ def main():
   writer.close()
   
 if __name__ == '__main__':
-    main()
+    parser = base_args()
+    args=parser.parse_args()
+    main(parser)
