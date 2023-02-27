@@ -11,6 +11,10 @@ scale_factor=[1,2,3,4,5,6,7,8]
 
 class SuperResModule:
     def __init__(self, menu):
+        self.width=args.width
+        self.height=args.height
+        self.out_scale=args.out_scale
+        self.sharpen=args.sharpen
         self.menu = menu
 
     @imgui_utils.scoped_by_object_id
@@ -20,13 +24,12 @@ class SuperResModule:
         _, self.result_path = imgui.input_text("Save Path", self.save_path, 1024)
         _, self.input_path = imgui.input_text("File Path", self.file_path, 1024)
         _, self.model_path = imgui.input_text("Model Path", self.model_path, 1024)
-        imgui.same_line()
 
-        _, self.out_scale = imgui.combo("Out_scale", self.out_scale, scale_factor) 
+        _, self.out_scale = imgui.combo("Out_scale", self.out_scale, scale_factor)
         _, self.height = imgui.input_int("Height", self.height)
+        imgui.same_line()
         _, self.width = imgui.input_int("Width", self.width)
         _, self.sharpen = imgui.input_int("Sharpen", self.sharpen)
-
 
         if imgui.button("Super Resolution"):
             print("Super Resolution")
