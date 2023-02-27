@@ -2,8 +2,8 @@ import os
 import imgui
 
 from utils.gui_utils import imgui_utils
-from super-res import main as super_res_main
-from super-res import base_args
+from super_res import main as super_res_main
+from super_res import base_args
 
 parser=base_args()
 args = parser.parse_args()
@@ -16,6 +16,7 @@ class SuperResModule:
         self.out_scale=args.out_scale
         self.sharpen=args.sharpen
         self.menu = menu
+        self.fps=args.fps
 
     @imgui_utils.scoped_by_object_id
     def __call__(self):
@@ -25,6 +26,7 @@ class SuperResModule:
         _, self.input_path = imgui.input_text("File Path", self.file_path, 1024)
         _, self.model_path = imgui.input_text("Model Path", self.model_path, 1024)
 
+        _, self.fps = imgui.input_int("FPS", self.fps)
         _, self.out_scale = imgui.combo("Out_scale", self.out_scale, scale_factor)
         _, self.height = imgui.input_int("Height", self.height)
         imgui.same_line()
@@ -40,5 +42,6 @@ class SuperResModule:
             args.height=self.height
             args.width=self.width
             args.sharpen=self.sharpen
+            args.fps=self.fps
             
             super_res_main(args)
