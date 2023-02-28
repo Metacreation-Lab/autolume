@@ -13,7 +13,7 @@ class SuperResModule:
     def __init__(self, menu):
         self.width=args.out_width
         self.height=args.out_height
-        self.out_scale=args.out_scale
+        self.out_scale=args.outscale
         self.sharpen=args.sharpen_scale
         self.fps=args.fps
         self.menu = menu
@@ -38,7 +38,7 @@ class SuperResModule:
             args.result_path=self.result_path
             args.input_path=self.input_path
             args.model_path=self.model_path
-            args.out_scale=self.out_scale
+            args.outscale=self.out_scale
             args.out_height=self.height
             args.out_width=self.width
             args.sharpen_scale=self.sharpen
