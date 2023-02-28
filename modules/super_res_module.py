@@ -11,12 +11,12 @@ scale_factor=[1,2,3,4,5,6,7,8]
 
 class SuperResModule:
     def __init__(self, menu):
-        self.width=args.width
-        self.height=args.height
+        self.width=args.out_width
+        self.height=args.out_height
         self.out_scale=args.out_scale
-        self.sharpen=args.sharpen
-        self.menu = menu
+        self.sharpen=args.sharpen_scale
         self.fps=args.fps
+        self.menu = menu
 
     @imgui_utils.scoped_by_object_id
     def __call__(self):
@@ -39,9 +39,9 @@ class SuperResModule:
             args.input_path=self.input_path
             args.model_path=self.model_path
             args.out_scale=self.out_scale
-            args.height=self.height
-            args.width=self.width
-            args.sharpen=self.sharpen
+            args.out_height=self.height
+            args.out_width=self.width
+            args.sharpen_scale=self.sharpen
             args.fps=self.fps
             
             super_res_main(args)
