@@ -27,11 +27,8 @@ Installations: \
 - Make start screenlook nicer
 - Training, Compressing, GANspace stop interface and can only be stopped by stopping program
 - Sometimes pytorch slows down (seems to aggregate variables in the background), when clearing with gc.collect overall slowdown in render and gui but more stable (currently commented out)
+- Super resolution: Off-line super-res module via Real-ESRGAN is now added to GUI and wait for testing. An upgrade model of RRDB net can be implemented for best frame quality. Choices of model is yet to be added for the user to choose different super-res style (photo-realistic or anime-artisitc)
 
-- Super resolution: pending to add to the GUI. Currently can run using command: 
-```
-python /content/super-res.py --result_path /content/result --input_path /content/video.mp4 --model_path /content/realesr-general-x4v3.pth --outscale 4 --sharpen_scale 3 --fps 30
-```
 
 ## Acknowledgment
 PyTorch StyleGAN2-ada: https://github.com/NVlabs/stylegan2-ada-pytorch \
