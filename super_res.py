@@ -207,4 +207,4 @@ def main(args):
 if __name__ == '__main__':
     parser = base_args()
     args=parser.parse_args()
-    main(parser)
+    main(args)
