@@ -93,7 +93,7 @@ def base_args():
   parser.add_argument("--input_path", type=str, required=True, help="path of input file, img or mp4")
   parser.add_argument("--model_type", type=str, required=True, choices=['Quality','Balance','Fast'],help="types of model")
   parser.add_argument("--model_path", type=str, required=True,help="path of model")
-  parser.add_argument("--outscale", type=float, default=4, choices=range(1,9), help="scale_factor")
+  parser.add_argument("--outscale", type=float, default=1, choices=range(1,9), help="scale_factor")
   parser.add_argument("--out_width", type=int, help="output_width")
   parser.add_argument("--out_height", type=int, help="output_height")
   parser.add_argument("--sharpen_scale", type=float, default=4, help="sharpen scale factor")
