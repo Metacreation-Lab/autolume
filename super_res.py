@@ -8,69 +8,24 @@ import os
 import argparse
 import ffmpeg
 import cv2
+from net_base import SRVGGNetPlus, SRVGGNetCompact, RRDBNet
+from torchvision import transforms
 
-class SRVGGNetCompact(nn.Module):
-    """A compact VGG-style network structure for super-resolution.
-    It is a compact network structure, which performs upsampling in the last layer and no convolution is
-    conducted on the HR feature space.
-    Args:
-        num_in_ch (int): Channel number of inputs. Default: 3.
-        num_out_ch (int): Channel number of outputs. Default: 3.
-        num_feat (int): Channel number of intermediate features. Default: 64.
-        num_conv (int): Number of convolution layers in the body network. Default: 16.
-        upscale (int): Upsampling factor. Default: 4.
-        act_type (str): Activation type, options: 'relu', 'prelu', 'leakyrelu'. Default: prelu.
-    """
+def load_model(choice,path):
+  if choice =='Quality':
+    model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=4)
+    model_sd=torch.load(path)['params_ema']
+    model.load_state_dict(model_sd)
+  if choice =='Balance':
+    model = model = SRVGGNetCompact(num_in_ch=3, num_out_ch=3, num_feat=64, num_conv=32, upscale=4, act_type='prelu').to('cuda')
+    model_sd=torch.load(path)['params']
+    model.load_state_dict(model_sd)
 
-    def __init__(self, num_in_ch=3, num_out_ch=3, num_feat=64, num_conv=16, upscale=4, act_type='prelu'):
-        super(SRVGGNetCompact, self).__init__()
-        self.num_in_ch = num_in_ch
-        self.num_out_ch = num_out_ch
-        self.num_feat = num_feat
-        self.num_conv = num_conv
-        self.upscale = upscale
-        self.act_type = act_type
-
-        self.body = nn.ModuleList()
-        # the first conv
-        self.body.append(nn.Conv2d(num_in_ch, num_feat, 3, 1, 1))
-        # the first activation
-        if act_type == 'relu':
-            activation = nn.ReLU(inplace=True)
-        elif act_type == 'prelu':
-            activation = nn.PReLU(num_parameters=num_feat)
-        elif act_type == 'leakyrelu':
-            activation = nn.LeakyReLU(negative_slope=0.1, inplace=True)
-        self.body.append(activation)
-
-        # the body structure
-        for _ in range(num_conv):
-            self.body.append(nn.Conv2d(num_feat, num_feat, 3, 1, 1))
-            # activation
-            if act_type == 'relu':
-                activation = nn.ReLU(inplace=True)
-            elif act_type == 'prelu':
-                activation = nn.PReLU(num_parameters=num_feat)
-            elif act_type == 'leakyrelu':
-                activation = nn.LeakyReLU(negative_slope=0.1, inplace=True)
-            self.body.append(activation)
-
-        # the last conv
-        self.body.append(nn.Conv2d(num_feat, num_out_ch * upscale * upscale, 3, 1, 1))
-        # upsample
-        self.upsampler = nn.PixelShuffle(upscale)
-
-    def forward(self, x):
-        out = x
-        for i in range(0, len(self.body)):
-            out = self.body[i](out)
-
-        out = self.upsampler(out)
-        # add the nearest upsampled image, so that the network learns the residual
-        base = f.interpolate(x, scale_factor=self.upscale, mode='nearest')
-        out += base
-        return out
-
+  if choice =='Fast':
+    model = SRVGGNetPlus(num_in_ch=3, num_out_ch=3, num_feat=48, upscale=4, act_type='prelu').to('cuda')
+    model_sd=torch.load(path).state_dict()
+    model.load_state_dict(model_sd)
+  return model
 
 def check_width_height(args):
   return args.out_width is not None and args.out_height is not None
@@ -135,8 +90,9 @@ def base_args():
   parser = argparse.ArgumentParser(description="video_super_resolution")
 
   parser.add_argument("--result_path", type=str, required=True, help="path of result")
-  parser.add_argument("--input_path", type=str, required=True, help="path of input file, mp4")
-  parser.add_argument("--model_path", type=str, required=True, help="path of model")
+  parser.add_argument("--input_path", type=str, required=True, help="path of input file, img or mp4")
+  parser.add_argument("--model_type", type=str, required=True, choices=['Quality','Balance','Fast'],help="types of model")
+  parser.add_argument("--model_path", type=str, required=True,help="path of model")
   parser.add_argument("--outscale", type=float, default=4, choices=range(1,9), help="scale_factor")
   parser.add_argument("--out_width", type=int, help="output_width")
   parser.add_argument("--out_height", type=int, help="output_height")
@@ -146,63 +102,98 @@ def base_args():
   return parser
 
 def main(args):
-  width, height = get_resolution(args.input_path)
 
-  if args.outscale > 4 or (check_width_height(args) and (args.out_width > 4*width or args.out_height > 4*height)):
-    print('warning: Any super-res scale larger than x4 required non-model inference with interpolation and can be slower')
+  upsampler=load_model(args.model_type,args.model_path)
+
+  if args.input_path[-3:]=='mp4' or args.input_path[-3:]=='avi' or args.input_path[-3:]=='mov':
+
+    width, height = get_resolution(args.input_path)
+
+    if args.outscale > 4 or (check_width_height(args) and (args.out_width > 4*width or args.out_height > 4*height)):
+      print('warning: Any super-res scale larger than x4 required non-model inference with interpolation and can be slower')
 
 
-  audio = get_audio(args.input_path)
-  if check_width_height(args):
-    video_save_path = os.path.join(args.result_path, f'result_x{int(args.out_width)}x{int(args.out_height)}.mp4')
-  else: 
-    video_save_path = os.path.join(args.result_path, f'result_{int(width*args.outscale)}x{int(height*args.outscale)}.mp4')
+    audio = get_audio(args.input_path)
+    if check_width_height(args):
+      video_save_path = os.path.join(args.result_path, f'result_x{int(args.out_width)}x{int(args.out_height)}.mp4')
+    else: 
+      video_save_path = os.path.join(args.result_path, f'result_{int(width*args.outscale)}x{int(height*args.outscale)}.mp4')
 
-  writer = Writer(args, audio, height, width, video_save_path, fps=30)
-  outscale=args.outscale
+    writer = Writer(args, audio, height, width, video_save_path, fps=30)
+    outscale=args.outscale
 
-  upsampler=SRVGGNetCompact(num_in_ch=3, num_out_ch=3, num_feat=64, num_conv=32, upscale=4, act_type='prelu').to('cuda')
-  sd=torch.load(args.model_path)['params']
-  upsampler.load_state_dict(sd)
   
-  cap = cv2.VideoCapture(args.input_path)
-  frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-  pbar = tqdm(total=frame_count, unit='frame', desc='inference')
-  while True:
-    ret, img = cap.read()
-    if img is None:
-      print('break')
-      break
-    else:
-      input=torch.tensor(img).permute(2,0,1).float().to('cuda')/255
-      input=torch.unsqueeze(input,0)
-      with torch.inference_mode():
-        output = upsampler(input)
-        output=F.adjust_sharpness(output,args.sharpen_scale)*255 
+    cap = cv2.VideoCapture(args.input_path)
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    pbar = tqdm(total=frame_count, unit='frame', desc='inference')
+    while True:
+      ret, img = cap.read()
 
-        output = output[0].permute(1,2,0).cpu().numpy().astype(np.uint8) 
+      if img is None:
+        print('break')
+        break
+
+      else:
+        input=torch.tensor(img).permute(2,0,1).float().to('cuda')/255
+        input=torch.unsqueeze(input,0)
+        with torch.inference_mode():
+          output = upsampler(input)
+          output=F.adjust_sharpness(output,args.sharpen_scale)*255 
+
+          output = output[0].permute(1,2,0).cpu().numpy().astype(np.uint8) 
         
-        if check_width_height(args):
-          output = cv2.resize( 
+          if check_width_height(args):
+            output = cv2.resize( 
                 output, (
                     int(args.out_width),
                     int(args.out_height),
                 ), interpolation=cv2.INTER_LINEAR)
 
-        else:
-          if args.outscale != 4:
-            output = cv2.resize( 
+          else:
+            if args.outscale != 4:
+              output = cv2.resize( 
                 output, (
                     int(width * outscale),
                     int(height * outscale),
                 ), interpolation=cv2.INTER_LINEAR)
       
-      writer.write_frame(output)
-      pbar.update(1)
-      ret, img = cap.read()
+        writer.write_frame(output)
+        pbar.update(1)
+        ret, img = cap.read()
+
+    writer.close()
+    print('done')
+
+  elif args.input_path[-3:]=='jpg' or args.input_path[-3:]=='png':
+    data_transformer = transforms.Compose([transforms.ToTensor()])
+    image = cv2.imread(args.input_path)
+    image = data_transformer(image).to('cuda')
+    input=torch.unsqueeze(image,0)
+
+    with torch.inference_mode():
+          output = upsampler(input)
+          output=F.adjust_sharpness(output,args.sharpen_scale)*255 
+
+          output = output[0].permute(1,2,0).cpu().numpy().astype(np.uint8) 
+        
+          if check_width_height(args):
+            output = cv2.resize( 
+                output, (
+                    int(args.out_width),
+                    int(args.out_height),
+                ), interpolation=cv2.INTER_LINEAR)
+
+          else:
+            if args.outscale != 4:
+              output = cv2.resize( 
+                output, (
+                    int(width * outscale),
+                    int(height * outscale),
+                ), interpolation=cv2.INTER_LINEAR)
+      
+    cv2.imwrite(args.result_path+'/result.jpg',output)
 
 
-  writer.close()
   
 if __name__ == '__main__':
     parser = base_args()
