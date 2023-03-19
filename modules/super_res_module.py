@@ -25,7 +25,7 @@ class SuperResModule:
         _, self.result_path = imgui.input_text("Save Path", self.save_path, 1024)
         _, self.input_path = imgui.input_text("File Path", self.file_path, 1024)
         _, self.model_path = imgui.input_text("Model Path", self.model_path, 1024)
-        _, self.model_path = imgui.input_text("Model Type", self.model_type, 1024)
+        _, self.model_type = imgui.input_text("Model Type", self.model_type, 1024)
 
         _, self.fps = imgui.input_int("FPS", self.fps)
         _, self.out_scale = imgui.combo("Out_scale", self.out_scale, scale_factor)
