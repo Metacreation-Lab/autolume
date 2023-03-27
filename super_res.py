@@ -98,7 +98,7 @@ def base_args():
   parser.add_argument("--out_width", type=int, help="output_width")
   parser.add_argument("--out_height", type=int, help="output_height")
   parser.add_argument("--sharpen_scale", type=float, default=2, help="sharpen scale factor")
-  parser.add_argument("--fps", type=int, default=30, help="fps")
+  #parser.add_argument("--fps", type=int, default=30, help="fps")
 
   return parser
 
@@ -125,7 +125,6 @@ def process(args,file):
     else:
       video_save_path = os.path.join(args.result_path, tail[:-4]+f'_result_{int(width*args.outscale)}x{int(height*args.outscale)}_Sharpness{args.sharpen_scale}.mp4')
 
-    writer = Writer(args, audio, height, width, video_save_path, fps=30)
     outscale=args.outscale
 
     sd=torch.load(args.model_path)['params']
@@ -134,6 +133,10 @@ def process(args,file):
     cap = cv2.VideoCapture(file)
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     pbar = tqdm(total=frame_count, unit='frame', desc='inference')
+
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    writer = Writer(args, audio, height, width, video_save_path, fps=fps)
+
     while True:
       ret, img = cap.read()
       if img is not None:
