@@ -92,7 +92,7 @@ def base_args():
 
   parser.add_argument("--result_path", type=str, required=True, help="path of result")
   parser.add_argument("--input_path", type=str, required=True, help="path of input file, mp4")
-  parser.add_argument("--model_path", type=str, required=True, help="path of model")
+  #parser.add_argument("--model_path", type=str, required=True, help="path of model")
   parser.add_argument("--model_type", type=str, required=True, choices=['Quality','Balance','Fast'],help="types of model")
   parser.add_argument("--outscale", type=float, default=4, choices=range(1,9), help="scale_factor")
   parser.add_argument("--out_width", type=int, help="output_width")
@@ -102,8 +102,15 @@ def base_args():
 
   return parser
 
+
 def process(args,file):
-  upsampler=load_model(args.model_type,args.model_path)
+  if args.model_type=="Quality":
+    model_path="./sr_models/Quality.pth"
+  elif args.model_type=="Balance":
+    model_path="./sr_models/Balance.pth"
+  elif args.model_type=="Fast":
+    model_path="./sr_models/Fast.pth"
+  upsampler=load_model(args.model_type,model_path)
   head, tail = os.path.split(file)
   if file[-3:] == 'mp4' or file[-3:] == 'avi' or file[-3:] == 'mov':
     width, height = get_resolution(file)
