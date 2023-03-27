@@ -7,7 +7,7 @@ from super_res import base_args
 from dnnlib import EasyDict
 
 args = EasyDict(result_path="", input_path="", model_type="Balance",
-                outscale=4, width=4096, height=4096, sharpen_scale=4, fps=30)
+                outscale=4, width=4096, height=4096, sharpen_scale=4)
 scale_factor = ['1', '2', '3', '4', '5', '6', '7', '8']
 
 
@@ -23,7 +23,6 @@ class SuperResModule:
         self.out_scale = args.outscale
         self.sharpen = args.sharpen_scale
         self.menu = menu
-        self.fps = args.fps
 
         self.scale_mode = 0
 
@@ -35,7 +34,6 @@ class SuperResModule:
         if len(self.models) > 0:
             _, self.model_selected = imgui.combo("Model", self.model_selected, self.models)
 
-        _, self.fps = imgui.input_int("FPS", self.fps)
         clicked, self.scale_mode = imgui.combo("Scale Mode", self.scale_mode, ["Custom", "Scale"])
         if clicked:
             print(self.scale_mode)
@@ -57,7 +55,6 @@ class SuperResModule:
                 args.out_height = self.height
                 args.out_width = self.width
                 args.sharpen_scale = self.sharpen
-                args.fps = self.fps
 
                 super_res_main(args)
         except Exception as e:
