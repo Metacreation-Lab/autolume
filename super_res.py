@@ -92,13 +92,11 @@ def base_args():
 
   parser.add_argument("--result_path", type=str, required=True, help="path of result")
   parser.add_argument("--input_path", type=str, required=True, help="path of input file, mp4")
-  #parser.add_argument("--model_path", type=str, required=True, help="path of model")
   parser.add_argument("--model_type", type=str, required=True, choices=['Quality','Balance','Fast'],help="types of model")
   parser.add_argument("--outscale", type=float, default=4, choices=range(1,9), help="scale_factor")
   parser.add_argument("--out_width", type=int, help="output_width")
   parser.add_argument("--out_height", type=int, help="output_height")
   parser.add_argument("--sharpen_scale", type=float, default=2, help="sharpen scale factor")
-  #parser.add_argument("--fps", type=int, default=30, help="fps")
 
   return parser
 
@@ -110,6 +108,7 @@ def process(args,file):
     model_path="./sr_models/Balance.pth"
   elif args.model_type=="Fast":
     model_path="./sr_models/Fast.pth"
+
   upsampler=load_model(args.model_type,model_path)
   head, tail = os.path.split(file)
   if file[-3:] == 'mp4' or file[-3:] == 'avi' or file[-3:] == 'mov':
@@ -124,11 +123,11 @@ def process(args,file):
       video_save_path = os.path.join(args.result_path, tail[:-4]+f'_result_x{int(args.out_width)}x{int(args.out_height)}_Sharpness{args.sharpen_scale}.mp4')
     else:
       video_save_path = os.path.join(args.result_path, tail[:-4]+f'_result_{int(width*args.outscale)}x{int(height*args.outscale)}_Sharpness{args.sharpen_scale}.mp4')
-
+    print(args.width)
     outscale=args.outscale
 
-    sd=torch.load(args.model_path)['params']
-    upsampler.load_state_dict(sd)
+    #sd=torch.load(args.model_path)['params']
+    #upsampler.load_state_dict(sd)
   
     cap = cv2.VideoCapture(file)
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -159,8 +158,8 @@ def process(args,file):
             if args.outscale != 4:
               output = cv2.resize(
                 output, (
-                    int(width * outscale),
-                    int(height * outscale),
+                    int(width * args.outscale),
+                    int(height * args.outscale),
                 ), interpolation=cv2.INTER_LINEAR)
       
         writer.write_frame(output)
@@ -176,6 +175,7 @@ def process(args,file):
   elif file[-3:] == 'jpg' or file[-3:] == 'png':
     data_transformer = transforms.Compose([transforms.ToTensor()])
     image = cv2.imread(file)
+    width, height = image.shape[0], image.shape[1]
     image = data_transformer(image).to('cuda')
     input = torch.unsqueeze(image, 0)
 
@@ -184,6 +184,8 @@ def process(args,file):
           output = F.adjust_sharpness(output, args.sharpen_scale) * 255
 
           output = output[0].permute(1, 2, 0).cpu().numpy().astype(np.uint8)
+
+          width, height = output.shape[0], output.shape[1]
 
           if check_width_height(args):
               output = cv2.resize(
@@ -196,10 +198,10 @@ def process(args,file):
               if args.outscale != 4:
                   output = cv2.resize(
                       output, (
-                          int(width * outscale),
-                          int(height * outscale),
+                          int(width * args.outscale),
+                          int(height * args.outscale),
                       ), interpolation=cv2.INTER_LINEAR)
-    width, height = output.shape[0],output.shape[1]
+
     if check_width_height(args):
       path = os.path.join(args.result_path,
                                tail[:-4] + f'_result_x{int(args.out_width)}x{int(args.out_height)}_Sharpness{args.sharpen_scale}.jpg')
