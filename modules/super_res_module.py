@@ -3,7 +3,7 @@ import imgui
 
 from utils.gui_utils import imgui_utils
 from super_res import main as super_res_main
-from super_res import base_args
+#from super_res import base_args
 from dnnlib import EasyDict
 
 args = EasyDict(result_path="", input_path="", model_type="Balance",
@@ -39,6 +39,7 @@ class SuperResModule:
             print(self.scale_mode)
         if self.scale_mode:
             _, self.out_scale = imgui.combo("Scale Factor", self.out_scale, scale_factor)
+
         else:
             _, self.height = imgui.input_int("Height", self.height)
             _, self.width = imgui.input_int("Width", self.width)
