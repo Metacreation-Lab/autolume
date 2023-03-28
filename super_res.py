@@ -45,6 +45,24 @@ def get_audio(video_path):
   audio=ffmpeg.input(video_path).audio if has_audio else None
   return audio
 
+class Reader:
+    def __init__(self, width, height, video_path):
+      self.width=width
+      self.height=height
+      self.stream_reader = (
+                ffmpeg.input(video_path).output('pipe:', format='rawvideo', pix_fmt='bgr24',
+                                                loglevel='error').run_async(
+                                                    pipe_stdin=True, pipe_stdout=True))
+    def get_frame_from_stream(self):
+        img_bytes = self.stream_reader.stdout.read(self.width * self.height * 3)  # 3 bytes for one pixel
+        if not img_bytes:
+            return None
+        img = np.frombuffer(img_bytes, np.uint8).reshape([self.height, self.width, 3])
+        return img
+
+    def get_frame(self):
+        return self.get_frame_from_stream()
+
 class Writer:
 
     def __init__(self, args, audio, height, width, video_save_path, fps):
@@ -123,21 +141,21 @@ def process(args,file):
       video_save_path = os.path.join(args.result_path, tail[:-4]+f'_result_x{int(args.out_width)}x{int(args.out_height)}_Sharpness{args.sharpen_scale}.mp4')
     else:
       video_save_path = os.path.join(args.result_path, tail[:-4]+f'_result_{int(width*args.outscale)}x{int(height*args.outscale)}_Sharpness{args.sharpen_scale}.mp4')
-    print(args.width)
+
     outscale=args.outscale
 
-    #sd=torch.load(args.model_path)['params']
-    #upsampler.load_state_dict(sd)
   
     cap = cv2.VideoCapture(file)
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     pbar = tqdm(total=frame_count, unit='frame', desc='inference')
 
     fps = cap.get(cv2.CAP_PROP_FPS)
+
+    reader= Reader(width,height,file)
     writer = Writer(args, audio, height, width, video_save_path, fps=fps)
 
     while True:
-      ret, img = cap.read()
+      img = reader.get_frame()
       if img is not None:
         input=torch.tensor(img).permute(2,0,1).float().to('cuda')/255
         input=torch.unsqueeze(input,0)
@@ -214,6 +232,7 @@ def process(args,file):
 # file loop
 def main(args):
   list_file=os.listdir(args.input_path)
+
   for img_file in list_file:
     if img_file[-3:] == 'jpg' or img_file[-3:] == 'png':
       print('working on images')
