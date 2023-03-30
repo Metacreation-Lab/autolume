@@ -23,7 +23,7 @@ def load_model(choice,path):
 
   if choice =='Fast':
     model = SRVGGNetPlus(num_in_ch=3, num_out_ch=3, num_feat=48, upscale=4, act_type='prelu').to('cuda')
-    model_sd=torch.load(path).state_dict()
+    model_sd=torch.load(path)
     model.load_state_dict(model_sd)
   return model
 
@@ -125,7 +125,7 @@ def process(args,file):
   elif args.model_type=="Balance":
     model_path="./sr_models/Balance.pth"
   elif args.model_type=="Fast":
-    model_path="./sr_models/Fast.pth"
+    model_path="./sr_models/Fast.pt"
 
   upsampler=load_model(args.model_type,model_path)
   head, tail = os.path.split(file)
@@ -138,9 +138,9 @@ def process(args,file):
 
     audio = get_audio(file)
     if check_width_height(args):
-      video_save_path = os.path.join(args.result_path, tail[:-4]+f'_result_x{int(args.out_width)}x{int(args.out_height)}_Sharpness{args.sharpen_scale}.mp4')
+      video_save_path = os.path.join(args.result_path, tail[:-4]+f'_result_{args.model_type}_x{int(args.out_width)}x{int(args.out_height)}_Sharpness{args.sharpen_scale}.mp4')
     else:
-      video_save_path = os.path.join(args.result_path, tail[:-4]+f'_result_{int(width*args.outscale)}x{int(height*args.outscale)}_Sharpness{args.sharpen_scale}.mp4')
+      video_save_path = os.path.join(args.result_path, tail[:-4]+f'_result_{args.model_type}_{int(width*args.outscale)}x{int(height*args.outscale)}_Sharpness{args.sharpen_scale}.mp4')
 
     outscale=args.outscale
 
@@ -193,7 +193,7 @@ def process(args,file):
   elif file[-3:] == 'jpg' or file[-3:] == 'png':
     data_transformer = transforms.Compose([transforms.ToTensor()])
     image = cv2.imread(file)
-    width, height = image.shape[0], image.shape[1]
+    input_width, input_height = image.shape[0], image.shape[1]
     image = data_transformer(image).to('cuda')
     input = torch.unsqueeze(image, 0)
 
@@ -203,7 +203,7 @@ def process(args,file):
 
           output = output[0].permute(1, 2, 0).cpu().numpy().astype(np.uint8)
 
-          width, height = output.shape[0], output.shape[1]
+          height, width = output.shape[0], output.shape[1]
 
           if check_width_height(args):
               output = cv2.resize(
@@ -222,10 +222,10 @@ def process(args,file):
 
     if check_width_height(args):
       path = os.path.join(args.result_path,
-                               tail[:-4] + f'_result_x{int(args.out_width)}x{int(args.out_height)}_Sharpness{args.sharpen_scale}.jpg')
+                               tail[:-4] + f'_result_{args.model_type}_{int(args.out_width)}x{int(args.out_height)}_Sharpness{args.sharpen_scale}.jpg')
     else:
       path = os.path.join(args.result_path,
-                               tail[:-4] + f'_result_{int(width * args.outscale)}x{int(height * args.outscale)}_Sharpness{args.sharpen_scale}.jpg')
+                               tail[:-4] + f'_result_{args.model_type}_{int(input_width * args.outscale)}x{int(input_height * args.outscale)}_Sharpness{args.sharpen_scale}.jpg')
     cv2.imwrite(path, output)
 
 
@@ -235,12 +235,13 @@ def main(args):
 
   for img_file in list_file:
     if img_file[-3:] == 'jpg' or img_file[-3:] == 'png':
-      print('working on images')
+      print(f'working on {img_file}')
       process(args,os.path.join(args.input_path,img_file))
   for vid_file in list_file:
     if vid_file[-3:] == 'mp4' or vid_file[-3:] == 'avi' or args.input_path[-3:] == 'mov':
-      print('working on videos')
+      print(f'working on {vid_file}')
       process(args,os.path.join(args.input_path,vid_file))
+  print('Done')
 
 if __name__ == '__main__':
     parser = base_args()
