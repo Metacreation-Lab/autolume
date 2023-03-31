@@ -60,7 +60,6 @@ class Translate(nn.Module):
         super().__init__()
     
     def forward(self, x, params, indices):
-        print(x.shape)
         x[:,indices] = kornia.geometry.transform.translate(x[:, indices],
                                                            torch.tensor([params], device=x.device).to(x.dtype))
         return x

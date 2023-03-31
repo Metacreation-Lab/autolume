@@ -9,8 +9,8 @@ from utils import dataset_tool
 
 augs = ["ADA", "DiffAUG"]
 ada_pipes = ['blit', 'geom', 'color', 'filter', 'noise', 'cutout', 'bg', 'bgc', 'bgcf', 'bgcfn', 'bgcfnc']
-diffaug_pipes = ['color, translation, cutoff', 'color, translation', 'color, cutoff', 'color',
-                 'translation', 'cutoff', 'translation', 'cutoff']
+diffaug_pipes = ['color,translation,cutout', 'color,translation', 'color,cutout', 'color',
+                 'translation', 'cutout,translation', 'cutout']
 sizes = ["64", "128", "256", "512", "1024"]
 class TrainingModule:
     def __init__(self, menu):
@@ -78,7 +78,7 @@ class TrainingModule:
                 mirror=True,
                 aug="ada" if augs[self.aug] == "ADA" else "noaug",
                 augpipe=ada_pipes[self.ada_pipe],
-                resume=self.resume_pkl,
+                resume=self.resume_pkl if self.resume_pkl != "" else None,
                 freezed=0,
                 p=0.2,
                 target=0.6,

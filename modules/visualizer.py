@@ -6,19 +6,9 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 import threading
-
-import click
-import os
-import gc
-
-import multiprocessing
-
-import glfw
 import numpy as np
 import imgui
-# import pyaudio
-import torch.cuda
-import ray
+import pyaudio
 
 import dnnlib
 from utils.gui_utils import imgui_utils
@@ -30,7 +20,7 @@ from widgets import trunc_noise_widget
 from widgets import performance_widget
 from widgets import layer_widget
 from widgets import adjuster_widget
-# from widgets import audio_widget
+from widgets import audio_widget
 from widgets import looping_widget
 from widgets import preset_widget
 
@@ -46,7 +36,7 @@ class Visualizer:
         self.app = app
 
         #COMMUNICATIONS
-        # self.pa = pyaudio.PyAudio()
+        self.pa = pyaudio.PyAudio()
         self.in_ip = "127.0.0.1"
         self.in_port = 1337
         self.out_ip = "127.0.0.1"
@@ -64,7 +54,6 @@ class Visualizer:
         self.video_frame = ndi.VideoFrameV2()
 
         # Internals.
-
         self.pane_w = 0
         self._last_error_print  = None
         self._async_renderer    = renderer
@@ -85,7 +74,7 @@ class Visualizer:
         self.adjuster_widget = adjuster_widget.AdjusterWidget(self)
         self.looping_widget = looping_widget.LoopingWidget(self)
         self.preset_widget = preset_widget.PresetWidget(self)
-        # self.audio_widget = audio_widget.AudioWidget(self)
+        self.audio_widget = audio_widget.AudioWidget(self)
 
 
     def close(self):
@@ -140,8 +129,8 @@ class Visualizer:
         self.layer_widget(expanded)
         expanded, _visible = imgui_utils.collapsing_header('Preset Module', default=True)
         self.preset_widget(expanded)
-        # expanded, _visible = imgui_utils.collapsing_header('Audio Module', default=True)
-        # self.audio_widget(expanded)
+        expanded, _visible = imgui_utils.collapsing_header('Audio Module', default=True)
+        self.audio_widget(expanded)
 
         # Render.
         if self.app.is_skipping_frames():

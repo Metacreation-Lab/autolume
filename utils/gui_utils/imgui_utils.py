@@ -138,12 +138,15 @@ def drag_previous_control(enabled=True):
     dragging = False
     dx = 0
     dy = 0
-    if imgui.begin_drag_drop_source(imgui.DRAG_DROP_SOURCE_NO_PREVIEW_TOOLTIP):
-        if enabled:
-            dragging = True
-            dx, dy = imgui.get_mouse_drag_delta()
-            imgui.reset_mouse_drag_delta()
-        imgui.end_drag_drop_source()
+    try:
+        if imgui.begin_drag_drop_source(imgui.DRAG_DROP_SOURCE_NO_PREVIEW_TOOLTIP):
+            if enabled:
+                dragging = True
+                dx, dy = imgui.get_mouse_drag_delta()
+                imgui.reset_mouse_drag_delta()
+            imgui.end_drag_drop_source()
+    except:
+        pass
     return dragging, dx, dy
 
 #----------------------------------------------------------------------------
