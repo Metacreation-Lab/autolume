@@ -264,7 +264,6 @@ def training_loop(
     if progress_fn is not None:
         progress_fn(0, total_kimg)
     while True:
-
         # Fetch training data.
         with torch.autograd.profiler.record_function('data_fetch'):
             phase_real_img, phase_real_c = next(training_set_iterator)

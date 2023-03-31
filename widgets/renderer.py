@@ -509,23 +509,9 @@ class Renderer:
             img = (img * 127.5 + 128).clamp(0, 255).to(torch.uint8).permute(1, 2, 0)
             res.image = img
 
-            # FFT.
-            if fft_show:
-                sig = out if fft_all else sel
-                sig = sig.to(torch.float32)
-                sig = sig - sig.mean(dim=[1, 2], keepdim=True)
-                sig = sig * torch.kaiser_window(sig.shape[1], periodic=False, beta=fft_beta, device=self._device)[None,
-                            :, None]
-                sig = sig * torch.kaiser_window(sig.shape[2], periodic=False, beta=fft_beta, device=self._device)[None,
-                            None, :]
-                fft = torch.fft.fftn(sig, dim=[1, 2]).abs().square().sum(dim=0)
-                fft = fft.roll(shifts=[fft.shape[0] // 2, fft.shape[1] // 2], dims=[0, 1])
-                fft = (fft / fft.mean()).log10() * 10  # dB
-                fft = self._apply_cmap((fft / fft_range_db + 1) / 2)
-                res.image = torch.cat([img.expand_as(fft), fft], dim=1)
-            # del img
-            # del manip_layers
-            # del out # Free up GPU memory.
+            del img
+            del manip_layers
+            del out # Free up GPU memory.
 
     def run_synthesis_net(self, net, *args, capture_layer=None, transforms=None, ratios=None, adjustments=None,
                           noise_adjustments=None, **kwargs):
