@@ -395,7 +395,6 @@ class LayerWidget:
                                             imgui.same_line()
 
                                         if changed:
-
                                             try:
                                                 self.viz.osc_dispatcher.unmap(trans.osc_address[j],
                                                                               self.osc_funcs[trans.imgui_id][j])

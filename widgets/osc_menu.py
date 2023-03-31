@@ -77,7 +77,7 @@ class OscMenu:
                     print(self.cached_osc_addresses[key], "is not mapped")
                 self.cached_osc_addresses[key] = self.osc_addresses[key]
 
-            if self.use_map[key]:
+            if self.use_map.get(key, False):
                 changed, self.mappings[key] = imgui.input_text(f"##Mappings_{self.label}_{key}",
                                                                self.mappings[key], 256,
                                                                imgui.INPUT_TEXT_ENTER_RETURNS_TRUE | (
