@@ -57,6 +57,7 @@ def slerp(t, v0, v1, DOT_THRESHOLD=0.9995):
 class LoopingWidget:
     def __init__(self, viz):
         self.params = dnnlib.EasyDict(num_keyframes=6, mode=True, anim=False, index=0, looptime=4)
+        self.use_osc = dnnlib.EasyDict(zip(self.params.keys(), [False] * len(self.params)))
         self.step_y = 100
         self.viz = viz
         self.keyframes = torch.randn(self.params.num_keyframes, 512)
@@ -69,20 +70,37 @@ class LoopingWidget:
         self.paths = [""] * self.params.num_keyframes
         self._pinned_bufs = dict()
         self._device = torch.device('cuda')
+        self.halt_update = 0
 
 
         funcs = dict(zip(["anim", "num_keyframes", "looptime", "index", "mode"], [self.osc_handler(param) for param in
                                                                                          ["anim", "num_keyframes", "looptime", "index", "mode"]]))
 
-        self.osc_menu = osc_menu.OscMenu(self.viz, funcs, self.params,
+        funcs["alpha"] = self.alpha_handler()
+
+        self.osc_menu = osc_menu.OscMenu(self.viz, funcs, None,
                                          label="##LoopingOSC")
 
+
+    def alpha_handler(self):
+        def func(address, *args):
+            try:
+                assert (type(args[-1]) is type(self.alpha)), f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {type(self.alpha)}"
+                self.alpha = args[-1]
+                print(self.alpha, args[-1])
+                self.update_alpha()
+
+            except Exception as e:
+                self.viz.print_error(e)
+        return func
     def osc_handler(self, param):
         def func(address, *args):
             try:
                 assert (type(args[-1]) is type(self.params[
                                                    param])), f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {type(self.params[param])}"
+                self.use_osc[param] = True
                 self.params[param] = args[-1]
+                print(self.params[param], args[-1])
             except Exception as e:
                 self.viz.print_error(e)
 
@@ -135,15 +153,23 @@ class LoopingWidget:
             step_size = 0.01 * self.speed
         self.alpha += step_size
         if self.alpha >= 1:
-            self.params.index = int(self.params.index+self.alpha)%self.params.num_keyframes
-            self.alpha = 0
+            if self.halt_update < 0:
+                self.params.index = int(self.params.index+self.alpha)%self.params.num_keyframes
+                self.alpha = 0
+            self.halt_update = 10
         if step_size < 0:
             if self.alpha <= 0:
-                self.params.index = self.params.index+self.alpha
-                if self.params.index < 0:
-                    self.params.index += self.params.num_keyframes
-                self.params.index = int(self.params.index %self.params.num_keyframes)
-                self.alpha = 1
+                if self.halt_update < 0:
+                    self.params.index = self.params.index+self.alpha
+                    if self.params.index < 0:
+                        self.params.index += self.params.num_keyframes
+                    self.params.index = int(self.params.index %self.params.num_keyframes)
+                    self.alpha = 1
+                self.halt_updatae = 10
+
+
+        self.halt_update -= 1
+        print(self.halt_update)
 
     @imgui_utils.scoped_by_object_id
     def key_frame_vizface(self, idx):
@@ -225,7 +251,8 @@ class LoopingWidget:
                 vecs= torch.randn(new_keyframes,512)
                 vecs[:min(new_keyframes,self.params.num_keyframes)] = self.keyframes[:min(new_keyframes,self.params.num_keyframes)]
                 self.keyframes = vecs
-                self.params.index = min(self.params.num_keyframes-2, self.params.index)
+                if not self.use_osc:
+                    self.params.index = min(self.params.num_keyframes-2, self.params.index)
                 seeds = [dnnlib.EasyDict(x=i,y=0) for i in range(new_keyframes)]
                 seeds[:min(new_keyframes, self.params.num_keyframes)] = self.seeds[:min(new_keyframes, self.params.num_keyframes)]
                 self.seeds = seeds
