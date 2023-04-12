@@ -14,7 +14,7 @@ from utils.gui_utils import imgui_utils
 from modules.pca_module import PCA_Module
 from modules.training_module import TrainingModule
 from modules.compress_module import CompressModule
-from modules.autolume_live import States
+from modules.network_surgery import SurgeryModule
 
 #----------------------------------------------------------------------------
 class Menu:
@@ -23,6 +23,7 @@ class Menu:
         self.pca = PCA_Module(self)
         self.training = TrainingModule(self)
         self.compress = CompressModule(self)
+        self.network_surgery = SurgeryModule(self)
 
     def __call__(self):
 
@@ -49,8 +50,15 @@ class Menu:
         self.pca()
         imgui.end()
 
-        imgui.set_next_window_position(0,(self.app.content_height * 3) // 4)
-        imgui.set_next_window_size(self.app.content_width, (self.app.content_height * 3) // 4)
+        imgui.set_next_window_position(0, (self.app.content_height * 3) // 4)
+        imgui.set_next_window_size(self.app.content_width // 2, (self.app.content_height * 3) // 4)
+        imgui.begin('Surgery##Menu', closable=False, flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE))
+        imgui.text("Network Surgery")
+        self.network_surgery()
+        imgui.end()
+
+        imgui.set_next_window_position(self.app.content_width//2,(self.app.content_height * 3) // 4)
+        imgui.set_next_window_size(self.app.content_width//2, (self.app.content_height * 3) // 4)
         imgui.begin('Render##Menu', closable=False, flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE))
         imgui.text("Renderer")
         if imgui_utils.button("START", width=self.app.button_w):
