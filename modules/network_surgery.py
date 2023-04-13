@@ -19,6 +19,10 @@ def extract_conv_names(model):
     model_names = [name for name, weight in model.named_parameters() if "mapping" not in name]
     return model_names
 
+def extract_mapping_names(model):
+    model_names = [name for name, weight in model.named_parameters() if "mapping" in name]
+    return model_names
+
 class SurgeryModule:
     """
     Allows users to combine two networks by copying layers of either model to create a new model.
@@ -281,11 +285,26 @@ class SurgeryModule:
                                        img_resolution=img_resolution)
 
         dict_dest = model_out.state_dict()
+        # depending on what model is used in the first entry extract the mapping layers from the corresponding model and copy them to the new model
+        if self.combined_layers[0] == "Model A":
+            print("MAPPING A")
+            mapping_names = extract_mapping_names(self.pkl1)
+            for name in mapping_names:
+                dict_dest[name] = self.pkl1.state_dict()[name]
+        elif self.combined_layers[0] == "Model B":
+            print("MAPPING B")
+            mapping_names = extract_mapping_names(self.pkl2)
+            for name in mapping_names:
+                dict_dest[name] = self.pkl2.state_dict()[name]
+
         # iterate over self.combine_channels and copy weights from self.pkl1 or self.pkl2 depending on the value
+        print(self.combined_layers)
         for i, entry in enumerate(self.combined_layers):
             if entry == "Model A":
+                print("A")
                 dict_dest[layer1[i]] = self.pkl1.state_dict()[layer1[i]]
             elif entry == "Model B":
+                print("B")
                 dict_dest[layer2[i]] = self.pkl2.state_dict()[layer2[i]]
 
         model_out_dict = model_out.state_dict()
@@ -296,6 +315,6 @@ class SurgeryModule:
 
         with open(os.path.join(os.getcwd(),"models",self.output_name), 'wb') as f:
             data['G_ema'] = model_out
-            data['G'] = self.data1['G']
-            data['D'] = self.data1['D']
+            data['G'] = model_out
+            data['D'] = self.data2['D']
             pickle.dump(data, f)
