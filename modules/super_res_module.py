@@ -1,12 +1,13 @@
 import os
 import imgui
 
+from modules.filedialog import FileDialog
 from utils.gui_utils import imgui_utils
 from super_res import main as super_res_main
 #from super_res import base_args
 from dnnlib import EasyDict
 
-args = EasyDict(result_path="", input_path="", model_type="Balance",
+args = EasyDict(result_path="", input_path=[""], model_type="Balance",
                 outscale=3, width=4096, height=4096, sharpen_scale=1)
 scale_factor = ['1', '2', '3', '4', '5', '6', '7', '8']
 
@@ -23,12 +24,19 @@ class SuperResModule:
         self.out_scale = args.outscale
         self.sharpen = args.sharpen_scale
         self.menu = menu
-
+        self.app = menu.app
+        self.file_dialog = FileDialog(self, "Videos and Images", os.path.abspath(os.getcwd()), ["*", ".mp4", ".avi", ".jpg", ".png", ".jpeg", ".bmp"])
         self.scale_mode = 0
 
     @imgui_utils.scoped_by_object_id
     def __call__(self):
-        _, self.input_path = imgui.input_text("Source Folder", self.input_path, 1024)
+        joined = '\n'.join(self.input_path)
+        imgui_utils.input_text("##SRINPUT", joined, 1024, flags=imgui.INPUT_TEXT_READ_ONLY, width=-self.app.button_w * 3, help_text="Input Files")
+        imgui.same_line()
+        _clicked, input = self.file_dialog()
+        if _clicked:
+            self.input_path = input
+            print(self.input_path)
         _, self.result_path = imgui.input_text("Destination Folder", self.result_path, 1024)
         self.models = ['Quality','Balance','Fast']
         if len(self.models) > 0:
@@ -63,4 +71,4 @@ class SuperResModule:
 
                 super_res_main(args)
         except Exception as e:
-            print(e)
+            print("SRR ERROR", e)

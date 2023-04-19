@@ -66,6 +66,7 @@ class Reader:
 class Writer:
 
     def __init__(self, args, audio, height, width, video_save_path, fps):
+        print("SAVING VIDEO TO: ", video_save_path)
         if args.out_width is None and args.out_height is None:
           out_width, out_height = int(width * args.outscale), int(height * args.outscale)
 
@@ -226,21 +227,21 @@ def process(args,file):
     else:
       path = os.path.join(args.result_path,
                                tail[:-4] + f'_result_{args.model_type}_{int(input_width * args.outscale)}x{int(input_height * args.outscale)}_Sharpness{args.sharpen_scale}.jpg')
+    print("Saving image to {}".format(path))
     cv2.imwrite(path, output)
 
 
 # file loop
 def main(args):
-  list_file=os.listdir(args.input_path)
-
-  for img_file in list_file:
-    if img_file[-3:] == 'jpg' or img_file[-3:] == 'png':
-      print(f'working on {img_file}')
-      process(args,os.path.join(args.input_path,img_file))
-  for vid_file in list_file:
-    if vid_file[-3:] == 'mp4' or vid_file[-3:] == 'avi' or args.input_path[-3:] == 'mov':
-      print(f'working on {vid_file}')
-      process(args,os.path.join(args.input_path,vid_file))
+  list_file=args.input_path
+  print(list_file)
+  for file in list_file:
+    print(f'working on {file}')
+    if file[-3:] == 'jpg' or file[-3:] == 'png':
+      process(args,file)
+    if file[-3:] == 'mp4' or file[-3:] == 'avi' or args.input_path[-3:] == 'mov':
+      print(f'working on {file}')
+      process(args,file)
   print('Done')
 
 if __name__ == '__main__':
