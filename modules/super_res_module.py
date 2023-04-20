@@ -8,7 +8,7 @@ from super_res import main as super_res_main
 from dnnlib import EasyDict
 
 args = EasyDict(result_path="", input_path=[""], model_type="Balance",
-                outscale=3, width=4096, height=4096, sharpen_scale=1)
+                outscale=3, width=4096, height=4096, sharpen_scale=1, scale_mode=0)
 scale_factor = ['1', '2', '3', '4', '5', '6', '7', '8']
 
 
@@ -47,9 +47,6 @@ class SuperResModule:
             print(self.scale_mode)
         if self.scale_mode:
             _, self.out_scale = imgui.combo("Scale Factor", self.out_scale, scale_factor)
-            self.height = None
-            self.width = None
-
         else:
             _, self.height = imgui.input_int("Height", self.height)
             _, self.width = imgui.input_int("Width", self.width)
@@ -64,10 +61,11 @@ class SuperResModule:
                 args.result_path = self.result_path
                 args.input_path = self.input_path
                 args.model_type = self.model_type
-                args.outscale = self.out_scale
+                args.outscale = self.out_scale + 1
                 args.out_height = self.height
                 args.out_width = self.width
                 args.sharpen_scale = self.sharpen
+                args.scale_mode = self.scale_mode
 
                 super_res_main(args)
         except Exception as e:
