@@ -116,11 +116,13 @@ def base_args():
   parser.add_argument("--out_width", type=int, help="output_width")
   parser.add_argument("--out_height", type=int, help="output_height")
   parser.add_argument("--sharpen_scale", type=float, default=2, help="sharpen scale factor")
+  parser.add_argument("--scale_mode", type=int, default=0, help="Scaling mode to use 0=custom widthxheight and 1=scale factor")
 
   return parser
 
 
 def process(args,file):
+  print("Processing", args)
   if args.model_type=="Quality":
     model_path="./sr_models/Quality.pth"
   elif args.model_type=="Balance":
@@ -138,14 +140,13 @@ def process(args,file):
 
 
     audio = get_audio(file)
-    if check_width_height(args):
-      video_save_path = os.path.join(args.result_path, tail[:-4]+f'_result_{args.model_type}_x{int(args.out_width)}x{int(args.out_height)}_Sharpness{args.sharpen_scale}.mp4')
+    if args.scale_mode:
+      video_save_path = os.path.join(args.result_path, tail[
+                                                         :-4] + f'_result_{args.model_type}_{int(width * args.outscale)}x{int(height * args.outscale)}_Sharpness{args.sharpen_scale}.mp4')
     else:
-      video_save_path = os.path.join(args.result_path, tail[:-4]+f'_result_{args.model_type}_{int(width*args.outscale)}x{int(height*args.outscale)}_Sharpness{args.sharpen_scale}.mp4')
+      video_save_path = os.path.join(args.result_path, tail[
+                                                         :-4] + f'_result_{args.model_type}_x{int(args.out_width)}x{int(args.out_height)}_Sharpness{args.sharpen_scale}.mp4')
 
-    outscale=args.outscale
-
-  
     cap = cv2.VideoCapture(file)
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     pbar = tqdm(total=frame_count, unit='frame', desc='inference')
@@ -166,20 +167,22 @@ def process(args,file):
 
           output = output[0].permute(1,2,0).cpu().numpy().astype(np.uint8)
         
-          if check_width_height(args):
-            output = cv2.resize(
-                output, (
-                    int(args.out_width),
-                    int(args.out_height),
-                ), interpolation=cv2.INTER_LINEAR)
-
-          else:
+          if args.scale_mode:
             if args.outscale != 4:
               output = cv2.resize(
                 output, (
                     int(width * args.outscale),
                     int(height * args.outscale),
                 ), interpolation=cv2.INTER_LINEAR)
+
+
+          else:
+            output = cv2.resize(
+                output, (
+                    int(args.out_width),
+                    int(args.out_height),
+                ), interpolation=cv2.INTER_LINEAR)
+
       
         writer.write_frame(output)
         pbar.update(1)
@@ -195,38 +198,43 @@ def process(args,file):
     data_transformer = transforms.Compose([transforms.ToTensor()])
     image = cv2.imread(file)
     input_width, input_height = image.shape[0], image.shape[1]
+    print("INPUT DIMENSIONS", input_width, input_height, image.shape)
     image = data_transformer(image).to('cuda')
     input = torch.unsqueeze(image, 0)
 
     with torch.inference_mode():
           output = upsampler(input)
+          print("OUTPUT DIMENSIONS", output.shape)
           output = F.adjust_sharpness(output, args.sharpen_scale) * 255
 
           output = output[0].permute(1, 2, 0).cpu().numpy().astype(np.uint8)
+          if args.scale_mode:
+              if args.outscale != 4:
+                  output = cv2.resize(
+                      output, (
+                          int(input_width * args.outscale),
+                          int(input_width * args.outscale),
+                      ), interpolation=cv2.INTER_LINEAR)
 
-          height, width = output.shape[0], output.shape[1]
 
-          if check_width_height(args):
+          else:
               output = cv2.resize(
                   output, (
                       int(args.out_width),
                       int(args.out_height),
                   ), interpolation=cv2.INTER_LINEAR)
 
-          else:
-              if args.outscale != 4:
-                  output = cv2.resize(
-                      output, (
-                          int(width * args.outscale),
-                          int(height * args.outscale),
-                      ), interpolation=cv2.INTER_LINEAR)
-
-    if check_width_height(args):
+    if args.scale_mode:
+      print("USING these params", input_width, input_height, args.outscale)
       path = os.path.join(args.result_path,
-                               tail[:-4] + f'_result_{args.model_type}_{int(args.out_width)}x{int(args.out_height)}_Sharpness{args.sharpen_scale}.jpg')
+                            tail[
+                            :-4] + f'_result_{args.model_type}_{int(input_width * args.outscale)}x{int(input_height * args.outscale)}_Sharpness{args.sharpen_scale}.jpg')
+
     else:
       path = os.path.join(args.result_path,
-                               tail[:-4] + f'_result_{args.model_type}_{int(input_width * args.outscale)}x{int(input_height * args.outscale)}_Sharpness{args.sharpen_scale}.jpg')
+                          tail[
+                          :-4] + f'_result_{args.model_type}_{int(args.out_width)}x{int(args.out_height)}_Sharpness{args.sharpen_scale}.jpg')
+
     print("Saving image to {}".format(path))
     cv2.imwrite(path, output)
 
@@ -234,6 +242,11 @@ def process(args,file):
 # file loop
 def main(args):
   list_file=args.input_path
+
+  #if args output path does not exist
+  if not os.path.exists(args.result_path):
+    os.makedirs(args.result_path)
+
   print(list_file)
   for file in list_file:
     print(f'working on {file}')
