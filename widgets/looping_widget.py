@@ -71,6 +71,7 @@ class LoopingWidget:
         self._pinned_bufs = dict()
         self._device = torch.device('cuda')
         self.halt_update = 0
+        self.perfect_loop = False
 
 
         funcs = dict(zip(["anim", "num_keyframes", "looptime", "index", "mode"], [self.osc_handler(param) for param in
@@ -156,16 +157,20 @@ class LoopingWidget:
             if self.halt_update < 0:
                 self.params.index = int(self.params.index+self.alpha)%self.params.num_keyframes
                 self.alpha = 0
+                if self.params.index == 0 and self.perfect_loop:
+                    self.params.anim = False
             self.halt_update = 10
         if step_size < 0:
             if self.alpha <= 0:
                 if self.halt_update < 0:
                     self.params.index = self.params.index+self.alpha
-                    if self.params.index < 0:
+                    if self.params.index <= 0:
                         self.params.index += self.params.num_keyframes
                     self.params.index = int(self.params.index %self.params.num_keyframes)
                     self.alpha = 1
-                self.halt_updatae = 10
+                    if self.params.index == 0 and self.perfect_loop:
+                        self.params.anim = False
+                self.halt_update = 10
 
 
         self.halt_update -= 1
@@ -291,10 +296,12 @@ class LoopingWidget:
             with imgui_utils.item_width(viz.app.font_size*5):
                 changed, idx = imgui.input_int("index", self.params.index+1)
                 if changed:
-                    self.params.index = int(idx-1 % self.params.num_keyframes)
+                    self.params.index = int((idx-1) % self.params.num_keyframes)
             imgui.same_line()
             with imgui_utils.item_width(viz.app.font_size*5):
                 changed, self.alpha = imgui.slider_float("alpha", self.alpha, 0, 1)
+
+            _, self.perfect_loop = imgui.checkbox("Perfect Loop", self.perfect_loop)
 
             if self.params.anim:
                 self.update_alpha()
