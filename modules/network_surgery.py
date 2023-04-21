@@ -223,37 +223,6 @@ class SurgeryModule:
 
             self.display_layers(layer1, layer2)
 
-            # for i, (l1, l2) in enumerate(zip(layer1, layer2)):
-            #     if self.combined_layers[i] != "" and self.combined_layers[i] != "X":
-            #         imgui.text_colored(l1, 0.0, 1.0, 0.0, 1.0)
-            #         imgui.same_line()
-            #         if imgui.button(f">##{i}") and l1:
-            #             self.combined_layers[i] = "Model A"
-            #         imgui.same_line()
-            #         if self.combined_layers[i] == "Model A":
-            #             imgui.text_colored("Model A", 0.0, 1.0, 0.0, 1.0)
-            #         elif self.combined_layers[i] == "Model B":
-            #             imgui.text_colored("Model B", 0.0, 0.0, 1.0, 1.0)
-            #         else:
-            #             imgui.text_colored("None", 1.0, 0.0, 0.0, 1.0)
-            #         imgui.same_line()
-            #         if imgui.button(f"<##{i}") and l2:
-            #             self.combined_layers[i] = "Model B"
-            #         imgui.same_line()
-            #         imgui.text_colored(l2, 0.0, 0.0, 1.0, 1.0)
-            #         if "torgb.affine.bias" in l1 and i < len(self.combined_layers) - 1:
-            #             imgui.same_line()
-            #             if self.combined_layers[i+1] == "X":
-            #                 if imgui.button(f"Recover##{i}"):
-            #                     self.combined_layers = copy.deepcopy(self.cached_layers)
-            #             else:
-            #                 if imgui.button(f"X##{i}"):
-            #                     self.cached_layers[:i] = copy.deepcopy(self.combined_layers[:i])
-            #                     self.combined_layers[i+1] = "X"
-            #                     self.combined_layers[i+2:] = [""] * (len(self.combined_layers) - i - 2)
-
-
-
             _, self.output_name = imgui_utils.input_text("Output Name", self.output_name, 1024, help_text="Name of the output model",
                                    flags=(imgui.INPUT_TEXT_AUTO_SELECT_ALL ))
             imgui.same_line()
@@ -276,7 +245,6 @@ class SurgeryModule:
 
         layer1 = extract_conv_names(self.pkl1)
         layer2 = extract_conv_names(self.pkl2)
-        print(last_entry)
         if last_entry.keys() == {"Model A"}:
             # get resolution through regex from last entry
             img_resolution = int(re.search(r'\d+', layer1[last_entry["Model A"]]).group())
@@ -341,24 +309,8 @@ class SurgeryModule:
                     self.collapsed[i] = ">" if self.collapsed[i] == "v" else "v"
                 imgui.same_line()
                 imgui.text_colored(f"Resolution {resolution} x {resolution}", 1.0, 1.0, 1.0, 1.0)
-                imgui.same_line()
-                if self.combined_layers[i] == "X":
-                    if imgui.button(f"Recover##{i}"):
-                        # find last entry in l1 or l2 that has the same resolution as resolution and copy all the layers from self.cached to self.combined up to that point
-                        for j, (l1, l2) in enumerate(zip(layer1, layer2)):
-                            if l1_res == resolution * 2 or l2_res == resolution *2:
-                                self.combined_layers[:j] = copy.deepcopy(self.cached_layers[:j])
-                                self.combined_layers[j] = "X"
-                                self.combined_layers[j + 1:] = ["X"] * (len(self.combined_layers) - j - 1)
-                                break
-                            # deal with the last resolution
-                            if j == len(layer1) - 1:
-                                self.combined_layers = copy.deepcopy(self.cached_layers)
-                else:
-                    if imgui.button(f"X##{i}"):
-                        self.cached_layers[:i] = copy.deepcopy(self.combined_layers[:i])
-                        self.combined_layers[i] = "X"
-                        self.combined_layers[i + 1:] = ["X"] * (len(self.combined_layers) - i - 1)
+
+
                 if self.collapsed[i] == ">":
 
                     if l1:
@@ -366,7 +318,6 @@ class SurgeryModule:
                         imgui.text_colored("Model A", 0.2, 1.0, 0.2, 1.0)
                     imgui.same_line()
                     if imgui.button("->##Resolutions{}".format(resolution)) and l1:
-                        print("CLICKING MODEL A")
                         self.combined_layers[i] = "Model A"
                         for j in range(i+1, len(self.combined_layers)):
                             res = int(re.search(r'\d+', layer1[j]).group())
@@ -407,8 +358,64 @@ class SurgeryModule:
                     if l2:
                         imgui.same_line()
                         imgui.text_colored("Model B", 0.2, 0.2, 1.0, 1.0)
+
+                    imgui.same_line(imgui.get_content_region_available_width() - self.menu.app.button_w * 1.5)
+                    if self.combined_layers[i] == "X":
+                        if imgui.button(f"Recover##{i}"):
+                            # find last entry in l1 or l2 that has the same resolution as resolution and copy all the layers from self.cached to self.combined up to that point
+                            for j, (l1, l2) in enumerate(zip(layer1, layer2)):
+                                res1 = 0
+                                res2 = 0
+                                if l1:
+                                    res1 = int(re.search(r'\d+', l1).group())
+                                if l2:
+                                    res2 = int(re.search(r'\d+', l2).group())
+                                if res1 == resolution * 2 or res2 == resolution * 2:
+                                    self.combined_layers[:j] = copy.deepcopy(self.cached_layers[:j])
+                                    break
+                                # deal with the last resolution
+                                if j == len(layer1) - 1:
+                                    self.combined_layers = copy.deepcopy(self.cached_layers)
+                    else:
+                        if imgui.button(f"X##{i}"):
+                            self.cached_layers[:i] = copy.deepcopy(self.combined_layers[:i])
+                            self.combined_layers[i] = "X"
+                            self.combined_layers[i + 1:] = ["X"] * (len(self.combined_layers) - i - 1)
                 # if not collapsed show the layers of the resolution
                 else:
+                    imgui.same_line(imgui.get_content_region_available_width() - self.menu.app.button_w * 1.5)
+                    if self.combined_layers[i] == "X":
+                        if imgui.button(f"Recover##{i}"):
+                            # find last entry in l1 or l2 that has the same resolution as resolution and copy all the layers from self.cached to self.combined up to that point
+                            for j, (l1, l2) in enumerate(zip(layer1, layer2)):
+                                res1 = 0
+                                res2 = 0
+                                if l1:
+                                    res1 = int(re.search(r'\d+', l1).group())
+                                if l2:
+                                    res2 = int(re.search(r'\d+', l2).group())
+                                if res1 == resolution * 2 or res2 == resolution * 2:
+                                    self.combined_layers[:j] = copy.deepcopy(self.cached_layers[:j])
+                                    break
+                                # deal with the last resolution
+                                if j == len(layer1) - 1:
+                                    self.combined_layers = copy.deepcopy(self.cached_layers)
+                    else:
+                        if imgui.button(f"X##{i}"):
+                            for j, (l1, l2) in enumerate(zip(layer1, layer2)):
+                                res1 = 0
+                                res2 = 0
+                                if l1:
+                                    res1 = int(re.search(r'\d+', l1).group())
+                                if l2:
+                                    res2 = int(re.search(r'\d+', l2).group())
+                                if res1 == resolution * 2 or res2 == resolution * 2:
+                                    self.cached_layers[:j] = copy.deepcopy(self.combined_layers[:j])
+                                    self.combined_layers[j+1] = "X"
+                                    break
+                                # deal with the last resolution
+                                if j == len(layer1) - 1:
+                                    self.cached_layers = copy.deepcopy(self.combined_layers)
                     for j in range(i, len(self.combined_layers)):
                         if layer1[j]:
                             res = int(re.search(r'\d+', layer1[j]).group())
