@@ -20,7 +20,11 @@ import dnnlib
 from bending.transform_layers import ManipulationLayer
 from torch_utils.ops import upfirdn2d
 import legacy  # pylint: disable=import-error
+from net_base import SRVGGNetPlus
 
+super_res = SRVGGNetPlus(num_in_ch=3, num_out_ch=3, num_feat=48, upscale=4, act_type='prelu').eval().to('cuda')
+model_sd=torch.load('./sr_models/Fast.pt')
+super_res.load_state_dict(model_sd)
 
 # ----------------------------------------------------------------------------
 
@@ -381,6 +385,7 @@ class Renderer:
                      looping_seeds=None,
                      looping_keyframes=None,
                      looping_projections=None,
+                     use_superres=False,
                      ):
         with torch.inference_mode():
             # Dig up network details.
@@ -467,17 +472,18 @@ class Renderer:
             torch.manual_seed(random_seed)
             w += self.to_device(direction)
             out, manip_layers = self.run_synthesis_net(G.synthesis, w, capture_layer=layer_name, transforms=latent_transforms,
-                                                 adjustments=adjustments, noise_adjustments=noise_adjustments, ratios=ratios,
+                                                 adjustments=adjustments, noise_adjustments=noise_adjustments, ratios=ratios, use_superres=use_superres,
                                                  **synthesis_kwargs)
             res.snap = self.to_cpu(w).squeeze()[0]
 
             # Update layer list.
             cache_key = (G.synthesis, tuple(sorted(synthesis_kwargs.items())))
             if cache_key not in self._net_layers:
+                print("Generating layer list for...")
                 layers = manip_layers
                 if layer_name is not None:
                     torch.manual_seed(random_seed)
-                    _out, layers = self.run_synthesis_net(G.synthesis, w, **synthesis_kwargs)
+                    _out, layers = self.run_synthesis_net(G.synthesis, w, use_superres=False,**synthesis_kwargs)
                 self._net_layers[cache_key] = layers
                 del layers
 
@@ -528,7 +534,7 @@ class Renderer:
             # del out # Free up GPU memory.
 
     def run_synthesis_net(self, net, *args, capture_layer=None, transforms=None, ratios=None, adjustments=None,
-                          noise_adjustments=None, **kwargs):
+                          noise_adjustments=None, use_superres=False, **kwargs):
         """
         Run the synthesis network and capture the output of a specific layer.
         :param net: Synthesis model
@@ -621,6 +627,10 @@ class Renderer:
                 out, _ = net(*args, **kwargs)
                 if isinstance(out, tuple):
                     out = out[0]
+                if use_superres:
+                    with torch.autocast("cuda"):
+                        out = super_res(out)
+                print("out, ", out.shape)
         except CaptureSuccess as e:
             out = e.out
         for hook in hooks:
