@@ -1,4 +1,7 @@
+import os
+
 import imgui
+
 from utils.gui_utils import imgui_window
 from enum import IntEnum
 class States(IntEnum):
@@ -18,10 +21,10 @@ class Autolume(imgui_window.ImguiWindow):
     # State handler that greets user, shows menu (allowing for training, compression, ganspace), and renders
     def __init__(self):
         super().__init__(title='Autolume-Live', window_width=3840, window_height=2160)
-        self.state = 0
+        self.state = 1
         self.running = True
         self.welcome = Welcome(self)
-        self.menu = None
+        self.menu = Menu(self)
         self.viz = None
         self.render_loop = None
         self.pkls = []

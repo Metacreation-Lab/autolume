@@ -27,6 +27,7 @@ Installations: \
 - Make start screenlook nicer
 - Training, Compressing, GANspace stop interface and can only be stopped by stopping program
 - Sometimes pytorch slows down (seems to aggregate variables in the background), when clearing with gc.collect overall slowdown in render and gui but more stable (currently commented out)
+- Super resolution: Off-line super-res module via Real-ESRGAN is now added to GUI and wait for testing. An upgrade model of RRDB net can be implemented for best frame quality. Choices of model is yet to be added for the user to choose different super-res style (photo-realistic or anime-artisitc)
 
 
 ## Acknowledgment

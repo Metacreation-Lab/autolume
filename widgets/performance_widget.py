@@ -18,7 +18,6 @@ import NDIlib as ndi
 
 
 # ----------------------------------------------------------------------------
-
 class PerformanceWidget:
     def __init__(self, viz):
         self.viz = viz
@@ -27,6 +26,8 @@ class PerformanceWidget:
         self.fps_limit = 60
         self.use_vsync = False
         self.force_fp32 = False
+        self.use_superres = False
+        self.scale_factor = 0
 
     @imgui_utils.scoped_by_object_id
     def __call__(self, show=True):
@@ -98,10 +99,12 @@ class PerformanceWidget:
                         ndi.send_destroy(self.viz.ndi_send)
                         self.viz.ndi_send = ndi.send_create(send_settings)
 
-
+            imgui.same_line()
+            _, self.use_superres = imgui.checkbox('Super Resolution', self.use_superres)
 
         viz.app.set_fps_limit(self.fps_limit)
         viz.app.set_vsync(self.use_vsync)
         viz.args.force_fp32 = self.force_fp32
+        viz.args.use_superres = self.use_superres
 
 # ----------------------------------------------------------------------------
