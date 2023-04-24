@@ -167,3 +167,16 @@ def drag_hidden_window(label, x, y, width, height, enabled=True):
     return dragging, dx, dy
 
 #----------------------------------------------------------------------------
+
+def drag_float_slider(label, value, min_value, max_value, format):
+
+    changed, value = imgui.slider_float(label, value, min_value, max_value, format)
+
+    # if using slider and moving mouse outside the slider area, the value will continue to increase/decrease
+
+    if imgui.is_item_active() and imgui.is_mouse_dragging():
+        changed = True
+        # calculate the delta between the mouse position and the slider position if mouse on the right side of the slider calculate in regards to the max value
+        if imgui.get_mouse_pos()[0] > imgui.get_item_rect_max()[0]:
+            value += (imgui.get_mouse_drag_delta()[0] / 100)
+    return changed, value
