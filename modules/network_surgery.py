@@ -193,7 +193,6 @@ class SurgeryModule:
         self.model_selection_gui("Model 1", 1)
         imgui.same_line()
         self.model_selection_gui("Model 2", 2)
-        imgui.same_line()
         if imgui_utils.button("Combine", enabled=self.pkl1 and self.pkl2):
             self.show_interface = True
 
