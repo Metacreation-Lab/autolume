@@ -386,6 +386,7 @@ class Renderer:
                      looping_keyframes=None,
                      looping_projections=None,
                      use_superres=False,
+                     global_noise=1,
                      ):
         with torch.inference_mode():
             # Dig up network details.
@@ -472,7 +473,7 @@ class Renderer:
             torch.manual_seed(random_seed)
             w += self.to_device(direction)
             out, manip_layers = self.run_synthesis_net(G.synthesis, w, capture_layer=layer_name, transforms=latent_transforms,
-                                                 adjustments=adjustments, noise_adjustments=noise_adjustments, ratios=ratios, use_superres=use_superres,
+                                                 adjustments=adjustments, noise_adjustments=noise_adjustments, ratios=ratios, use_superres=use_superres,global_noise=global_noise,
                                                  **synthesis_kwargs)
             res.snap = self.to_cpu(w).squeeze()[0]
 
@@ -520,7 +521,7 @@ class Renderer:
             del out # Free up GPU memory.
 
     def run_synthesis_net(self, net, *args, capture_layer=None, transforms=None, ratios=None, adjustments=None,
-                          noise_adjustments=None, use_superres=False, **kwargs):
+                          noise_adjustments=None, use_superres=False, global_noise=1, **kwargs):
         """
         Run the synthesis network and capture the output of a specific layer.
         :param net: Synthesis model
@@ -554,6 +555,7 @@ class Renderer:
                     inps.append(None)
             name = submodule_names[module]
             if "conv" in name and not ('affine' in name):
+                module.global_noise = global_noise
                 # if not affine means has noise parameter and is convolutional
                 if name in noise_adjustments:
                     noise_strength = noise_adjustments[name]["strength"]
