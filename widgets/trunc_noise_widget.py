@@ -22,10 +22,10 @@ except ModuleNotFoundError:
 class TruncationNoiseWidget:
     def __init__(self, viz):
         self.viz            = viz
-        self.params = dnnlib.EasyDict(trunc_psi=0.8, trunc_cutoff=0, noise_enable=True, noise_seed=0, noise_anim=False)
+        self.params = dnnlib.EasyDict(trunc_psi=0.8, trunc_cutoff=0, global_noise =1, noise_enable=True, noise_seed=0, noise_anim=False)
         self.prev_num_ws    = 0
 
-        funcs = dict(zip(["Truncation", "Cut Off", "Noise ON/Off", "Noise Seed", "Noise Anim"], [self.osc_handler(param) for param in
+        funcs = dict(zip(["Truncation", "Cut Off","Global Noise", "Noise ON/Off", "Noise Seed", "Noise Anim"], [self.osc_handler(param) for param in
                                                      self.params]))
 
         self.osc_menu = osc_menu.OscMenu(self.viz, funcs,
@@ -81,10 +81,16 @@ class TruncationNoiseWidget:
                         self.params.trunc_cutoff = min(max(new_cutoff, 0), num_ws)
 
             with imgui_utils.grayed_out(not has_noise):
-                imgui.same_line()
                 _clicked, self.params.noise_enable = imgui.checkbox('Noise##enable', self.params.noise_enable)
-                imgui.same_line(round(viz.app.font_size * 27.7))
+                imgui.same_line()
+
+
                 with imgui_utils.grayed_out(not self.params.noise_enable):
+                    with imgui_utils.item_width((viz.app.button_w + viz.app.spacing)* 4):
+                        _changed, g_noise= imgui_utils.drag_float_slider('##global_noise', self.params.global_noise, 0, 2, format='Global Noise %.2f')
+                        if _changed and has_noise:
+                            self.params.global_noise = g_noise
+                    imgui.same_line()
                     with imgui_utils.item_width(-1 - viz.app.button_w - viz.app.spacing - viz.app.font_size * 4):
                         _changed, self.params.noise_seed = imgui.input_int('##seed', self.params.noise_seed)
                     imgui.same_line(spacing=0)
@@ -101,11 +107,12 @@ class TruncationNoiseWidget:
                     self.params.noise_enable = True
                     self.params.noise_seed = 0
                     self.params.noise_anim = False
+                    self.params.global_noise = 1
 
         self.osc_menu()
         if self.params.noise_anim:
             self.params.noise_seed += 1
-        viz.args.update(trunc_psi=self.params.trunc_psi, trunc_cutoff=self.params.trunc_cutoff, random_seed=self.params.noise_seed)
+        viz.args.update(trunc_psi=self.params.trunc_psi, trunc_cutoff=self.params.trunc_cutoff, random_seed=self.params.noise_seed, global_noise=self.params.global_noise)
         viz.args.noise_mode = ('none' if not self.params.noise_enable else 'const' if self.params.noise_seed == 0 else 'random')
 
 #----------------------------------------------------------------------------
