@@ -314,7 +314,7 @@ class SurgeryModule:
 
                     if l1:
                         imgui.same_line()
-                        imgui.text_colored("Model A", 0.2, 1.0, 0.2, 1.0)
+                        imgui.text_colored(os.path.basename(self.model1), 0.2, 1.0, 0.2, 1.0)
                     imgui.same_line()
                     if imgui.button("->##Resolutions{}".format(resolution)) and l1:
                         self.combined_layers[i] = "Model A"
@@ -331,10 +331,10 @@ class SurgeryModule:
 
                     if all([self.combined_layers[j] == "Model A" for j in range(i + 1, len(self.combined_layers)) if
                             layer1_matches[j]]):
-                        imgui.text_colored("Model A", 0.2, 1.0, 0.2, 1.0)
+                        imgui.text_colored(os.path.basename(self.model1), 0.2, 1.0, 0.2, 1.0)
                     elif all([self.combined_layers[j] == "Model B" for j in range(i + 1, len(self.combined_layers)) if
                               layer2_matches[j]]):
-                        imgui.text_colored("Model B", 0.2, 0.2, 1.0, 1.0)
+                        imgui.text_colored(os.path.basename(self.model2), 0.2, 0.2, 1.0, 1.0)
                     elif all([self.combined_layers[j] == "X" for j in range(i + 1, len(self.combined_layers)) if
                               layer1_matches[j]]):
                         imgui.text_colored("Deleted", 1, 0.2, 0.2, 1.0)
@@ -356,7 +356,7 @@ class SurgeryModule:
 
                     if l2:
                         imgui.same_line()
-                        imgui.text_colored("Model B", 0.2, 0.2, 1.0, 1.0)
+                        imgui.text_colored(os.path.basename(self.model2), 0.2, 0.2, 1.0, 1.0)
 
                     imgui.same_line(imgui.get_content_region_available_width() - self.menu.app.button_w * 1.5)
                     if self.combined_layers[i] == "X":
@@ -428,9 +428,9 @@ class SurgeryModule:
                                 self.combined_layers[j] = "Model A"
                             imgui.same_line()
                             if self.combined_layers[j] == "Model A":
-                                imgui.text_colored("Model A", 0.2, 1.0, 0.2, 1.0)
+                                imgui.text_colored(os.path.basename(self.model1), 0.2, 1.0, 0.2, 1.0)
                             elif self.combined_layers[j] == "Model B":
-                                imgui.text_colored("Model B", 0.2, 0.2, 1.0, 1.0)
+                                imgui.text_colored(os.path.basename(self.model2), 0.2, 0.2, 1.0, 1.0)
                             elif self.combined_layers[j] == "X":
                                 imgui.text_colored("Deleted", 1, 0.2, 0.2, 1.0)
                             imgui.same_line()
