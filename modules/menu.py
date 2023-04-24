@@ -60,9 +60,6 @@ class Menu:
         self.super_res()
         imgui.end()
 
-        imgui.set_next_window_position(0,(self.app.content_height * 4) // 5)
-        imgui.set_next_window_size(self.app.content_width, (self.app.content_height * 4) // 5)
-        imgui.begin('Render##Menu', closable=False, flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS))
         imgui.set_next_window_position(0, (self.app.content_height * 3) // 4)
         imgui.set_next_window_size(self.app.content_width // 2, (self.app.content_height * 3) // 4)
         imgui.begin('Surgery##Menu', closable=False, flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE))
@@ -76,7 +73,7 @@ class Menu:
         imgui.text("Renderer")
         if imgui_utils.button("START", width=self.app.button_w):
             self.app.start_renderer()
-
         imgui.end()
+
 
 
