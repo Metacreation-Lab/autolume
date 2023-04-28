@@ -15,6 +15,7 @@ from modules.pca_module import PCA_Module
 from modules.training_module import TrainingModule
 from modules.compress_module import CompressModule
 from modules.network_surgery import SurgeryModule
+from modules.projection_module import ProjectionModule
 
 from modules.super_res_module import SuperResModule
 #----------------------------------------------------------------------------
@@ -25,6 +26,7 @@ class Menu:
         self.training = TrainingModule(self)
         self.compress = CompressModule(self)
         self.network_surgery = SurgeryModule(self)
+        self.projection = ProjectionModule(self)
         self.super_res = SuperResModule(self)
 
 
@@ -43,7 +45,8 @@ class Menu:
         imgui.set_next_window_size(self.app.content_width // 4, (self.app.content_height * 4) // 5)
         imgui.begin('Compress##Menu', closable=False, flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS))
         imgui.text("Compress")
-        self.compress()
+        # self.compress()
+        self.projection()
         imgui.end()
 
         imgui.set_next_window_position((2 * self.app.content_width)// 4, 0)
@@ -73,6 +76,8 @@ class Menu:
         imgui.text("Renderer")
         if imgui_utils.button("START", width=self.app.button_w):
             self.app.start_renderer()
+
+
         imgui.end()
 
 

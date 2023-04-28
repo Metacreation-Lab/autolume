@@ -74,6 +74,7 @@ class LoopingWidget:
         self.perfect_loop = False
 
 
+
         funcs = dict(zip(["anim", "num_keyframes", "looptime", "index", "mode"], [self.osc_handler(param) for param in
                                                                                          ["anim", "num_keyframes", "looptime", "index", "mode"]]))
 

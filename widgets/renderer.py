@@ -435,16 +435,28 @@ class Renderer:
                         w += w_avg
 
                 else:
-                    try:
-                        all_cs = np.zeros([len(vec), G.c_dim], dtype=np.float32)
+
+                    if len(vec.shape) == 1:
+                        vec = vec.unsqueeze(0)
+                    elif len(vec.shape) == 2:
+                        if vec.shape[0] == 1:
+                            try:
+                                all_cs = np.zeros([len(vec), G.c_dim], dtype=np.float32)
+                                w = self.to_device(vec)
+                                if project:
+                                    w = G.mapping(z=w, c=all_cs, truncation_psi=trunc_psi, truncation_cutoff=trunc_cutoff)
+                            except Exception as e:
+                                print(e)
+                        else:
+                            w = self.to_device(vec.unsqueeze(0))
+
+                    else:
                         w = self.to_device(vec)
-                        if project:
-                            w = G.mapping(z=w, c=all_cs, truncation_psi=trunc_psi, truncation_cutoff=trunc_cutoff)
-                    except Exception as e:
-                        print(e)
 
                 if not project:
-                    w = w.repeat(G.num_ws, 1).unsqueeze(0)
+                    if len(w.shape) == 2 and w.shape[0] != G.num_ws:
+                        print('w shape', w.shape)
+                        w = w.repeat(G.num_ws, 1).unsqueeze(0)
             else:
                 if looping_modes[looping_index - 1]:
                     v0 = self.evaluate(G, looping_index - 1, looping_seeds, looping_projections, trunc_psi,

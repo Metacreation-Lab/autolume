@@ -1,3 +1,5 @@
+import os
+
 import imgui
 import numpy as np
 import torch
@@ -8,6 +10,7 @@ except ModuleNotFoundError:
     import pickle
 import dnnlib
 from utils.gui_utils import imgui_utils
+from modules.filedialog import FileDialog
 
 
 class AdjusterWidget:
@@ -21,6 +24,7 @@ class AdjusterWidget:
         self.vslide_use_osc = [False] * len(self.weights)
         self.vslide_address = [""] * len(self.weights)
         self.vslide_mappings = ["x"] * len(self.weights)
+        self.file_dialog = FileDialog(viz, "Vector", os.path.abspath(os.getcwd()), ["*",".pth", ".pt"], width=self.viz.app.button_w)
 
     def save(self, path):
         with open(path, "wb") as f:
@@ -139,6 +143,9 @@ class AdjusterWidget:
                 changed, self.paths[i] = imgui_utils.input_text(f"##vec_path{i}", self.paths[i], 256,
                                                                 imgui.INPUT_TEXT_CHARS_NO_BLANK,
                                                                 width=self.viz.app.button_w, help_text="filepath")
+                _clicked, files = self.file_dialog()
+                if _clicked:
+                    self.paths[i] = files[0]
                 if imgui_utils.button(f"Load Vec##{i}", (self.viz.app.button_w * (6 / 8) - (self.viz.app.spacing / 2))):
                     self.open_vec(i)
                 imgui.same_line()
