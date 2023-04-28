@@ -5,10 +5,13 @@
 # and any modifications thereto.  Any use, reproduction, disclosure or
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
+import os
 
 import numpy as np
 import torch
 import torch.nn.functional as F
+
+from modules.filedialog import FileDialog
 
 try:
     import cPickle as pickle
@@ -42,6 +45,10 @@ class LatentWidget:
         self.update = False
         self.latent_def = dnnlib.EasyDict(self.latent)
         self.step_y     = 100
+        self.vec_path   = ""
+        self.file_dialog = FileDialog(viz, "Vector", os.path.abspath(os.getcwd()),
+                                      ["*", ".pth", ".pt", ".npy", ".npz", ],
+                                      width=self.viz.app.button_w, multiple_files=False)
 
 
     def save(self, path):
@@ -151,6 +158,31 @@ class LatentWidget:
         if imgui_utils.button("Randomize##vecmode", width=viz.app.button_w):
             self.latent.vec = torch.randn(self.latent.vec.shape)
             self.latent.next = torch.randn(self.latent.next.shape)
+
+        imgui.same_line()
+        # _, self.vec_path = imgui_utils.input_text("##vecpath", self.vec_path, 1024, width=viz.app.button_w, flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL, help="Load vector from file")
+        _clicked, paths = self.file_dialog()
+        if _clicked:
+            self.vec_path = paths[0]
+            print("Selected vector at", self.vec_path)
+
+        imgui.same_line()
+        if imgui_utils.button("Load##vecmode", width=viz.app.button_w, enabled=self.vec_path is not None or self.vec_path != ''):
+            print("Loading vector from", self.vec_path)
+            if self.vec_path:
+                if self.vec_path.endswith('.npy'):
+                    self.latent.vec = torch.from_numpy(np.load(self.vec_path))
+                    if len(self.latent.vec.shape) == 1:
+                        self.latent.vec = self.latent.vec.unsqueeze(0)
+                elif self.vec_path.endswith('.pt'):
+                    self.latent.vec = torch.load(self.vec_path)
+                    if len(self.latent.vec.shape) == 1:
+                        self.latent.vec = self.latent.vec.unsqueeze(0)
+                else:
+                    print("Unsupported file format")
+                print("Loaded vector of shape", self.latent.vec.shape)
+                self.latent.next = torch.randn(self.latent.next.shape)
+
 
     @imgui_utils.scoped_by_object_id
     def __call__(self, show=True):
