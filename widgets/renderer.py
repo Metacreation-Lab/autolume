@@ -391,6 +391,7 @@ class Renderer:
         with torch.inference_mode():
             # Dig up network details.
             G = self.get_network(pkl, 'G_ema')
+            G2 = self.get_network('/home/olaf/PycharmProjects/Full_Autolume/models/FreaGAN-6000-steps.pkl', 'G_ema')
             res.img_resolution = G.img_resolution
             res.num_ws = G.num_ws
             res.has_noise = any('noise_const' in name for name, _buf in G.synthesis.named_buffers())
@@ -485,7 +486,7 @@ class Renderer:
             torch.manual_seed(random_seed)
             w += self.to_device(direction)
             out, manip_layers = self.run_synthesis_net(G.synthesis, w, capture_layer=layer_name, transforms=latent_transforms,
-                                                 adjustments=adjustments, noise_adjustments=noise_adjustments, ratios=ratios, use_superres=use_superres,global_noise=global_noise,
+                                                 adjustments=adjustments, noise_adjustments=noise_adjustments, ratios=ratios, use_superres=use_superres,global_noise=global_noise, net2=G2,
                                                  **synthesis_kwargs)
             res.snap = self.to_cpu(w).squeeze()[0]
 
@@ -533,7 +534,7 @@ class Renderer:
             del out # Free up GPU memory.
 
     def run_synthesis_net(self, net, *args, capture_layer=None, transforms=None, ratios=None, adjustments=None,
-                          noise_adjustments=None, use_superres=False, global_noise=1, **kwargs):
+                          noise_adjustments=None, use_superres=False, global_noise=1, net2=None, **kwargs):
         """
         Run the synthesis network and capture the output of a specific layer.
         :param net: Synthesis model
@@ -619,7 +620,7 @@ class Renderer:
                 layers.append(dnnlib.EasyDict(name=name, shape=shape, dtype=dtype))
                 if name == capture_layer:
                     raise CaptureSuccess(out)
-
+        print([mod for mod in net2.modules()])
         hooks = [module.register_forward_hook(module_hook) for module in net.modules()]
         hooks.extend([module.register_forward_pre_hook(adjustment_hook) for module in net.modules()])
         try:

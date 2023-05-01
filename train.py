@@ -95,10 +95,7 @@ def launch_training(c, desc, outdir, dry_run):
     except RuntimeError as e:
         print(e)
     with tempfile.TemporaryDirectory() as temp_dir:
-        if c.num_gpus == 1:
-            subprocess_fn(rank=0, c=c, temp_dir=temp_dir)
-        else:
-            torch.multiprocessing.spawn(fn=subprocess_fn, args=(c, temp_dir), nprocs=c.num_gpus)
+        subprocess_fn(rank=0, c=c, temp_dir=temp_dir)
 
 #----------------------------------------------------------------------------
 
@@ -185,7 +182,7 @@ def parse_comma_separated_list(s):
 def clickmain(**kwargs):
     main(**kwargs)
 
-def main(**kwargs):
+def main(queue, reply):
     """Train a GAN using the techniques described in the paper
     "Alias-Free Generative Adversarial Networks".
 
@@ -209,8 +206,11 @@ def main(**kwargs):
     """
 
     # Initialize config.
-    opts = dnnlib.EasyDict(kwargs) # Command line arguments.
+    kwargs = queue.get()
+
+    opts = dnnlib.EasyDict(**kwargs) # Command line arguments.
     c = dnnlib.EasyDict() # Main config dict.
+    reply.put(['Configuring Models...', False])
     c.G_kwargs = dnnlib.EasyDict(class_name=None, z_dim=opts.z_dim, w_dim=opts.w_dim, mapping_kwargs=dnnlib.EasyDict())
     c.G_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=[0, 0.99], eps=1e-8)
     c.D_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=[0, 0.99], eps=1e-8)
@@ -234,10 +234,12 @@ def main(**kwargs):
     c.G_kwargs.channel_max = opts.cmax
     c.G_kwargs.mapping_kwargs.num_layers = (8 if opts.cfg == 'stylegan2' else 2) if opts.map_depth is None else opts.map_depth
     if opts.teacher is not None:
+        reply.put(['Loading Teacher...', False])
         assert isinstance(opts.teacher, str)
         c.teacher = opts.teacher
     c.projected = opts.projected
     if opts.projected:
+        reply.put(['Using Projected Discriminator...', False])
         c.D_kwargs = dnnlib.EasyDict(
             class_name='architectures.pg_modules.discriminator.ProjectedDiscriminator',
             diffaug=True,
@@ -373,6 +375,7 @@ def main(**kwargs):
         desc += f'-{opts.desc}'
 
     # Launch.
+    reply.put(["launching", False])
     launch_training(c=c, desc=desc, outdir=opts.outdir, dry_run=opts.dry_run)
 
 #----------------------------------------------------------------------------

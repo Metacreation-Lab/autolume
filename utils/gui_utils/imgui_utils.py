@@ -181,5 +181,5 @@ def drag_float_slider(label, value, min_value, max_value, format):
         changed = True
         # calculate the delta between the mouse position and the slider position if mouse on the right side of the slider calculate in regards to the max value
         if imgui.get_mouse_pos()[0] > imgui.get_item_rect_max()[0]:
-            value += (imgui.get_mouse_drag_delta()[0] / 100)
+            value += (imgui.get_mouse_drag_delta()[0] / (imgui.get_item_rect_size()[0]))
     return changed, value

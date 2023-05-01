@@ -1,6 +1,7 @@
 import os
 
 import imgui
+import multiprocessing as mp
 
 import dnnlib
 from utils.gui_utils import imgui_utils
@@ -31,8 +32,22 @@ class TrainingModule:
 
         self.menu = menu
 
+        self.queue = mp.Queue()
+        self.reply = mp.Queue()
+        self.message = ""
+        self.done = False
+        self.training_process = mp.Process(target=train_main, args=(self.queue, self.reply))
+
     @imgui_utils.scoped_by_object_id
     def __call__(self):
+
+        if self.reply.qsize() > 0:
+            self.message, self.done = self.reply.get()
+            while self.reply.qsize() > 0:
+                self.message, self.done = self.reply.get()
+
+            print(self.message, self.done)
+
         imgui.text("Training Module")
 
         _, self.save_path = imgui.input_text("Save Path", self.save_path, 1024)
@@ -63,6 +78,7 @@ class TrainingModule:
 
 
         if imgui.button("Train"):
+            imgui.open_popup("Training")
             print("training")
             kwargs = dnnlib.EasyDict(
                 outdir=self.save_path,
@@ -111,7 +127,17 @@ class TrainingModule:
                 custom=True,
                 lpips_image_size=256
             )
-            train_main(**kwargs)
+
+            self.queue.put(kwargs)
+            self.training_process.start()
+
+        if imgui.begin_popup_modal("Training")[0]:
+            imgui.text("Training...")
+            if self.message != "":
+                imgui.text(self.message)
+            if imgui_utils.button("Done", enabled=self.done):
+                imgui.close_current_popup()
+            imgui.end_popup()
 
 
 
