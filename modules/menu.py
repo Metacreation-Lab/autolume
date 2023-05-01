@@ -16,6 +16,7 @@ from modules.training_module import TrainingModule
 from modules.compress_module import CompressModule
 from modules.network_surgery import SurgeryModule
 from modules.projection_module import ProjectionModule
+from modules.network_mixing import MixingModule
 
 from modules.super_res_module import SuperResModule
 #----------------------------------------------------------------------------
@@ -25,9 +26,10 @@ class Menu:
         self.pca = PCA_Module(self)
         self.training = TrainingModule(self)
         self.compress = CompressModule(self)
-        self.network_surgery = SurgeryModule(self)
+        # self.network_surgery = SurgeryModule(self)
         self.projection = ProjectionModule(self)
         self.super_res = SuperResModule(self)
+        self.mixing_module = MixingModule(self)
 
 
     def __call__(self):
@@ -67,7 +69,7 @@ class Menu:
         imgui.set_next_window_size(self.app.content_width // 2, (self.app.content_height * 3) // 4)
         imgui.begin('Surgery##Menu', closable=False, flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE))
         imgui.text("Network Surgery")
-        self.network_surgery()
+        self.mixing_module()
         imgui.end()
 
         imgui.set_next_window_position(self.app.content_width//2,(self.app.content_height * 3) // 4)
