@@ -60,10 +60,6 @@ class LayerWidget:
         self.base_channel = 0
         self.img_scale_db = 0
         self.img_normalize = False
-        self.fft_show = False
-        self.fft_all = True
-        self.fft_range_db = 50
-        self.fft_beta = 8
         self.refocus = False
         self.mode = True
         self.cached_transforms = []
@@ -292,10 +288,6 @@ class LayerWidget:
             -1].name else None
         viz.args.update(sel_channels=self.sel_channels, base_channel=self.base_channel, img_scale_db=self.img_scale_db,
                         img_normalize=self.img_normalize)
-        viz.args.fft_show = self.fft_show
-        if self.fft_show:
-            viz.args.update(fft_all=self.fft_all, fft_range_db=self.fft_range_db, fft_beta=self.fft_beta)
-
         viz.args.latent_transforms = copy.deepcopy(self.cached_transforms)
         viz.args.noise_adjustments = copy.deepcopy(self.noises)
 
