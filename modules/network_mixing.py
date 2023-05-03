@@ -8,6 +8,7 @@ import legacy
 from architectures import custom_stylegan2
 from utils.gui_utils import imgui_utils
 import pickle
+from widgets.browse_widget import BrowseWidget
 
 import glob
 import os
@@ -38,6 +39,7 @@ class MixingModule:
         self.model2 = ""
         self.pkl2 = None
         self.data2 = None
+        self.browser = BrowseWidget(self, "Browse", os.path.abspath("./models"), ["pkl"])
 
         self.browse_refocus = False
 
@@ -187,6 +189,7 @@ class MixingModule:
 
     @imgui_utils.scoped_by_object_id
     def __call__(self):
+        self.browser()
         self.model_selection_gui("Model 1", 1)
         imgui.same_line()
         self.model_selection_gui("Model 2", 2)
@@ -278,7 +281,6 @@ class MixingModule:
                     if all(np.array(self.combined_layers)[layer1_matches] == "A"):
                         ckb_display = "A"
                     elif all(np.array(self.combined_layers)[layer2_matches] == "B") and len(np.array(self.combined_layers)[layer2_matches]):
-                        print()
                         ckb_display = "B"
                     elif all(np.array(self.combined_layers)[layer2_matches] == "X") or all(np.array(self.combined_layers)[layer1_matches] == "X"):
                         ckb_display = "X"
@@ -415,7 +417,6 @@ class MixingModule:
                 dict_dest[name] = self.pkl2.state_dict()[name]
 
         # iterate over self.combine_channels and copy weights from self.pkl1 or self.pkl2 depending on the value
-        print(self.combined_layers)
         for i, entry in enumerate(self.combined_layers):
             if entry == "A":
                 print("A")

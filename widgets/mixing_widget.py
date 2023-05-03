@@ -47,34 +47,39 @@ def resolve_pkl(pattern):
         return path
 
 class MixingWidget:
-    
     def __init__(self, viz):
         self.viz = viz
-        
         self.output_name = ""
         self.model_pth = ""
         self.main_model = ""
         self.browse_refocus = False
+        self.layer1 = []
+        self.layer2 = []
+        self.output_name = ""
+        self.save = False
 
         self.models = []
         self.combined_layers = []
         self.collapsed = []
         self.cached_layers = []
+        self.mixing = False
 
         for pkl in os.listdir("./models"):
             if pkl.endswith(".pkl"):
                 self.models.append(os.path.join(os.getcwd(),"models",pkl))
-                
+
     @imgui_utils.scoped_by_object_id
     def __call__(self, show):
         if show:
+            _, self.mixing = imgui.checkbox("##mixingwidget_ckb", self.mixing)
+            imgui.same_line()
             model_changed, self.model_pth = imgui_utils.input_text(f'##network_mixing_widget', self.model_pth , 1024,
                                                         flags=(
                                                                     imgui.INPUT_TEXT_AUTO_SELECT_ALL | imgui.INPUT_TEXT_ENTER_RETURNS_TRUE),
                                                         width=(100),
                                                         help_text='<PATH> | <URL> | <RUN_DIR> | <RUN_ID> | <RUN_ID>/<KIMG>.pkl')
-        
-            
+
+
             imgui.same_line()
             if imgui_utils.button(f'Browse...##mixingWidget', enabled=len(self.models) > 0):
                 imgui.open_popup(f'browse_pkls_popup##mixingWidget')
@@ -85,25 +90,39 @@ class MixingWidget:
                     clicked, _state = imgui.menu_item(pkl)
                     if clicked:
                         self.model_pth = resolve_pkl(pkl)
+                        model_changed = True
                 if self.browse_refocus:
                     imgui.set_scroll_here()
                     self.browse_refocus = False
 
                 imgui.end_popup()
+            
+            imgui.same_line()
+            with imgui_utils.item_width(self.viz.app.button_w):
+                _, self.output_name = imgui_utils.input_text("##network_mixing_pkl", self.output_name, 1024, help_text="Name of the output model",
+                                    flags=(imgui.INPUT_TEXT_AUTO_SELECT_ALL ))
+            imgui.same_line()
+            imgui.text(".pkl")
+            imgui.same_line()
+            if imgui_utils.button("Save##mixing widget", enabled=self.output_name != ""):
+                print("saving at", self.output_name)
+                self.save = True
+            
             imgui.separator()
             if "g2_layers" in self.viz.result and "g1_layers" in self.viz.result:
-                
                 layers1 = self.viz.result.g1_layers
                 layers2 = self.viz.result.g2_layers
-                
-                if self.viz.args.pkl != self.main_model or model_changed:
+
+                if self.viz.args.pkl != self.main_model or model_changed or layers1 != self.layer1 or layers2 != self.layer2:
+                    self.layer1 = layers1
+                    self.layer2 = layers2
+                    print("reinitatilzation")
                     self.main_model = self.viz.args.pkl
                     self.combined_layers = ["A"] * len(layers1)
                     if len(layers2) > len(layers1):
                         self.combined_layers = self.combined_layers + ["B"] * (len(layers2) - len(layers1))
-                
+
                     self.cached_layers = copy.deepcopy(self.combined_layers)
-            
 
                     self.collapsed = [">"] * len(self.combined_layers)
                 if len(layers1) > len(layers2):
@@ -114,7 +133,11 @@ class MixingWidget:
                 self.display_layers(layers1, layers2)
         self.viz.args.combined_layers = self.combined_layers
         self.viz.args.pkl2 = self.model_pth
-                
+        self.viz.args.mixing = self.mixing
+        self.viz.args.save_model = self.save
+        self.viz.args.save_path = self.output_name
+        self.save = False
+        
     def display_layers(self, layer1, layer2):
         imgui.begin_group()
         imgui.set_cursor_pos((imgui.get_content_region_available_width() // 3, imgui.get_cursor_pos()[1]))
@@ -143,14 +166,12 @@ class MixingWidget:
                 if imgui.is_item_clicked():
                     self.collapsed[i] = ">" if self.collapsed[i] == "v" else "v"
                 if self.collapsed[i] == ">":
-                    
                     # Check if all the layers with the res in the name are already set to Model A or Model B and display if so otherwise display mixed
                     layer1_matches, layer2_matches = [], []
                     for k, (layer1tmp, layer2_tmp) in enumerate(zip(layer1, layer2)):
                         if layer1tmp:
                             if int(re.search(r'\d+', layer1tmp).group()) == resolution:
                                 layer1_matches += [k]
-                                
                         if layer2_tmp:
                             if int(re.search(r'\d+', layer2_tmp).group()) == resolution:
                                 layer2_matches += [k]
@@ -252,10 +273,7 @@ class MixingWidget:
                             if clicked and l2t != '' and not(self.combined_layers[it]=="X"):
                                 print("clicked2")
                                 self.combined_layers[it] = "B"
-                            
 
                 imgui.end_child()
                 res_exp += 1
         imgui.end_group()
-        
-                
