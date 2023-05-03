@@ -11,6 +11,7 @@ import copy
 import traceback
 
 import kornia
+import re
 import numpy as np
 import torch
 import torch.fft
@@ -21,6 +22,7 @@ from bending.transform_layers import ManipulationLayer
 from torch_utils.ops import upfirdn2d
 import legacy  # pylint: disable=import-error
 from net_base import SRVGGNetPlus
+from modules.network_mixing import extract_conv_names, extract_mapping_names
 
 super_res = SRVGGNetPlus(num_in_ch=3, num_out_ch=3, num_feat=48, upscale=4, act_type='prelu').eval().to('cuda')
 model_sd=torch.load('./sr_models/Fast.pt')
@@ -224,6 +226,14 @@ class Renderer:
         self._end_event = torch.cuda.Event(enable_timing=True)
         self._net_layers = dict()  # {cache_key: [dnnlib.EasyDict, ...], ...}
         self.manipulation = ManipulationLayer()
+        self.pkl = ""
+        self.G = None
+        self.og_state = None
+        self.pkl2 = "" #'/home/olaf/PycharmProjects/Full_Autolume/models/FreaGAN-6000-steps.pkl'
+        self.G2 = None #self.get_network('/home/olaf/PycharmProjects/Full_Autolume/models/FreaGAN-6000-steps.pkl', 'G_ema')
+ 
+        self.combined_layers = []
+        self.model_changed = False
 
     def render(self, **args):
         self._is_timing = True
@@ -309,6 +319,7 @@ class Renderer:
         return x
 
     def evaluate(self, G, looping_index, looping_seeds, looping_projections, trunc_psi, trunc_cutoff):
+        mapping_net = G.mapping
         latent = looping_seeds[looping_index]
         w0_seeds = []
         for ofs_x, ofs_y in [[0, 0], [1, 0], [0, 1], [1, 1]]:
@@ -339,10 +350,10 @@ class Renderer:
             w = torch.stack([all_ws[seed] * weight for seed, weight in w0_seeds]).sum(dim=0, keepdim=True)
         # Run mapping network.
         else:
-            w_avg = G.mapping.w_avg
+            w_avg = mapping_net.w_avg
             all_zs = torch.from_numpy(all_zs).to(self._device)#self.to_device(torch.from_numpy(all_zs))
             all_cs = torch.from_numpy(all_cs).to(self._device) #self.to_device(torch.from_numpy(all_cs))
-            all_ws = G.mapping(z=all_zs, c=all_cs, truncation_psi=trunc_psi,
+            all_ws = mapping_net(z=all_zs, c=all_cs, truncation_psi=trunc_psi,
                                truncation_cutoff=trunc_cutoff) - w_avg
             all_ws = dict(zip(all_seeds, all_ws))
             w = torch.stack([all_ws[seed] * weight for seed, weight in w0_seeds]).sum(dim=0, keepdim=True)
@@ -351,6 +362,7 @@ class Renderer:
 
     def _render_impl(self, res,
                      pkl=None,
+                     pkl2=None,
                      w0_seeds=[[0, 1]],
                      vec=torch.randn(1, 512),
                      stylemix_idx=[],
@@ -387,11 +399,44 @@ class Renderer:
                      looping_projections=None,
                      use_superres=False,
                      global_noise=1,
+                     combined_layers = []
                      ):
         with torch.inference_mode():
             # Dig up network details.
-            G = self.get_network(pkl, 'G_ema')
-            G2 = self.get_network('/home/olaf/PycharmProjects/Full_Autolume/models/FreaGAN-6000-steps.pkl', 'G_ema')
+            if not pkl is None:
+                if pkl != self.pkl:
+                    self.G = self.get_network(pkl, 'G_ema')
+                    self.pkl = pkl
+                    self.model_changed = True
+                else:
+                    self.model_changed = False
+                    
+            if not pkl2 is None:
+                if pkl2 != self.pkl2:
+                    self.G2 = self.get_network(pkl2, 'G_ema')
+                    self.pkl2 = pkl2
+                    self.model_changed = True
+                else:
+                    self.model_changed = False
+            if self.G is not None:
+                res.g1_layers = self.get_layers(self.G.synthesis)
+                
+            if self.G2 is not None:
+                res.g2_layers = self.get_layers(self.G2.synthesis)
+                
+            if not (combined_layers == self.combined_layers):
+                if not self.og_state is None:
+                    self.G.synthesis.state_dict().update(self.og_state)
+                    self.G.synthesis.load_state_dict(self.og_state)
+                self.combined_layers = combined_layers
+                self.model_changed = True
+                
+                
+            G = self.G
+            G2 = self.G2    
+            
+            mapping_net = G.mapping
+        
             res.img_resolution = G.img_resolution
             res.num_ws = G.num_ws
             res.has_noise = any('noise_const' in name for name, _buf in G.synthesis.named_buffers())
@@ -426,10 +471,10 @@ class Renderer:
                         w = torch.stack([all_ws[seed] * weight for seed, weight in w0_seeds]).sum(dim=0, keepdim=True)
                     # Run mapping network.
                     else:
-                        w_avg = G.mapping.w_avg
+                        w_avg = mapping_net.w_avg
                         all_zs = self.to_device(torch.from_numpy(all_zs))
                         all_cs = self.to_device(torch.from_numpy(all_cs))
-                        all_ws = G.mapping(z=all_zs, c=all_cs, truncation_psi=trunc_psi,
+                        all_ws = mapping_net(z=all_zs, c=all_cs, truncation_psi=trunc_psi,
                                            truncation_cutoff=trunc_cutoff) - w_avg
                         all_ws = dict(zip(all_seeds, all_ws))
                         w = torch.stack([all_ws[seed] * weight for seed, weight in w0_seeds]).sum(dim=0, keepdim=True)
@@ -445,7 +490,7 @@ class Renderer:
                                 all_cs = np.zeros([len(vec), G.c_dim], dtype=np.float32)
                                 w = self.to_device(vec)
                                 if project:
-                                    w = G.mapping(z=w, c=all_cs, truncation_psi=trunc_psi, truncation_cutoff=trunc_cutoff)
+                                    w = mapping_net(z=w, c=all_cs, truncation_psi=trunc_psi, truncation_cutoff=trunc_cutoff)
                             except Exception as e:
                                 print(e)
                         else:
@@ -466,7 +511,7 @@ class Renderer:
                     v0 = self.to_device(looping_keyframes[looping_index - 1][None])
                     all_cs = np.zeros([len(v0), G.c_dim], dtype=np.float32)
                     if looping_projections[looping_index - 1]:
-                        v0 = G.mapping(v0, all_cs)
+                        v0 = mapping_net(v0, all_cs)
 
                 if looping_modes[looping_index]:
                     v1 = self.evaluate(G, looping_index, looping_seeds, looping_projections, trunc_psi, trunc_cutoff)
@@ -474,7 +519,7 @@ class Renderer:
                     v1 = self.to_device(looping_keyframes[looping_index][None])
                     all_cs = np.zeros([len(v1), G.c_dim], dtype=np.float32)
                     if looping_projections[looping_index]:
-                        v1 = G.mapping(v1, all_cs)
+                        v1 = mapping_net(v1, all_cs)
                 if len(v0.shape) == 2:
                     v0 = v0.repeat(G.num_ws, 1).unsqueeze(0)
                 if len(v1.shape) == 2:
@@ -485,8 +530,9 @@ class Renderer:
             synthesis_kwargs = dnnlib.EasyDict(noise_mode=noise_mode, force_fp32=force_fp32)
             torch.manual_seed(random_seed)
             w += self.to_device(direction)
-            out, manip_layers = self.run_synthesis_net(G.synthesis, w, capture_layer=layer_name, transforms=latent_transforms,
-                                                 adjustments=adjustments, noise_adjustments=noise_adjustments, ratios=ratios, use_superres=use_superres,global_noise=global_noise, net2=G2,
+            out, manip_layers, = self.run_synthesis_net( w, capture_layer=layer_name, transforms=latent_transforms,
+                                                 adjustments=adjustments, noise_adjustments=noise_adjustments, ratios=ratios, use_superres=use_superres,global_noise=global_noise,
+                                                 combined_layers=combined_layers,
                                                  **synthesis_kwargs)
             res.snap = self.to_cpu(w).squeeze()[0]
 
@@ -497,7 +543,7 @@ class Renderer:
                 layers = manip_layers
                 if layer_name is not None:
                     torch.manual_seed(random_seed)
-                    _out, layers = self.run_synthesis_net(G.synthesis, w, use_superres=False,**synthesis_kwargs)
+                    _out, layers = self.run_synthesis_net( w, use_superres=False,combined_layers=combined_layers**synthesis_kwargs)
                 self._net_layers[cache_key] = layers
                 del layers
 
@@ -528,13 +574,18 @@ class Renderer:
             img = img * (10 ** (img_scale_db / 20))
             img = (img * 127.5 + 128).clamp(0, 255).to(torch.uint8).permute(1, 2, 0)
             res.image = img
+            
 
             del img
             del manip_layers
             del out # Free up GPU memory.
+            
+    def get_layers(self, net):
+        return [name for name, weight in net.named_parameters()]
+        
 
-    def run_synthesis_net(self, net, *args, capture_layer=None, transforms=None, ratios=None, adjustments=None,
-                          noise_adjustments=None, use_superres=False, global_noise=1, net2=None, **kwargs):
+    def run_synthesis_net(self,*args, capture_layer=None, transforms=None, ratios=None, adjustments=None,
+                          noise_adjustments=None, use_superres=False, global_noise=1, combined_layers=[],**kwargs):
         """
         Run the synthesis network and capture the output of a specific layer.
         :param net: Synthesis model
@@ -547,6 +598,16 @@ class Renderer:
         :param kwargs: further synthesis kwargs
         :return: img and dict of layers
         """
+        # atob = False
+        # if self.G.img_resolution >= self.G2.img_resolution:
+        net = self.G.synthesis
+        net2 = None
+        if not self.G2 is None:
+            net2 = self.G2.synthesis
+        # else:
+        #     atob = True
+        #     net = self.G2.synthesis
+        #     net2 = self.G.synthesis
         if noise_adjustments is None:
             noise_adjustments = {}
         if adjustments is None:
@@ -558,6 +619,34 @@ class Renderer:
         submodule_names = {mod: name for name, mod in net.named_modules()}
         unique_names = set()
         layers = []
+        print(combined_layers, self.model_changed,not (net2 is None) )
+        
+        if not (net2 is None) and self.model_changed and len(combined_layers):
+            net_state = net.state_dict()
+            self.og_state = copy.deepcopy(net_state)
+            net2_state = net2.state_dict()  
+            mixed_state = copy.deepcopy(net_state)
+            
+            layer1 = extract_conv_names(net)      
+            layer2 = extract_conv_names(net2)  
+             
+            for i, entry in enumerate(combined_layers):
+                if entry == "B":
+                    if i < len(layer2):
+                        print("mixing", layer2[i])
+                        if layer2[i] in mixed_state:
+                            print("swapped in")
+                            mixed_state[layer2[i]] = net2_state[layer2[i]]
+
+            # for layer in layer2:
+            #     res = int(re.search(r'\d+', layer).group())
+            #     if res >128 and layer in mixed_state:
+            #         print("replacing", layer)
+            #         mixed_state[layer] = net2_state[layer]
+            net_state.update(mixed_state)
+            net.load_state_dict(mixed_state)
+            self.G.synthesis = net
+                
         def adjustment_hook(module, inputs):
             #pre forward hook to add adjustments to the latent vector and resize input to fit ratio
             inps = []
@@ -620,7 +709,6 @@ class Renderer:
                 layers.append(dnnlib.EasyDict(name=name, shape=shape, dtype=dtype))
                 if name == capture_layer:
                     raise CaptureSuccess(out)
-        print([mod for mod in net2.modules()])
         hooks = [module.register_forward_hook(module_hook) for module in net.modules()]
         hooks.extend([module.register_forward_pre_hook(adjustment_hook) for module in net.modules()])
         try:
@@ -631,11 +719,10 @@ class Renderer:
                 if use_superres:
                     with torch.autocast("cuda"):
                         out = super_res(out)
-                print("out, ", out.shape)
         except CaptureSuccess as e:
             out = e.out
         for hook in hooks:
             hook.remove()
-        return out, layers
+        return out, layers 
 
 # ----------------------------------------------------------------------------
