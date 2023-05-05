@@ -7,6 +7,7 @@ import dnnlib
 from utils.gui_utils import imgui_utils
 from train import main as train_main
 from utils import dataset_tool
+from widgets.browse_widget import BrowseWidget
 
 augs = ["ADA", "DiffAUG"]
 ada_pipes = ['blit', 'geom', 'color', 'filter', 'noise', 'cutout', 'bg', 'bgc', 'bgcf', 'bgcfn', 'bgcfnc']
@@ -18,6 +19,8 @@ class TrainingModule:
         cwd = os.getcwd()
         self.save_path = os.path.join(cwd, "training-runs")
         self.data_path = os.path.join(cwd, "data")
+        self.file_dialog = BrowseWidget(menu, "Dataset", os.path.abspath(os.path.join(os.getcwd(),"data")), ["*",""], multiple=False, traverse_folders=False)
+
         self.resume_pkl = ""
         self.browse_cache = []
         self.aug = 0
@@ -52,6 +55,10 @@ class TrainingModule:
 
         _, self.save_path = imgui.input_text("Save Path", self.save_path, 1024)
         _, self.data_path = imgui.input_text("Data Path", self.data_path, 1024)
+        imgui.same_line()
+        _clicked, data_path = self.file_dialog()
+        if _clicked:
+            self.data_path = data_path[0]
         _, self.resume_pkl = imgui.input_text("Resume Pkl", self.resume_pkl, 1024)
         imgui.same_line()
         if imgui_utils.button('Browse...', enabled=len(self.browse_cache) > 0, width=-1):

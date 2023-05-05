@@ -8,12 +8,13 @@ from torchvision import transforms
 import torchvision.transforms.functional as F
 import numpy as np
 
-from modules.filedialog import FileDialog
 from utils.gui_utils import imgui_utils
 from super_res import main as super_res_main, load_model, get_resolution, check_width_height, get_audio, Reader, Writer
 #from super_res import base_args
 from dnnlib import EasyDict
 import multiprocessing as mp
+
+from widgets.browse_widget import BrowseWidget
 
 args = EasyDict(result_path="", input_path=[""], model_type="Balance",
                 outscale=3, width=4096, height=4096, sharpen_scale=1, scale_mode=0)
@@ -33,7 +34,7 @@ class SuperResModule:
         self.sharpen = args.sharpen_scale
         self.menu = menu
         self.app = menu.app
-        self.file_dialog = FileDialog(self, "Videos and Images", os.path.abspath(os.getcwd()), ["*", ".mp4", ".avi", ".jpg", ".png", ".jpeg", ".bmp"])
+        self.file_dialog = BrowseWidget(self, "Videos and Images", os.path.abspath(os.getcwd()), ["*", ".mp4", ".avi", ".jpg", ".png", ".jpeg", ".bmp"])
         self.scale_mode = 0
         self.running = False
         self.progress = {"num_files": 0, "current_file": 0, "current_file_name": "", "current_file_progress": 0, "eta":0}

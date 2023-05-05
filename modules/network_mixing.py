@@ -8,7 +8,6 @@ import legacy
 from architectures import custom_stylegan2
 from utils.gui_utils import imgui_utils
 import pickle
-from widgets.browse_widget import BrowseWidget
 
 import glob
 import os
@@ -39,7 +38,6 @@ class MixingModule:
         self.model2 = ""
         self.pkl2 = None
         self.data2 = None
-        self.browser = BrowseWidget(self, "Browse", os.path.abspath("./models"), ["pkl"])
 
         self.browse_refocus = False
 
@@ -189,7 +187,6 @@ class MixingModule:
 
     @imgui_utils.scoped_by_object_id
     def __call__(self):
-        self.browser()
         self.model_selection_gui("Model 1", 1)
         imgui.same_line()
         self.model_selection_gui("Model 2", 2)
