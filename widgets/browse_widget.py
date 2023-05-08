@@ -34,7 +34,7 @@ class BrowseWidget():
             else:
                 selected.append(f)
 
-        print("Resolbed Selection", selected)
+        print("Resolved Selection", selected)
 
         return selected
 
@@ -53,7 +53,7 @@ class BrowseWidget():
             self.directory = os.path.dirname(self.directory)
         
         imgui.same_line()
-        _changed, self.directory = imgui.input_text("##directory", self.directory, 1000, imgui.INPUT_TEXT_ENTER_RETURNS_TRUE)
+        _changed,directory = imgui.input_text("##directory", self.directory, 1000, imgui.INPUT_TEXT_ENTER_RETURNS_TRUE)
         if _changed:
             directory = os.path.normpath(directory)
             if os.path.isdir(directory):
@@ -70,53 +70,59 @@ class BrowseWidget():
         for i, f in enumerate(self.files):
             # if the file is a directory draw it as a selectable or if it is a file and has the correct extension draw it as a selectable
             if os.path.isdir(os.path.join(self.directory, f)):
-                imgui.text(u"\U0001F4C1")   # folder emoji
-                imgui.same_line()
-                # single click selects double clicks enters directory_popup
-                if imgui.selectable(f, f in self.selected, imgui.SELECTABLE_ALLOW_DOUBLE_CLICK)[0]:
-                    if self.multiple:
-                        if f in self.selected:
-                            self.selected.remove(f)
-                        else:
-                            self.selected.append(f)
-                        if imgui.get_io().key_shift:
-                            self.shift_idx = i
-                            print("shift idx", self.last_selected_idx, self.shift_idx)
-                            if self.last_selected_idx != -1 and self.shift_idx != -1:
-                                if self.last_selected_idx < self.shift_idx:
-                                    for j in range(self.last_selected_idx, self.shift_idx+1):
-                                        if j == self.last_selected_idx or j == self.shift_idx:
-                                            pass
-                                        else:
-                                            if self.files[j] not in self.selected:
-                                                self.selected.append(self.files[j])
-                                            else:
-                                                self.selected.remove(self.files[j])
-                                else:
-                                    for j in range(self.shift_idx, self.last_selected_idx+1):
-                                        if j == self.last_selected_idx or j == self.shift_idx:
-                                            pass
-                                        else:
-                                            if self.files[j] not in self.selected:
-                                                self.selected.append(self.files[j])
-                                            else:
-                                                self.selected.remove(self.files[j])
-                            self.last_selected_idx = -1
-                            self.shift_idx = -1
-                        else:
-                            self.last_selected_idx = i
-                            print(self.last_selected_idx, self.shift_idx)
-                    else:
-                        self.selected = [f]
-                    if imgui.is_mouse_double_clicked(0):
-                        self.directory = os.path.join(self.directory, f)
+                # if self.extensions[self.extension] != "*" we traverse the folder and only show the folder if it contains at least one file with the extension
+                contains_extension = True
+                if self.extensions[self.extension] != "*" and self.extensions[self.extension] != "":
+                    contains_extension = False
+                    for root, dirs, files in os.walk(os.path.join(self.directory, f)):
+                        for file in files:
+                            if file.endswith(self.extensions[self.extension]):
+                                contains_extension = True
+                                break
+                if contains_extension:
+                    imgui.text(u"\U0001F4C1")   # folder emoji
+                    imgui.same_line()
+                    # single click selects double clicks enters directory_popup
+                    if imgui.selectable(f, os.path.join(self.directory, f) in self.selected, imgui.SELECTABLE_ALLOW_DOUBLE_CLICK)[0]:
                         if self.multiple:
-                            if f in self.selected:
-                                self.selected.remove(f)
+                            if os.path.join(self.directory, f) in self.selected:
+                                self.selected.remove(os.path.join(self.directory, f))
                             else:
-                                self.selected.append(f)
+                                self.selected.append(os.path.join(self.directory, f))
+                            if imgui.get_io().key_shift:
+                                self.shift_idx = i
+                                print("shift", self.shift_idx, "last", self.last_selected_idx)
+                                if self.last_selected_idx != -1 and self.shift_idx != -1:
+
+                                    print("SHIFT SELECTING")
+                                    if self.last_selected_idx > self.shift_idx:
+                                        self.last_selected_idx, self.shift_idx = self.shift_idx, self.last_selected_idx
+                                    print("smaller", self.last_selected_idx, "bigger", self.shift_idx)
+                                    for j in range(self.last_selected_idx, self.shift_idx+1):
+                                        print(j)
+                                        if j == self.last_selected_idx or j == self.shift_idx:
+                                            pass
+                                        else:
+                                            if os.path.join(self.directory, self.files[j]) not in self.selected:
+                                                print("adding", os.path.join(self.directory, self.files[j]))
+                                                self.selected.append(os.path.join(self.directory, self.files[j]))
+                                            else:
+                                                print("removing", os.path.join(self.directory, self.files[j]))
+                                                self.selected.remove(os.path.join(self.directory, self.files[j]))
+                                    self.last_selected_idx = -1
+                                    self.shift_idx = -1
+                            else:
+                                    self.last_selected_idx = i
+                                    print("shift", self.shift_idx, "last", self.last_selected_idx)
                         else:
-                            self.selected = []
+                            self.selected = [os.path.join(self.directory, f)]
+                        if imgui.is_mouse_double_clicked(0):
+                            self.directory = os.path.join(self.directory, f)
+                            if self.multiple:
+                                if os.path.join(self.directory, f) in self.selected:
+                                    self.selected.remove(os.path.join(self.directory, f))
+                            else:
+                                self.selected = []
 
 
             elif os.path.isfile(os.path.join(self.directory, f)) and (self.extensions is None or not(len(self.extensions)) or f.endswith(self.extensions[self.extension]) or self.extensions[self.extension] == "*"):
@@ -124,41 +130,40 @@ class BrowseWidget():
                     # select file on single click
                     imgui.bullet()
                     imgui.same_line()
-                    if imgui.selectable(f, f in self.selected, imgui.SELECTABLE_ALLOW_DOUBLE_CLICK)[0]:
+                    if imgui.selectable(f, os.path.join(self.directory, f) in self.selected, imgui.SELECTABLE_ALLOW_DOUBLE_CLICK)[0]:
                         if self.multiple:
-                            if f in self.selected:
-                                self.selected.remove(f)
+                            if os.path.join(self.directory,f) in self.selected:
+                                self.selected.remove(os.path.join(self.directory, f))
                             else:
-                                self.selected.append(f)
+                                self.selected.append(os.path.join(self.directory, f))
                             if imgui.get_io().key_shift:
                                 self.shift_idx = i
-                                print("shift idx", self.last_selected_idx, self.shift_idx)
+                                print("shift", self.shift_idx, "last", self.last_selected_idx)
                                 if self.last_selected_idx != -1 and self.shift_idx != -1:
-                                    if self.last_selected_idx < self.shift_idx:
-                                        for j in range(self.last_selected_idx, self.shift_idx+1):
-                                            if j == self.last_selected_idx or j == self.shift_idx:
-                                                pass
+
+                                    print("SHIFT SELECTING")
+                                    if self.last_selected_idx > self.shift_idx:
+                                        self.last_selected_idx, self.shift_idx = self.shift_idx, self.last_selected_idx
+                                    print("smaller", self.last_selected_idx, "bigger", self.shift_idx)
+                                    for j in range(self.last_selected_idx, self.shift_idx+1):
+                                        print(j)
+                                        if j == self.last_selected_idx or j == self.shift_idx:
+                                            pass
+                                        else:
+                                            if os.path.join(self.directory, self.files[j]) not in self.selected:
+                                                print("adding", os.path.join(self.directory, self.files[j]))
+                                                self.selected.append(os.path.join(self.directory, self.files[j]))
                                             else:
-                                                if self.files[j] not in self.selected:
-                                                    self.selected.append(self.files[j])
-                                                else:
-                                                    self.selected.remove(self.files[j])
-                                    else:
-                                        for j in range(self.shift_idx, self.last_selected_idx+1):
-                                            if j == self.last_selected_idx or j == self.shift_idx:
-                                                pass
-                                            else:
-                                                if self.files[j] not in self.selected:
-                                                    self.selected.append(self.files[j])
-                                                else:
-                                                    self.selected.remove(self.files[j])
-                                self.last_selected_idx = -1
-                                self.shift_idx = -1
+                                                print("removing", os.path.join(self.directory, self.files[j]))
+                                                self.selected.remove(os.path.join(self.directory, self.files[j]))
+                                    self.last_selected_idx = -1
+                                    self.shift_idx = -1
                             else:
                                 self.last_selected_idx = i
-                                print(self.last_selected_idx, self.shift_idx)
+                                print("shift", self.shift_idx, "last", self.last_selected_idx)
+
                         else:
-                            self.selected = [f]
+                            self.selected = [os.path.join(self.directory,f)]
 
         imgui.end_child()
 
