@@ -34,26 +34,32 @@ class SuperResModule:
         self.sharpen = args.sharpen_scale
         self.menu = menu
         self.app = menu.app
-        self.file_dialog = BrowseWidget(self, "Videos and Images", os.path.abspath(os.getcwd()), ["*", ".mp4", ".avi", ".jpg", ".png", ".jpeg", ".bmp"])
+        self.file_dialog = BrowseWidget(self, "Videos and Images", os.path.abspath(os.getcwd()), ["*", ".mp4", ".avi", ".jpg", ".png", ".jpeg", ".bmp"], traverse_folders=True)
         self.scale_mode = 0
         self.running = False
-        self.progress = {"num_files": 0, "current_file": 0, "current_file_name": "", "current_file_progress": 0, "eta":0}
-        self.queue = mp.Queue()
-        self.reply = mp.Queue()
-        self.super_res_process = mp.Process(target=super_res_mp, args=(self.queue, self.reply))
+        self.writer = None
+        self.reader = None
+        self.files = []
+        self.file_idx = 0
+        self.super_res_idx = 0
+        self.total_frames = -1
+        self.super_res_model = None
+        self.start_time = 0
+        self.eta = -1
+        self.video_width = 0
+        self.video_height = 0
 
 
     def display_progress(self):
-        if self.reply.qsize() > 0:
-            self.progress, self.running = self.reply.get()
-            while self.reply.qsize() > 0:
-                self.progress, self.running = self.reply.get()
         imgui.begin("Super Resolution", False)
         imgui.text('Super Resolution...')
-        imgui.text("Files: " + str(self.progress["current_file"]) + "/" + str(self.progress["num_files"]))
-        imgui.text("Current File: " + self.progress["current_file_name"])
-        imgui.text("Progress: " + str(self.progress["current_file_progress"]) + "%" + " | ETA: " + str(self.progress["eta"]) + "s")
+        imgui.text("Files: " + str(self.file_idx) + "/" + str(len(self.files)))
+        imgui.text("Current File: " + self.files[self.file_idx])
+        imgui.text("Progress: " + "#"*int((self.super_res_idx/self.total_frames*10) + 1) + " " + str(self.super_res_idx/self.total_frames*100) + "%")
+        imgui.text(str(self.super_res_idx) + "/" + str(self.total_frames) + " ETA:" + str(self.eta) + "seconds")
         imgui.end()
+        self.perform_super_res()
+
 
     @imgui_utils.scoped_by_object_id
     def __call__(self):
@@ -86,7 +92,7 @@ class SuperResModule:
         if imgui.is_item_hovered():
             imgui.set_tooltip("Additional sharpening performed after super resolution")
         try:
-            if imgui.button("Super Resolution"):
+            if imgui.button("Super Resolution") and not self.running:
                 self.running = True
                 print("Super Resolution")
                 args.result_path = self.result_path
@@ -97,147 +103,139 @@ class SuperResModule:
                 args.out_width = self.width
                 args.sharpen_scale = self.sharpen
                 args.scale_mode = self.scale_mode
-                self.queue.put(args)
+                self.args = args
                 print("Starting Super Resolution")
-                self.super_res_process.start()
+                self.start_super_res()
 
         except Exception as e:
             print("SRR ERROR", e)
 
-def super_res_mp(queue, reply):
-    start = time.time()
-    eta = -1
+    def start_super_res(self):
+        self.start_time = time.time()
+        if self.model_type == "Quality":
+            model_path = "./sr_models/Quality.pth"
+        elif self.model_type == "Balance":
+            model_path = "./sr_models/Balance.pth"
+        elif self.model_type == "Fast":
+            model_path = "./sr_models/Fast.pt"
 
-    args = queue.get()
-    print("in super_res_mp", args)
-    if args.model_type == "Quality":
-        model_path = "./sr_models/Quality.pth"
-    elif args.model_type == "Balance":
-        model_path = "./sr_models/Balance.pth"
-    elif args.model_type == "Fast":
-        model_path = "./sr_models/Fast.pt"
+        self.super_res_model = load_model(self.model_type, model_path)
+        self.files = self.input_path
 
-    upsampler = load_model(args.model_type, model_path)
-    list_file = args.input_path
-    # if args output path does not exist
-    if not os.path.exists(args.result_path):
-        os.makedirs(args.result_path)
-    reply.put(({"num_files": len(list_file), "current_file": 0, "current_file_name": "", "current_file_progress": 0, "eta":eta}, True))
-    print(list_file)
-    for i, file in enumerate(list_file):
-        start = time.time()
-        reply.put(({"num_files": len(list_file), "current_file": i, "current_file_name": file, "current_file_progress": 0, "eta":eta}, True))
-        print(f'working on {file}')
-        head, tail = os.path.split(file)
-        if file[-3:] == 'jpg' or file[-3:] == 'png':
-            data_transformer = transforms.Compose([transforms.ToTensor()])
-            image = cv2.imread(file)
-            input_width, input_height = image.shape[0], image.shape[1]
-            print("INPUT DIMENSIONS", input_width, input_height, image.shape)
-            image = data_transformer(image).to('cuda')
-            input = torch.unsqueeze(image, 0)
+        if not os.path.exists(self.result_path):
+            os.makedirs(self.result_path)
 
-            with torch.inference_mode():
-                output = upsampler(input)
-                print("OUTPUT DIMENSIONS", output.shape)
-                output = F.adjust_sharpness(output, args.sharpen_scale) * 255
+        self.file_idx = 0
+        self.super_res_idx = 0
 
-                output = output[0].permute(1, 2, 0).cpu().numpy().astype(np.uint8)
-                if args.scale_mode:
-                    if args.outscale != 4:
+        if len(self.files) == 0:
+            self.running = False
+
+
+    def perform_super_res(self):
+        self.start_time = time.time()
+        if self.super_res_idx == 0:
+            file = self.files[self.file_idx]
+            self.start_time = time.time()
+            head, tail = os.path.split(file)
+            if file[-3:] == 'jpg' or file[-3:] == 'png':
+                data_transformer = transforms.Compose([transforms.ToTensor()])
+                image = cv2.imread(file)
+                input_width, input_height = image.shape[0], image.shape[1]
+                print("INPUT DIMENSIONS", input_width, input_height, image.shape)
+                image = data_transformer(image).to('cuda')
+                input = torch.unsqueeze(image, 0)
+
+                with torch.inference_mode():
+                    output = self.super_res_model(input)
+                    print("OUTPUT DIMENSIONS", output.shape)
+                    output = F.adjust_sharpness(output, self.args.sharpen_scale) * 255
+
+                    output = output[0].permute(1, 2, 0).cpu().numpy().astype(np.uint8)
+                    if self.args.scale_mode:
+                        if self.args.outscale != 4:
+                            output = cv2.resize(
+                                output, (
+                                    int(input_width * self.args.outscale),
+                                    int(input_width * self.args.outscale),
+                                ), interpolation=cv2.INTER_LINEAR)
+
+
+                    else:
                         output = cv2.resize(
                             output, (
-                                int(input_width * args.outscale),
-                                int(input_width * args.outscale),
+                                int(self.args.out_width),
+                                int(self.args.out_height),
                             ), interpolation=cv2.INTER_LINEAR)
 
+                if self.args.scale_mode:
+                    print("USING these params", input_width, input_height, self.args.outscale)
+                    path = os.path.join(self.args.result_path,
+                                        tail[
+                                        :-4] + f'_result_{self.args.model_type}_{int(input_width * self.args.outscale)}x{int(input_height * self.args.outscale)}_Sharpness{self.args.sharpen_scale}.jpg')
 
                 else:
-                    output = cv2.resize(
-                        output, (
-                            int(args.out_width),
-                            int(args.out_height),
-                        ), interpolation=cv2.INTER_LINEAR)
+                    path = os.path.join(self.args.result_path,
+                                        tail[
+                                        :-4] + f'_result_{self.args.model_type}_{int(self.args.out_width)}x{int(self.args.out_height)}_Sharpness{self.args.sharpen_scale}.jpg')
 
-            if args.scale_mode:
-                print("USING these params", input_width, input_height, args.outscale)
-                path = os.path.join(args.result_path,
-                                    tail[
-                                    :-4] + f'_result_{args.model_type}_{int(input_width * args.outscale)}x{int(input_height * args.outscale)}_Sharpness{args.sharpen_scale}.jpg')
+                print("Saving image to {}".format(path))
+                cv2.imwrite(path, output)
+                self.file_idx += 1
+            if file[-3:] == 'mp4' or file[-3:] == 'avi' or file[-3:] == 'mov':
+                audio = get_audio(file)
+                self.video = cv2.VideoCapture(file)
+                self.fps = self.video.get(cv2.CAP_PROP_FPS)
+                self.total_frames = int(self.video.get(cv2.CAP_PROP_FRAME_COUNT))
+                self.video_width = int(self.video.get(cv2.CAP_PROP_FRAME_WIDTH))
+                self.video_height = int(self.video.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                if args.scale_mode:
+                    self.video_save_path = os.path.join(self.args.result_path, tail[:-4] + f'_result_{self.args.model_type}_{int(self.video_width * args.outscale)}x{int(self.video_height * self.args.outscale)}_Sharpness{self.args.sharpen_scale}.mp4')
+                else:
+                    self.video_save_path = os.path.join(self.args.result_path, tail[:-4] + f'_result_{self.args.model_type}_x{int(self.args.out_width)}x{int(self.args.out_height)}_Sharpness{self.args.sharpen_scale}.mp4')
 
-            else:
-                path = os.path.join(args.result_path,
-                                    tail[
-                                    :-4] + f'_result_{args.model_type}_{int(args.out_width)}x{int(args.out_height)}_Sharpness{args.sharpen_scale}.jpg')
 
-            print("Saving image to {}".format(path))
-            cv2.imwrite(path, output)
-            eta = (time.time() - start) * (len(list_file) - i)
-            reply.put(
-               ({"num_files": len(list_file), "current_file": i, "current_file_name": file, "current_file_progress": 1, "eta":eta}, True))
-        if file[-3:] == 'mp4' or file[-3:] == 'avi' or file[-3:] == 'mov':
-            reply.put(({"num_files": len(list_file), "current_file": len(list_file), "current_file_name": file, "current_file_progress":0, "eta":eta}, True))
-            width, height = get_resolution(file)
+                self.writer = Writer(self.args, audio, self.video_height, self.video_width, video_save_path=self.video_save_path, fps=self.fps)
+                self.reader = Reader(self.video_width, self.video_height, file)
 
-            if args.outscale > 4 or (
-                    check_width_height(args) and (args.out_width > 4 * width or args.out_height > 4 * height)):
-                print(
-                    'warning: Any super-res scale larger than x4 required non-model inference with interpolation and can be slower')
+                self.super_res_idx = 0
 
-            audio = get_audio(file)
-            if args.scale_mode:
-                video_save_path = os.path.join(args.result_path, tail[
-                                                                 :-4] + f'_result_{args.model_type}_{int(width * args.outscale)}x{int(height * args.outscale)}_Sharpness{args.sharpen_scale}.mp4')
-            else:
-                video_save_path = os.path.join(args.result_path, tail[
-                                                                 :-4] + f'_result_{args.model_type}_x{int(args.out_width)}x{int(args.out_height)}_Sharpness{args.sharpen_scale}.mp4')
+        if self.super_res_idx < self.total_frames:
+            img = self.reader.get_frame()
+            if img is not None:
+                sr_input = torch.tensor(img).permute(2, 0, 1).unsqueeze(0).float().to('cuda')/255
 
-            cap = cv2.VideoCapture(file)
-            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            fps = cap.get(cv2.CAP_PROP_FPS)
+                with torch.inference_mode():
+                    sr_output = self.super_res_model(sr_input)
+                    sr_output = F.adjust_sharpness(sr_output, self.args.sharpen_scale) * 255
 
-            reader = Reader(width, height, file)
-            writer = Writer(args, audio, height, width, video_save_path, fps=fps)
-            current_frame = 0
-            while True:
-                current_frame += 1
-                eta = (time.time() - start) * (frame_count - current_frame) * (len(list_file) - i)
-                reply.put(({"num_files": len(list_file), "current_file": len(list_file), "current_file_name": file, "current_file_progress":current_frame/frame_count, "eta":eta}, True))
-                start = time.time()
-                img = reader.get_frame()
-                if img is not None:
-                    input = torch.tensor(img).permute(2, 0, 1).float().to('cuda') / 255
-                    input = torch.unsqueeze(input, 0)
-                    with torch.inference_mode():
-                        output = upsampler(input)
-                        output = F.adjust_sharpness(output, args.sharpen_scale) * 255
+                    sr_output = sr_output[0].permute(1, 2, 0).cpu().numpy().astype(np.uint8)
 
-                        output = output[0].permute(1, 2, 0).cpu().numpy().astype(np.uint8)
-
-                        if args.scale_mode:
-                            if args.outscale != 4:
-                                output = cv2.resize(
-                                    output, (
-                                        int(width * args.outscale),
-                                        int(height * args.outscale),
+                    if self.args.scale_mode:
+                            if self.args.outscale != 4:
+                                sr_output = cv2.resize(
+                                    sr_output, (
+                                        int(self.video_width * self.args.outscale),
+                                        int(self.video_height * self.args.outscale),
                                     ), interpolation=cv2.INTER_LINEAR)
 
 
-                        else:
-                            output = cv2.resize(
-                                output, (
-                                    int(args.out_width),
-                                    int(args.out_height),
-                                ), interpolation=cv2.INTER_LINEAR)
+                    else:
+                        sr_output = cv2.resize(
+                            sr_output, (
+                                int(self.args.out_width),
+                                int(self.args.out_height),
+                            ), interpolation=cv2.INTER_LINEAR)
+                    print("Saving frame {} to {}".format(self.super_res_idx, self.video_save_path))
+                    self.writer.write_frame(sr_output)
+                    ret, img = self.video.read()
+                    self.super_res_idx += 1
 
-                    writer.write_frame(output)
-                    ret, img = cap.read()
-
-                else:
-                    print('break')
-                    break
-
-            writer.close()
-
-    reply.put(({"num_files": len(list_file), "current_file": len(list_file), "current_file_name": "", "current_file_progress": 0, "eta":eta}, False))
+            else:
+                self.writer.close()
+                self.super_res_idx = 0
+                self.file_idx += 1
+        self.eta = (time.time() - self.start_time) * (self.total_frames - self.super_res_idx)
+        if self.file_idx >= len(self.files):
+            self.running = False
 
