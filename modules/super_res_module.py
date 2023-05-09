@@ -14,6 +14,8 @@ from super_res import main as super_res_main, load_model, get_resolution, check_
 from dnnlib import EasyDict
 import multiprocessing as mp
 
+import gc
+
 from widgets.browse_widget import BrowseWidget
 
 args = EasyDict(result_path="", input_path=[""], model_type="Balance",
@@ -53,10 +55,16 @@ class SuperResModule:
     def display_progress(self):
         imgui.begin("Super Resolution", False)
         imgui.text('Super Resolution...')
-        imgui.text("Files: " + str(self.file_idx) + "/" + str(len(self.files)))
+        imgui.text("Files: " + str(self.file_idx + 1) + "/" + str(len(self.files)))
         imgui.text("Current File: " + self.files[self.file_idx])
-        imgui.text("Progress: " + "#"*int((self.super_res_idx/self.total_frames*10) + 1) + " " + str(self.super_res_idx/self.total_frames*100) + "%")
-        imgui.text(str(self.super_res_idx) + "/" + str(self.total_frames) + " ETA:" + str(self.eta) + "seconds")
+        imgui.text("Progress: " + "#"*int((self.super_res_idx/self.total_frames*10) + 1) + " " + str((self.super_res_idx+1)/self.total_frames*100) + "%")
+        # self.eta is in seconds so we convert it to hours minutes and seconds if not -1 
+        if self.eta != -1:
+            hours = int(self.eta/3600)
+            minutes = int((self.eta - hours*3600)/60)
+            seconds = int(self.eta - hours*3600 - minutes*60)
+            imgui.text("ETA: " + str(hours) + "h " + str(minutes) + "m " + str(seconds) + "s")
+        imgui.text(str(self.super_res_idx) + "/" + str(self.total_frames) + " frames")
         imgui.end()
         self.perform_super_res()
 
@@ -201,11 +209,12 @@ class SuperResModule:
                 self.super_res_idx = 0
 
         if self.super_res_idx < self.total_frames:
+            print(self.super_res_idx, self.total_frames)
             img = self.reader.get_frame()
             if img is not None:
-                sr_input = torch.tensor(img).permute(2, 0, 1).unsqueeze(0).float().to('cuda')/255
 
                 with torch.inference_mode():
+                    sr_input = torch.tensor(img).permute(2, 0, 1).unsqueeze(0).float().to('cuda')/255
                     sr_output = self.super_res_model(sr_input)
                     sr_output = F.adjust_sharpness(sr_output, self.args.sharpen_scale) * 255
 
@@ -230,12 +239,16 @@ class SuperResModule:
                     self.writer.write_frame(sr_output)
                     ret, img = self.video.read()
                     self.super_res_idx += 1
+            self.eta = (time.time() - self.start_time) * (self.total_frames - self.super_res_idx)
 
-            else:
+        else:
+            if self.writer is not None:
                 self.writer.close()
-                self.super_res_idx = 0
-                self.file_idx += 1
-        self.eta = (time.time() - self.start_time) * (self.total_frames - self.super_res_idx)
+            self.super_res_idx = 0
+            self.file_idx += 1
+            # torch clear cuda cache
+            torch.cuda.empty_cache()
+            gc.collect()
         if self.file_idx >= len(self.files):
             self.running = False
 

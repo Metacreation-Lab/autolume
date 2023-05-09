@@ -46,7 +46,8 @@ class LatentWidget:
         self.latent_def = dnnlib.EasyDict(self.latent)
         self.step_y     = 100
         self.vec_path   = ""
-        self.file_dialog = FileDialog(viz, "Vector", os.path.abspath(os.getcwd()),
+        self.vec_save_path = ""
+        self.file_dialog = FileDialog(viz, "Browse", os.path.abspath(os.getcwd()),
                                       ["*", ".pth", ".pt", ".npy", ".npz", ],
                                       width=self.viz.app.button_w, multiple_files=False)
 
@@ -126,7 +127,6 @@ class LatentWidget:
         if _changed:
             self.latent.x = seed
             self.latent.y = 0
-            update_vec = True
         imgui.same_line()
         frac_x = self.latent.x - round(self.latent.x)
         frac_y = self.latent.y - round(self.latent.y)
@@ -140,6 +140,17 @@ class LatentWidget:
         _clicked, dragging, dx, dy = imgui_utils.drag_button('Drag', width=viz.app.button_w)
         if dragging:
             self.drag(dx, dy)
+        imgui.same_line()
+        if imgui_utils.button(f"{modes[self.latent.update_mode]}##latent"):
+            self.latent.update_mode = (self.latent.update_mode + 1) % len(modes)
+        imgui.same_line()
+        with imgui_utils.item_width(viz.app.button_w * 2 - viz.app.spacing * 2):
+            changed, speed = imgui.slider_float('##speed', self.latent.speed, -5, 5,
+                                                format='Speed %.3f',
+                                                power=3)
+            if changed:
+                self.latent.speed = speed
+                self.update = True
 
     def update_vec(self):
         viz = self.viz
@@ -160,14 +171,30 @@ class LatentWidget:
             self.latent.next = torch.randn(self.latent.next.shape)
 
         imgui.same_line()
-        # _, self.vec_path = imgui_utils.input_text("##vecpath", self.vec_path, 1024, width=viz.app.button_w, flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL, help="Load vector from file")
+        if imgui_utils.button(f"{modes[self.latent.update_mode]}##latent"):
+            self.latent.update_mode = (self.latent.update_mode + 1) % len(modes)
+        imgui.same_line()
+        with imgui_utils.item_width(viz.app.button_w * 2 - viz.app.spacing * 2):
+            changed, speed = imgui.slider_float('##speed', self.latent.speed, -5, 5,
+                                                format='Speed %.3f',
+                                                power=3)
+            if changed:
+                self.latent.speed = speed
+                self.update = True
+
+        _changed, vec_path = imgui_utils.input_text("##vecpath", self.vec_path, 1024, width=viz.app.button_w, flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL, help_text="Load vector from file")
+        imgui.same_line()
+        if _changed:
+            # if the file exists and is a valid vector, load it
+            if os.path.exists(vec_path):
+                self.vec_path = vec_path
         _clicked, paths = self.file_dialog()
-        if _clicked:
+        if _clicked and len(paths) > 0:
             self.vec_path = paths[0]
             print("Selected vector at", self.vec_path)
 
         imgui.same_line()
-        if imgui_utils.button("Load##vecmode", width=viz.app.button_w, enabled=self.vec_path is not None or self.vec_path != ''):
+        if imgui_utils.button("Load##vecmode", width=viz.app.button_w, enabled=self.vec_path is not None and self.vec_path != ''):
             print("Loading vector from", self.vec_path)
             if self.vec_path:
                 if self.vec_path.endswith('.npy'):
@@ -182,6 +209,20 @@ class LatentWidget:
                     print("Unsupported file format")
                 print("Loaded vector of shape", self.latent.vec.shape)
                 self.latent.next = torch.randn(self.latent.next.shape)
+
+
+        imgui.same_line()
+        _changed, self.vec_save_path = imgui_utils.input_text("##vecsavepath", self.vec_save_path, 1024, width=viz.app.button_w, flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL, help_text="Save vector to file")
+        imgui.same_line()
+        if imgui_utils.button("Save##vecmode", width=viz.app.button_w, enabled=self.vec_save_path != ''):
+            print("Saving vector to", self.vec_save_path)
+            if self.vec_save_path:
+                if self.vec_save_path.endswith('.npy'):
+                    np.save(self.vec_save_path, self.latent.vec.detach().cpu().numpy())
+                elif self.vec_save_path.endswith('.pt'):
+                    torch.save(self.latent.vec, self.vec_save_path)
+                else:
+                    print("Unsupported file format")
 
 
     @imgui_utils.scoped_by_object_id
@@ -203,17 +244,7 @@ class LatentWidget:
                         self.seed_viz()
                     else:
                         self.vec_viz()
-                    imgui.same_line()
-                    if imgui_utils.button(f"{modes[self.latent.update_mode]}##latent"):
-                        self.latent.update_mode = (self.latent.update_mode + 1) % len(modes)
-                    imgui.same_line()
-                    with imgui_utils.item_width(viz.app.button_w * 2 - viz.app.spacing * 2):
-                        changed, speed = imgui.slider_float('##speed', self.latent.speed, -5, 5,
-                                                            format='Speed %.3f',
-                                                            power=3)
-                        if changed:
-                            self.latent.speed = speed
-                            self.update = True
+
                 except Exception as e:
                     self.viz.print_error(e)
 
