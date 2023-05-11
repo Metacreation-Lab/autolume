@@ -23,6 +23,34 @@ try:
 except ImportError:
     pyspng = None
 
+
+def calc_res(shape):
+    base0 = 2 ** int(np.log2(shape[0]))
+    base1 = 2 ** int(np.log2(shape[1]))
+    base = min(base0, base1)
+    min_res = min(shape[0], shape[1])
+
+    def int_log2(xs, base):
+        return [x * 2 ** (2 - int(np.log2(base))) % 1 == 0 for x in xs]
+
+    if min_res != base or max(*shape) / min(*shape) >= 2:
+        if np.log2(base) < 10 and all(int_log2(shape, base * 2)):
+            base = base * 2
+
+    return base  # , [shape[0]/base, shape[1]/base]
+
+def calc_init_res(shape, resolution=None):
+    if len(shape) == 1:
+        shape = [shape[0], shape[0], 1]
+    elif len(shape) == 2:
+        shape = [*shape, 1]
+    size = shape[:2] if shape[2] < min(*shape[:2]) else shape[1:] # fewer colors than pixels
+    if resolution is None:
+        resolution = calc_res(size)
+    res_log2 = int(np.log2(resolution))
+    init_res = [int(s * 2**(2-res_log2)) for s in size]
+    return init_res, resolution, res_log2
+
 #----------------------------------------------------------------------------
 
 class Dataset(torch.utils.data.Dataset):
@@ -90,8 +118,9 @@ class Dataset(torch.utils.data.Dataset):
         image = self._load_raw_image(self._raw_idx[idx])
         assert isinstance(image, np.ndarray)
         if list(image.shape) != self.image_shape:
-            print(image.shape, self.image_shape)
-            image = cv2.resize(image, dsize=self.image_shape[-2:], interpolation=cv2.INTER_CUBIC)
+            print(image.shape, self.image_shape, type(image))
+            image = cv2.resize(image.transpose(1,2,0), dsize=self.image_shape[-2:], interpolation=cv2.INTER_CUBIC).transpose(2,0,1)
+        print("DSET", image.shape, self.image_shape)
         assert list(image.shape) == self.image_shape
         assert image.dtype == np.uint8
         if self._xflip[idx]:
@@ -130,8 +159,18 @@ class Dataset(torch.utils.data.Dataset):
     @property
     def resolution(self):
         assert len(self.image_shape) == 3 # CHW
-        assert self.image_shape[1] == self.image_shape[2]
-        return self.image_shape[1]
+        max_res = calc_res(self.image_shape[1:])
+        return max_res
+
+    # !!! custom init res
+    @property
+    def res_log2(self):
+        return int(np.ceil(np.log2(self.resolution)))
+
+    # !!! custom init res
+    @property
+    def init_res(self):
+        return [int(s * 2 ** (2 - self.res_log2)) for s in self.image_shape[1:]]
 
     @property
     def label_shape(self):
@@ -162,10 +201,14 @@ class ImageFolderDataset(Dataset):
     def __init__(self,
         path,                   # Path to directory or zip.
         resolution      = None, # Ensure specific resolution, None = highest available.
+        height = None,
+        width   = None, # Override resolution.
         **super_kwargs,         # Additional arguments for the Dataset base class.
     ):
         self._path = path
         self._zipfile = None
+        self.height = height
+        self.width = width
 
         if os.path.isdir(self._path):
             self._type = 'dir'
@@ -182,9 +225,9 @@ class ImageFolderDataset(Dataset):
             raise IOError('No image files found in the specified path')
 
         name = os.path.splitext(os.path.basename(self._path))[0]
-        raw_shape = [len(self._image_fnames)] + list(self._load_raw_image(0).shape)
-        if resolution is not None and (raw_shape[2] != resolution or raw_shape[3] != resolution):
-            raise IOError('Image files do not match the specified resolution')
+        img_shape = [3, self.height,self.width]  if self.width is not None and self.height is not None else list(self._load_raw_image(0).shape)
+        raw_shape = [len(self._image_fnames)] + img_shape
+        print("RAW SHAPE", raw_shape, resolution)
         super().__init__(name=name, raw_shape=raw_shape, **super_kwargs)
 
     @staticmethod
@@ -239,5 +282,32 @@ class ImageFolderDataset(Dataset):
         labels = np.array(labels)
         labels = labels.astype({1: np.int64, 2: np.float32}[labels.ndim])
         return labels
+
+    @property
+    def heightandwidth(self):
+        return self._load_raw_image(0).shape[1:]
+
+    def __getitem__(self, idx):
+        image = self._load_raw_image(self._raw_idx[idx])
+        assert isinstance(image, np.ndarray)
+        image_shape = (3, self.width, self.height) if self.height is not None and self.width is not None else self.image_shape
+        if list(image.shape) != image_shape:
+            print(image.shape, image_shape, type(image))
+            image = cv2.resize(image.transpose(1,2,0), dsize=image_shape[-2:], interpolation=cv2.INTER_CUBIC).transpose(2,0,1)
+        print("DSET", image.shape, self.image_shape, image_shape)
+        assert list(image.shape) == self.image_shape
+        assert image.dtype == np.uint8
+        if self._xflip[idx]:
+            assert image.ndim == 3 # CHW
+            image = image[:, :, ::-1]
+        return image.copy(), self.get_label(idx)
+
+    @property
+    def resolution(self):
+        image_shape = (
+        3, self.height, self.width) if self.height is not None and self.width is not None else self.image_shape
+        assert len(image_shape) == 3  # CHW
+        max_res = calc_res(image_shape[1:])
+        return max_res
 
 #----------------------------------------------------------------------------

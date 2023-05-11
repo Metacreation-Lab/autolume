@@ -73,6 +73,7 @@ def launch_training(c, desc, outdir, dry_run):
     print(f'Dataset path:        {c.training_set_kwargs.path}')
     print(f'Dataset size:        {c.training_set_kwargs.max_size} images')
     print(f'Dataset resolution:  {c.training_set_kwargs.resolution}')
+    print(f'Dataset Height and width:  {c.training_set_kwargs.height} {c.training_set_kwargs.width}')
     print(f'Dataset labels:      {c.training_set_kwargs.use_labels}')
     print(f'Dataset x-flips:     {c.training_set_kwargs.xflip}')
     print()
@@ -99,14 +100,17 @@ def launch_training(c, desc, outdir, dry_run):
 
 #----------------------------------------------------------------------------
 
-def init_dataset_kwargs(data):
+def init_dataset_kwargs(data, resolution=None, height = None, width = None):
     try:
-        dataset_kwargs = dnnlib.EasyDict(class_name='training.dataset.ImageFolderDataset', path=data, use_labels=True, max_size=None, xflip=False)
+        print("RESOLUTION: ", resolution, height, width)
+        dataset_kwargs = dnnlib.EasyDict(class_name='training.dataset.ImageFolderDataset', path=data, use_labels=True, max_size=None, xflip=False, resolution=resolution, height=height, width=width)
         dataset_obj = dnnlib.util.construct_class_by_name(**dataset_kwargs) # Subclass of training.dataset.Dataset.
         dataset_kwargs.resolution = dataset_obj.resolution # Be explicit about resolution.
         dataset_kwargs.use_labels = dataset_obj.has_labels # Be explicit about labels.
         dataset_kwargs.max_size = len(dataset_obj) # Be explicit about dataset size.
-        return dataset_kwargs, dataset_obj.name
+        dataset_kwargs.height = dataset_obj.height
+        dataset_kwargs.width = dataset_obj.width
+        return dataset_kwargs, dataset_obj.name, dataset_obj.init_res
     except IOError as err:
         raise click.ClickException(f'--data: {err}')
 
@@ -129,6 +133,7 @@ def parse_comma_separated_list(s):
 @click.option('--data',         help='Training data', metavar='[ZIP|DIR]',                      type=str, required=True)
 @click.option('--gpus',         help='Number of GPUs to use', metavar='INT',                    type=click.IntRange(min=1), required=True)
 @click.option('--batch',        help='Total batch size', metavar='INT',                         type=click.IntRange(min=1), required=True)
+@click.option('--resolution',   help='Dataset resolution', metavar='TUPLE',                     type=tuple, default=None)
 @click.option('--gamma',        help='R1 regularization weight', metavar='FLOAT',               type=click.FloatRange(min=0), required=True)
 @click.option('--topk', help='Enable topk training [default: None]', type=float, metavar='FLOAT')
 
@@ -207,6 +212,7 @@ def main(queue, reply):
 
     # Initialize config.
     kwargs = queue.get()
+    print("kwargs", kwargs)
 
     opts = dnnlib.EasyDict(**kwargs) # Command line arguments.
     c = dnnlib.EasyDict() # Main config dict.
@@ -219,7 +225,7 @@ def main(queue, reply):
     c.data_loader_kwargs = dnnlib.EasyDict(pin_memory=True, prefetch_factor=2)
 
     # Training set.
-    c.training_set_kwargs, dataset_name = init_dataset_kwargs(data=opts.data)
+    c.training_set_kwargs, dataset_name, init_res = init_dataset_kwargs(data=opts.data, resolution=opts.resolution, height=opts.resolution[1], width=opts.resolution[0])
     if opts.cond and not c.training_set_kwargs.use_labels:
         raise click.ClickException('--cond=True requires labels specified in dataset.json')
     c.training_set_kwargs.use_labels = opts.cond
@@ -270,6 +276,11 @@ def main(queue, reply):
     c.image_snapshot_ticks = c.network_snapshot_ticks = opts.snap
     c.random_seed = c.training_set_kwargs.random_seed = opts.seed
     c.data_loader_kwargs.num_workers = opts.workers
+
+
+    if list(init_res) != [4, 4]:
+        print(' custom init resolution', init_res)
+        c.G_kwargs.init_res = c.D_kwargs.init_res = list(init_res)
 
     # Sanity checks.
     if c.batch_size % c.num_gpus != 0:
