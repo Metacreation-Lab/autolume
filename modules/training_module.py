@@ -27,6 +27,8 @@ class TrainingModule:
         self.ada_pipe = 7
         self.diffaug_pipe = 0
         self.img_size = 2
+        self.square = True
+        self.height = 2
         self.batch_size = 8
         for pkl in os.listdir("./models"):
             if pkl.endswith(".pkl"):
@@ -77,7 +79,14 @@ class TrainingModule:
         else:
             _, self.diffaug_pipe = imgui.combo("Augmentation Pipeline", self.diffaug_pipe, diffaug_pipes)
 
-        _, self.img_size = imgui.combo("Image Size", self.img_size, sizes)
+        _, self.img_size = imgui.combo("Image Size" if self.square else "Width", self.img_size, sizes)
+        if not(self.square):
+            _, self.height = imgui.combo("Height", self.height, sizes)
+        else:
+            self.height = self.img_size
+
+        imgui.same_line()
+        _, self.square = imgui.checkbox("Square", self.square)
 
         _, self.batch_size = imgui.input_int("Batch Size", self.batch_size)
         if self.batch_size < 1:
@@ -99,6 +108,7 @@ class TrainingModule:
                 w_dim=512,
                 cond=False,
                 mirror=True,
+                resolution=(int(sizes[self.img_size]), int(sizes[self.height])),
                 aug="ada" if augs[self.aug] == "ADA" else "noaug",
                 augpipe=ada_pipes[self.ada_pipe],
                 resume=self.resume_pkl if self.resume_pkl != "" else None,

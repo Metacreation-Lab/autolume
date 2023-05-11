@@ -25,6 +25,7 @@ from widgets import adjuster_widget
 from widgets import looping_widget
 from widgets import preset_widget
 from widgets import mixing_widget
+from widgets import collapsable_layer
 
 from pythonosc.osc_server import BlockingOSCUDPServer
 from pythonosc.dispatcher import Dispatcher
@@ -77,6 +78,7 @@ class Visualizer:
         self.looping_widget = looping_widget.LoopingWidget(self)
         self.preset_widget = preset_widget.PresetWidget(self)
         self.mixing_widget = mixing_widget.MixingWidget(self)
+        self.collapsed_widget = collapsable_layer.LayerWidget(self)
         # self.audio_widget = audio_widget.AudioWidget(self)
 
 
@@ -129,7 +131,8 @@ class Visualizer:
         expanded, _visible = imgui_utils.collapsing_header('Adjust Input', default=True)
         self.adjuster_widget(expanded)
         expanded, _visible = imgui_utils.collapsing_header('Layers & channels', default=True)
-        self.layer_widget(expanded)
+        # self.layer_widget(expanded)
+        self.collapsed_widget(expanded)
         expanded, _visible = imgui_utils.collapsing_header('Mixing Widget', default=True)
         self.mixing_widget(expanded)
         expanded, _visible = imgui_utils.collapsing_header('Preset Module', default=True)
