@@ -1,3 +1,4 @@
+import os
 
 import imgui
 import numpy as np
@@ -10,6 +11,7 @@ except ModuleNotFoundError:
 import dnnlib
 from utils.gui_utils import imgui_utils
 from widgets import osc_menu
+from widgets.browse_widget import BrowseWidget
 
 
 
@@ -52,6 +54,7 @@ def slerp(t, v0, v1, DOT_THRESHOLD=0.9995):
 
 
 
+labels = ["Seed", "Vector", "Keyframe"]
 
 
 class LoopingWidget:
@@ -64,14 +67,19 @@ class LoopingWidget:
         self.alpha = 0
         self.speed = 0
         self.expand_vec = False
-        self.seeds = [dnnlib.EasyDict(x=i,y=0) for i in range(self.params.num_keyframes)]
-        self.modes = [False] * self.params.num_keyframes
+        self.seeds = [[i, 0] for i in range(self.params.num_keyframes)]
+        self.modes = [0] * self.params.num_keyframes
         self.project = [True]*self.params.num_keyframes
         self.paths = [""] * self.params.num_keyframes
         self._pinned_bufs = dict()
         self._device = torch.device('cuda')
         self.halt_update = 0
         self.perfect_loop = False
+        self.looping_snaps = [{} for _ in range(self.params.num_keyframes)]
+        self.file_dialogs = [BrowseWidget(viz, f"Browse##vec{i}", os.path.abspath(os.getcwd()), ["*",".pth", ".pt"], width=self.viz.app.button_w, multiple=False, traverse_folders=False) for i in range(self.params.num_keyframes)]
+        self.open_keyframes = False
+        self.open_file_dialog = False
+
 
 
 
@@ -129,8 +137,8 @@ class LoopingWidget:
 
     def drag(self,idx, dx, dy):
         viz = self.viz
-        self.seeds[idx].x += dx / viz.app.font_size * 4e-2
-        self.seeds[idx].y += dy / viz.app.font_size * 4e-2
+        self.seeds[idx][0] += dx / viz.app.font_size * 4e-2
+        self.seeds[idx][1] += dy / viz.app.font_size * 4e-2
 
     def _get_pinned_buf(self, ref):
         key = (tuple(ref.shape), ref.dtype)
@@ -175,22 +183,24 @@ class LoopingWidget:
 
 
         self.halt_update -= 1
-        print(self.halt_update)
+
 
     @imgui_utils.scoped_by_object_id
     def key_frame_vizface(self, idx):
-        label = "Seed" if self.modes[idx] else "Vector"
+        label = labels[self.modes[idx]]
         if imgui_utils.button(f"{label}##{idx}", width=(self.viz.app.font_size*len(label))/2):
-            self.modes[idx] = not self.modes[idx]
+            self.modes[idx] = (self.modes[idx] + 1) % len(labels) if self.looping_snaps[idx] != {} else (self.modes[idx] + 1) % (len(labels)-1)
         imgui.same_line()
         _clicked, self.project[idx] = imgui.checkbox(f'Project##loop{idx}', self.project[idx])
         imgui.same_line()
         imgui.text("|")
         imgui.same_line()
-        if self.modes[idx]:
+        if self.modes[idx]==0:
             self.seed_viz(idx)
-        else:
+        elif self.modes[idx]==1:
             self.vec_viz(idx)
+        elif self.modes[idx]==2:
+            imgui.text("Not Implemented")
 
     def open_vec(self, idx):
         try:
@@ -206,14 +216,33 @@ class LoopingWidget:
                                                             imgui.INPUT_TEXT_CHARS_NO_BLANK,
                                                             width=viz.app.font_size*7, help_text="filepath")
         imgui.same_line()
+        _clicked, path = self.file_dialogs[idx]()
+        if _clicked:
+            self.paths[idx] = path
+        imgui.same_line()
         if imgui_utils.button(f"Load Vec##loop_{idx}", viz.app.button_w):
             self.open_vec(idx)
         imgui.same_line()
         if imgui_utils.button(f"Snap##{idx}", viz.app.button_w):
             snapped = self.snap()
+            print("snapped", snapped, "-----------------------")
+
             if not(snapped is None):
-                print("snapped", idx, snapped.shape)
-                self.keyframes[idx] = snapped
+                if snapped["mode"] == 0:
+                    print("SEED")
+                    self.seeds[idx] = snapped["snap"]
+                    self.modes[idx] = snapped["mode"]
+                elif snapped["mode"] == 1:
+                    print("VECTOR")
+                    self.keyframes[idx] = snapped["snap"]
+                    self.modes[idx] = snapped["mode"]
+                elif snapped["mode"] == 2:
+                    print("getting LOOP")
+                    self.looping_snaps[idx] = snapped["snap"]
+                    self.modes[idx] = snapped["mode"]
+                    print(self.looping_snaps[idx])
+                    print(self.modes[idx])
+
         imgui.same_line()
         if imgui_utils.button(f"Randomize##vecmode{idx}", width=viz.app.button_w):
             self.keyframes[idx] = torch.randn(self.keyframes[idx].shape)
@@ -223,34 +252,55 @@ class LoopingWidget:
     def seed_viz(self, idx):
         update_vec = False
         viz = self.viz
-        seed = round(self.seeds[idx].x) + round(self.seeds[idx].y) * self.step_y
+        seed = round(self.seeds[idx][0]) + round(self.seeds[idx][1]) * self.step_y
         with imgui_utils.item_width(viz.app.font_size * 8):
             _changed, seed = imgui.input_int(f"##loopseed{idx})", seed)
         if _changed:
-            self.seeds[idx].x = seed
-            self.seeds[idx].y = 0
+            self.seeds[idx][0] = seed
+            self.seeds[idx][1] = 0
         imgui.same_line()
-        frac_x = self.seeds[idx].x - round(self.seeds[idx].x)
-        frac_y = self.seeds[idx].y - round(self.seeds[idx].y)
+        frac_x = self.seeds[idx][0] - round(self.seeds[idx][0])
+        frac_y = self.seeds[idx][1] - round(self.seeds[idx][1])
         with imgui_utils.item_width(viz.app.font_size * 5):
             _changed, (new_frac_x, new_frac_y) = imgui.input_float2(f'##loopfrac{idx}', frac_x, frac_y, format='%+.2f',
                                                                     flags=imgui.INPUT_TEXT_ENTER_RETURNS_TRUE)
         if _changed:
-            self.seeds[idx].x += new_frac_x - frac_x
-            self.seeds[idx].y += new_frac_y - frac_y
+            self.seeds[idx][0] += new_frac_x - frac_x
+            self.seeds[idx][1] += new_frac_y - frac_y
 
         imgui.same_line()
         _clicked, dragging, dx, dy = imgui_utils.drag_button(f'Drag##loopdrag{idx}', width=viz.app.button_w)
         if dragging:
             self.drag(idx,dx, dy)
 
+        imgui.same_line()
+        if imgui_utils.button(f"Snap##seed{idx}", viz.app.button_w):
+            snapped = self.snap()
+            print("snapped", snapped, "-----------------------")
+
+            if not(snapped is None):
+                if snapped["mode"] == 0:
+                    print("SEED")
+                    self.seeds[idx] = snapped["snap"]
+                    self.modes[idx] = snapped["mode"]
+                elif snapped["mode"] == 1:
+                    print("VECTOR")
+                    self.keyframes[idx] = snapped["snap"]
+                    self.modes[idx] = snapped["mode"]
+                elif snapped["mode"] == 2:
+                    print("getting LOOP")
+                    self.looping_snaps[idx] = snapped["snap"]
+                    self.modes[idx] = snapped["mode"]
+                    print(self.looping_snaps[idx])
+                    print(self.modes[idx])
+
     @imgui_utils.scoped_by_object_id
     def __call__(self, show=True):
         viz = self.viz
-        viz.args.looping = self.params.anim
+        # viz.args.looping = self.params.anim
 
         if show:
-            _clicked, self.params.anim = imgui.checkbox('AnimLoop', self.params.anim)
+            _clicked, self.params.anim = imgui.checkbox('Loop', self.params.anim)
             with imgui_utils.item_width(viz.app.font_size*5):
                 changed, new_keyframes = imgui.input_int("# of Keyframes", self.params.num_keyframes)
             if changed and new_keyframes > 0:
@@ -272,6 +322,16 @@ class LoopingWidget:
                 project[:min(new_keyframes, self.params.num_keyframes)] = self.project[:min(new_keyframes, self.params.num_keyframes)]
                 self.project = project
                 self.params.num_keyframes = new_keyframes
+                looping_snaps = [{} for _ in range(new_keyframes)]
+                looping_snaps[:min(new_keyframes, self.params.num_keyframes)] = self.looping_snaps[
+                                                                        :min(new_keyframes, self.params.num_keyframes)]
+                self.looping_snaps = looping_snaps
+
+                file_dialogs = [BrowseWidget(viz, f"Vector##vec{i}", os.path.abspath(os.getcwd()), ["*",".pth", ".pt"], width=self.viz.app.button_w, multiple=False, traverse_folders=False) for i in range(new_keyframes)]
+                file_dialogs[:min(new_keyframes, self.params.num_keyframes)] = self.file_dialogs[:min(new_keyframes, self.params.num_keyframes)]
+                self.file_dialogs = file_dialogs
+
+
             imgui.same_line()
             label = "Time" if self.params.mode else "Speed"
             if imgui_utils.button(f'{label}##loopmode', width=viz.app.button_w,enabled=True):
@@ -288,11 +348,29 @@ class LoopingWidget:
                     if changed:
                         self.speed = speed
             imgui.same_line()
-            opened = imgui_utils.popup_button("KeyFrames", width=viz.app.button_w)
-            if opened:
-                for i in range(self.params.num_keyframes):
-                    self.key_frame_vizface(i)
-                imgui.end_popup()
+            if imgui_utils.button("KeyFrames", width=viz.app.button_w):
+                self.open_keyframes = True
+            if self.open_keyframes:
+                collapsed, self.open_keyframes = imgui.begin("KeyFrames", closable=True, flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE|imgui.WINDOW_NO_COLLAPSE)
+                if collapsed:
+                    for i in range(self.params.num_keyframes):
+                        self.key_frame_vizface(i)
+
+                # check if any file dialogs are open
+                open_dialog = False
+                for file_dialog in self.file_dialogs:
+                    if file_dialog.open:
+                        open_dialog = True
+                        break
+                if self.open_file_dialog == True and not open_dialog:
+                    self.open_file_dialog = False
+                    imgui.set_window_focus()
+
+                self.open_file_dialog = open_dialog
+                # check if current window focussed if not close it unless a file dialog is open
+                if not imgui.is_window_focused() and not self.open_file_dialog:
+                    self.open_keyframes = False
+                imgui.end()
             imgui.same_line()
             with imgui_utils.item_width(viz.app.font_size*5):
                 changed, idx = imgui.input_int("index", self.params.index+1)
@@ -307,44 +385,20 @@ class LoopingWidget:
             if self.params.anim:
                 self.update_alpha()
                 viz.args.alpha = self.alpha
-                viz.args.looping_modes = self.modes
-                viz.args.looping_seeds = self.seeds
-                viz.args.looping_keyframes = self.keyframes
                 viz.args.looping_index = self.params.index
-                viz.args.looping_projections = self.project
+                viz.args.mode = "loop"
+                l_list = []
+                for i, mode in enumerate(self.modes):
+                    if mode == 0:
+                        l_list.append({"mode": "seed", "latent": self.seeds[i], "project": self.project[i]})
+                    elif mode == 1:
+                        l_list.append({"mode": "vec", "latent": self.keyframes[i], "project": self.project[i]})
+                    elif mode == 2:
+                        print("adding loop", self.looping_snaps[i])
+                        l_list.append({"mode": "loop", "looping_list": self.looping_snaps[i]["looping_list"], "looping_index": self.looping_snaps[i]["index"], "alpha": self.looping_snaps[i]["alpha"]})
+                viz.args.looping_list = l_list
+
         self.osc_menu()
-
-    def evaluate(self, seed_idx):
-        if not self.viz.vm is None:
-            latent = self.seeds[seed_idx]
-            w0_seeds = []
-            for ofs_x, ofs_y in [[0, 0], [1, 0], [0, 1], [1, 1]]:
-                seed_x = np.floor(latent.x) + ofs_x
-                seed_y = np.floor(latent.y) + ofs_y
-                seed = (int(seed_x) + int(seed_y) * self.step_y) & ((1 << 32) - 1)
-                weight = (1 - abs(latent.x - seed_x)) * (1 - abs(latent.y - seed_y))
-                if weight > 0:
-                    w0_seeds.append([seed, weight])
-            all_seeds = [seed for seed, _weight in w0_seeds]  # + [mappingmix_seed]
-            all_seeds = list(set(all_seeds))
-            all_zs = np.zeros([len(all_seeds), self.viz.vm.mapping_dim], dtype=np.float32)
-            for idx, seed in enumerate(all_seeds):
-                rnd = np.random.RandomState(seed)
-                all_zs[idx] = rnd.randn(self.viz.vm.w_dim)
-
-            if not self.project[seed_idx]:
-                all_ws = self.to_device(torch.from_numpy(all_zs))
-                all_ws = dict(zip(all_seeds, all_ws))
-                w = torch.stack([all_ws[seed] * weight for seed, weight in w0_seeds]).sum(dim=0, keepdim=True)
-            # Run mapping network.
-            else:
-                w_avg = self.to_device(self.viz.vm.w_avg)
-                all_ws = self.to_device(torch.from_numpy(all_zs))
-                all_ws = self.viz.vm.mapping(all_ws) - w_avg
-                all_ws = dict(zip(all_seeds, all_ws))
-                w = torch.stack([all_ws[seed] * weight for seed, weight in w0_seeds]).sum(dim=0, keepdim=True)
-                w += w_avg
-            return w
 
     def snap(self):
         return self.viz.result.get("snap", None)

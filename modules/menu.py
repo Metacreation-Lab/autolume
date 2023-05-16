@@ -45,8 +45,8 @@ class Menu:
 
         imgui.set_next_window_position(self.app.content_width // 4, 0)
         imgui.set_next_window_size(self.app.content_width // 4, (self.app.content_height * 4) // 5)
-        imgui.begin('Compress##Menu', closable=False, flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS))
-        imgui.text("Compress")
+        imgui.begin('Projection##Menu', closable=False, flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS))
+        imgui.text("Projection")
         # self.compress()
         self.projection()
         imgui.end()

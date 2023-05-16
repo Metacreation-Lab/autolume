@@ -1,12 +1,18 @@
 import os
 
+import cv2
 import imgui
-from utils.gui_utils import imgui_utils
+import torch
+
+from utils.gui_utils import imgui_utils, gl_utils
 from utils.gui_utils import imgui_window
+
+
 
 class BrowseWidget():
 
-    def __init__(self, parent, title, directory, extensions, width=0, enabled=True, multiple=True, traverse_folders=True):
+    def __init__(self, parent, title, directory, extensions, width=0, enabled=True, multiple=True, traverse_folders=True, add_folder_button=True):
+        self.add_folder_name = ""
         self.parent = parent
         self.title = title
         self.directory = directory
@@ -20,7 +26,18 @@ class BrowseWidget():
         self.enabled = enabled
         self.multiple = multiple
         self.traverse_folders = traverse_folders
+        self.add_folder_button = add_folder_button
         self.open = False
+
+        # read as rgba
+        self.folder = cv2.imread("misc/folder.png")
+        self.folder = cv2.cvtColor(self.folder, cv2.COLOR_BGR2RGBA)
+
+        # in the alpha channel we put alpha to 0 where the image is black
+        self.folder[:,:,3] = (self.folder[:,:,0] != 0) * 255
+
+
+        self.folder_texture = gl_utils.Texture(image=self.folder, width=self.folder.shape[0], height=self.folder.shape[1], channels=self.folder.shape[2])
 
     def resolve_selected(self):
         # returns a list of all selected files with their full path and if the file is a directory it recursively selects all files in it
@@ -43,13 +60,13 @@ class BrowseWidget():
         # Opens new window with file browser shows only files with given extensions in current directory and displays other directories by double clicking on a directory we enter said directory, single click selects files and if a directory is selected we recursively select all files in it
 
         imgui.set_next_window_size((self.parent.app.content_width *3)//4, self.parent.app.content_height//2)
-        window_out = imgui.begin(self.title, True)
-        self.open = window_out[0]
+        window_out = imgui.begin(self.title, True, flags=imgui.WINDOW_NO_COLLAPSE)
+        self.open = window_out[1]
 
         # draw the top bar with the current directory and a button that goes up one directory
         imgui.begin_child("top_bar", 0, self.parent.app.font_size * 2, border=True, flags=imgui.WINDOW_NO_SCROLLBAR)
 
-        if imgui.button("^", self.parent.app.font_size * 1.5):
+        if imgui.arrow_button("##up", imgui.DIRECTION_UP):
             self.directory = os.path.dirname(self.directory)
         
         imgui.same_line()
@@ -80,7 +97,8 @@ class BrowseWidget():
                                 contains_extension = True
                                 break
                 if contains_extension:
-                    imgui.text(u"\U0001F4C1")   # folder emoji
+
+                    imgui.image(self.folder_texture.gl_id, self.parent.app.font_size, self.parent.app.font_size)
                     imgui.same_line()
                     # single click selects double clicks enters directory_popup
                     if imgui.selectable(f, os.path.join(self.directory, f) in self.selected, imgui.SELECTABLE_ALLOW_DOUBLE_CLICK)[0]:
@@ -164,6 +182,37 @@ class BrowseWidget():
 
                         else:
                             self.selected = [os.path.join(self.directory,f)]
+
+        #if self.add_folder_button add a + button that opens a popup to add a folder
+        if self.add_folder_button:
+            if imgui.button("+", self.parent.app.button_w):
+                self.add_folder_name = ""
+                imgui.open_popup("add_folder_popup")
+
+            if imgui.begin_popup("add_folder_popup"):
+                imgui.text("Add Folder")
+                # add input text to add folder
+                _changed, self.add_folder_name = imgui_utils.input_text("##add_folder_input", self.add_folder_name, 1024, help_text="Enter the name of the folder to add", flags=imgui.INPUT_TEXT_ENTER_RETURNS_TRUE|imgui.INPUT_TEXT_AUTO_SELECT_ALL)
+
+                # add button to confirm action and add folder to directory and a button to cancel
+                if imgui_utils.button("Add", self.parent.app.font_size*2, enabled=self.add_folder_name != "") or _changed:
+                    # add folder to directory
+                    if not os.path.exists(os.path.join(self.directory, self.add_folder_name)):
+                        os.mkdir(os.path.join(self.directory, self.add_folder_name))
+                    # select created folder
+                    if self.multiple:
+                        if not os.path.join(self.directory, self.add_folder_name) in self.selected:
+                            self.selected.append(os.path.join(self.directory, self.add_folder_name))
+                    else:
+                        self.selected = [os.path.join(self.directory, self.add_folder_name)]
+                    # close popup
+                    imgui.close_current_popup()
+
+                imgui.same_line()
+                if imgui.button("Cancel", self.parent.app.button_w):
+                    # close popup
+                    imgui.close_current_popup()
+                imgui.end_popup()
 
         imgui.end_child()
 

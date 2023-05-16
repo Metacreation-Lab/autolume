@@ -17,6 +17,7 @@ import PIL.Image
 import json
 import torch
 import dnnlib
+import ffmpeg
 
 try:
     import pyspng
@@ -203,6 +204,7 @@ class ImageFolderDataset(Dataset):
         resolution      = None, # Ensure specific resolution, None = highest available.
         height = None,
         width   = None, # Override resolution.
+        fps = 10,
         **super_kwargs,         # Additional arguments for the Dataset base class.
     ):
         self._path = path
@@ -219,15 +221,47 @@ class ImageFolderDataset(Dataset):
         else:
             raise IOError('Path must point to a directory or zip')
 
+        found_video = False
+        # if any file in self__all_fnames is a video create a new subfolder where we save the frames based on fps using ffmpeg
+        for fname in self._all_fnames:
+            if fname.endswith('.mp4') or fname.endswith('.avi'):
+                found_video = True
+                # make dir with the name of the video + _frames
+                video_name = os.path.splitext(fname)[0]
+                save_name = video_name + '_frames'
+                save_path = os.path.join(self._path, save_name)
+                if not os.path.exists(save_path):
+                    os.makedirs(save_path)
+                # extract frames from video using ffmpeg
+                video_path = os.path.join(self._path, fname)
+                cmd = 'ffmpeg -i {} -vf fps={} {}/%04d.jpg'.format(video_path, fps, save_path)
+                os.system(cmd)
+
+        # if any of the files were videos we need to update the all_fnames list
+        if found_video:
+            if os.path.isdir(self._path):
+                self._type = 'dir'
+                self._all_fnames = {os.path.relpath(os.path.join(root, fname), start=self._path) for root, _dirs, files
+                                    in os.walk(self._path) for fname in files}
+            elif self._file_ext(self._path) == '.zip':
+                self._type = 'zip'
+                self._all_fnames = set(self._get_zipfile().namelist())
+            else:
+                raise IOError('Path must point to a directory or zip')
+
+
+
+
+
         PIL.Image.init()
         self._image_fnames = sorted(fname for fname in self._all_fnames if self._file_ext(fname) in PIL.Image.EXTENSION)
+
         if len(self._image_fnames) == 0:
             raise IOError('No image files found in the specified path')
 
         name = os.path.splitext(os.path.basename(self._path))[0]
         img_shape = [3, self.height,self.width]  if self.width is not None and self.height is not None else list(self._load_raw_image(0).shape)
         raw_shape = [len(self._image_fnames)] + img_shape
-        print("RAW SHAPE", raw_shape, resolution)
         super().__init__(name=name, raw_shape=raw_shape, **super_kwargs)
 
     @staticmethod

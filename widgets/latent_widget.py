@@ -11,7 +11,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from modules.filedialog import FileDialog
+from widgets.browse_widget import BrowseWidget
 
 try:
     import cPickle as pickle
@@ -44,12 +44,11 @@ class LatentWidget:
                                          label="##LatentOSC")
         self.update = False
         self.latent_def = dnnlib.EasyDict(self.latent)
-        self.step_y     = 100
         self.vec_path   = ""
         self.vec_save_path = ""
-        self.file_dialog = FileDialog(viz, "Browse", os.path.abspath(os.getcwd()),
+        self.file_dialog = BrowseWidget(viz, "Browse", os.path.abspath(os.getcwd()),
                                       ["*", ".pth", ".pt", ".npy", ".npz", ],
-                                      width=self.viz.app.button_w, multiple_files=False)
+                                      width=self.viz.app.button_w, multiple=False, traverse_folders=False)
 
 
     def save(self, path):
@@ -66,20 +65,12 @@ class LatentWidget:
 
     def set_params(self, params):
         self.latent, osc_params = params
-        print("speed", self.latent.speed)
         self.osc_menu.set_params(osc_params)
 
         self.viz.args.mode = self.latent.mode
         self.viz.args.project = self.latent.project
-        self.viz.args.w0_seeds = []  # [[seed, weight], ...]
+        self.viz.args.seed = [self.latent.x, self.latent.y]  # [[seed, weight], ...]
         self.viz.args.vec = self.latent.vec.pin_memory()
-        for ofs_x, ofs_y in [[0, 0], [1, 0], [0, 1], [1, 1]]:
-            seed_x = np.floor(self.latent.x) + ofs_x
-            seed_y = np.floor(self.latent.y) + ofs_y
-            seed = (int(seed_x) + int(seed_y) * self.step_y) & ((1 << 31) - 1)
-            weight = (1 - abs(self.latent.x - seed_x)) * (1 - abs(self.latent.y - seed_y))
-            if weight > 0:
-                self.viz.args.w0_seeds.append([seed, weight])
 
     def drag(self, dx, dy):
         viz = self.viz
@@ -236,7 +227,7 @@ class LatentWidget:
                     self.latent.mode = imgui.checkbox('Seed', self.latent.mode)[1]
                     imgui.same_line()
                     self.latent.mode = not (imgui.checkbox('Vector', not self.latent.mode)[1])
-                    viz.args.mode = self.latent.mode
+                    viz.args.mode = "seed" if self.latent.mode else "vec"
                     _clicked, self.latent.project = imgui.checkbox('Project', self.latent.project)
                     viz.args.project = self.latent.project
                     imgui.same_line()
@@ -253,17 +244,13 @@ class LatentWidget:
                 if self.latent.update_mode in [1, 2] and self.update:
                     self.update_vec()
                 self.update = False
-        viz.args.w0_seeds = []  # [[seed, weight], ...]
+        viz.args.seeds = (self.latent.x, self.latent.y)
         viz.args.vec = self.latent.vec.pin_memory()
 
-        for ofs_x, ofs_y in [[0, 0], [1, 0], [0, 1], [1, 1]]:
-            seed_x = np.floor(self.latent.x) + ofs_x
-            seed_y = np.floor(self.latent.y) + ofs_y
-            seed = (int(seed_x) + int(seed_y) * self.step_y) & ((1 << 31) - 1)
-            weight = (1 - abs(self.latent.x - seed_x)) * (1 - abs(self.latent.y - seed_y))
-            if weight > 0:
-                viz.args.w0_seeds.append([seed, weight])
+
 
         self.osc_menu()
 
 #----------------------------------------------------------------------------
+
+

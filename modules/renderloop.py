@@ -55,21 +55,21 @@ class AsyncRenderer:
         self._is_async = is_async
 
     def set_args(self, **args):
-        assert not self._closed
-        if self._args_queue.qsize() == 0:
-            if not compare_args(args, self._cur_args):
-                self._args_queue.put([args, self._cur_stamp])
-            self._cur_args = args
+        if not self._closed:
+            if self._args_queue.qsize() == 0:
+                if not compare_args(args, self._cur_args):
+                    self._args_queue.put([args, self._cur_stamp])
+                self._cur_args = args
 
     def get_result(self):
-        assert not self._closed
-        if self._result_queue is not None:
-            if self._result_queue.qsize() > 0:
-                result, stamp = self._result_queue.get()
-                while self._result_queue.qsize() > 0:
+        if not self._closed:
+            if self._result_queue is not None:
+                if self._result_queue.qsize() > 0:
                     result, stamp = self._result_queue.get()
-                self._cur_result = result
-        return self._cur_result
+                    while self._result_queue.qsize() > 0:
+                        result, stamp = self._result_queue.get()
+                    self._cur_result = result
+            return self._cur_result
 
     def clear_result(self):
         assert not self._closed

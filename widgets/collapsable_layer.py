@@ -188,18 +188,18 @@ class LayerWidget:
                             _opened, selected = imgui.selectable(f'##{layer.name}_selectable',
                                                                  width=width - viz.app.button_w,
                                                                  selected=selected)
-                            if self.has_transforms[layer.name] \
-                                    and not selected and not imgui.is_item_active():
+                            if self.has_transforms[layer.name] and not imgui.is_item_active():
                                 draw_list.channels_set_current(0)
                                 selectable_color(0.16, 0.48, 0.29, 0.5)
-                            if layer.name in self.noises \
-                                    and not selected and not imgui.is_item_active():
-                                draw_list.channels_set_current(0)
-                                selectable_color(0.48, 0.48, 0.29, 0.5)
-                            if layer.name in self.noises and self.has_transforms[layer.name] \
-                                    and not selected and not imgui.is_item_active():
-                                draw_list.channels_set_current(0)
-                                selectable_color(0.48, 0.16, 0.29, 0.5)
+                            if layer.name in self.noises and not imgui.is_item_active():
+                                if self.noises[layer.name]["strength"] != 0:
+                                    draw_list.channels_set_current(0)
+                                    selectable_color(0.48, 0.48, 0.29, 0.5)
+                            if layer.name in self.noises and self.has_transforms[
+                                layer.name] and not imgui.is_item_active():
+                                if self.noises[layer.name]["strength"] != 0:
+                                    draw_list.channels_set_current(0)
+                                    selectable_color(0.48, 0.16, 0.29, 0.5)
                             imgui.same_line(checkbox_size + viz.app.spacing)
                             _clicked, selected = imgui.checkbox(f'{layer.name}##radio', selected)
                             if selected:
@@ -232,10 +232,18 @@ class LayerWidget:
                         _opened, selected = imgui.selectable(f'##{layer.name}_selectable',
                                                              width=width - viz.app.button_w,
                                                              selected=selected)
-                        if self.has_transforms[layer.name] \
-                                and not selected and not imgui.is_item_active():
+                        if self.has_transforms[layer.name] and not imgui.is_item_active():
                             draw_list.channels_set_current(0)
                             selectable_color(0.16, 0.48, 0.29, 0.5)
+                        if layer.name in self.noises and not imgui.is_item_active():
+                            if self.noises[layer.name]["strength"] != 0:
+                                draw_list.channels_set_current(0)
+                                selectable_color(0.48, 0.48, 0.29, 0.5)
+                        if layer.name in self.noises and self.has_transforms[
+                            layer.name] and not imgui.is_item_active():
+                            if self.noises[layer.name]["strength"] != 0:
+                                draw_list.channels_set_current(0)
+                                selectable_color(0.48, 0.16, 0.29, 0.5)
 
                         imgui.same_line(checkbox_size + viz.app.spacing)
                         _clicked, selected = imgui.checkbox(f'{layer.name}##radio', selected)
@@ -270,18 +278,18 @@ class LayerWidget:
                         imgui.same_line(checkbox_size + viz.app.spacing)
                         _opened, selected = imgui.selectable(f'##{layer.name}_selectable', width=width - viz.app.button_w,
                                                              selected=selected)
-                        if self.has_transforms[layer.name] \
-                                and not selected and not imgui.is_item_active():
+                        if self.has_transforms[layer.name] and not imgui.is_item_active():
                             draw_list.channels_set_current(0)
                             selectable_color(0.16, 0.48, 0.29, 0.5)
-                        if layer.name in self.noises \
-                                and not selected and not imgui.is_item_active():
-                            draw_list.channels_set_current(0)
-                            selectable_color(0.48, 0.48, 0.29, 0.5)
-                        if layer.name in self.noises and self.has_transforms[layer.name] \
-                                and not selected and not imgui.is_item_active():
-                            draw_list.channels_set_current(0)
-                            selectable_color(0.48, 0.16, 0.29, 0.5)
+                        if layer.name in self.noises and not imgui.is_item_active():
+                            if self.noises[layer.name]["strength"] != 0:
+                                draw_list.channels_set_current(0)
+                                selectable_color(0.48, 0.48, 0.29, 0.5)
+                        if layer.name in self.noises and self.has_transforms[
+                            layer.name] and not imgui.is_item_active():
+                            if self.noises[layer.name]["strength"] != 0:
+                                draw_list.channels_set_current(0)
+                                selectable_color(0.48, 0.16, 0.29, 0.5)
                         imgui.same_line(checkbox_size + viz.app.spacing)
                         _clicked, selected = imgui.checkbox(f'{layer.name}##radio', selected)
                         if selected:
@@ -337,6 +345,9 @@ class LayerWidget:
                     self.transform_widget(layers)
             else:
                 self.adjust_noise()
+                for i, trans in enumerate(self.cached_transforms):
+                    if trans.layerID in self.names:
+                        self.has_transforms[trans.layerID] = True
             imgui.end_child()
 
             if self.cur_layer is not None:

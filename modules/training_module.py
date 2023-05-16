@@ -1,4 +1,5 @@
 import os
+import zipfile
 
 import imgui
 import multiprocessing as mp
@@ -42,6 +43,19 @@ class TrainingModule:
         self.message = ""
         self.done = False
         self.training_process = mp.Process(target=train_main, args=(self.queue, self.reply))
+        self.fps = 10
+        self.found_video = False
+        self._zipfile = None
+
+    @staticmethod
+    def _file_ext(fname):
+        return os.path.splitext(fname)[1].lower()
+
+    def _get_zipfile(self):
+        assert self._type == 'zip'
+        if self._zipfile is None:
+            self._zipfile = zipfile.ZipFile(self.data_path)
+        return self._zipfile
 
     @imgui_utils.scoped_by_object_id
     def __call__(self):
@@ -61,6 +75,23 @@ class TrainingModule:
         _clicked, data_path = self.file_dialog()
         if _clicked:
             self.data_path = data_path[0]
+            # find all files in the directory and then check if any are videos
+            if os.path.isdir(self.data_path):
+                self._type = 'dir'
+                self._all_fnames = {os.path.relpath(os.path.join(root, fname), start=self.data_path) for root, _dirs, files
+                                    in os.walk(self.data_path) for fname in files}
+            elif self._file_ext(self.data_path) == '.zip':
+                self._type = 'zip'
+                self._all_fnames = set(self._get_zipfile().namelist())
+            else:
+                raise IOError('Path must point to a directory or zip')
+
+            self.found_video = False
+            # if any file in self__all_fnames is a video create a new subfolder where we save the frames based on fps using ffmpeg
+            for fname in self._all_fnames:
+                if fname.endswith('.mp4') or fname.endswith('.avi'):
+                    self.found_video = True
+                    break
         _, self.resume_pkl = imgui.input_text("Resume Pkl", self.resume_pkl, 1024)
         imgui.same_line()
         if imgui_utils.button('Browse...', enabled=len(self.browse_cache) > 0, width=-1):
@@ -87,6 +118,11 @@ class TrainingModule:
 
         imgui.same_line()
         _, self.square = imgui.checkbox("Square", self.square)
+
+        if self.found_video:
+            _, self.fps = imgui.input_int("FPS for frame extraction", self.fps)
+            if self.fps < 1:
+                self.fps = 1
 
         _, self.batch_size = imgui.input_int("Batch Size", self.batch_size)
         if self.batch_size < 1:
@@ -142,7 +178,8 @@ class TrainingModule:
                 content_aware_kd=False,
                 teacher = None,
                 custom=True,
-                lpips_image_size=256
+                lpips_image_size=256,
+                fps=self.fps if self.found_video else 10,
             )
 
             self.queue.put(kwargs)
