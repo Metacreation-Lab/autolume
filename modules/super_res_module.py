@@ -36,7 +36,8 @@ class SuperResModule:
         self.sharpen = args.sharpen_scale
         self.menu = menu
         self.app = menu.app
-        self.file_dialog = BrowseWidget(self, "Videos and Images", os.path.abspath(os.getcwd()), ["*", ".mp4", ".avi", ".jpg", ".png", ".jpeg", ".bmp"], traverse_folders=True)
+        self.file_dialog = BrowseWidget(self, "Browse", os.path.abspath(os.getcwd()), ["*", ".mp4", ".avi", ".jpg", ".png", ".jpeg", ".bmp"], traverse_folders=True)
+        self.save_path_dialog = BrowseWidget(self, "Save Path", os.path.abspath(os.getcwd()), [""], multiple=False, traverse_folders=False, add_folder_button=True)
         self.scale_mode = 0
         self.running = False
         self.writer = None
@@ -81,7 +82,14 @@ class SuperResModule:
         if _clicked:
             self.input_path = input
             print(self.input_path)
-        _, self.result_path = imgui.input_text("Destination Folder", self.result_path, 1024)
+
+        joined = '\n'.join(self.result_path)
+        imgui_utils.input_text("##SRRESULT", joined, 1024, flags=imgui.INPUT_TEXT_READ_ONLY, width=-self.app.button_w * 3, help_text="Result Path")
+        imgui.same_line()
+        _clicked, save_path = self.save_path_dialog()
+        if _clicked:
+            self.result_path = save_path
+            print(self.result_path)
         self.models = ['Quality','Balance','Fast']
         if len(self.models) > 0:
             _, self.model_selected = imgui.combo("Model", self.model_selected, self.models)

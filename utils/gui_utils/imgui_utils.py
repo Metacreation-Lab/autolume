@@ -11,7 +11,7 @@ import imgui
 
 #----------------------------------------------------------------------------
 
-def set_default_style(color_scheme='dark', spacing=9, indent=23, scrollbar=27):
+def set_default_style(color_scheme='light', spacing=9, indent=23, scrollbar=15):
     s = imgui.get_style()
     s.window_padding        = [spacing, spacing]
     s.item_spacing          = [spacing, spacing]

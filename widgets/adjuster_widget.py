@@ -23,8 +23,8 @@ class AdjusterWidget:
         self.vslide_use_osc = [False] * len(self.weights)
         self.vslide_address = [""] * len(self.weights)
         self.vslide_mappings = ["x"] * len(self.weights)
-        self.file_dialogs = [BrowseWidget(viz, f"Vector##vec{i}", os.path.abspath(os.getcwd()), ["*",".pth", ".pt"], width=self.viz.app.button_w, multiple=False, traverse_folders=False) for i in range(len(self.weights))]
-        self.all_dialog = BrowseWidget(viz, f"Vectors##vecalldialog", os.path.abspath(os.getcwd()), ["*",".pth", ".pt"], width=self.viz.app.button_w, multiple=False, traverse_folders=False)
+        self.file_dialogs = [BrowseWidget(viz, f"Browse##vec{i}", os.path.abspath(os.getcwd()), ["*",".pth", ".pt"], width=self.viz.app.button_w, multiple=False, traverse_folders=False) for i in range(len(self.weights))]
+        self.all_dialog = BrowseWidget(viz, f"Browse##vecalldialog", os.path.abspath(os.getcwd()), ["*",".pth", ".pt"], width=self.viz.app.button_w, multiple=False, traverse_folders=False)
 
     def save(self, path):
         with open(path, "wb") as f:

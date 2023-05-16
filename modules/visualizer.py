@@ -87,6 +87,15 @@ class Visualizer:
             self._async_renderer.close()
             self._async_renderer = None
 
+        if self.server is not None:
+            self.server.shutdown()
+            self.server = None
+
+        if self.ndi_send is not None:
+            ndi.send_destroy(self.ndi_send)
+            self.ndi_send = None
+
+
     def add_recent_pickle(self, pkl, ignore_errors=False):
         self.pickle_widget.add_recent(pkl, ignore_errors=ignore_errors)
 
@@ -104,6 +113,7 @@ class Visualizer:
 
     def clear_result(self):
         self._async_renderer.clear_result()
+
 
     @imgui_utils.scoped_by_object_id
     def __call__(self):
@@ -133,12 +143,18 @@ class Visualizer:
         expanded, _visible = imgui_utils.collapsing_header('Layers & channels', default=True)
         # self.layer_widget(expanded)
         self.collapsed_widget(expanded)
-        expanded, _visible = imgui_utils.collapsing_header('Mixing Widget', default=True)
+        expanded, _visible = imgui_utils.collapsing_header('Model Mixing', default=True)
         self.mixing_widget(expanded)
-        expanded, _visible = imgui_utils.collapsing_header('Preset Module', default=True)
+        expanded, _visible = imgui_utils.collapsing_header('Presets', default=True)
         self.preset_widget(expanded)
         # expanded, _visible = imgui_utils.collapsing_header('Audio Module', default=True)
         # self.audio_widget(expanded)
+
+        # go back to menu
+        imgui.separator()
+        if imgui.button('Back to menu'):
+            self.defer_rendering(10)
+            self.app.set_visible_menu()
 
         # Render.
         if self.app.is_skipping_frames():
