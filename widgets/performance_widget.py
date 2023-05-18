@@ -26,6 +26,7 @@ from torch_utils.ops.filtered_lrelu import _use_custom as _use_custom_filtered_l
 # ----------------------------------------------------------------------------
 class PerformanceWidget:
     def __init__(self, viz):
+        global _use_custom_upfirdn2d, _use_custom_bias_act, _use_custom_filtered_lrelu
         self.viz = viz
         self.gui_times = [float('nan')] * 60
         self.render_times = [float('nan')] * 30
@@ -39,8 +40,10 @@ class PerformanceWidget:
         if self.device == "cuda":
             if _init():
                 self.custom_kernel_available = True
+        print("CUSTOM KERNEL AVAILABLE:", self.custom_kernel_available)
 
         if self.custom_kernel_available:
+            print("IFFFING")
             _use_custom_bias_act = True
             _use_custom_filtered_lrelu = True
             _use_custom_upfirdn2d = True
@@ -50,6 +53,7 @@ class PerformanceWidget:
             _use_custom_filtered_lrelu = False
             _use_custom_upfirdn2d = False
 
+            print("NO CUSTOM KERNEL ------------")
 
 
 

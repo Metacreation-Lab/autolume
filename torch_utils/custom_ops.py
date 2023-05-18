@@ -82,7 +82,7 @@ def get_plugin(module_name, sources, headers=None, source_dir=None, **build_kwar
             compiler_bindir = _find_compiler_bindir()
             if compiler_bindir is None:
                 print(f'Could not find MSVC/GCC/CLANG installation on this computer. Check _find_compiler_bindir() in "{__file__}".')
-                return False
+                return None
             os.environ['PATH'] += ';' + compiler_bindir
 
         # Some containers set TORCH_CUDA_ARCH_LIST to a list that can either
@@ -145,7 +145,7 @@ def get_plugin(module_name, sources, headers=None, source_dir=None, **build_kwar
     except:
         if verbosity == 'brief':
             print('Failed!')
-        return False
+        return None
 
     # Print status and add to cache dict.
     if verbosity == 'full':
