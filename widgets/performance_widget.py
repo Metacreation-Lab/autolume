@@ -11,10 +11,16 @@ import threading
 
 import numpy as np
 import imgui
+import torch.cuda
+
 from utils.gui_utils import imgui_utils
 from pythonosc.osc_server import BlockingOSCUDPServer
 from pythonosc.udp_client import SimpleUDPClient
 import NDIlib as ndi
+
+from torch_utils.ops.upfirdn2d import _init, _use_custom as _use_custom_upfirdn2d
+from torch_utils.ops.bias_act import _use_custom as _use_custom_bias_act
+from torch_utils.ops.filtered_lrelu import _use_custom as _use_custom_filtered_lrelu
 
 
 # ----------------------------------------------------------------------------
@@ -28,6 +34,24 @@ class PerformanceWidget:
         self.force_fp32 = False
         self.use_superres = False
         self.scale_factor = 0
+        self.device = "cuda" if torch.cuda.is_available() else 'cpu'
+        self.custom_kernel_available = False
+        if self.device == "cuda":
+            if _init():
+                self.custom_kernel_available = True
+
+        if self.custom_kernel_available:
+            _use_custom_bias_act = True
+            _use_custom_filtered_lrelu = True
+            _use_custom_upfirdn2d = True
+            self.device = "custom"
+        else:
+            _use_custom_bias_act = False
+            _use_custom_filtered_lrelu = False
+            _use_custom_upfirdn2d = False
+
+
+
 
     @imgui_utils.scoped_by_object_id
     def __call__(self, show=True):
@@ -102,9 +126,26 @@ class PerformanceWidget:
             imgui.same_line()
             _, self.use_superres = imgui.checkbox('Super Resolution', self.use_superres)
 
+        if imgui.checkbox("CPU", self.device=="cpu")[0]:
+            self.device = "cpu"
+
+        imgui.same_line()
+        with imgui_utils.grayed_out(not torch.cuda.is_available()):
+            if imgui.checkbox("GPU", self.device == "cuda")[0]:
+                if torch.cuda.is_available():
+                    self.device = "cuda"
+
+        imgui.same_line()
+
+        with imgui_utils.grayed_out(not self.custom_kernel_available):
+            if imgui.checkbox("Custom Kernel", self.device == "custom")[0]:
+                if self.custom_kernel_available:
+                    self.device = "custom"
+
         viz.app.set_fps_limit(self.fps_limit)
         viz.app.set_vsync(self.use_vsync)
         viz.args.force_fp32 = self.force_fp32
         viz.args.use_superres = self.use_superres
+        viz.args.device = self.device
 
 # ----------------------------------------------------------------------------

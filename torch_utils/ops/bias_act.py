@@ -34,7 +34,7 @@ activation_funcs = {
 
 _plugin = None
 _null_tensor = torch.empty([0])
-_use_custom = False
+_use_custom = True
 
 def _init():
     global _plugin
@@ -48,6 +48,8 @@ def _init():
                 source_dir=os.path.dirname(__file__),
                 extra_cuda_cflags=['--use_fast_math', '--allow-unsupported-compiler'],
             )
+            if _plugin is None:
+                return False
         else:
             print('Using native plugin for bias_act')
             return False

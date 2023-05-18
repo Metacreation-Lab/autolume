@@ -222,7 +222,8 @@ def slerp(t, v0, v1, DOT_THRESHOLD=0.9995):
 class Renderer:
     def __init__(self):
         self.step_y = 100
-        self._device = torch.device('cuda')
+        self._device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+        self.kernel_type = "cuda" if torch.cuda.is_available() else "cpu"
         self._pkl_data = dict()  # {pkl: dict | CapturedException, ...}
         self._networks = dict()  # {cache_key: torch.nn.Module, ...}
         self._pinned_bufs = dict()  # {(shape, dtype): torch.Tensor, ...}
@@ -268,8 +269,8 @@ class Renderer:
         if 'error' in res:
             res.error = str(res.error)
         if self._is_timing:
-            # self._end_event.synchronize()
             if self._device.type == 'cuda':
+                self._end_event.synchronize()
                 res.render_time = self._start_event.elapsed_time(self._end_event) * 1e-3
             else:
                 res.render_time = (self._end_event - self._start_event)
@@ -293,9 +294,10 @@ class Renderer:
             raise data
 
         orig_net = data[key]
-        cache_key = (orig_net, self._device, tuple(sorted(tweak_kwargs.items())))
+        cache_key = (orig_net, self._device, self.kernel_type, tuple(sorted(tweak_kwargs.items())))
         net = self._networks.get(cache_key, None)
         if net is None:
+            print(f'Initializing network "{cache_key}"... ', end='', flush=True)
             try:
                 net = copy.deepcopy(orig_net)
                 net = net.to(self._device).eval().requires_grad_(False)
@@ -303,6 +305,8 @@ class Renderer:
                 net = CapturedException()
             self._networks[cache_key] = net
             self._ignore_timing()
+        else:
+            print(f'Network "{cache_key}" already initialized, reusing... ', end='', flush=True)
         if isinstance(net, CapturedException):
             raise net
         return net
@@ -412,8 +416,13 @@ class Renderer:
                      mixing = True,
                      save_model = False,
                      save_path = "",
-                     snapped=None
+                     snapped=None,
+                     device="cuda"
                      ):
+
+        if device != self._device.type:
+            self.set_device(device)
+
         if snapped is not None:
             mode = snapped["mode"]
 
@@ -456,6 +465,7 @@ class Renderer:
                 self.combined_layers = combined_layers
                 self.model_changed = True
 
+            self.to_device(self.G)
             G = self.G
             
             if save_model:
@@ -467,7 +477,9 @@ class Renderer:
                     pickle.dump(data, f)
 
             if mixing and not (self.G_mixed is None):
+                self.to_device(self.G_mixed)
                 G = self.G_mixed
+
 
             mapping_net = G.mapping
         
@@ -665,11 +677,6 @@ class Renderer:
             model_out = custom_stylegan2.Generator(z_dim=self.G.z_dim, w_dim=self.G.w_dim, c_dim=self.G.c_dim, img_channels=self.G.img_channels,
                                        img_resolution=img_resolution)
 
-            if self._device.type == "cuda":
-                model_out = model_out.cuda().eval()
-            else:
-                model_out = model_out.eval()
-
             dict_dest = model_out.state_dict()
             # depending on what model is used in the first entry extract the mapping layers from the corresponding model and copy them to the new model
             if self.combined_layers[0] == "A":
@@ -801,6 +808,27 @@ class Renderer:
 
         return latent
 
+    def set_device(self, device):
+        if device != self.kernel_type:
+            print(f"Switching to {device}")
+            self.kernel_type = device
+            self._device = torch.device("cuda" if device == "custom" else device)
+            if self._device.type == 'cuda':
+                self._start_event = torch.cuda.Event(enable_timing=True)
+                self._end_event = torch.cuda.Event(enable_timing=True)
+                self._start_event.record()
+                self._end_event.record()
+            else:
+                self._start_event = time.time()
+                self._end_event = time.time()
+
+            if self.pkl != "":
+                self.G = self.get_network(self.pkl, 'G_ema')
+                self.model_changed = True
+
+            if self.G2 is not None:
+                self.G2 = self.get_network(self.pkl2, 'G_ema')
+                self.model_changed = True
 
 
 

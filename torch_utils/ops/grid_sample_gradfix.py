@@ -20,7 +20,7 @@ from pkg_resources import parse_version
 
 #----------------------------------------------------------------------------
 
-enabled = False  # Enable the custom op by setting this to true.
+enabled = True  # Enable the custom op by setting this to true.
 _use_pytorch_1_11_api = parse_version(torch.__version__) >= parse_version('1.11.0a') # Allow prerelease builds of 1.11
 
 #----------------------------------------------------------------------------
