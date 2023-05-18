@@ -18,15 +18,13 @@ from pythonosc.osc_server import BlockingOSCUDPServer
 from pythonosc.udp_client import SimpleUDPClient
 import NDIlib as ndi
 
-from torch_utils.ops.upfirdn2d import _init, _use_custom as _use_custom_upfirdn2d
-from torch_utils.ops.bias_act import _use_custom as _use_custom_bias_act
-from torch_utils.ops.filtered_lrelu import _use_custom as _use_custom_filtered_lrelu
-
+import torch_utils.ops.upfirdn2d as upfirdn2d
+import torch_utils.ops.bias_act as bias_act
+import torch_utils.ops.filtered_lrelu as filtered_lrelu
 
 # ----------------------------------------------------------------------------
 class PerformanceWidget:
     def __init__(self, viz):
-        global _use_custom_upfirdn2d, _use_custom_bias_act, _use_custom_filtered_lrelu
         self.viz = viz
         self.gui_times = [float('nan')] * 60
         self.render_times = [float('nan')] * 30
@@ -38,20 +36,20 @@ class PerformanceWidget:
         self.device = "cuda" if torch.cuda.is_available() else 'cpu'
         self.custom_kernel_available = False
         if self.device == "cuda":
-            if _init():
-                self.custom_kernel_available = True
+            if upfirdn2d._init():
+                self.custom_kernel_available = False
         print("CUSTOM KERNEL AVAILABLE:", self.custom_kernel_available)
 
         if self.custom_kernel_available:
             print("IFFFING")
-            _use_custom_bias_act = True
-            _use_custom_filtered_lrelu = True
-            _use_custom_upfirdn2d = True
+            bias_act._use_custom = True
+            filtered_lrelu._use_custom = True
+            upfirdn2d._use_custom = True
             self.device = "custom"
         else:
-            _use_custom_bias_act = False
-            _use_custom_filtered_lrelu = False
-            _use_custom_upfirdn2d = False
+            bias_act._use_custom = False
+            filtered_lrelu._use_custom = False
+            upfirdn2d._use_custom = False
 
             print("NO CUSTOM KERNEL ------------")
 

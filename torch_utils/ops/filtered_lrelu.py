@@ -22,7 +22,7 @@ _plugin = None
 _use_custom = True
 
 def _init():
-    global _plugin
+    global _plugin, _use_custom
     if _plugin is None:
         if _use_custom:
             _plugin = custom_ops.get_plugin(
@@ -33,6 +33,7 @@ def _init():
                 extra_cuda_cflags=['--use_fast_math', '--allow-unsupported-compiler'],
             )
             if _plugin is None:
+                _use_custom = False
                 return False
         else:
             print('WARNING: Using slow reference implementation of filtered_lrelu(). Set torch_utils.ops.filtered_lrelu._use_custom = True to enable the fast CUDA implementation.')
