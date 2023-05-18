@@ -35,9 +35,7 @@ class BrowseWidget():
 
         # in the alpha channel we put alpha to 0 where the image is black
         self.folder[:,:,3] = (self.folder[:,:,0] != 0) * 255
-
-
-        self.folder_texture = gl_utils.Texture(image=self.folder, width=self.folder.shape[0], height=self.folder.shape[1], channels=self.folder.shape[2])
+        self.folder_texture = gl_utils.Texture(image=self.folder, width=self.folder.shape[1], height=self.folder.shape[0], channels=self.folder.shape[2])
 
     def resolve_selected(self):
         # returns a list of all selected files with their full path and if the file is a directory it recursively selects all files in it
@@ -98,7 +96,7 @@ class BrowseWidget():
                                 break
                 if contains_extension:
 
-                    imgui.image(self.folder_texture.gl_id, self.parent.app.font_size, self.parent.app.font_size)
+                    imgui.image(self.folder_texture.gl_id, self.parent.app.font_size, self.parent.app.font_size, tint_color=(0.26,0.59,0.98,.67))
                     imgui.same_line()
                     # single click selects double clicks enters directory_popup
                     if imgui.selectable(f, os.path.join(self.directory, f) in self.selected, imgui.SELECTABLE_ALLOW_DOUBLE_CLICK)[0]:

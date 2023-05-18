@@ -8,6 +8,7 @@
 
 import sys
 import copy
+import time
 import traceback
 import re
 import numpy as np
@@ -227,8 +228,13 @@ class Renderer:
         self._pinned_bufs = dict()  # {(shape, dtype): torch.Tensor, ...}
         self._cmaps = dict()  # {name: torch.Tensor, ...}
         self._is_timing = False
-        self._start_event = torch.cuda.Event(enable_timing=True)
-        self._end_event = torch.cuda.Event(enable_timing=True)
+
+        if self._device.type == 'cuda':
+            self._start_event = torch.cuda.Event(enable_timing=True)
+            self._end_event = torch.cuda.Event(enable_timing=True)
+        else:
+            self._start_event = time.time()
+            self._end_event = time.time()
         self._net_layers = dict()  # {cache_key: [dnnlib.EasyDict, ...], ...}
         self.manipulation = ManipulationLayer()
         self.pkl = ""
@@ -242,13 +248,19 @@ class Renderer:
 
     def render(self, **args):
         self._is_timing = True
-        self._start_event.record(torch.cuda.current_stream(self._device))
+        if self._device.type == 'cuda':
+            self._start_event.record()
+        else:
+            self._start_event = time.time()
         res = dnnlib.EasyDict()
         try:
             self._render_impl(res, **args)
         except:
             res.error = CapturedException()
-        self._end_event.record(torch.cuda.current_stream(self._device))
+        if self._device.type == 'cuda':
+            self._end_event.record()
+        else:
+            self._end_event = time.time()
         if 'image' in res:
             res.image = self.to_cpu(res.image).numpy()
         if 'stats' in res:
@@ -256,8 +268,11 @@ class Renderer:
         if 'error' in res:
             res.error = str(res.error)
         if self._is_timing:
-            self._end_event.synchronize()
-            res.render_time = self._start_event.elapsed_time(self._end_event) * 1e-3
+            # self._end_event.synchronize()
+            if self._device.type == 'cuda':
+                res.render_time = self._start_event.elapsed_time(self._end_event) * 1e-3
+            else:
+                res.render_time = (self._end_event - self._start_event)
             self._is_timing = False
         return res
 
@@ -474,7 +489,6 @@ class Renderer:
             # Generate random latents. Either project with intermediate mapping model or not
 
             if mode=="seed":
-                print("seed", seeds)
                 w0_seeds=[]
                 for ofs_x, ofs_y in [[0, 0], [1, 0], [0, 1], [1, 1]]:
                     seed_x = np.floor(seeds[0]) + ofs_x
@@ -649,7 +663,12 @@ class Renderer:
                 raise ValueError("Last entry should be either A or B but is: ", last_entry)
 
             model_out = custom_stylegan2.Generator(z_dim=self.G.z_dim, w_dim=self.G.w_dim, c_dim=self.G.c_dim, img_channels=self.G.img_channels,
-                                       img_resolution=img_resolution).cuda().eval()
+                                       img_resolution=img_resolution)
+
+            if self._device.type == "cuda":
+                model_out = model_out.cuda().eval()
+            else:
+                model_out = model_out.eval()
 
             dict_dest = model_out.state_dict()
             # depending on what model is used in the first entry extract the mapping layers from the corresponding model and copy them to the new model
@@ -747,7 +766,7 @@ class Renderer:
                 if isinstance(out, tuple):
                     out = out[0]
                 if use_superres:
-                    with torch.autocast("cuda"):
+                    with torch.autocast("cuda" if self._device.type == "cuda" else "cpu"):
                         out = super_res(out)
         except CaptureSuccess as e:
             out = e.out

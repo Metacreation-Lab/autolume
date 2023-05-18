@@ -34,6 +34,15 @@ class Menu:
 
     def __call__(self):
 
+        style = imgui.get_style()
+        imgui.begin("Color window")
+        imgui.columns(4)
+        for color in range(0, imgui.COLOR_COUNT):
+            imgui.text("Color: {}".format(color))
+            imgui.color_button("color#{}".format(color), *style.colors[color])
+            imgui.next_column()
+
+        imgui.end()
         # Make train and compress buttons call function as subprocess to avoid blocking
         # Begin control pane.
         imgui.set_next_window_position(0, 0)
