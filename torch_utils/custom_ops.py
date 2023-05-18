@@ -81,7 +81,8 @@ def get_plugin(module_name, sources, headers=None, source_dir=None, **build_kwar
         if os.name == 'nt' and os.system("where cl.exe >nul 2>nul") != 0:
             compiler_bindir = _find_compiler_bindir()
             if compiler_bindir is None:
-                raise RuntimeError(f'Could not find MSVC/GCC/CLANG installation on this computer. Check _find_compiler_bindir() in "{__file__}".')
+                print(f'Could not find MSVC/GCC/CLANG installation on this computer. Check _find_compiler_bindir() in "{__file__}".')
+                return False
             os.environ['PATH'] += ';' + compiler_bindir
 
         # Some containers set TORCH_CUDA_ARCH_LIST to a list that can either
@@ -129,7 +130,7 @@ def get_plugin(module_name, sources, headers=None, source_dir=None, **build_kwar
                 except OSError:
                     # source directory already exists, delete tmpdir and its contents.
                     shutil.rmtree(tmpdir)
-                    if not os.path.isdir(cached_build_dir): raise
+                    if not os.path.isdir(cached_build_dir): return False
 
             # Compile.
             cached_sources = [os.path.join(cached_build_dir, os.path.basename(fname)) for fname in sources]
@@ -144,7 +145,7 @@ def get_plugin(module_name, sources, headers=None, source_dir=None, **build_kwar
     except:
         if verbosity == 'brief':
             print('Failed!')
-        raise
+        return False
 
     # Print status and add to cache dict.
     if verbosity == 'full':

@@ -19,7 +19,7 @@ from . import bias_act
 #----------------------------------------------------------------------------
 
 _plugin = None
-_use_custom = False
+_use_custom = True
 
 def _init():
     global _plugin
@@ -32,6 +32,8 @@ def _init():
                 source_dir=os.path.dirname(__file__),
                 extra_cuda_cflags=['--use_fast_math', '--allow-unsupported-compiler'],
             )
+            if _plugin is None:
+                return False
         else:
             print('WARNING: Using slow reference implementation of filtered_lrelu(). Set torch_utils.ops.filtered_lrelu._use_custom = True to enable the fast CUDA implementation.')
             return False
