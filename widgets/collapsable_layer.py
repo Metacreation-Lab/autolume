@@ -81,7 +81,7 @@ class LayerWidget:
         self.simplified = True
 
         # read as rgba
-        self.edit_img = cv2.imread("misc/pen.png")
+        self.edit_img = cv2.imread("misc/folder.png")
         self.edit_img = cv2.cvtColor(self.edit_img, cv2.COLOR_BGR2RGBA)
 
         # in the alpha channel we put alpha to 0 where the image is black
@@ -89,7 +89,7 @@ class LayerWidget:
         self.edit_texture = gl_utils.Texture(image=self.edit_img, width=self.edit_img.shape[1],
                                              height=self.edit_img.shape[0], channels=self.edit_img.shape[2])
 
-        self.view_img = cv2.imread("misc/eye.png")
+        self.view_img = cv2.imread("misc/folder.png")
         self.view_img = cv2.cvtColor(self.view_img, cv2.COLOR_BGR2RGBA)
 
         # in the alpha channel we put alpha to 0 where the image is black
