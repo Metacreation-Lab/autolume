@@ -5,10 +5,13 @@
 # and any modifications thereto.  Any use, reproduction, disclosure or
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
+import os
 
 import numpy as np
 import torch
 import torch.nn.functional as F
+
+from widgets.browse_widget import BrowseWidget
 
 try:
     import cPickle as pickle
@@ -41,7 +44,11 @@ class LatentWidget:
                                          label="##LatentOSC")
         self.update = False
         self.latent_def = dnnlib.EasyDict(self.latent)
-        self.step_y     = 100
+        self.vec_path   = ""
+        self.vec_save_path = ""
+        self.file_dialog = BrowseWidget(viz, "Browse", os.path.abspath(os.getcwd()),
+                                      ["*", ".pth", ".pt", ".npy", ".npz", ],
+                                      width=self.viz.app.button_w, multiple=False, traverse_folders=False)
 
 
     def save(self, path):
@@ -58,20 +65,12 @@ class LatentWidget:
 
     def set_params(self, params):
         self.latent, osc_params = params
-        print("speed", self.latent.speed)
         self.osc_menu.set_params(osc_params)
 
         self.viz.args.mode = self.latent.mode
         self.viz.args.project = self.latent.project
-        self.viz.args.w0_seeds = []  # [[seed, weight], ...]
+        self.viz.args.seed = [self.latent.x, self.latent.y]  # [[seed, weight], ...]
         self.viz.args.vec = self.latent.vec.pin_memory()
-        for ofs_x, ofs_y in [[0, 0], [1, 0], [0, 1], [1, 1]]:
-            seed_x = np.floor(self.latent.x) + ofs_x
-            seed_y = np.floor(self.latent.y) + ofs_y
-            seed = (int(seed_x) + int(seed_y) * self.step_y) & ((1 << 31) - 1)
-            weight = (1 - abs(self.latent.x - seed_x)) * (1 - abs(self.latent.y - seed_y))
-            if weight > 0:
-                self.viz.args.w0_seeds.append([seed, weight])
 
     def drag(self, dx, dy):
         viz = self.viz
@@ -119,7 +118,6 @@ class LatentWidget:
         if _changed:
             self.latent.x = seed
             self.latent.y = 0
-            update_vec = True
         imgui.same_line()
         frac_x = self.latent.x - round(self.latent.x)
         frac_y = self.latent.y - round(self.latent.y)
@@ -133,6 +131,17 @@ class LatentWidget:
         _clicked, dragging, dx, dy = imgui_utils.drag_button('Drag', width=viz.app.button_w)
         if dragging:
             self.drag(dx, dy)
+        imgui.same_line()
+        if imgui_utils.button(f"{modes[self.latent.update_mode]}##latent"):
+            self.latent.update_mode = (self.latent.update_mode + 1) % len(modes)
+        imgui.same_line()
+        with imgui_utils.item_width(viz.app.button_w * 2 - viz.app.spacing * 2):
+            changed, speed = imgui.slider_float('##speed', self.latent.speed, -5, 5,
+                                                format='Speed %.3f',
+                                                power=3)
+            if changed:
+                self.latent.speed = speed
+                self.update = True
 
     def update_vec(self):
         viz = self.viz
@@ -152,6 +161,61 @@ class LatentWidget:
             self.latent.vec = torch.randn(self.latent.vec.shape)
             self.latent.next = torch.randn(self.latent.next.shape)
 
+        imgui.same_line()
+        if imgui_utils.button(f"{modes[self.latent.update_mode]}##latent"):
+            self.latent.update_mode = (self.latent.update_mode + 1) % len(modes)
+        imgui.same_line()
+        with imgui_utils.item_width(viz.app.button_w * 2 - viz.app.spacing * 2):
+            changed, speed = imgui.slider_float('##speed', self.latent.speed, -5, 5,
+                                                format='Speed %.3f',
+                                                power=3)
+            if changed:
+                self.latent.speed = speed
+                self.update = True
+
+        _changed, vec_path = imgui_utils.input_text("##vecpath", self.vec_path, 1024, width=viz.app.button_w, flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL, help_text="Load vector from file")
+        imgui.same_line()
+        if _changed:
+            # if the file exists and is a valid vector, load it
+            if os.path.exists(vec_path):
+                self.vec_path = vec_path
+        _clicked, paths = self.file_dialog()
+        if _clicked and len(paths) > 0:
+            self.vec_path = paths[0]
+            print("Selected vector at", self.vec_path)
+
+        imgui.same_line()
+        if imgui_utils.button("Load##vecmode", width=viz.app.button_w, enabled=self.vec_path is not None and self.vec_path != ''):
+            print("Loading vector from", self.vec_path)
+            if self.vec_path:
+                if self.vec_path.endswith('.npy'):
+                    self.latent.vec = torch.from_numpy(np.load(self.vec_path))
+                    if len(self.latent.vec.shape) == 1:
+                        self.latent.vec = self.latent.vec.unsqueeze(0)
+                elif self.vec_path.endswith('.pt'):
+                    self.latent.vec = torch.load(self.vec_path)
+                    if len(self.latent.vec.shape) == 1:
+                        self.latent.vec = self.latent.vec.unsqueeze(0)
+                else:
+                    print("Unsupported file format")
+                print("Loaded vector of shape", self.latent.vec.shape)
+                self.latent.next = torch.randn(self.latent.next.shape)
+
+
+        imgui.same_line()
+        _changed, self.vec_save_path = imgui_utils.input_text("##vecsavepath", self.vec_save_path, 1024, width=viz.app.button_w, flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL, help_text="Save vector to file")
+        imgui.same_line()
+        if imgui_utils.button("Save##vecmode", width=viz.app.button_w, enabled=self.vec_save_path != ''):
+            print("Saving vector to", self.vec_save_path)
+            if self.vec_save_path:
+                if self.vec_save_path.endswith('.npy'):
+                    np.save(self.vec_save_path, self.latent.vec.detach().cpu().numpy())
+                elif self.vec_save_path.endswith('.pt'):
+                    torch.save(self.latent.vec, self.vec_save_path)
+                else:
+                    print("Unsupported file format")
+
+
     @imgui_utils.scoped_by_object_id
     def __call__(self, show=True):
         viz = self.viz
@@ -163,7 +227,7 @@ class LatentWidget:
                     self.latent.mode = imgui.checkbox('Seed', self.latent.mode)[1]
                     imgui.same_line()
                     self.latent.mode = not (imgui.checkbox('Vector', not self.latent.mode)[1])
-                    viz.args.mode = self.latent.mode
+                    viz.args.mode = "seed" if self.latent.mode else "vec"
                     _clicked, self.latent.project = imgui.checkbox('Project', self.latent.project)
                     viz.args.project = self.latent.project
                     imgui.same_line()
@@ -171,17 +235,7 @@ class LatentWidget:
                         self.seed_viz()
                     else:
                         self.vec_viz()
-                    imgui.same_line()
-                    if imgui_utils.button(f"{modes[self.latent.update_mode]}##latent"):
-                        self.latent.update_mode = (self.latent.update_mode + 1) % len(modes)
-                    imgui.same_line()
-                    with imgui_utils.item_width(viz.app.button_w * 2 - viz.app.spacing * 2):
-                        changed, speed = imgui.slider_float('##speed', self.latent.speed, -5, 5,
-                                                            format='Speed %.3f',
-                                                            power=3)
-                        if changed:
-                            self.latent.speed = speed
-                            self.update = True
+
                 except Exception as e:
                     self.viz.print_error(e)
 
@@ -190,17 +244,13 @@ class LatentWidget:
                 if self.latent.update_mode in [1, 2] and self.update:
                     self.update_vec()
                 self.update = False
-        viz.args.w0_seeds = []  # [[seed, weight], ...]
+        viz.args.seeds = (self.latent.x, self.latent.y)
         viz.args.vec = self.latent.vec.pin_memory()
 
-        for ofs_x, ofs_y in [[0, 0], [1, 0], [0, 1], [1, 1]]:
-            seed_x = np.floor(self.latent.x) + ofs_x
-            seed_y = np.floor(self.latent.y) + ofs_y
-            seed = (int(seed_x) + int(seed_y) * self.step_y) & ((1 << 31) - 1)
-            weight = (1 - abs(self.latent.x - seed_x)) * (1 - abs(self.latent.y - seed_y))
-            if weight > 0:
-                viz.args.w0_seeds.append([seed, weight])
+
 
         self.osc_menu()
 
 #----------------------------------------------------------------------------
+
+

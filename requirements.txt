@@ -221,3 +221,5 @@ widgetsnbextension==3.6.1
 yarl==1.8.1
 yt-dlp==2022.9.1
 zipp==3.8.1
+
+clip~=0.2.0

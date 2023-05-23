@@ -8,9 +8,9 @@
 
 import sys
 import copy
+import time
 import traceback
-
-import kornia
+import re
 import numpy as np
 import torch
 import torch.fft
@@ -20,7 +20,13 @@ import dnnlib
 from bending.transform_layers import ManipulationLayer
 from torch_utils.ops import upfirdn2d
 import legacy  # pylint: disable=import-error
+from architectures import custom_stylegan2
 from net_base import SRVGGNetPlus
+from modules.network_mixing import extract_conv_names, extract_mapping_names
+import os
+import pickle
+
+import multiprocessing as mp
 
 super_res = SRVGGNetPlus(num_in_ch=3, num_out_ch=3, num_feat=48, upscale=4, act_type='prelu').eval().to('cuda')
 model_sd=torch.load('./sr_models/Fast.pt')
@@ -211,29 +217,51 @@ def slerp(t, v0, v1, DOT_THRESHOLD=0.9995):
     v2 = s0 * v0_copy + s1 * v1_copy
     return torch.from_numpy(v2)
 
+   
 
 class Renderer:
     def __init__(self):
-        self._device = torch.device('cuda')
+        self.step_y = 100
+        self._device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+        self.kernel_type = "cuda" if torch.cuda.is_available() else "cpu"
         self._pkl_data = dict()  # {pkl: dict | CapturedException, ...}
         self._networks = dict()  # {cache_key: torch.nn.Module, ...}
         self._pinned_bufs = dict()  # {(shape, dtype): torch.Tensor, ...}
         self._cmaps = dict()  # {name: torch.Tensor, ...}
         self._is_timing = False
-        self._start_event = torch.cuda.Event(enable_timing=True)
-        self._end_event = torch.cuda.Event(enable_timing=True)
+
+        if self._device.type == 'cuda':
+            self._start_event = torch.cuda.Event(enable_timing=True)
+            self._end_event = torch.cuda.Event(enable_timing=True)
+        else:
+            self._start_event = time.time()
+            self._end_event = time.time()
         self._net_layers = dict()  # {cache_key: [dnnlib.EasyDict, ...], ...}
         self.manipulation = ManipulationLayer()
+        self.pkl = ""
+        self.G = None
+        self.og_state = None
+        self.pkl2 = ""
+        self.G2 = None
+        self.G_mixed = None
+        self.combined_layers = []
+        self.model_changed = False
 
     def render(self, **args):
         self._is_timing = True
-        self._start_event.record(torch.cuda.current_stream(self._device))
+        if self._device.type == 'cuda':
+            self._start_event.record()
+        else:
+            self._start_event = time.time()
         res = dnnlib.EasyDict()
         try:
             self._render_impl(res, **args)
         except:
             res.error = CapturedException()
-        self._end_event.record(torch.cuda.current_stream(self._device))
+        if self._device.type == 'cuda':
+            self._end_event.record()
+        else:
+            self._end_event = time.time()
         if 'image' in res:
             res.image = self.to_cpu(res.image).numpy()
         if 'stats' in res:
@@ -241,8 +269,11 @@ class Renderer:
         if 'error' in res:
             res.error = str(res.error)
         if self._is_timing:
-            self._end_event.synchronize()
-            res.render_time = self._start_event.elapsed_time(self._end_event) * 1e-3
+            if self._device.type == 'cuda':
+                self._end_event.synchronize()
+                res.render_time = self._start_event.elapsed_time(self._end_event) * 1e-3
+            else:
+                res.render_time = (self._end_event - self._start_event)
             self._is_timing = False
         return res
 
@@ -263,9 +294,10 @@ class Renderer:
             raise data
 
         orig_net = data[key]
-        cache_key = (orig_net, self._device, tuple(sorted(tweak_kwargs.items())))
+        cache_key = (orig_net, self._device, self.kernel_type, tuple(sorted(tweak_kwargs.items())))
         net = self._networks.get(cache_key, None)
         if net is None:
+            print(f'Initializing network "{cache_key}"... ', end='', flush=True)
             try:
                 net = copy.deepcopy(orig_net)
                 net = net.to(self._device).eval().requires_grad_(False)
@@ -273,6 +305,8 @@ class Renderer:
                 net = CapturedException()
             self._networks[cache_key] = net
             self._ignore_timing()
+        else:
+            print(f'Network "{cache_key}" already initialized, reusing... ', end='', flush=True)
         if isinstance(net, CapturedException):
             raise net
         return net
@@ -308,14 +342,14 @@ class Renderer:
         x = torch.nn.functional.embedding(x, cmap)
         return x
 
-    def evaluate(self, G, looping_index, looping_seeds, looping_projections, trunc_psi, trunc_cutoff):
-        latent = looping_seeds[looping_index]
+    def process_seed(self, G, latent, project, trunc_psi, trunc_cutoff):
+        mapping_net = G.mapping
         w0_seeds = []
         for ofs_x, ofs_y in [[0, 0], [1, 0], [0, 1], [1, 1]]:
-            seed_x = np.floor(latent.x) + ofs_x
-            seed_y = np.floor(latent.y) + ofs_y
+            seed_x = np.floor(latent[0]) + ofs_x
+            seed_y = np.floor(latent[1]) + ofs_y
             seed = (int(seed_x) + int(seed_y) * 100) & ((1 << 32) - 1)
-            weight = (1 - abs(latent.x - seed_x)) * (1 - abs(latent.y - seed_y))
+            weight = (1 - abs(latent[0] - seed_x)) * (1 - abs(latent[1] - seed_y))
             if weight > 0:
                 w0_seeds.append([seed, weight])
         all_seeds = [seed for seed, _weight in w0_seeds]  # + [mappingmix_seed]
@@ -333,16 +367,16 @@ class Renderer:
             if G.c_dim > 0:
                 all_cs[idx, rnd.randint(G.c_dim)] = 1
 
-        if not looping_projections[looping_index]:
+        if not project:
             all_ws = self.to_device(torch.from_numpy(all_zs))
             all_ws = dict(zip(all_seeds, all_ws))
             w = torch.stack([all_ws[seed] * weight for seed, weight in w0_seeds]).sum(dim=0, keepdim=True)
         # Run mapping network.
         else:
-            w_avg = G.mapping.w_avg
+            w_avg = mapping_net.w_avg
             all_zs = torch.from_numpy(all_zs).to(self._device)#self.to_device(torch.from_numpy(all_zs))
             all_cs = torch.from_numpy(all_cs).to(self._device) #self.to_device(torch.from_numpy(all_cs))
-            all_ws = G.mapping(z=all_zs, c=all_cs, truncation_psi=trunc_psi,
+            all_ws = mapping_net(z=all_zs, c=all_cs, truncation_psi=trunc_psi,
                                truncation_cutoff=trunc_cutoff) - w_avg
             all_ws = dict(zip(all_seeds, all_ws))
             w = torch.stack([all_ws[seed] * weight for seed, weight in w0_seeds]).sum(dim=0, keepdim=True)
@@ -351,11 +385,10 @@ class Renderer:
 
     def _render_impl(self, res,
                      pkl=None,
-                     w0_seeds=[[0, 1]],
+                     pkl2=None,
+                     seeds=(1, 0),
                      vec=torch.randn(1, 512),
-                     stylemix_idx=[],
-                     stylemix_seed=0,
-                     mode=True,
+                     mode="seed",
                      project=True,
                      trunc_psi=1,
                      trunc_cutoff=0,
@@ -367,10 +400,6 @@ class Renderer:
                      base_channel=0,
                      img_scale_db=0,
                      img_normalize=False,
-                     fft_show=False,
-                     fft_all=True,
-                     fft_range_db=50,
-                     fft_beta=8,
                      input_transform=None,
                      untransform=False,
                      latent_transforms=[],
@@ -378,19 +407,82 @@ class Renderer:
                      ratios={},
                      direction=torch.zeros(512),
                      noise_adjustments=None,
-                     looping=False,
                      looping_index=0,
                      alpha=0,
-                     looping_modes=None,
-                     looping_seeds=None,
-                     looping_keyframes=None,
-                     looping_projections=None,
+                     looping_list=[],
                      use_superres=False,
                      global_noise=1,
+                     combined_layers = [],
+                     mixing = True,
+                     save_model = False,
+                     save_path = "",
+                     snapped=None,
+                     device="cuda"
                      ):
+
+        if device != self._device.type:
+            self.set_device(device)
+
+        if snapped is not None:
+            mode = snapped["mode"]
+
+            if "vec" in snapped:
+                vec = snapped["vec"]
+            if "seed" in snapped:
+                seed = snapped["seed"]
+            if "loop" in snapped:
+                looping_index = snapped["loop"]["looping_index"]
+                alpha = snapped["loop"]["alpha"]
+                looping_list = snapped["loop"]["looping_list"]
+
+
         with torch.inference_mode():
             # Dig up network details.
-            G = self.get_network(pkl, 'G_ema')
+            if not pkl is None:
+                if pkl != self.pkl:
+                    self.G = self.get_network(pkl, 'G_ema')
+                    self.pkl = pkl
+                    self.model_changed = True
+                else:
+                    self.model_changed = False
+
+            if not pkl2 is None:
+                if pkl2 != self.pkl2:
+                    self.G2 = self.get_network(pkl2, 'G_ema')
+                    self.pkl2 = pkl2
+                    self.model_changed = True
+                else:
+                    self.model_changed = False
+            if self.G is not None:
+                res.g1_layers = self.get_layers(self.G.synthesis)
+            if self.G2 is not None:
+                res.g2_layers = self.get_layers(self.G2.synthesis)
+
+            if not (combined_layers == self.combined_layers):
+                if not self.og_state is None:
+                    self.G.synthesis.state_dict().update(self.og_state)
+                    self.G.synthesis.load_state_dict(self.og_state)
+                self.combined_layers = combined_layers
+                self.model_changed = True
+
+            self.to_device(self.G)
+            G = self.G
+            
+            if save_model:
+                data = self._pkl_data[pkl]
+                data['G_ema'] = self.G_mixed
+                data['G'] = self.G_mixed
+                
+                with open(os.path.join(os.getcwd(),"models",save_path+".pkl"), 'wb') as f:
+                    pickle.dump(data, f)
+
+            if mixing and not (self.G_mixed is None):
+                self.to_device(self.G_mixed)
+                G = self.G_mixed
+
+
+            mapping_net = G.mapping
+        
             res.img_resolution = G.img_resolution
             res.num_ws = G.num_ws
             res.has_noise = any('noise_const' in name for name, _buf in G.synthesis.named_buffers())
@@ -407,75 +499,84 @@ class Renderer:
                 G.synthesis.input.transform.copy_(torch.from_numpy(m))
 
             # Generate random latents. Either project with intermediate mapping model or not
-            if not looping:
-                if mode:
-                    all_seeds = [seed for seed, _weight in w0_seeds]  # + [stylemix_seed]
-                    all_seeds = list(set(all_seeds))
-                    all_cs = np.zeros([len(all_seeds), G.c_dim], dtype=np.float32)
-                    all_zs = np.zeros([len(all_seeds), G.z_dim], dtype=np.float32)
-                    for idx, seed in enumerate(all_seeds):
-                        rnd = np.random.RandomState(seed)
-                        all_zs[idx] = rnd.randn(G.z_dim)
-                        if G.c_dim > 0:
-                            all_cs[idx, rnd.randint(G.c_dim)] = 1
 
-                    if not project:
-                        all_ws = self.to_device(torch.from_numpy(all_zs))
-                        all_ws = dict(zip(all_seeds, all_ws))
-                        w = torch.stack([all_ws[seed] * weight for seed, weight in w0_seeds]).sum(dim=0, keepdim=True)
-                    # Run mapping network.
-                    else:
-                        w_avg = G.mapping.w_avg
-                        all_zs = self.to_device(torch.from_numpy(all_zs))
-                        all_cs = self.to_device(torch.from_numpy(all_cs))
-                        all_ws = G.mapping(z=all_zs, c=all_cs, truncation_psi=trunc_psi,
-                                           truncation_cutoff=trunc_cutoff) - w_avg
-                        all_ws = dict(zip(all_seeds, all_ws))
-                        w = torch.stack([all_ws[seed] * weight for seed, weight in w0_seeds]).sum(dim=0, keepdim=True)
-                        w += w_avg
+            if mode=="seed":
+                w0_seeds=[]
+                for ofs_x, ofs_y in [[0, 0], [1, 0], [0, 1], [1, 1]]:
+                    seed_x = np.floor(seeds[0]) + ofs_x
+                    seed_y = np.floor(seeds[1]) + ofs_y
+                    seed = (int(seed_x) + int(seed_y) * self.step_y) & ((1 << 31) - 1)
+                    weight = (1 - abs(seeds[0] - seed_x)) * (1 - abs(seeds[1] - seed_y))
+                    if weight > 0:
+                        w0_seeds.append([seed, weight])
 
-                else:
-                    try:
-                        all_cs = np.zeros([len(vec), G.c_dim], dtype=np.float32)
-                        w = self.to_device(vec)
-                        if project:
-                            w = G.mapping(z=w, c=all_cs, truncation_psi=trunc_psi, truncation_cutoff=trunc_cutoff)
-                    except Exception as e:
-                        print(e)
+                res.snap = {"mode": 0, "snap": seeds}
+                all_seeds = [seed for seed, _weight in w0_seeds]  # + [stylemix_seed]
+                all_seeds = list(set(all_seeds))
+                all_cs = np.zeros([len(all_seeds), G.c_dim], dtype=np.float32)
+                all_zs = np.zeros([len(all_seeds), G.z_dim], dtype=np.float32)
+                for idx, seed in enumerate(all_seeds):
+                    rnd = np.random.RandomState(seed)
+                    all_zs[idx] = rnd.randn(G.z_dim)
+                    if G.c_dim > 0:
+                        all_cs[idx, rnd.randint(G.c_dim)] = 1
 
                 if not project:
-                    w = w.repeat(G.num_ws, 1).unsqueeze(0)
-            else:
-                if looping_modes[looping_index - 1]:
-                    v0 = self.evaluate(G, looping_index - 1, looping_seeds, looping_projections, trunc_psi,
-                                       trunc_cutoff)
+                    all_ws = self.to_device(torch.from_numpy(all_zs))
+                    all_ws = dict(zip(all_seeds, all_ws))
+                    w = torch.stack([all_ws[seed] * weight for seed, weight in w0_seeds]).sum(dim=0, keepdim=True)
+                # Run mapping network.
                 else:
-                    v0 = self.to_device(looping_keyframes[looping_index - 1][None])
-                    all_cs = np.zeros([len(v0), G.c_dim], dtype=np.float32)
-                    if looping_projections[looping_index - 1]:
-                        v0 = G.mapping(v0, all_cs)
+                    w_avg = mapping_net.w_avg
+                    all_zs = self.to_device(torch.from_numpy(all_zs))
+                    all_cs = self.to_device(torch.from_numpy(all_cs))
+                    all_ws = mapping_net(z=all_zs, c=all_cs, truncation_psi=trunc_psi,
+                                       truncation_cutoff=trunc_cutoff) - w_avg
+                    all_ws = dict(zip(all_seeds, all_ws))
+                    w = torch.stack([all_ws[seed] * weight for seed, weight in w0_seeds]).sum(dim=0, keepdim=True)
+                    w += w_avg
 
-                if looping_modes[looping_index]:
-                    v1 = self.evaluate(G, looping_index, looping_seeds, looping_projections, trunc_psi, trunc_cutoff)
+                if not project:
+                    if len(w.shape) == 2 and w.shape[0] != G.num_ws:
+                        w = w.repeat(G.num_ws, 1).unsqueeze(0)
+
+            elif mode == "vec":
+                res.snap = {"mode": 1, "snap": vec}
+
+                if len(vec.shape) == 1:
+                    vec = vec.unsqueeze(0)
+                elif len(vec.shape) == 2:
+                    if vec.shape[0] == 1:
+                        try:
+                            all_cs = np.zeros([len(vec), G.c_dim], dtype=np.float32)
+                            w = self.to_device(vec)
+                            if project:
+                                w = mapping_net(z=w, c=all_cs, truncation_psi=trunc_psi, truncation_cutoff=trunc_cutoff)
+                        except Exception as e:
+                            print(e)
+                    else:
+                        w = self.to_device(vec.unsqueeze(0))
+
                 else:
-                    v1 = self.to_device(looping_keyframes[looping_index][None])
-                    all_cs = np.zeros([len(v1), G.c_dim], dtype=np.float32)
-                    if looping_projections[looping_index]:
-                        v1 = G.mapping(v1, all_cs)
-                if len(v0.shape) == 2:
-                    v0 = v0.repeat(G.num_ws, 1).unsqueeze(0)
-                if len(v1.shape) == 2:
-                    v1 = v1.repeat(G.num_ws, 1).unsqueeze(0)
-                w = self.to_device(slerp(alpha, v0, v1))
+                    w = self.to_device(vec)
+
+                if not project:
+                    if len(w.shape) == 2 and w.shape[0] != G.num_ws:
+                        w = w.repeat(G.num_ws, 1).unsqueeze(0)
+
+            elif mode == "loop":
+                res.snap = {"mode": 2, "snap": {"looping_list": looping_list, "index": looping_index, "alpha": alpha}}
+                w = self.to_device(self.process_loop(G, looping_list, looping_index, alpha, trunc_psi, trunc_cutoff))
 
             # Run synthesis network.
             synthesis_kwargs = dnnlib.EasyDict(noise_mode=noise_mode, force_fp32=force_fp32)
             torch.manual_seed(random_seed)
             w += self.to_device(direction)
-            out, manip_layers = self.run_synthesis_net(G.synthesis, w, capture_layer=layer_name, transforms=latent_transforms,
+            out, manip_layers, = self.run_synthesis_net( w, capture_layer=layer_name, transforms=latent_transforms,
                                                  adjustments=adjustments, noise_adjustments=noise_adjustments, ratios=ratios, use_superres=use_superres,global_noise=global_noise,
+                                                 combined_layers=combined_layers,mixing=mixing,
                                                  **synthesis_kwargs)
-            res.snap = self.to_cpu(w).squeeze()[0]
+
 
             # Update layer list.
             cache_key = (G.synthesis, tuple(sorted(synthesis_kwargs.items())))
@@ -484,7 +585,7 @@ class Renderer:
                 layers = manip_layers
                 if layer_name is not None:
                     torch.manual_seed(random_seed)
-                    _out, layers = self.run_synthesis_net(G.synthesis, w, use_superres=False,**synthesis_kwargs)
+                    _out, layers = self.run_synthesis_net( w, use_superres=False,combined_layers=combined_layers, mixing=mixing, **synthesis_kwargs)
                 self._net_layers[cache_key] = layers
                 del layers
 
@@ -515,13 +616,18 @@ class Renderer:
             img = img * (10 ** (img_scale_db / 20))
             img = (img * 127.5 + 128).clamp(0, 255).to(torch.uint8).permute(1, 2, 0)
             res.image = img
+            
 
             del img
             del manip_layers
             del out # Free up GPU memory.
+            
+    def get_layers(self, net):
+        return [name for name, weight in net.named_parameters()]
+        
 
-    def run_synthesis_net(self, net, *args, capture_layer=None, transforms=None, ratios=None, adjustments=None,
-                          noise_adjustments=None, use_superres=False, global_noise=1, **kwargs):
+    def run_synthesis_net(self,*args, capture_layer=None, transforms=None, ratios=None, adjustments=None,
+                          noise_adjustments=None, use_superres=False, global_noise=1, combined_layers=[], mixing=False, **kwargs):
         """
         Run the synthesis network and capture the output of a specific layer.
         :param net: Synthesis model
@@ -534,6 +640,9 @@ class Renderer:
         :param kwargs: further synthesis kwargs
         :return: img and dict of layers
         """
+        net = self.G.synthesis
+        if mixing and not(self.G_mixed is None):
+            net = self.G_mixed.synthesis
         if noise_adjustments is None:
             noise_adjustments = {}
         if adjustments is None:
@@ -544,7 +653,56 @@ class Renderer:
             transforms = []
         submodule_names = {mod: name for name, mod in net.named_modules()}
         unique_names = set()
-        layers = []
+        layers = []        
+        if not (self.G2 is None) and self.model_changed and len(combined_layers):
+            net_state = self.G.state_dict()
+            net2_state = self.G2.state_dict() 
+            
+            last_index = 0
+            for i, entry in enumerate(combined_layers):
+                if entry != "" and entry != "X":
+                    last_index = i
+            last_entry = {self.combined_layers[last_index]: last_index}
+
+            layer1 = extract_conv_names(self.G)      
+            layer2 = extract_conv_names(self.G2) 
+            if last_entry.keys() == {"A"}:
+                # get resolution through regex from last entry
+                img_resolution = int(re.search(r'\d+', layer1[last_entry["A"]]).group())
+            elif last_entry.keys() == {"B"}:
+                img_resolution = int(re.search(r'\d+', layer2[last_entry["B"]]).group())
+            else:
+                raise ValueError("Last entry should be either A or B but is: ", last_entry)
+
+            model_out = custom_stylegan2.Generator(z_dim=self.G.z_dim, w_dim=self.G.w_dim, c_dim=self.G.c_dim, img_channels=self.G.img_channels,
+                                       img_resolution=img_resolution)
+
+            dict_dest = model_out.state_dict()
+            # depending on what model is used in the first entry extract the mapping layers from the corresponding model and copy them to the new model
+            if self.combined_layers[0] == "A":
+                print("MAPPING A")
+                mapping_names = extract_mapping_names(self.G)
+                for name in mapping_names:
+                    dict_dest[name] = net_state[name]
+            elif self.combined_layers[0] == "B":
+                print("MAPPING B")
+                mapping_names = extract_mapping_names(self.G2)
+                for name in mapping_names:
+                    dict_dest[name] = net2_state[name]
+
+            # iterate over self.combine_channels and copy weights from self.pkl1 or self.pkl2 depending on the value
+
+            for i, entry in enumerate(self.combined_layers):
+                if entry == "A":
+                    dict_dest[layer1[i]] =net_state[layer1[i]]
+                elif entry == "B":
+                    dict_dest[layer2[i]] = net2_state[layer2[i]]
+
+            model_out_dict = model_out.state_dict()
+            model_out_dict.update(dict_dest)
+            model_out.load_state_dict(dict_dest)
+            self.G_mixed = model_out
+                
         def adjustment_hook(module, inputs):
             #pre forward hook to add adjustments to the latent vector and resize input to fit ratio
             inps = []
@@ -607,7 +765,6 @@ class Renderer:
                 layers.append(dnnlib.EasyDict(name=name, shape=shape, dtype=dtype))
                 if name == capture_layer:
                     raise CaptureSuccess(out)
-
         hooks = [module.register_forward_hook(module_hook) for module in net.modules()]
         hooks.extend([module.register_forward_pre_hook(adjustment_hook) for module in net.modules()])
         try:
@@ -616,13 +773,62 @@ class Renderer:
                 if isinstance(out, tuple):
                     out = out[0]
                 if use_superres:
-                    with torch.autocast("cuda"):
+                    with torch.autocast("cuda" if self._device.type == "cuda" else "cpu"):
                         out = super_res(out)
-                print("out, ", out.shape)
         except CaptureSuccess as e:
             out = e.out
         for hook in hooks:
             hook.remove()
-        return out, layers
+        return out, layers 
 
 # ----------------------------------------------------------------------------
+    def process_loop(self, G, looping_list, looping_index, alpha, trunc_psi, trunc_cutoff):
+        v0 = self.evaluate(G, looping_list[looping_index-1], trunc_psi, trunc_cutoff)
+        v1 = self.evaluate(G, looping_list[looping_index], trunc_psi, trunc_cutoff)
+        return slerp(alpha, v0, v1)
+
+    def evaluate(self, G, keyframe, trunc_psi, trunc_cutoff):
+        if keyframe["mode"] == "seed":
+            return self.process_seed(G, keyframe["latent"], keyframe["project"], trunc_psi, trunc_cutoff)
+        elif keyframe["mode"] == "vec":
+            return self.process_vec(G, keyframe["latent"], keyframe["project"], trunc_psi, trunc_cutoff)
+        elif keyframe["mode"] == "loop":
+            return self.process_loop(G, keyframe["looping_list"], keyframe["looping_index"], keyframe["alpha"], trunc_psi, trunc_cutoff)
+
+    def process_vec(self, G, latent, project, trunc_psi, trunc_cutoff):
+        mapping_net = G.mapping
+        latent = self.to_device(latent[None, ...])
+        if project:
+            all_cs = np.zeros([len(latent), G.c_dim], dtype=np.float32)
+            latent = mapping_net(latent, all_cs, truncation_psi=trunc_psi,
+                               truncation_cutoff=trunc_cutoff)
+
+        if len(latent.shape) == 2:
+            latent = latent.repeat(G.num_ws, 1).unsqueeze(0)
+
+        return latent
+
+    def set_device(self, device):
+        if device != self.kernel_type:
+            print(f"Switching to {device}")
+            self.kernel_type = device
+            self._device = torch.device("cuda" if device == "custom" else device)
+            if self._device.type == 'cuda':
+                self._start_event = torch.cuda.Event(enable_timing=True)
+                self._end_event = torch.cuda.Event(enable_timing=True)
+                self._start_event.record()
+                self._end_event.record()
+            else:
+                self._start_event = time.time()
+                self._end_event = time.time()
+
+            if self.pkl != "":
+                self.G = self.get_network(self.pkl, 'G_ema')
+                self.model_changed = True
+
+            if self.G2 is not None:
+                self.G2 = self.get_network(self.pkl2, 'G_ema')
+                self.model_changed = True
+
+
+

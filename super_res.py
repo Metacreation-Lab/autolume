@@ -67,10 +67,9 @@ class Writer:
 
     def __init__(self, args, audio, height, width, video_save_path, fps):
         print("SAVING VIDEO TO: ", video_save_path)
-        if args.out_width is None and args.out_height is None:
+        if args.scale_mode:
           out_width, out_height = int(width * args.outscale), int(height * args.outscale)
-
-        else: 
+        else:
           assert (args.out_width is not None and args.out_height is not None) # width and height should be specify together
 
           out_width, out_height = int(args.out_width), int(args.out_width)
@@ -88,8 +87,8 @@ class Writer:
                                      pipe_stdin=True, pipe_stdout=True,cmd='ffmpeg'))
         else:
             self.stream_writer = (
-                ffmpeg.input('pipe:', format='rawvideo', 
-                pix_fmt='bgr24', 
+                ffmpeg.input('pipe:', format='rawvideo',
+                pix_fmt='bgr24',
                 s=f'{out_width}x{out_height}',
                              framerate=fps).output(
                                  video_save_path, pix_fmt='yuv420p',vcodec='libx264',
@@ -149,6 +148,7 @@ def process(args,file):
 
     cap = cv2.VideoCapture(file)
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    print("Framecount",frame_count)
     pbar = tqdm(total=frame_count, unit='frame', desc='inference')
 
     fps = cap.get(cv2.CAP_PROP_FPS)

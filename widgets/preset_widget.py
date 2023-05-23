@@ -1,6 +1,7 @@
 import os
 import imgui
 from utils.gui_utils import imgui_utils
+from widgets.browse_widget import BrowseWidget
 
 
 
@@ -20,6 +21,9 @@ class PresetWidget:
         self.recent_paths = [self.path]
         self.use_osc = False
         self.osc_addresses = ""
+        self.browser = BrowseWidget(self.viz, "Preset Path##presetwidget", os.path.abspath(os.getcwd()), [""], width=viz.app.font_size * 10, multiple=False, traverse_folders=False)
+
+
 
     def check_presets(self):
         if not os.path.exists(self.path):
@@ -92,11 +96,11 @@ class PresetWidget:
                 if self.active.any():
                     self.save(self.paths[np.where(self.active)].item())
                     self.assigned[np.where(self.active)] = 0
+            _clicked, file_out = self.browser()
 
-            changed, self.tmp_path = imgui_utils.input_text(f"Preset Path##presetpath",
-                                                            self.tmp_path, 256, width=viz.app.font_size * 10,
-                                                            flags=0,
-                                                            help_text="Preset Path")
+            if _clicked:
+                self.tmp_path = file_out[0]
+
             imgui.same_line()
             if imgui_utils.button('Recent...##presets', width=viz.app.button_w, enabled=(len(self.recent_paths) != 0)):
                 imgui.open_popup('recent_preset_popup')
