@@ -5,6 +5,10 @@
 # and any modifications thereto.  Any use, reproduction, disclosure or
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
+import re
+
+import cv2
+
 try:
     import cPickle as pickle
 except ModuleNotFoundError:
@@ -20,7 +24,7 @@ import torch
 import yaml
 
 import dnnlib
-from utils.gui_utils import imgui_utils
+from utils.gui_utils import imgui_utils, gl_utils
 
 # ----------------------------------------------------------------------------
 
@@ -67,18 +71,36 @@ class LayerWidget:
         self.names = []
         self.has_transforms = {}
         self.imgui_ids = set()
-        self.capture_layer = "output" # which layer should be captured and rendered
-        self.cached_adjustments = {} # cached adjustments for each layer that will be applied to latent vectors (currently not doing anything)
-        self.noises = {} # noise strength for each layer
-        self.ratios = {} # ratio of activations for each layer
-        self.paths = {} # path to vectors for adjustments (currently not doing anything)
+        self.capture_layer = "output"  # which layer should be captured and rendered
+        self.cached_adjustments = {}  # cached adjustments for each layer that will be applied to latent vectors (currently not doing anything)
+        self.noises = {}  # noise strength for each layer
+        self.ratios = {}  # ratio of activations for each layer
+        self.paths = {}  # path to vectors for adjustments (currently not doing anything)
         self.capture_channels = 0
         self.tab = False
+        self.simplified = True
+
+        # read as rgba
+        self.edit_img = cv2.imread("misc/pen.png")
+        self.edit_img = cv2.cvtColor(self.edit_img, cv2.COLOR_BGR2RGBA)
+
+        # in the alpha channel we put alpha to 0 where the image is black
+        self.edit_img[:, :, 3] = (self.edit_img[:, :, 0] != 0) * 255
+        self.edit_texture = gl_utils.Texture(image=self.edit_img, width=self.edit_img.shape[1],
+                                             height=self.edit_img.shape[0], channels=self.edit_img.shape[2])
+
+        self.view_img = cv2.imread("misc/eye.png")
+        self.view_img = cv2.cvtColor(self.view_img, cv2.COLOR_BGR2RGBA)
+
+        # in the alpha channel we put alpha to 0 where the image is black
+        self.view_img[:, :, 3] = (self.view_img[:, :, 0] != 0) * 255
+        self.view_texture = gl_utils.Texture(image=self.view_img, width=self.view_img.shape[1],
+                                             height=self.view_img.shape[0], channels=self.view_img.shape[2])
 
     def get_params(self):
         return self.mode, self.cached_transforms, self.names, self.has_transforms, self.cached_adjustments, \
-               self.noises, self.ratios, self.paths, self.imgui_ids, self.capture_layer, self.capture_channels, \
-               self.tab, self.img_scale_db, self.img_normalize
+            self.noises, self.ratios, self.paths, self.imgui_ids, self.capture_layer, self.capture_channels, \
+            self.tab, self.img_scale_db, self.img_normalize
 
     def set_params(self, param):
         self.mode, cached_transforms, self.names, self.has_transforms, cached_adjustments, noises, self.ratios, self.paths, self.imgui_ids, self.capture_layer, self.capture_channels, self.tab, self.img_scale_db, self.img_normalize = param
@@ -149,48 +171,178 @@ class LayerWidget:
             imgui.push_style_color(imgui.COLOR_HEADER, 0, 0, 0, 0)
             imgui.push_style_color(imgui.COLOR_HEADER_HOVERED, 0.16, 0.29, 0.48, 0.5)
             imgui.push_style_color(imgui.COLOR_HEADER_ACTIVE, 0.16, 0.29, 0.48, 0.9)
+
             imgui.begin_child('##list', width=width, height=height, border=True,
                               flags=imgui.WINDOW_ALWAYS_VERTICAL_SCROLLBAR)
-
-            # List items.
+            if imgui_utils.button("Simple", width=(width // 2) - (viz.app.spacing * 3), enabled=not self.simplified):
+                self.simplified = True
+            imgui.same_line()
+            if imgui_utils.button("Advanced", width=(width // 2) - (viz.app.spacing * 3), enabled=self.simplified):
+                self.simplified = False
+            imgui.separator()
             checkbox_size = viz.app.font_size + viz.app.spacing * 2
             draw_list = imgui.get_window_draw_list()
-            for layer in layers:
-                if layer.name == 'output' or 'conv' in layer.name or "torgb" in layer.name:
-                    draw_list.channels_split(2)
-                    draw_list.channels_set_current(1)
-                    selected = (self.cur_layer == layer.name)
-                    clicked, state = imgui.checkbox(f"##{layer.name}", self.capture_layer == layer.name)
-                    if clicked and not self.capture_layer == layer.name:
-                        self.capture_layer = layer.name
-                        self.capture_channels = layer.shape[1]
-                    imgui.same_line(viz.app.font_size + viz.app.spacing * 1.5)
-                    imgui.text("|")
-                    imgui.same_line(checkbox_size + viz.app.spacing)
-                    _opened, selected = imgui.selectable(f'##{layer.name}_selectable', width=width - viz.app.button_w,
-                                                         selected=selected)
-                    if self.has_transforms[layer.name] \
-                            and not selected and not imgui.is_item_active():
-                        draw_list.channels_set_current(0)
-                        selectable_color(0.16, 0.48, 0.29, 0.5)
-                    imgui.same_line(checkbox_size + viz.app.spacing)
-                    _clicked, selected = imgui.checkbox(f'{layer.name}##radio', selected)
-                    if selected:
-                        self.cur_layer = layer.name
-                        self.cur_channels = layer.shape[1]
-                        if self.refocus:
-                            imgui.set_scroll_here()
-                            viz.app.skip_frame()  # Focus will change on next frame.
-                            self.refocus = False
-                    draw_list.channels_merge()
-                    imgui.same_line(width - viz.app.font_size * 13)
-                    imgui.text_colored('x'.join(str(x) for x in layer.shape[2:]), *dim_color)
-                    imgui.same_line(width - viz.app.font_size * 8)
-                    imgui.text_colored(str(layer.shape[1]), *dim_color)
-                    imgui.same_line(width - viz.app.font_size * 5)
-                    imgui.text_colored(layer.dtype, *dim_color)
+            # List items.
+            if self.simplified:
+                resolution = 4
+                for layer in layers:
+                    if 'conv' in layer.name or "torgb" in layer.name:
+                        res = int(re.search(r'\d+', layer.name).group())
+                        if res == resolution:
+                            resolution *= 2
+                            draw_list.channels_split(2)
+                            draw_list.channels_set_current(1)
+                            selected = (self.cur_layer == layer.name)
+                            clicked, state = imgui_utils.img_checkbox(self.view_texture.gl_id,
+                                                                      self.capture_layer == f"b{res}.torgb",
+                                                                      width=checkbox_size // 2)
+                            if clicked and not self.capture_layer == layer.name:
+                                self.capture_layer = f"b{res}.torgb"
+                                for ltmp in layers:
+                                    if ltmp.name == self.capture_layer:
+                                        self.capture_channels = ltmp.shape[1]
+                            # imgui.same_line(viz.app.font_size + viz.app.spacing * 1.5)
+                            imgui.set_cursor_pos([imgui.get_cursor_pos()[0] + viz.app.font_size + viz.app.spacing // 2,
+                                                  imgui.get_cursor_pos()[1]])
+                            imgui.text("|")
+                            imgui.same_line(checkbox_size + viz.app.spacing)
+                            _opened, selected = imgui.selectable(f'##{layer.name}_selectable',
+                                                                 width=width - viz.app.button_w,
+                                                                 selected=selected)
+                            if self.has_transforms[layer.name] and not imgui.is_item_active():
+                                draw_list.channels_set_current(0)
+                                selectable_color(0.16, 0.48, 0.29, 0.5)
+                            if layer.name in self.noises and not imgui.is_item_active():
+                                if self.noises[layer.name]["strength"] != 0:
+                                    draw_list.channels_set_current(0)
+                                    selectable_color(0.48, 0.48, 0.29, 0.5)
+                            if layer.name in self.noises and self.has_transforms[
+                                layer.name] and not imgui.is_item_active():
+                                if self.noises[layer.name]["strength"] != 0:
+                                    draw_list.channels_set_current(0)
+                                    selectable_color(0.48, 0.16, 0.29, 0.5)
+                            imgui.same_line(checkbox_size + viz.app.spacing)
+                            _clicked, selected = imgui_utils.img_checkbox(self.edit_texture.gl_id,
+                                                                          selected, width=checkbox_size // 2,
+                                                                          label=layer.name)
+                            if selected:
+                                self.cur_layer = layer.name
+                                self.cur_channels = layer.shape[1]
+                                if self.refocus:
+                                    imgui.set_scroll_here()
+                                    viz.app.skip_frame()  # Focus will change on next frame.
+                                    self.refocus = False
+                            draw_list.channels_merge()
+                            imgui.same_line(width - viz.app.font_size * 13)
+                            imgui.text_colored('x'.join(str(x) for x in layer.shape[2:]), *dim_color)
+                            imgui.same_line(width - viz.app.font_size * 8)
+                            imgui.text_colored(str(layer.shape[1]), *dim_color)
+                            imgui.same_line(width - viz.app.font_size * 5)
+                            imgui.text_colored(layer.dtype, *dim_color)
 
-                    self.has_transforms[layer.name] = False
+                            self.has_transforms[layer.name] = False
+                    if layer.name == "output":
+                        draw_list.channels_split(2)
+                        draw_list.channels_set_current(1)
+                        selected = (self.cur_layer == layer.name)
+                        clicked, state = imgui_utils.img_checkbox(self.view_texture.gl_id,
+                                                                  self.capture_layer == layer.name,
+                                                                  width=checkbox_size // 2)
+                        if clicked and not self.capture_layer == layer.name:
+                            self.capture_layer = layer.name
+                            self.capture_channels = layer.shape[1]
+                        imgui.set_cursor_pos([imgui.get_cursor_pos()[0] + viz.app.font_size + viz.app.spacing // 2,
+                                              imgui.get_cursor_pos()[1]])
+                        imgui.text("|")
+                        imgui.same_line(checkbox_size + viz.app.spacing)
+                        _opened, selected = imgui.selectable(f'##{layer.name}_selectable',
+                                                             width=width - viz.app.button_w,
+                                                             selected=selected)
+                        if self.has_transforms[layer.name] and not imgui.is_item_active():
+                            draw_list.channels_set_current(0)
+                            selectable_color(0.16, 0.48, 0.29, 0.5)
+                        if layer.name in self.noises and not imgui.is_item_active():
+                            if self.noises[layer.name]["strength"] != 0:
+                                draw_list.channels_set_current(0)
+                                selectable_color(0.48, 0.48, 0.29, 0.5)
+                        if layer.name in self.noises and self.has_transforms[
+                            layer.name] and not imgui.is_item_active():
+                            if self.noises[layer.name]["strength"] != 0:
+                                draw_list.channels_set_current(0)
+                                selectable_color(0.48, 0.16, 0.29, 0.5)
+
+                        imgui.same_line(checkbox_size + viz.app.spacing)
+                        _clicked, selected = imgui_utils.img_checkbox(self.edit_texture.gl_id,
+                                                                      selected, width=checkbox_size // 2,
+                                                                      label=layer.name)
+                        if selected:
+                            self.cur_layer = layer.name
+                            self.cur_channels = layer.shape[1]
+                            if self.refocus:
+                                imgui.set_scroll_here()
+                                viz.app.skip_frame()  # Focus will change on next frame.
+                                self.refocus = False
+                        draw_list.channels_merge()
+                        imgui.same_line(width - viz.app.font_size * 13)
+                        imgui.text_colored('x'.join(str(x) for x in layer.shape[2:]), *dim_color)
+                        imgui.same_line(width - viz.app.font_size * 8)
+                        imgui.text_colored(str(layer.shape[1]), *dim_color)
+                        imgui.same_line(width - viz.app.font_size * 5)
+                        imgui.text_colored(layer.dtype, *dim_color)
+
+                        self.has_transforms[layer.name] = False
+            else:
+                for layer in layers:
+                    if layer.name == 'output' or 'conv' in layer.name or "torgb" in layer.name:
+                        draw_list.channels_split(2)
+                        draw_list.channels_set_current(1)
+                        selected = (self.cur_layer == layer.name)
+                        clicked, state = imgui_utils.img_checkbox(self.view_texture.gl_id,
+                                                                  self.capture_layer == layer.name,
+                                                                  width=checkbox_size // 2)
+                        if clicked and not self.capture_layer == layer.name:
+                            self.capture_layer = layer.name
+                            self.capture_channels = layer.shape[1]
+                        imgui.set_cursor_pos([imgui.get_cursor_pos()[0] + viz.app.font_size + viz.app.spacing // 2,
+                                              imgui.get_cursor_pos()[1]])
+                        imgui.text("|")
+                        imgui.same_line(checkbox_size + viz.app.spacing)
+                        _opened, selected = imgui.selectable(f'##{layer.name}_selectable',
+                                                             width=width - viz.app.button_w,
+                                                             selected=selected)
+                        if self.has_transforms[layer.name] and not imgui.is_item_active():
+                            draw_list.channels_set_current(0)
+                            selectable_color(0.16, 0.48, 0.29, 0.5)
+                        if layer.name in self.noises and not imgui.is_item_active():
+                            if self.noises[layer.name]["strength"] != 0:
+                                draw_list.channels_set_current(0)
+                                selectable_color(0.48, 0.48, 0.29, 0.5)
+                        if layer.name in self.noises and self.has_transforms[
+                            layer.name] and not imgui.is_item_active():
+                            if self.noises[layer.name]["strength"] != 0:
+                                draw_list.channels_set_current(0)
+                                selectable_color(0.48, 0.16, 0.29, 0.5)
+
+                        imgui.same_line(checkbox_size + viz.app.spacing)
+                        _clicked, selected = imgui_utils.img_checkbox(self.edit_texture.gl_id,
+                                                                      selected, width=checkbox_size // 2,
+                                                                      label=layer.name)
+                        if selected:
+                            self.cur_layer = layer.name
+                            self.cur_channels = layer.shape[1]
+                            if self.refocus:
+                                imgui.set_scroll_here()
+                                viz.app.skip_frame()  # Focus will change on next frame.
+                                self.refocus = False
+                        draw_list.channels_merge()
+                        imgui.same_line(width - viz.app.font_size * 13)
+                        imgui.text_colored('x'.join(str(x) for x in layer.shape[2:]), *dim_color)
+                        imgui.same_line(width - viz.app.font_size * 8)
+                        imgui.text_colored(str(layer.shape[1]), *dim_color)
+                        imgui.same_line(width - viz.app.font_size * 5)
+                        imgui.text_colored(layer.dtype, *dim_color)
+
+                        self.has_transforms[layer.name] = False
 
             # End list.
             if len(layers) == 0:
@@ -224,15 +376,13 @@ class LayerWidget:
                             _, ratio = imgui.input_float2(f"Ratio##{self.cur_layer}ratio", *ratio, format='%.2f',
                                                           flags=imgui.INPUT_TEXT_ENTER_RETURNS_TRUE)
 
-                # if imgui_utils.button(f"{label}##adjust", width=-1):
-                #     self.mode = not self.mode
                 if len(layers) > 0:
-                    # if self.mode:
                     self.transform_widget(layers)
-                    # else:
-                    #     self.adjust_widget(layers)
             else:
                 self.adjust_noise()
+                for i, trans in enumerate(self.cached_transforms):
+                    if trans.layerID in self.names:
+                        self.has_transforms[trans.layerID] = True
             imgui.end_child()
 
             if self.cur_layer is not None:
@@ -390,7 +540,7 @@ class LayerWidget:
                                             try:
                                                 self.viz.osc_dispatcher.unmap(trans.osc_address[j],
                                                                               self.osc_funcs[trans.imgui_id][j])
-                                                print(f"Unmapped",trans.osc_address[j])
+                                                print(f"Unmapped", trans.osc_address[j])
                                                 print(self.viz.osc_dispatcher.mappings)
                                             except Exception as e:
                                                 print(f"{trans.osc_address[j]} is not mapped")
@@ -399,20 +549,11 @@ class LayerWidget:
                                             self.viz.osc_dispatcher.map(address,
                                                                         self.osc_funcs[trans.imgui_id][j])
                                             trans.osc_address[j] = address
-                                    # for j in range(len(trans.params)):
-                                    #     changed, trans.mapping[j] = imgui.input_text(f"##mappings_{j}_{u_id}",
-                                    #                                                  trans.mapping[j], 256,
-                                    #                                                  imgui.INPUT_TEXT_ENTER_RETURNS_TRUE | (
-                                    #                                                          imgui.INPUT_TEXT_READ_ONLY * (
-                                    #                                                      not trans.use_osc)))
-                                    #     if j < len(trans.params) - 1:
-                                    #         imgui.same_line()
                             imgui.separator()
 
         for idx in to_remove:
             del self.cached_transforms[idx]
         self.viz.args.latent_transforms = copy.deepcopy(self.cached_transforms)
-
 
     @imgui_utils.scoped_by_object_id
     def indices_widget(self, trans):
@@ -542,52 +683,51 @@ class LayerWidget:
 # ----------------------------------------------------------------------------
 
 # adjustment widget currently left out since not happy with how it works
-    # @imgui_utils.scoped_by_object_id
-    # def adjust_widget(self, layers):
-    #
-    #     if imgui_utils.button("+##vecs", width=-1, enabled=self.cur_layer is not None):
-    #         if not (self.cur_layer in self.cached_adjustments):
-    #             self.cached_adjustments[self.cur_layer] = []
-    #         adjustment = {"weight": torch.tensor([0]), "dir": torch.randn(1, 512), "path": "", "uid": self.make_id()}
-    #         self.cached_adjustments[self.cur_layer].append(adjustment)
-    #
-    #     remove_idx = None
-    #     if self.cur_layer in self.cached_adjustments:
-    #         for i, adjustment in enumerate(self.cached_adjustments[self.cur_layer]):
-    #             if imgui_utils.button(f"-##remove{adjustment['uid']}",
-    #                                   self.viz.app.button_w * (2 / 8) - (self.viz.app.spacing / 2)):
-    #                 remove_idx = i
-    #             imgui.same_line()
-    #             with imgui_utils.item_width(self.viz.app.button_w * (6 / 8) - (self.viz.app.spacing / 2)):
-    #                 _, adjustment["weight"] = imgui.slider_float(f"##{adjustment['uid']}",adjustment["weight"], -2, 2,
-    #                                                              format='Weight %.3f', power=3)
-    #             imgui.same_line()
-    #             if imgui_utils.button(f"Randomize##{i}", self.viz.app.button_w):
-    #                 adjustment["dir"] = torch.randn(adjustment["dir"].shape)
-    #             if imgui_utils.button(f"Load##{i}", self.viz.app.button_w):
-    #                 dir = torch.load(adjustment["path"])
-    #                 assert dir.shape == adjustment["dir"].shape
-    #                 adjustment["dir"] = dir
-    #             imgui.separator()
-    #
-    #         if remove_idx is not None:
-    #             self.cached_adjustments[self.cur_layer].pop(remove_idx)
-    #             if len(self.cached_adjustments[self.cur_layer]) == 0:
-    #                 del self.cached_adjustments[self.cur_layer]
-    #     imgui.separator()
-    #     _, self.paths[self.cur_layer] = imgui_utils.input_text("Path", self.paths.get(self.cur_layer, ""),
-    #                                                            width=self.viz.app.button_w, flags=0, buffer_length=1024)
-    #     if imgui_utils.button(f"Load##_all{self.cur_layer}", -1):
-    #         if not (self.cur_layer in self.cached_adjustments):
-    #             self.cached_adjustments[self.cur_layer] = []
-    #         dirs =  torch.from_numpy(np.load(self.paths[self.cur_layer])).squeeze()
-    #         for dir in dirs:
-    #             self.cached_adjustments[self.cur_layer].append({"weight": torch.tensor([0]), "dir": dir, "path": "", "uid": self.make_id()})
-    #
-    #
-    #     weighted_adjustments = {}
-    #     for layer, adjustments in self.cached_adjustments.items():
-    #         weighted_adjustments[layer + ".affine"] = torch.stack(
-    #             [adj["weight"] * adj["dir"] for adj in adjustments]).sum(dim=0)
-    #     self.viz.args.adjustments = weighted_adjustments
-
+# @imgui_utils.scoped_by_object_id
+# def adjust_widget(self, layers):
+#
+#     if imgui_utils.button("+##vecs", width=-1, enabled=self.cur_layer is not None):
+#         if not (self.cur_layer in self.cached_adjustments):
+#             self.cached_adjustments[self.cur_layer] = []
+#         adjustment = {"weight": torch.tensor([0]), "dir": torch.randn(1, 512), "path": "", "uid": self.make_id()}
+#         self.cached_adjustments[self.cur_layer].append(adjustment)
+#
+#     remove_idx = None
+#     if self.cur_layer in self.cached_adjustments:
+#         for i, adjustment in enumerate(self.cached_adjustments[self.cur_layer]):
+#             if imgui_utils.button(f"-##remove{adjustment['uid']}",
+#                                   self.viz.app.button_w * (2 / 8) - (self.viz.app.spacing / 2)):
+#                 remove_idx = i
+#             imgui.same_line()
+#             with imgui_utils.item_width(self.viz.app.button_w * (6 / 8) - (self.viz.app.spacing / 2)):
+#                 _, adjustment["weight"] = imgui.slider_float(f"##{adjustment['uid']}",adjustment["weight"], -2, 2,
+#                                                              format='Weight %.3f', power=3)
+#             imgui.same_line()
+#             if imgui_utils.button(f"Randomize##{i}", self.viz.app.button_w):
+#                 adjustment["dir"] = torch.randn(adjustment["dir"].shape)
+#             if imgui_utils.button(f"Load##{i}", self.viz.app.button_w):
+#                 dir = torch.load(adjustment["path"])
+#                 assert dir.shape == adjustment["dir"].shape
+#                 adjustment["dir"] = dir
+#             imgui.separator()
+#
+#         if remove_idx is not None:
+#             self.cached_adjustments[self.cur_layer].pop(remove_idx)
+#             if len(self.cached_adjustments[self.cur_layer]) == 0:
+#                 del self.cached_adjustments[self.cur_layer]
+#     imgui.separator()
+#     _, self.paths[self.cur_layer] = imgui_utils.input_text("Path", self.paths.get(self.cur_layer, ""),
+#                                                            width=self.viz.app.button_w, flags=0, buffer_length=1024)
+#     if imgui_utils.button(f"Load##_all{self.cur_layer}", -1):
+#         if not (self.cur_layer in self.cached_adjustments):
+#             self.cached_adjustments[self.cur_layer] = []
+#         dirs =  torch.from_numpy(np.load(self.paths[self.cur_layer])).squeeze()
+#         for dir in dirs:
+#             self.cached_adjustments[self.cur_layer].append({"weight": torch.tensor([0]), "dir": dir, "path": "", "uid": self.make_id()})
+#
+#
+#     weighted_adjustments = {}
+#     for layer, adjustments in self.cached_adjustments.items():
+#         weighted_adjustments[layer + ".affine"] = torch.stack(
+#             [adj["weight"] * adj["dir"] for adj in adjustments]).sum(dim=0)
+#     self.viz.args.adjustments = weighted_adjustments

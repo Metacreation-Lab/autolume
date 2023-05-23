@@ -1,3 +1,4 @@
+import gc
 import os
 
 import imgui
@@ -61,6 +62,18 @@ class Autolume(imgui_window.ImguiWindow):
                 self.viz.add_recent_pickle(pkl)
             self.viz.load_pickle(self.pkls[0])
         self.state = States.RENDER
+        self.menu = None
+        gc.collect()
+
+    def set_visible_menu(self):
+        print("setting visible menu ------------------------")
+        self.state = States.MENU
+        self.viz.close()
+        self.render_loop.close()
+        self.viz = None
+        self.render_loop = None
+        gc.collect()
+        self.menu = Menu(self)
 
     def draw_frame(self):
         self.begin_frame()
@@ -78,7 +91,7 @@ class Autolume(imgui_window.ImguiWindow):
                 self.menu()
 
         if self.state == States.RENDER:
-            if self.viz is None:
+            if self.viz is None or self.render_loop is None:
                 self.state = States.ERROR
             else:
                 self.viz()

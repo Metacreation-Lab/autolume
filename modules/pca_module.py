@@ -2,6 +2,7 @@ import glob
 import os
 import time
 from pathlib import Path
+import multiprocessing as mp
 
 import imgui
 import numpy as np
@@ -31,7 +32,14 @@ class PCA_Module:
         self.num_features = 0
         self.alpha = 1
         self.browse_cache = []
-        self.extract = -1
+        self.running = False
+        self.queue = mp.Queue()
+        self.reply = mp.Queue()
+        self.message = ""
+        self.pca_process = mp.Process(target=fit, args=(self.queue, self.reply),
+                                      daemon=True)
+        self.X_comp, self.Z_comp = None, None
+        self.done = False
         for pkl in os.listdir("./models"):
             if pkl.endswith(".pkl"):
                 print(pkl, os.path.join(os.getcwd(), "models", pkl))
@@ -39,6 +47,18 @@ class PCA_Module:
 
     @imgui_utils.scoped_by_object_id
     def __call__(self):
+        if self.reply.qsize() > 0:
+            self.message, (self.X_comp, self.Z_comp), self.done = self.reply.get()
+            while self.reply.qsize() > 0:
+                self.message, (self.X_comp, self.Z_comp), self.done = self.reply.get()
+
+        if self.done:
+            self.running = False
+            filename = Path(self.user_pkl).stem
+            np.save(os.path.join(self.save_path,f"{filename}_xcomp.npy"), self.X_comp)
+            np.save(os.path.join(self.save_path,f"{filename}_zcomp.npy"), self.Z_comp)
+
+
         imgui.same_line(self.menu.app.label_w)
         changed, self.user_pkl = imgui_utils.input_text('##pkl', self.user_pkl, 1024,
                                                         flags=(imgui.INPUT_TEXT_AUTO_SELECT_ALL |
@@ -87,24 +107,13 @@ class PCA_Module:
                                                         width=(-1 - self.menu.app.button_w - self.menu.app.spacing),
                                                         help_text='Dir to Folder to save GANSPACE')
 
-
-        if self.extract > 0:
-            print(self.extract)
-            self.extract -= 1
-
-        if self.extract == 0:
-            os.makedirs(self.save_path, exist_ok=True)
-            x_comp, z_comp = fit(pca_modes[self.pca_mode], self.num_features, self.G, "cuda", True, self.alpha)
-            filename = Path(self.user_pkl).stem
-            np.save(os.path.join(self.save_path,f"{filename}_xcomp.npy"), x_comp)
-            np.save(os.path.join(self.save_path,f"{filename}_zcomp.npy"), x_comp)
-            print(x_comp.shape, z_comp.shape)
-            self.extract = -1
-
-
         if imgui_utils.button("GET SALIENT FEATURES", width=self.menu.app.button_w, enabled=self.G is not None):
             imgui.open_popup("PCA-popup")
-            self.extract = 10
+            self.running = True
+            self.X_comp, self.Z_comp = None, None
+            os.makedirs(self.save_path, exist_ok=True)
+            self.queue.put((pca_modes[self.pca_mode], self.num_features, self.G, "cuda", True, self.alpha))
+            self.pca_process.start()
 
         if imgui.begin_popup_modal("PCA-popup")[0]:
             imgui.text(f"Extracting Salient Directions in Latent Space of: {self.user_pkl}")
@@ -112,7 +121,9 @@ class PCA_Module:
             filename = Path(self.user_pkl).stem
             direct=os.path.join(self.save_path,f"{filename}_xcomp.npy")
             imgui.text(f"Saving Extracted Directions at: {direct}")
-            if imgui_utils.button("Done", width=self.menu.app.button_w, enabled=self.extract < 0):
+            if self.message != "":
+                imgui.text(self.message)
+            if imgui_utils.button("Done", width=self.menu.app.button_w, enabled=not self.running):
                 imgui.close_current_popup()
             imgui.end_popup()
 

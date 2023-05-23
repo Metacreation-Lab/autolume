@@ -33,7 +33,11 @@ def get_max_batch_size(model, device):
             return i
     return B_max
 
-def fit(name, num_features, model, device, project=False, alpha=1):
+def fit(queue, reply):
+    name, num_features, model, device, project, alpha = queue.get()
+    while queue.qsize() > 0:
+        name, num_features, model, device, project, alpha = queue.get()
+
 
     sample_shape = model.w_dim
     sample_dims = np.prod(sample_shape)
@@ -41,9 +45,9 @@ def fit(name, num_features, model, device, project=False, alpha=1):
     input_shape = model.z_dim
     input_dims = np.prod(input_shape)
     print('Input shape:', input_shape, input_dims)
-
+    reply.put(["Setting up estimator", (None, None), False])
     transformer = setup_estimator(name, num_features, alpha)
-
+    reply.put(["Estimating Batch Size", (None, None), False])
     B = get_max_batch_size(model, device)
     # Divisible by B (ignored in output name)
     N = 300000 // B * B
@@ -55,7 +59,7 @@ def fit(name, num_features, model, device, project=False, alpha=1):
     if not transformer.batch_support and N > N_limit_RAM:
         print('WARNING: estimator does not support batching, ' \
               'given config will use {:.1f} GB memory.'.format(feat_size_bytes / 1_000_000_000 * N))
-    print('B={}, N={}, dims={}, N/dims={:.1f}'.format(B, N, sample_dims, N / sample_dims), flush=True)
+    reply.put(['B={}, N={}, dims={}, N/dims={:.1f}'.format(B, N, sample_dims, N / sample_dims), (None, None), False])
 
 
     # Must not depend on chosen batch size (reproducibility)
@@ -67,16 +71,18 @@ def fit(name, num_features, model, device, project=False, alpha=1):
     n_lat = ((N + NB - 1) // B + 1) * B
     n_lat = ((N + NB - 1) // B + 1) * B
     latents = np.zeros((n_lat, input_shape), dtype=np.float32)
-    print(latents.shape)
 
     # Sampling latents for pca (DSET)
+    reply.put(("Sampling Latents", (None, None), False))
     with torch.no_grad():
         for i in trange(n_lat // B, desc='Sampling latents'):
+            reply.put(["Sampling Latents: " + str(i) + " of " + str(n_lat // B) + " batches", (None, None), False])
             latents[i * B:(i + 1) * B] = sample_latent(B, model, device, None, project).cpu().numpy()
     #FITTING
     X = np.ones((NB, sample_dims), dtype=np.float32)
     action = 'Fitting' if transformer.batch_support else 'Collecting'
     for gi in trange(0, N, NB, desc=f'{action} batches (NB={NB})', ascii=True):
+        reply.put([f"{action} Batches: {gi} of {N} batches", (None, None), False])
         for mb in range(0, NB, B):
             z = latents[gi + mb:gi + mb + B]
             batch = z.reshape((B, -1))
@@ -95,12 +101,12 @@ def fit(name, num_features, model, device, project=False, alpha=1):
         X_global_mean = X.mean(axis=0, keepdims=True, dtype=np.float32)
         X -= X_global_mean
 
-        print(f'[{timestamp()}] Fitting whole batch')
+        reply.put([f'[{timestamp()}] Fitting whole batch', (None, None), False])
         t_start_fit = datetime.datetime.now()
 
         transformer.fit(X)
 
-        print(f'[{timestamp()}] Done in {datetime.datetime.now() - t_start_fit}')
+        reply.put([f'[{timestamp()}] Done in {datetime.datetime.now() - t_start_fit}', (None, None), False])
         assert np.all(transformer.transformer.mean_ < 1e-3), 'Mean of normalized data should be zero'
     else:
         X_global_mean = transformer.transformer.mean_.reshape((1, sample_dims))
@@ -122,7 +128,7 @@ def fit(name, num_features, model, device, project=False, alpha=1):
     Z_comp /= np.linalg.norm(Z_comp, axis=-1, keepdims=True)
 
     torch.cuda.empty_cache()
-    return X_comp, Z_comp
+    reply.put(("", (X_comp, Z_comp), True))
 
 
 

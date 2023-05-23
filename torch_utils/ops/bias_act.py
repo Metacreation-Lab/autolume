@@ -34,17 +34,27 @@ activation_funcs = {
 
 _plugin = None
 _null_tensor = torch.empty([0])
+_use_custom = True
 
 def _init():
-    global _plugin
+    global _plugin, _use_custom
+    print("USING CUSTOM KERNEL:", _use_custom)
     if _plugin is None:
-        _plugin = custom_ops.get_plugin(
-            module_name='bias_act_plugin',
-            sources=['bias_act.cpp', 'bias_act.cu'],
-            headers=['bias_act.h'],
-            source_dir=os.path.dirname(__file__),
-            extra_cuda_cflags=['--use_fast_math', '--allow-unsupported-compiler'],
-        )
+        if _use_custom:
+            print('Loading custom plugin for bias_act')
+            _plugin = custom_ops.get_plugin(
+                module_name='bias_act_plugin',
+                sources=['bias_act.cpp', 'bias_act.cu'],
+                headers=['bias_act.h'],
+                source_dir=os.path.dirname(__file__),
+                extra_cuda_cflags=['--use_fast_math', '--allow-unsupported-compiler'],
+            )
+            if _plugin is None:
+                _use_custom = False
+                return False
+        else:
+            print('Using native plugin for bias_act')
+            return False
     return True
 
 #----------------------------------------------------------------------------

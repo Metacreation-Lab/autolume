@@ -15,6 +15,8 @@ from modules.pca_module import PCA_Module
 from modules.training_module import TrainingModule
 from modules.compress_module import CompressModule
 from modules.network_surgery import SurgeryModule
+from modules.projection_module import ProjectionModule
+from modules.network_mixing import MixingModule
 
 from modules.super_res_module import SuperResModule
 #----------------------------------------------------------------------------
@@ -24,12 +26,23 @@ class Menu:
         self.pca = PCA_Module(self)
         self.training = TrainingModule(self)
         self.compress = CompressModule(self)
-        self.network_surgery = SurgeryModule(self)
+        # self.network_surgery = SurgeryModule(self)
+        self.projection = ProjectionModule(self)
         self.super_res = SuperResModule(self)
+        self.mixing_module = MixingModule(self)
 
 
     def __call__(self):
 
+        style = imgui.get_style()
+        imgui.begin("Color window")
+        imgui.columns(4)
+        for color in range(0, imgui.COLOR_COUNT):
+            imgui.text("Color: {}".format(color))
+            imgui.color_button("color#{}".format(color), *style.colors[color])
+            imgui.next_column()
+
+        imgui.end()
         # Make train and compress buttons call function as subprocess to avoid blocking
         # Begin control pane.
         imgui.set_next_window_position(0, 0)
@@ -41,9 +54,10 @@ class Menu:
 
         imgui.set_next_window_position(self.app.content_width // 4, 0)
         imgui.set_next_window_size(self.app.content_width // 4, (self.app.content_height * 4) // 5)
-        imgui.begin('Compress##Menu', closable=False, flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS))
-        imgui.text("Compress")
-        self.compress()
+        imgui.begin('Projection##Menu', closable=False, flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS))
+        imgui.text("Projection")
+        # self.compress()
+        self.projection()
         imgui.end()
 
         imgui.set_next_window_position((2 * self.app.content_width)// 4, 0)
@@ -64,7 +78,7 @@ class Menu:
         imgui.set_next_window_size(self.app.content_width // 2, (self.app.content_height * 3) // 4)
         imgui.begin('Surgery##Menu', closable=False, flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE))
         imgui.text("Network Surgery")
-        self.network_surgery()
+        self.mixing_module()
         imgui.end()
 
         imgui.set_next_window_position(self.app.content_width//2,(self.app.content_height * 3) // 4)
@@ -73,6 +87,8 @@ class Menu:
         imgui.text("Renderer")
         if imgui_utils.button("START", width=self.app.button_w):
             self.app.start_renderer()
+
+
         imgui.end()
 
 

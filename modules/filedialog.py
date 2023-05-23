@@ -21,7 +21,7 @@ The user can select a file or directory by clicking on it, and the path to the f
 # instead of tree maybe just display selectable list of files and directories
 
 class FileDialog():
-    def __init__(self, parent, title, directory, extensions, show_hidden=False):
+    def __init__(self, parent, title, directory, extensions, show_hidden=False, width=0, enabled=True, multiple_files=True):
         self.parent = parent
         self.title = title
         self.directory = directory
@@ -30,16 +30,19 @@ class FileDialog():
         self.selected = []
         self.show_hidden = show_hidden
         self.history = []
+        self.multiple_files = multiple_files
         self.current_history_idx = 0
         self.start_idx = -1
         self.end_idx = -1
+        self.width = width
+        self.enabled = enabled
 
         # Initialize window.
         self.open = False # Layout may change after first frame.
 
     @imgui_utils.scoped_by_object_id
     def __call__(self):
-        if imgui_utils.button("Browse"):
+        if imgui_utils.button(self.title, width=self.width, enabled=self.enabled):
             self.open = True
         if self.open:
             return self._draw()
@@ -67,7 +70,7 @@ class FileDialog():
                     if imgui.selectable(file, file_path in self.selected)[0]:
                         print("SELECTED INDEX", file_path, i)
                         # if shift is pressed down then select all files between start_idx and end_idx and reset start_idx and end_idx else only update start_idx and set end_idx -1
-                        if imgui.get_io().key_shift:
+                        if imgui.get_io().key_shift and self.multiple_files:
                             if self.start_idx == -1:
                                 self.start_idx = i
                                 self.end_idx = -1
@@ -96,12 +99,16 @@ class FileDialog():
                         else:
                             self.start_idx = i
                         print("SELECTED", file_path)
-                        if file_path in self.selected:
-                            self.selected.remove(file_path)
-                            print("removed")
+                        if self.multiple_files:
+                            if file_path in self.selected:
+                                self.selected.remove(file_path)
+                                print("removed")
+                            else:
+                                self.selected.append(file_path)
+                                print("added")
                         else:
-                            self.selected.append(file_path)
-                            print("added")
+                            self.selected = [file_path]
+                            print("set")
             imgui.tree_pop()
         imgui.pop_id()
 

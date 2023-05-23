@@ -73,6 +73,7 @@ def launch_training(c, desc, outdir, dry_run):
     print(f'Dataset path:        {c.training_set_kwargs.path}')
     print(f'Dataset size:        {c.training_set_kwargs.max_size} images')
     print(f'Dataset resolution:  {c.training_set_kwargs.resolution}')
+    print(f'Dataset Height and width:  {c.training_set_kwargs.height} {c.training_set_kwargs.width}')
     print(f'Dataset labels:      {c.training_set_kwargs.use_labels}')
     print(f'Dataset x-flips:     {c.training_set_kwargs.xflip}')
     print()
@@ -95,21 +96,21 @@ def launch_training(c, desc, outdir, dry_run):
     except RuntimeError as e:
         print(e)
     with tempfile.TemporaryDirectory() as temp_dir:
-        if c.num_gpus == 1:
-            subprocess_fn(rank=0, c=c, temp_dir=temp_dir)
-        else:
-            torch.multiprocessing.spawn(fn=subprocess_fn, args=(c, temp_dir), nprocs=c.num_gpus)
+        subprocess_fn(rank=0, c=c, temp_dir=temp_dir)
 
 #----------------------------------------------------------------------------
 
-def init_dataset_kwargs(data):
+def init_dataset_kwargs(data, resolution=None, height = None, width = None, fps=10):
     try:
-        dataset_kwargs = dnnlib.EasyDict(class_name='training.dataset.ImageFolderDataset', path=data, use_labels=True, max_size=None, xflip=False)
+        print("RESOLUTION: ", resolution, height, width)
+        dataset_kwargs = dnnlib.EasyDict(class_name='training.dataset.ImageFolderDataset', path=data, use_labels=True, max_size=None, xflip=False, resolution=resolution, height=height, width=width, fps=fps)
         dataset_obj = dnnlib.util.construct_class_by_name(**dataset_kwargs) # Subclass of training.dataset.Dataset.
         dataset_kwargs.resolution = dataset_obj.resolution # Be explicit about resolution.
         dataset_kwargs.use_labels = dataset_obj.has_labels # Be explicit about labels.
         dataset_kwargs.max_size = len(dataset_obj) # Be explicit about dataset size.
-        return dataset_kwargs, dataset_obj.name
+        dataset_kwargs.height = dataset_obj.height
+        dataset_kwargs.width = dataset_obj.width
+        return dataset_kwargs, dataset_obj.name, dataset_obj.init_res
     except IOError as err:
         raise click.ClickException(f'--data: {err}')
 
@@ -132,6 +133,7 @@ def parse_comma_separated_list(s):
 @click.option('--data',         help='Training data', metavar='[ZIP|DIR]',                      type=str, required=True)
 @click.option('--gpus',         help='Number of GPUs to use', metavar='INT',                    type=click.IntRange(min=1), required=True)
 @click.option('--batch',        help='Total batch size', metavar='INT',                         type=click.IntRange(min=1), required=True)
+@click.option('--resolution',   help='Dataset resolution', metavar='TUPLE',                     type=tuple, default=None)
 @click.option('--gamma',        help='R1 regularization weight', metavar='FLOAT',               type=click.FloatRange(min=0), required=True)
 @click.option('--topk', help='Enable topk training [default: None]', type=float, metavar='FLOAT')
 
@@ -185,7 +187,7 @@ def parse_comma_separated_list(s):
 def clickmain(**kwargs):
     main(**kwargs)
 
-def main(**kwargs):
+def main(queue, reply):
     """Train a GAN using the techniques described in the paper
     "Alias-Free Generative Adversarial Networks".
 
@@ -209,8 +211,12 @@ def main(**kwargs):
     """
 
     # Initialize config.
-    opts = dnnlib.EasyDict(kwargs) # Command line arguments.
+    kwargs = queue.get()
+    print("kwargs", kwargs)
+
+    opts = dnnlib.EasyDict(**kwargs) # Command line arguments.
     c = dnnlib.EasyDict() # Main config dict.
+    reply.put(['Configuring Models...', False])
     c.G_kwargs = dnnlib.EasyDict(class_name=None, z_dim=opts.z_dim, w_dim=opts.w_dim, mapping_kwargs=dnnlib.EasyDict())
     c.G_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=[0, 0.99], eps=1e-8)
     c.D_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=[0, 0.99], eps=1e-8)
@@ -219,7 +225,7 @@ def main(**kwargs):
     c.data_loader_kwargs = dnnlib.EasyDict(pin_memory=True, prefetch_factor=2)
 
     # Training set.
-    c.training_set_kwargs, dataset_name = init_dataset_kwargs(data=opts.data)
+    c.training_set_kwargs, dataset_name, init_res = init_dataset_kwargs(data=opts.data, resolution=opts.resolution, height=opts.resolution[1], width=opts.resolution[0], fps=opts.fps)
     if opts.cond and not c.training_set_kwargs.use_labels:
         raise click.ClickException('--cond=True requires labels specified in dataset.json')
     c.training_set_kwargs.use_labels = opts.cond
@@ -234,10 +240,12 @@ def main(**kwargs):
     c.G_kwargs.channel_max = opts.cmax
     c.G_kwargs.mapping_kwargs.num_layers = (8 if opts.cfg == 'stylegan2' else 2) if opts.map_depth is None else opts.map_depth
     if opts.teacher is not None:
+        reply.put(['Loading Teacher...', False])
         assert isinstance(opts.teacher, str)
         c.teacher = opts.teacher
     c.projected = opts.projected
     if opts.projected:
+        reply.put(['Using Projected Discriminator...', False])
         c.D_kwargs = dnnlib.EasyDict(
             class_name='architectures.pg_modules.discriminator.ProjectedDiscriminator',
             diffaug=True,
@@ -268,6 +276,11 @@ def main(**kwargs):
     c.image_snapshot_ticks = c.network_snapshot_ticks = opts.snap
     c.random_seed = c.training_set_kwargs.random_seed = opts.seed
     c.data_loader_kwargs.num_workers = opts.workers
+
+
+    if list(init_res) != [4, 4]:
+        print(' custom init resolution', init_res)
+        c.G_kwargs.init_res = c.D_kwargs.init_res = list(init_res)
 
     # Sanity checks.
     if c.batch_size % c.num_gpus != 0:
@@ -373,6 +386,7 @@ def main(**kwargs):
         desc += f'-{opts.desc}'
 
     # Launch.
+    reply.put(["launching", False])
     launch_training(c=c, desc=desc, outdir=opts.outdir, dry_run=opts.dry_run)
 
 #----------------------------------------------------------------------------
