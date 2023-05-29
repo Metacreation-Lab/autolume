@@ -1,5 +1,5 @@
 import dnnlib
-import legacy
+from torch_utils import legacy
 import torchvision
 import torch
 import numpy as np

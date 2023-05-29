@@ -18,10 +18,9 @@ import PIL.Image
 import numpy as np
 import torch
 import dnnlib as dnnlib
-from torch_utils import misc, training_stats
+from torch_utils import misc, training_stats, legacy as legacy
 from torch_utils.ops import conv2d_gradfix, grid_sample_gradfix
 
-import legacy as legacy
 from metrics import metric_main
 
 #----------------------------------------------------------------------------

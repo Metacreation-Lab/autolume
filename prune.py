@@ -10,7 +10,7 @@ import numpy as np
 import torchvision.utils
 
 import dnnlib
-import legacy
+from torch_utils import legacy
 from training.distillation.Util.content_aware_pruning import Get_Content_Aware_Pruning_Score
 from training.distillation.Util.mask_util import Mask_the_Generator
 from training.distillation.Util.network_util import Get_Network_Shape

@@ -9,7 +9,7 @@ import argparse
 import ffmpeg
 import cv2
 from torchvision import transforms
-from net_base import SRVGGNetPlus, SRVGGNetCompact, RRDBNet
+from super_res.net_base import SRVGGNetPlus, SRVGGNetCompact, RRDBNet
 
 def load_model(choice,path):
   if choice =='Quality':
@@ -123,11 +123,11 @@ def base_args():
 def process(args,file):
   print("Processing", args)
   if args.model_type=="Quality":
-    model_path="./sr_models/Quality.pth"
+    model_path= "../sr_models/Quality.pth"
   elif args.model_type=="Balance":
-    model_path="./sr_models/Balance.pth"
+    model_path= "../sr_models/Balance.pth"
   elif args.model_type=="Fast":
-    model_path="./sr_models/Fast.pt"
+    model_path= "../sr_models/Fast.pt"
 
   upsampler=load_model(args.model_type,model_path)
   head, tail = os.path.split(file)
