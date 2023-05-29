@@ -4,10 +4,7 @@ import imgui
 import numpy as np
 
 import dnnlib
-import legacy
-from architectures import custom_stylegan2
 from utils.gui_utils import imgui_utils
-import pickle
 
 import glob
 import os

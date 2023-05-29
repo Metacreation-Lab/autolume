@@ -3,7 +3,7 @@ import copy
 import imgui
 
 import dnnlib
-import legacy
+from torch_utils import legacy
 from architectures import custom_stylegan2
 from utils.gui_utils import imgui_utils
 import pickle

@@ -1,15 +1,13 @@
 import glob
 import os
-import time
 from pathlib import Path
 import multiprocessing as mp
 
 import imgui
 import numpy as np
-import torch
 
 import dnnlib
-import legacy
+from torch_utils import legacy
 from utils.gui_utils import imgui_utils
 from ganspace.extract_pca import fit
 

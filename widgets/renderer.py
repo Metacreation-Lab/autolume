@@ -19,14 +19,12 @@ import matplotlib.cm
 import dnnlib
 from bending.transform_layers import ManipulationLayer
 from torch_utils.ops import upfirdn2d
-import legacy  # pylint: disable=import-error
+from torch_utils import legacy
 from architectures import custom_stylegan2
-from net_base import SRVGGNetPlus
+from super_res.net_base import SRVGGNetPlus
 from modules.network_mixing import extract_conv_names, extract_mapping_names
 import os
 import pickle
-
-import multiprocessing as mp
 
 super_res = SRVGGNetPlus(num_in_ch=3, num_out_ch=3, num_feat=48, upscale=4, act_type='prelu').eval().to('cuda')
 model_sd=torch.load('./sr_models/Fast.pt')

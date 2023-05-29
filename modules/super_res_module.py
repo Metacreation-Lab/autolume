@@ -9,8 +9,8 @@ import torchvision.transforms.functional as F
 import numpy as np
 
 from utils.gui_utils import imgui_utils
-from super_res import main as super_res_main, load_model, get_resolution, check_width_height, get_audio, Reader, Writer
-#from super_res import base_args
+from super_res.super_res import main as super_res_main, load_model, get_resolution, check_width_height, get_audio, Reader, Writer
+
 from dnnlib import EasyDict
 import multiprocessing as mp
 
@@ -83,13 +83,16 @@ class SuperResModule:
             self.input_path = input
             print(self.input_path)
 
-        joined = '\n'.join(self.result_path)
-        imgui_utils.input_text("##SRRESULT", joined, 1024, flags=imgui.INPUT_TEXT_READ_ONLY, width=-self.app.button_w * 3, help_text="Result Path")
+        imgui_utils.input_text("##SRRESULT", self.result_path, 1024, flags=imgui.INPUT_TEXT_READ_ONLY, width=-self.app.button_w * 3, help_text="Result Path")
         imgui.same_line()
         _clicked, save_path = self.save_path_dialog()
         if _clicked:
-            self.result_path = save_path
-            print(self.result_path)
+            if len(save_path) > 0:
+                self.result_path = save_path[0]
+                print(self.result_path)
+            else:
+                self.result_path = ""
+                print("No path selected")
         self.models = ['Quality','Balance','Fast']
         if len(self.models) > 0:
             _, self.model_selected = imgui.combo("Model", self.model_selected, self.models)

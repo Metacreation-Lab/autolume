@@ -25,7 +25,7 @@ import torch
 import torch.nn.functional as F
 
 import dnnlib
-import legacy
+from torch_utils import legacy
 
 image_mean = torch.tensor([0.48145466, 0.4578275, 0.40821073]).cuda()
 image_std = torch.tensor([0.26862954, 0.26130258, 0.27577711]).cuda()
