@@ -7,7 +7,6 @@ from pythonosc.udp_client import SimpleUDPClient
 import dnnlib
 from audio import audio_stream
 from utils.gui_utils import imgui_utils
-import multiprocessing
 
 chromas = ["C", "C/D", "D", "D/E", "E", "E/F", "F", "F/G" "G", "G/A", "A", "A/B", "B"]
 

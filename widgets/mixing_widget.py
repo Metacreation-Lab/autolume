@@ -159,7 +159,7 @@ class MixingWidget:
                 if imgui.is_item_clicked():
                     self.collapsed[i] = ">" if self.collapsed[i] == "v" else "v"
                 imgui.same_line()
-                imgui.text_colored(f"Resolution {resolution} x {resolution}", 1.0, 1.0, 1.0, 1.0)
+                imgui.text(f"Resolution {resolution} x {resolution}")
                 if imgui.is_item_clicked():
                     self.collapsed[i] = ">" if self.collapsed[i] == "v" else "v"
                 if self.collapsed[i] == ">":

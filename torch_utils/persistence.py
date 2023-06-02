@@ -86,7 +86,7 @@ def persistent_class(orig_class):
         with open('old_pickle.pkl', 'rb') as f:
             old_net = pickle.load(f)
         new_net = MyNetwork(*old_obj.init_args, **old_obj.init_kwargs)
-        misc.copy_params_and_buffers(old_net, new_net, require_all=True)
+        assets.copy_params_and_buffers(old_net, new_net, require_all=True)
     """
     assert isinstance(orig_class, type)
     if is_persistent(orig_class):
