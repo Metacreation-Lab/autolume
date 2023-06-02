@@ -38,10 +38,8 @@ _use_custom = True
 
 def _init():
     global _plugin, _use_custom
-    print("USING CUSTOM KERNEL:", _use_custom)
     if _plugin is None:
         if _use_custom:
-            print('Loading custom plugin for bias_act')
             _plugin = custom_ops.get_plugin(
                 module_name='bias_act_plugin',
                 sources=['bias_act.cpp', 'bias_act.cu'],

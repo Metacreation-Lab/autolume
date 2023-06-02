@@ -3,6 +3,8 @@ import os
 import imgui
 import numpy as np
 import torch
+from opensimplex import OpenSimplex
+
 try:
     import cPickle as pickle
 except ModuleNotFoundError:
@@ -13,7 +15,25 @@ from utils.gui_utils import imgui_utils
 from widgets import osc_menu
 from widgets.browse_widget import BrowseWidget
 
+from pythonosc.udp_client import SimpleUDPClient
 
+def valmap(value, istart, istop, ostart, ostop):
+    return ostart + (ostop - ostart) * ((value - istart) / (istop - istart))
+
+class OSN():
+    min = -1
+    max = 1
+
+    def __init__(self, seed, diameter):
+        self.tmp = OpenSimplex(seed)
+        self.d = diameter
+        self.x = 0
+        self.y = 0
+
+    def get_val(self, angle):
+        self.xoff = valmap(np.cos(angle), -1, 1, self.x, self.x + self.d)
+        self.yoff = valmap(np.sin(angle), -1, 1, self.y, self.y + self.d)
+        return self.tmp.noise2(self.xoff,self.yoff)
 
 def slerp(t, v0, v1, DOT_THRESHOLD=0.9995):
     '''
@@ -72,16 +92,22 @@ class LoopingWidget:
         self.project = [True]*self.params.num_keyframes
         self.paths = [""] * self.params.num_keyframes
         self._pinned_bufs = dict()
-        self._device = torch.device('cuda')
         self.halt_update = 0
         self.perfect_loop = False
         self.looping_snaps = [{} for _ in range(self.params.num_keyframes)]
         self.file_dialogs = [BrowseWidget(viz, f"Browse##vec{i}", os.path.abspath(os.getcwd()), ["*",".pth", ".pt"], width=self.viz.app.button_w, multiple=False, traverse_folders=False) for i in range(self.params.num_keyframes)]
         self.open_keyframes = False
         self.open_file_dialog = False
-
-
-
+        self.osc_ip = "127.0.0.1"
+        self.osc_port = 5005
+        self.osc_client = SimpleUDPClient(self.osc_ip, self.osc_port)
+        self.osc_address = ""
+        self.looped = 0
+        self.loop_type = True
+        self.z = torch.randn(1, 512)
+        self.radius = 1
+        self.noise_seed = 0
+        self.noise_loop_feats = [OSN(self.noise_seed + i, self.radius) for i in range(512)]
 
         funcs = dict(zip(["anim", "num_keyframes", "looptime", "index", "mode"], [self.osc_handler(param) for param in
                                                                                          ["anim", "num_keyframes", "looptime", "index", "mode"]]))
@@ -90,6 +116,8 @@ class LoopingWidget:
 
         self.osc_menu = osc_menu.OscMenu(self.viz, funcs, None,
                                          label="##LoopingOSC")
+
+        self.remove_entry = -1
 
 
     def alpha_handler(self):
@@ -125,9 +153,6 @@ class LoopingWidget:
         with open(path, "rb") as f:
             self.set_params(pickle.load(f))
 
-
-
-
     def get_params(self):
         return self.params.num_keyframes, self.keyframes, self.alpha, self.params.index, self.params.mode, self.params.anim, self.params.looptime,\
                self.expand_vec,self.seeds, self.modes, self.project, self.paths
@@ -148,38 +173,43 @@ class LoopingWidget:
             self._pinned_bufs[key] = buf
         return buf
 
-    def to_device(self, buf):
-        return self._get_pinned_buf(buf).copy_(buf).to(self._device)
-
     def to_cpu(self, buf):
         return self._get_pinned_buf(buf).copy_(buf).clone()
 
     def update_alpha(self):
+        self.looped = 0
         step_size = 0
         if self.params.mode:
-            if not(self.viz.app._fps_limit is None)and self.params.looptime!=0:
+            if not(self.viz.app._fps_limit is None) and self.params.looptime!=0:
                 step_size = (self.params.num_keyframes / self.viz.app._fps_limit)/self.params.looptime
         else:
             step_size = 0.01 * self.speed
+
         self.alpha += step_size
         if self.alpha >= 1:
             if self.halt_update < 0:
-                self.params.index = int(self.params.index+self.alpha)%self.params.num_keyframes
+                if self.loop_type:
+                    self.params.index = int(self.params.index+self.alpha)%self.params.num_keyframes
                 self.alpha = 0
-                if self.params.index == 0 and self.perfect_loop:
+                if (self.params.index == 0 or self.loop_type==False):
+                    self.looped = 1
+                if (self.params.index == 0 or self.loop_type==False)and self.perfect_loop:
                     self.params.anim = False
-            self.halt_update = 10
+                self.halt_update = 10
         if step_size < 0:
             if self.alpha <= 0:
                 if self.halt_update < 0:
                     self.params.index = self.params.index+self.alpha
                     if self.params.index <= 0:
                         self.params.index += self.params.num_keyframes
-                    self.params.index = int(self.params.index %self.params.num_keyframes)
+                    if self.loop_type:
+                        self.params.index = int(self.params.index %self.params.num_keyframes)
                     self.alpha = 1
-                    if self.params.index == 0 and self.perfect_loop:
+                    if (self.params.index == 0 or self.loop_type==False):
+                        self.looped = 1
+                    if (self.params.index == 0 or self.loop_type==False) and self.perfect_loop:
                         self.params.anim = False
-                self.halt_update = 10
+                    self.halt_update = 10
 
 
         self.halt_update -= 1
@@ -201,6 +231,9 @@ class LoopingWidget:
             self.vec_viz(idx)
         elif self.modes[idx]==2:
             imgui.text("Not Implemented")
+            imgui.same_line()
+            if imgui_utils.button(f"Remove##vecmode{idx}", width=self.viz.app.button_w):
+                self.remove_entry = idx
 
     def open_vec(self, idx):
         try:
@@ -247,6 +280,10 @@ class LoopingWidget:
         if imgui_utils.button(f"Randomize##vecmode{idx}", width=viz.app.button_w):
             self.keyframes[idx] = torch.randn(self.keyframes[idx].shape)
 
+        imgui.same_line()
+        if imgui_utils.button(f"Remove##vecmode{idx}", width=viz.app.button_w):
+            self.remove_entry = idx
+
 
     @imgui_utils.scoped_by_object_id
     def seed_viz(self, idx):
@@ -281,7 +318,7 @@ class LoopingWidget:
             if not(snapped is None):
                 if snapped["mode"] == 0:
                     print("SEED")
-                    self.seeds[idx] = snapped["snap"]
+                    self.seeds[idx] = snapped["snap"] #[snapped["snap"]["x"],snapped["snap"]["y"]]
                     self.modes[idx] = snapped["mode"]
                 elif snapped["mode"] == 1:
                     print("VECTOR")
@@ -293,110 +330,182 @@ class LoopingWidget:
                     self.modes[idx] = snapped["mode"]
                     print(self.looping_snaps[idx])
                     print(self.modes[idx])
+        imgui.same_line()
+        if imgui_utils.button(f"Remove##vecmode{idx}", width=viz.app.button_w):
+            self.remove_entry = idx
 
     @imgui_utils.scoped_by_object_id
     def __call__(self, show=True):
+        if self.osc_address != "":
+            try:
+                self.osc_client.send_message(self.osc_address, self.looped)
+            except Exception as e:
+                print(e)
         viz = self.viz
         # viz.args.looping = self.params.anim
 
         if show:
             _clicked, self.params.anim = imgui.checkbox('Loop', self.params.anim)
-            with imgui_utils.item_width(viz.app.font_size*5):
-                changed, new_keyframes = imgui.input_int("# of Keyframes", self.params.num_keyframes)
-            if changed and new_keyframes > 0:
-                vecs= torch.randn(new_keyframes,512)
-                vecs[:min(new_keyframes,self.params.num_keyframes)] = self.keyframes[:min(new_keyframes,self.params.num_keyframes)]
-                self.keyframes = vecs
-                if not self.use_osc:
-                    self.params.index = min(self.params.num_keyframes-2, self.params.index)
-                seeds = [dnnlib.EasyDict(x=i,y=0) for i in range(new_keyframes)]
-                seeds[:min(new_keyframes, self.params.num_keyframes)] = self.seeds[:min(new_keyframes, self.params.num_keyframes)]
-                self.seeds = seeds
-                paths = [""]*new_keyframes
-                paths[:min(new_keyframes, self.params.num_keyframes)] = self.paths[:min(new_keyframes, self.params.num_keyframes)]
-                self.paths = paths
-                modes = [False]*new_keyframes
-                modes[:min(new_keyframes, self.params.num_keyframes)] = self.modes[:min(new_keyframes, self.params.num_keyframes)]
-                self.modes = modes
-                project = [True]*new_keyframes
-                project[:min(new_keyframes, self.params.num_keyframes)] = self.project[:min(new_keyframes, self.params.num_keyframes)]
-                self.project = project
-                self.params.num_keyframes = new_keyframes
-                looping_snaps = [{} for _ in range(new_keyframes)]
-                looping_snaps[:min(new_keyframes, self.params.num_keyframes)] = self.looping_snaps[
-                                                                        :min(new_keyframes, self.params.num_keyframes)]
-                self.looping_snaps = looping_snaps
-
-                file_dialogs = [BrowseWidget(viz, f"Vector##vec{i}", os.path.abspath(os.getcwd()), ["*",".pth", ".pt"], width=self.viz.app.button_w, multiple=False, traverse_folders=False) for i in range(new_keyframes)]
-                file_dialogs[:min(new_keyframes, self.params.num_keyframes)] = self.file_dialogs[:min(new_keyframes, self.params.num_keyframes)]
-                self.file_dialogs = file_dialogs
-
+            if _clicked and self.params.anim:
+                self.looped = 2
+            label = "Keyframe" if self.loop_type else "NoiseLoop"
+            imgui.same_line()
+            if imgui_utils.button(label, viz.app.button_w):
+                self.loop_type = not self.loop_type
 
             imgui.same_line()
             label = "Time" if self.params.mode else "Speed"
-            if imgui_utils.button(f'{label}##loopmode', width=viz.app.button_w,enabled=True):
+            if imgui_utils.button(f'{label}##loopmode', width=viz.app.button_w, enabled=True):
                 self.params.mode = not self.params.mode
             imgui.same_line()
             if self.params.mode:
                 imgui.same_line()
                 with imgui_utils.item_width(viz.app.font_size * 5):
-                    changed, self.params.looptime = imgui.input_int("Time to loop", self.params.looptime)
+                    changed, self.params.looptime = imgui.input_int("Seconds", self.params.looptime)
             else:
                 with imgui_utils.item_width(viz.app.button_w * 2 - viz.app.spacing * 2):
                     changed, speed = imgui.slider_float('##speed', self.speed, -5, 5, format='Speed %.3f',
                                                         power=3)
                     if changed:
                         self.speed = speed
-            imgui.same_line()
-            if imgui_utils.button("KeyFrames", width=viz.app.button_w):
-                self.open_keyframes = True
-            if self.open_keyframes:
-                collapsed, self.open_keyframes = imgui.begin("KeyFrames", closable=True, flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE|imgui.WINDOW_NO_COLLAPSE)
-                if collapsed:
-                    for i in range(self.params.num_keyframes):
-                        self.key_frame_vizface(i)
 
-                # check if any file dialogs are open
-                open_dialog = False
-                for file_dialog in self.file_dialogs:
-                    if file_dialog.open:
-                        open_dialog = True
-                        break
-                if self.open_file_dialog == True and not open_dialog:
-                    self.open_file_dialog = False
-                    imgui.set_window_focus()
 
-                self.open_file_dialog = open_dialog
-                # check if current window focussed if not close it unless a file dialog is open
-                if not imgui.is_window_focused() and not self.open_file_dialog:
-                    self.open_keyframes = False
-                imgui.end()
-            imgui.same_line()
-            with imgui_utils.item_width(viz.app.font_size*5):
-                changed, idx = imgui.input_int("index", self.params.index+1)
-                if changed:
-                    self.params.index = int((idx-1) % self.params.num_keyframes)
-            imgui.same_line()
-            with imgui_utils.item_width(viz.app.font_size*5):
-                changed, self.alpha = imgui.slider_float("alpha", self.alpha, 0, 1)
+            if self.loop_type:
+                with imgui_utils.item_width(viz.app.font_size*5):
+                    changed, new_keyframes = imgui.input_int("# of Keyframes", self.params.num_keyframes)
+                if changed and new_keyframes > 0:
+                    vecs= torch.randn(new_keyframes,512)
+                    vecs[:min(new_keyframes,self.params.num_keyframes)] = self.keyframes[:min(new_keyframes,self.params.num_keyframes)]
+                    self.keyframes = vecs
+                    if not self.use_osc:
+                        self.params.index = min(self.params.num_keyframes-2, self.params.index)
+                    seeds = [(i, 0) for i in range(new_keyframes)]
+                    seeds[:min(new_keyframes, self.params.num_keyframes)] = self.seeds[:min(new_keyframes, self.params.num_keyframes)]
+                    self.seeds = seeds
+                    paths = [""]*new_keyframes
+                    paths[:min(new_keyframes, self.params.num_keyframes)] = self.paths[:min(new_keyframes, self.params.num_keyframes)]
+                    self.paths = paths
+                    modes = [False]*new_keyframes
+                    modes[:min(new_keyframes, self.params.num_keyframes)] = self.modes[:min(new_keyframes, self.params.num_keyframes)]
+                    self.modes = modes
+                    project = [True]*new_keyframes
+                    project[:min(new_keyframes, self.params.num_keyframes)] = self.project[:min(new_keyframes, self.params.num_keyframes)]
+                    self.project = project
+                    looping_snaps = [{} for _ in range(new_keyframes)]
+                    print("empty looping_snaps", len(looping_snaps))
+                    looping_snaps[:min(new_keyframes, self.params.num_keyframes)] = self.looping_snaps[
+                                                                            :min(new_keyframes, self.params.num_keyframes)]
+                    print(looping_snaps)
+                    self.looping_snaps = looping_snaps
+                    print(self.looping_snaps, looping_snaps)
+                    print("Looping snaps add", len(self.looping_snaps), self.params.num_keyframes)
+
+                    file_dialogs = [BrowseWidget(viz, f"Vector##vec{i}", os.path.abspath(os.getcwd()), ["*",".pth", ".pt"], width=self.viz.app.button_w, multiple=False, traverse_folders=False) for i in range(new_keyframes)]
+                    file_dialogs[:min(new_keyframes, self.params.num_keyframes)] = self.file_dialogs[:min(new_keyframes, self.params.num_keyframes)]
+                    self.file_dialogs = file_dialogs
+                    self.params.num_keyframes = new_keyframes
+
+
+
+                imgui.same_line()
+                if imgui_utils.button("KeyFrames", width=viz.app.button_w):
+                    self.open_keyframes = True
+                if self.open_keyframes:
+                    collapsed, self.open_keyframes = imgui.begin("KeyFrames", closable=True, flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE|imgui.WINDOW_NO_COLLAPSE)
+                    if collapsed:
+                        for i in range(self.params.num_keyframes):
+                            self.key_frame_vizface(i)
+                        if self.remove_entry != -1:
+                            self.keyframes = torch.cat([self.keyframes[:self.remove_entry], self.keyframes[self.remove_entry + 1:]], dim=0)
+                            del self.paths[self.remove_entry]
+                            del self.project[self.remove_entry]
+                            del self.modes[self.remove_entry]
+                            del self.seeds[self.remove_entry]
+                            del self.looping_snaps[self.remove_entry]
+                            del self.file_dialogs[self.remove_entry]
+
+                            print("Looping snaps del", len(self.looping_snaps), self.params.num_keyframes)
+                            self.params.num_keyframes -= 1
+                            self.remove_entry = -1
+
+                    # check if any file dialogs are open
+                    open_dialog = False
+                    for file_dialog in self.file_dialogs:
+                        if file_dialog.open:
+                            open_dialog = True
+                            break
+                    if self.open_file_dialog == True and not open_dialog:
+                        self.open_file_dialog = False
+                        imgui.set_window_focus()
+
+                    self.open_file_dialog = open_dialog
+                    # check if current window focussed if not close it unless a file dialog is open
+                    if not imgui.is_window_focused() and not self.open_file_dialog:
+                        self.open_keyframes = False
+                    imgui.end()
+                imgui.same_line()
+                with imgui_utils.item_width(viz.app.font_size*5):
+                    changed, idx = imgui.input_int("index", self.params.index+1)
+                    if changed:
+                        self.params.index = int((idx-1) % self.params.num_keyframes)
+                imgui.same_line()
+                with imgui_utils.item_width(viz.app.font_size*5):
+                    changed, self.alpha = imgui.slider_float("alpha", self.alpha, 0, 1)
+            else:
+                imgui.same_line()
+                with imgui_utils.item_width(viz.app.font_size * 5):
+                    changed, self.alpha = imgui.slider_float("alpha", self.alpha, 0, 1)
+                imgui.same_line()
+                with imgui_utils.item_width(viz.app.font_size * 5):
+                    _changed, self.noise_seed = imgui.input_int("Looping Seed", self.noise_seed)
+                if _changed:
+                    self.noise_loop_feats = [OSN(self.noise_seed + i, self.radius) for i in range(512)]
 
             _, self.perfect_loop = imgui.checkbox("Perfect Loop", self.perfect_loop)
+            imgui.same_line()
+            _changed, self.osc_ip = imgui_utils.input_text("OSC IP", self.osc_ip, 256, imgui.INPUT_TEXT_CHARS_NO_BLANK,
+                                                           width=viz.app.font_size * 5)
+            if _changed:
+                self.osc_client = SimpleUDPClient(self.osc_ip, self.osc_port)
+
+            imgui.same_line()
+            with imgui_utils.item_width(viz.app.font_size * 6):
+                _changed, self.osc_port = imgui.input_int("OSC Port", self.osc_port)
+            if _changed:
+                self.osc_client = SimpleUDPClient(self.osc_ip, self.osc_port)
+
+            imgui.same_line()
+            _changed, self.osc_address = imgui_utils.input_text("OSC Address", self.osc_address, 256,
+                                                                imgui.INPUT_TEXT_CHARS_NO_BLANK,
+                                                                width=viz.app.font_size * 7)
+
+            imgui.same_line()
+            with imgui_utils.grayed_out(True):
+                imgui.checkbox("Looped", self.looped == 1)
 
             if self.params.anim:
                 self.update_alpha()
                 viz.args.alpha = self.alpha
-                viz.args.looping_index = self.params.index
-                viz.args.mode = "loop"
-                l_list = []
-                for i, mode in enumerate(self.modes):
-                    if mode == 0:
-                        l_list.append({"mode": "seed", "latent": self.seeds[i], "project": self.project[i]})
-                    elif mode == 1:
-                        l_list.append({"mode": "vec", "latent": self.keyframes[i], "project": self.project[i]})
-                    elif mode == 2:
-                        print("adding loop", self.looping_snaps[i])
-                        l_list.append({"mode": "loop", "looping_list": self.looping_snaps[i]["looping_list"], "looping_index": self.looping_snaps[i]["index"], "alpha": self.looping_snaps[i]["alpha"]})
-                viz.args.looping_list = l_list
+                if self.loop_type:
+                    viz.args.looping_index = self.params.index
+
+                    viz.args.mode = "loop"
+                    l_list = []
+                    for i, mode in enumerate(self.modes):
+                        if mode == 0:
+                            l_list.append({"mode": "seed", "latent": self.seeds[i], "project": self.project[i]})
+                        elif mode == 1:
+                            l_list.append({"mode": "vec", "latent": self.keyframes[i], "project": self.project[i]})
+                        elif mode == 2:
+                            print("adding loop", self.looping_snaps[i])
+                            l_list.append({"mode": "loop", "looping_list": self.looping_snaps[i]["looping_list"], "looping_index": self.looping_snaps[i]["index"], "alpha": self.looping_snaps[i]["alpha"]})
+                    viz.args.looping_list = l_list
+                else:
+                    viz.args.mode = "vec"
+                    for i in range(512):
+                        self.z[0, i] = self.noise_loop_feats[i].get_val((np.pi * 2) * self.alpha)
+                    viz.args.vec = self.z
+
 
         self.osc_menu()
 

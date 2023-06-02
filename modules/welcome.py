@@ -5,12 +5,10 @@
 # and any modifications thereto.  Any use, reproduction, disclosure or
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
-
-import click
+import cv2
 import imgui
 
-from utils.gui_utils import imgui_window
-from utils.gui_utils import imgui_utils
+from utils.gui_utils import imgui_utils, gl_utils
 from modules.autolume_live import States
 
 #----------------------------------------------------------------------------
@@ -18,21 +16,12 @@ from modules.autolume_live import States
 class Welcome:
     def __init__(self, app):
         self.app = app
+        self.splash = cv2.imread("assets/splashscreen.jpg")
+        print(self.splash.shape)
+        self.splash = cv2.cvtColor(self.splash, cv2.COLOR_BGR2RGB)
+        self.splash_texture = gl_utils.Texture(image=self.splash, width=self.splash.shape[1], height=self.splash.shape[0], channels=self.splash.shape[2])
 
     @imgui_utils.scoped_by_object_id
     def __call__(self):
         # Begin control pane.
-        imgui.set_next_window_position(0, 0)
-        imgui.set_next_window_size(self.app.content_width, self.app.content_height)
-        imgui.begin('##welcome', closable=False, flags=(imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE))
 
-        draw_list = imgui.get_window_draw_list()
-        draw_list.add_text(self.app.content_width//2, self.app.content_height//2, imgui.get_color_u32_rgba(1, 1, 1, 1), "Autolume-Live!")
-        if imgui_utils.button("START", self.app.button_w):
-            self.app.state = States.MENU
-
-        if self.app.state == States.MENU:
-            self.app.open_menu()
-
-
-        imgui.end()

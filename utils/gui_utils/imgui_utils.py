@@ -12,7 +12,7 @@ import imgui
 
 # ----------------------------------------------------------------------------
 
-def set_default_style(color_scheme='light', spacing=9, indent=23, scrollbar=15):
+def set_default_style(color_scheme='dark', spacing=9, indent=23, scrollbar=15):
     s = imgui.get_style()
     s.window_padding = [spacing, spacing]
     s.item_spacing = [spacing, spacing]
@@ -32,7 +32,61 @@ def set_default_style(color_scheme='light', spacing=9, indent=23, scrollbar=15):
     s.scrollbar_rounding = 3
     s.grab_rounding = 3
 
+    # Color scheme.
+    red = [235/255,  27/255,  59/255, .7]
+    red_hovered = [235/255,  27/255,  59/255, 1.]
+    red_active = [205/255,  7/255,  39/255, 1.]
+    white = [1.00, 1.00, 1.00, 1.00]
+    black = [0.00, 0.00, 0.00, 1.00]
+    gray = [0.6, 0.6, 0.6, 1]
+
     getattr(imgui, f'style_colors_{color_scheme}')(s)
+    # s.colors[imgui.COLOR_TEXT] = black
+    # s.colors[imgui.COLOR_TEXT_DISABLED] = gray
+    # s.colors[imgui.COLOR_WINDOW_BACKGROUND] = [0.94, 0.94, 0.94, 1.00]
+    # s.colors[imgui.COLOR_CHILD_BACKGROUND] = [0.00, 0.00, 0.00, 1.]
+    # s.colors[imgui.COLOR_POPUP_BACKGROUND] = [0., 1., 0., 1.00]
+    # s.colors[imgui.COLOR_BORDER] = [0., 1., 0., 0.00]
+    # s.colors[imgui.COLOR_BORDER_SHADOW] = [0., 1., 0., 0.00]
+    s.colors[imgui.COLOR_FRAME_BACKGROUND] = [235/255,  27/255,  59/255, 0.5]
+    s.colors[imgui.COLOR_FRAME_BACKGROUND_HOVERED] = red
+    s.colors[imgui.COLOR_FRAME_BACKGROUND_ACTIVE] = red_active
+    s.colors[imgui.COLOR_TITLE_BACKGROUND] = red
+    s.colors[imgui.COLOR_TITLE_BACKGROUND_ACTIVE] = red_active
+    s.colors[imgui.COLOR_TITLE_BACKGROUND_COLLAPSED] = red
+    # s.colors[imgui.COLOR_MENUBAR_BACKGROUND] = [0., 1., 0., 1.00]
+    # s.colors[imgui.COLOR_SCROLLBAR_BACKGROUND] = [0., 1., 0., 1.00]
+    # s.colors[imgui.COLOR_SCROLLBAR_GRAB] = [0., 1., 0., 1.00]
+    # s.colors[imgui.COLOR_SCROLLBAR_GRAB_HOVERED] = [0., 1., 0., 1.00]
+    # s.colors[imgui.COLOR_SCROLLBAR_GRAB_ACTIVE] = [0., 1., 0., 1.00]
+    s.colors[imgui.COLOR_CHECK_MARK] = red
+    s.colors[imgui.COLOR_SLIDER_GRAB] = red_hovered
+    s.colors[imgui.COLOR_SLIDER_GRAB_ACTIVE] = red_hovered
+    s.colors[imgui.COLOR_BUTTON] = red
+    s.colors[imgui.COLOR_BUTTON_HOVERED] = red_hovered
+    s.colors[imgui.COLOR_BUTTON_ACTIVE] = red_active
+    s.colors[imgui.COLOR_HEADER] = red
+    s.colors[imgui.COLOR_HEADER_HOVERED] = red_hovered
+    s.colors[imgui.COLOR_HEADER_ACTIVE] = red_active
+    # s.colors[imgui.COLOR_SEPARATOR] = [0., 1., 0., 1.00]
+    s.colors[imgui.COLOR_SEPARATOR_HOVERED] = red_hovered
+    s.colors[imgui.COLOR_SEPARATOR_ACTIVE] = red_active
+    s.colors[imgui.COLOR_RESIZE_GRIP] = red
+    s.colors[imgui.COLOR_RESIZE_GRIP_HOVERED] = red_hovered
+    s.colors[imgui.COLOR_RESIZE_GRIP_ACTIVE] = red_active
+    s.colors[imgui.COLOR_PLOT_LINES] = white
+    s.colors[imgui.COLOR_PLOT_LINES_HOVERED] = white
+    # s.colors[imgui.COLOR_PLOT_HISTOGRAM] = [0., 1., 0., 1.00]
+    # s.colors[imgui.COLOR_PLOT_HISTOGRAM_HOVERED] = [0., 1., 0., 1.00]
+    s.colors[imgui.COLOR_TEXT_SELECTED_BACKGROUND] = red
+    s.colors[imgui.COLOR_DRAG_DROP_TARGET] = [0.8, 0.8, 0.8, 1.00]
+    s.colors[imgui.COLOR_NAV_HIGHLIGHT] = red
+    s.colors[imgui.COLOR_NAV_WINDOWING_HIGHLIGHT] = red
+    s.colors[imgui.COLOR_NAV_WINDOWING_DIM_BACKGROUND] = red
+    s.colors[imgui.COLOR_MODAL_WINDOW_DIM_BACKGROUND] = red
+
+
+
     c0 = s.colors[imgui.COLOR_MENUBAR_BACKGROUND]
     c1 = s.colors[imgui.COLOR_FRAME_BACKGROUND]
     s.colors[imgui.COLOR_POPUP_BACKGROUND] = [x * 0.7 + y * 0.3 for x, y in zip(c0, c1)][:3] + [1]

@@ -1,9 +1,10 @@
 import gc
 import os
 
+import cv2
 import imgui
 
-from utils.gui_utils import imgui_window
+from utils.gui_utils import imgui_window, gl_utils
 from enum import IntEnum
 class States(IntEnum):
     ERROR = -2
@@ -11,24 +12,28 @@ class States(IntEnum):
     WELCOME = 0
     MENU = 1
     RENDER = 2
+    SPLASH = 3
 
-from modules.visualizer import Visualizer
-from modules.menu import Menu
-from modules.welcome import Welcome
-from modules.renderloop import AsyncRenderer
 
 
 class Autolume(imgui_window.ImguiWindow):
     # State handler that greets user, shows menu (allowing for training, compression, ganspace), and renders
     def __init__(self):
         super().__init__(title='Autolume-Live', window_width=3840, window_height=2160)
-        self.state = 1
+
+        self.state = 0
         self.running = True
-        self.welcome = Welcome(self)
-        self.menu = Menu(self)
+        self.menu = None
         self.viz = None
         self.render_loop = None
         self.pkls = []
+        self.splash_delay = 0
+
+        self.splash = cv2.imread("assets/splashscreen.jpg")
+        print(self.splash.shape)
+        self.splash = cv2.cvtColor(self.splash, cv2.COLOR_BGR2RGB)
+        self.splash_texture = gl_utils.Texture(image=self.splash, width=self.splash.shape[1],
+                                               height=self.splash.shape[0], channels=self.splash.shape[2])
 
         # Initialize window.
         self.label_w = 0
@@ -48,11 +53,15 @@ class Autolume(imgui_window.ImguiWindow):
 
 
     def open_menu(self):
+        from modules.menu import Menu
         print("opening Menu")
         # Initialize window.
         self.menu = Menu(self)
 
     def start_renderer(self):
+        from modules.renderloop import AsyncRenderer
+        from modules.visualizer import Visualizer
+
         self.render_loop = AsyncRenderer()
         self.viz = Visualizer(self, self.render_loop)
 
@@ -66,12 +75,15 @@ class Autolume(imgui_window.ImguiWindow):
         gc.collect()
 
     def set_visible_menu(self):
+        from modules.menu import Menu
         print("setting visible menu ------------------------")
         self.state = States.MENU
-        self.viz.close()
-        self.render_loop.close()
-        self.viz = None
-        self.render_loop = None
+        if self.viz is not None:
+            self.viz.close()
+            self.viz = None
+        if self.render_loop is not None:
+            self.render_loop.close()
+            self.render_loop = None
         gc.collect()
         self.menu = Menu(self)
 
@@ -80,9 +92,29 @@ class Autolume(imgui_window.ImguiWindow):
         self.button_w = self.font_size * 5
         self.label_w = round(self.font_size * 4.5)
 
-        # print("running", States(self.state).name)
-        if States.WELCOME == self.state:
-            self.welcome()
+        if self.state == States.SPLASH:
+            imgui.set_next_window_position(0, 0)
+            imgui.set_next_window_size(self.content_width, self.content_height)
+            imgui.begin('##welcome', closable=False,
+                        flags=(imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE))
+            imgui.image(self.splash_texture.gl_id, self.content_width, self.content_height)
+            imgui.end()
+            self.splash_delay -= 1
+            if self.splash_delay <= 0:
+                self.set_visible_menu()
+
+
+        if self.state == States.WELCOME:
+            imgui.set_next_window_position(0, 0)
+            imgui.set_next_window_size(self.content_width, self.content_height)
+            imgui.begin('##welcome', closable=False,
+                        flags=(imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE))
+            imgui.image(self.splash_texture.gl_id, self.content_width, self.content_height)
+            imgui.end()
+            self.state = States.SPLASH
+            self.splash_delay = 30
+
+
 
         if self.state == States.MENU:
             if self.menu is None:

@@ -315,7 +315,7 @@ class SynthesisLayer(torch.nn.Module):
         rx, ry = self.ratio
         in_w = x.shape[-2]
         in_h = x.shape[-1]
-        # misc.assert_shape(x, [None, self.in_channels, in_resolution, in_resolution])
+        # assets.assert_shape(x, [None, self.in_channels, in_resolution, in_resolution])
         styles = self.affine(w)
         noise = None
         noise_strength = self.noise_strength * self.global_noise
@@ -448,7 +448,7 @@ class SynthesisBlock(torch.nn.Module):
             x = self.const.to(dtype=dtype, memory_format=memory_format)
             x = x.unsqueeze(0).repeat([ws.shape[0], 1, 1, 1])
         else:
-            # misc.assert_shape(x, [None, self.in_channels, self.resolution // 2, self.resolution // 2])
+            # assets.assert_shape(x, [None, self.in_channels, self.resolution // 2, self.resolution // 2])
             x = x.to(dtype=dtype, memory_format=memory_format)
 
         # Main layers.
@@ -464,7 +464,7 @@ class SynthesisBlock(torch.nn.Module):
             x = self.conv1(x, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs)
         # ToRGB.
         if img is not None:
-            # misc.assert_shape(img, [None, self.img_channels, self.resolution // 2, self.resolution // 2])
+            # assets.assert_shape(img, [None, self.img_channels, self.resolution // 2, self.resolution // 2])
             img = upfirdn2d.upsample2d(img, self.resample_filter)
         if self.is_last or self.architecture == 'skip':
             y = self.torgb(x, next(w_iter), fused_modconv=fused_modconv)
@@ -653,7 +653,7 @@ class DiscriminatorBlock(torch.nn.Module):
 
         # Input.
         if x is not None:
-            #misc.assert_shape(x, [None, self.in_channels, self.resolution, self.resolution])
+            #assets.assert_shape(x, [None, self.in_channels, self.resolution, self.resolution])
 
             # !!! custom
             misc.assert_shape(x, [None, self.in_channels, self.resolution * self.init_res[0] // 4,
@@ -664,7 +664,7 @@ class DiscriminatorBlock(torch.nn.Module):
         if self.in_channels == 0 or self.architecture == 'skip':
             misc.assert_shape(img, [None, self.img_channels, self.resolution * self.init_res[0] // 4,
                                     self.resolution * self.init_res[1] // 4])
-            #misc.assert_shape(img, [None, self.img_channels, self.resolution, self.resolution])
+            #assets.assert_shape(img, [None, self.img_channels, self.resolution, self.resolution])
             img = img.to(dtype=dtype, memory_format=memory_format)
             y = self.fromrgb(img)
             x = x + y if x is not None else y
@@ -750,7 +750,7 @@ class DiscriminatorEpilogue(torch.nn.Module):
 
     def forward(self, x, img, cmap, force_fp32=False):
         misc.assert_shape(x, [None, self.in_channels, *self.init_res]) # [NCHW]
-        # misc.assert_shape(x, [None, self.in_channels, self.resolution, self.resolution]) # [NCHW]
+        # assets.assert_shape(x, [None, self.in_channels, self.resolution, self.resolution]) # [NCHW]
         _ = force_fp32 # unused
         dtype = torch.float32
         memory_format = torch.contiguous_format

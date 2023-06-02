@@ -781,6 +781,7 @@ class Renderer:
 
 # ----------------------------------------------------------------------------
     def process_loop(self, G, looping_list, looping_index, alpha, trunc_psi, trunc_cutoff):
+        print("looping", looping_list, looping_index, alpha)
         v0 = self.evaluate(G, looping_list[looping_index-1], trunc_psi, trunc_cutoff)
         v1 = self.evaluate(G, looping_list[looping_index], trunc_psi, trunc_cutoff)
         return slerp(alpha, v0, v1)

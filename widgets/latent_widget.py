@@ -20,8 +20,7 @@ except ModuleNotFoundError:
 
 import dnnlib
 from utils.gui_utils import imgui_utils
-from widgets import osc_menu
-
+from widgets import osc_menu, save_widget
 import imgui
 
 
@@ -49,6 +48,7 @@ class LatentWidget:
         self.file_dialog = BrowseWidget(viz, "Browse", os.path.abspath(os.getcwd()),
                                       ["*", ".pth", ".pt", ".npy", ".npz", ],
                                       width=self.viz.app.button_w, multiple=False, traverse_folders=False)
+        self.pt_save_dialog = save_widget.SaveWidget(viz, "Save Vector", os.path.abspath(os.getcwd()), ".pt")
 
 
     def save(self, path):
@@ -203,18 +203,10 @@ class LatentWidget:
 
 
         imgui.same_line()
-        _changed, self.vec_save_path = imgui_utils.input_text("##vecsavepath", self.vec_save_path, 1024, width=viz.app.button_w, flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL, help_text="Save vector to file")
-        imgui.same_line()
-        if imgui_utils.button("Save##vecmode", width=viz.app.button_w, enabled=self.vec_save_path != ''):
-            print("Saving vector to", self.vec_save_path)
-            if self.vec_save_path:
-                if self.vec_save_path.endswith('.npy'):
-                    np.save(self.vec_save_path, self.latent.vec.detach().cpu().numpy())
-                elif self.vec_save_path.endswith('.pt'):
-                    torch.save(self.latent.vec, self.vec_save_path)
-                else:
-                    print("Unsupported file format")
-
+        _changed, fname = self.pt_save_dialog()
+        if _changed:
+            self.vec_save_path = fname
+            torch.save(self.latent.vec, self.vec_save_path)
 
     @imgui_utils.scoped_by_object_id
     def __call__(self, show=True):
