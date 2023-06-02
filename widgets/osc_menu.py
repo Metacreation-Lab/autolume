@@ -1,3 +1,5 @@
+import contextlib
+
 import imgui
 
 import dnnlib
@@ -5,6 +7,7 @@ from utils.gui_utils import imgui_utils
 import numpy as np
 import math
 import torch
+from assets import RED
 
 
 class OscMenu:
@@ -13,6 +16,8 @@ class OscMenu:
         self.label = label
         self.funcs = funcs
         self.use_map = use_map
+        self.hovering = None
+        self.active = False
         if use_map is None:
             self.use_map = dict(zip(self.funcs.keys(),[True] * len(self.funcs)))
         print(self.use_map)
@@ -100,9 +105,32 @@ class OscMenu:
         if imgui.begin_menu_bar():
             imgui.text("Osc Menu |")
             for key in self.funcs.keys():
-                if imgui.begin_menu(key, True):
+                # if self.use_osc[key] we turn the selectable red to indicate that it is active
+                with make_red(self.use_osc[key]):
+                    opened, selected = imgui.selectable(key, (self.hovering == key and self.active) or self.use_osc[key], width=imgui.calc_text_size(key)[0])
+
+                if imgui.is_item_hovered():
+                    self.hovering = key
+                if opened:
+                    self.active = not self.active
+                if self.active and self.hovering == key:
+                    p_min = imgui.get_item_rect_min()
+                    p_max = imgui.get_item_rect_max()
+                    imgui.set_next_window_position(p_min[0], p_max[1])
+                    imgui.begin(f"##OSCItem{key}", flags=imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_SCROLLBAR)
                     self.osc_item(key)
-                    imgui.end_menu()
+                    imgui.end()
             imgui.end_menu_bar()
 
         imgui.end_child()
+
+@contextlib.contextmanager
+def make_red(condition=True):
+    if condition:
+        imgui.push_style_color(imgui.COLOR_HEADER, *RED)
+        imgui.push_style_color(imgui.COLOR_HEADER_HOVERED, *RED)
+        imgui.push_style_color(imgui.COLOR_HEADER_ACTIVE, *RED)
+        yield
+        imgui.pop_style_color(3)
+    else:
+        yield

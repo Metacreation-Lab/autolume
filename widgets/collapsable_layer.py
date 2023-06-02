@@ -26,6 +26,7 @@ import yaml
 import dnnlib
 from utils.gui_utils import imgui_utils, gl_utils
 from widgets import osc_menu
+from assets import RED
 
 # ----------------------------------------------------------------------------
 
@@ -71,6 +72,7 @@ class LayerWidget:
         self.osc_funcs = {}
         self.names = []
         self.has_transforms = {}
+        self.has_osc = {}
         self.imgui_ids = set()
         self.capture_layer = "output"  # which layer should be captured and rendered
         self.cached_adjustments = {}  # cached adjustments for each layer that will be applied to latent vectors (currently not doing anything)
@@ -81,7 +83,7 @@ class LayerWidget:
         self.tab = False
         self.simplified = True
 
-        funcs= {"Grayscale": self.grayscale_osc(), "Contrast": self.contrast_osc()}
+        funcs = {"Grayscale": self.grayscale_osc(), "Contrast": self.contrast_osc()}
         self.osc_menu = osc_menu.OscMenu(self.viz, funcs, None, label="##LayerOSCMenu")
 
         # read as rgba
@@ -106,16 +108,14 @@ class LayerWidget:
 
         self.transform_img[:, :, 3] = np.where(self.transform_img[:, :, 0] == 0, 255, 0)
         self.transform_texture = gl_utils.Texture(image=self.transform_img, width=self.transform_img.shape[1],
-                                             height=self.transform_img.shape[0], channels=self.transform_img.shape[2])
+                                                  height=self.transform_img.shape[0],
+                                                  channels=self.transform_img.shape[2])
 
         self.noise_img = cv2.imread("assets/noise.png")
         self.noise_img = cv2.cvtColor(self.noise_img, cv2.COLOR_RGB2RGBA)
         self.noise_img[:, :, 3] = np.where(self.noise_img[:, :, 0] == 0, 255, 0)
         self.noise_texture = gl_utils.Texture(image=self.noise_img, width=self.noise_img.shape[1],
-                                             height=self.noise_img.shape[0], channels=self.noise_img.shape[2])
-
-
-
+                                              height=self.noise_img.shape[0], channels=self.noise_img.shape[2])
 
     def get_params(self):
         return self.mode, self.cached_transforms, self.names, self.has_transforms, self.cached_adjustments, \
@@ -169,6 +169,8 @@ class LayerWidget:
         for layer in layers:
             if not layer.name in self.has_transforms:
                 self.has_transforms[layer.name] = False
+            if not layer.name in self.has_osc:
+                self.has_osc[layer.name] = False
         layer = ([layer for layer in layers if layer.name == self.cur_layer] + [None])[0]
 
         if layer is None and len(layers) > 0:
@@ -194,11 +196,19 @@ class LayerWidget:
 
             imgui.begin_child('##list', width=width, height=height, border=True,
                               flags=imgui.WINDOW_ALWAYS_VERTICAL_SCROLLBAR)
-            if imgui_utils.button("Simple", width=(width // 2) - (viz.app.spacing * 3), enabled=not self.simplified):
-                self.simplified = True
+            if self.simplified:
+                imgui_utils.color_button("Simple", color=RED, width=(width // 2) - (viz.app.spacing * 3))
+            else:
+                if imgui_utils.button("Simple", width=(width // 2) - (viz.app.spacing * 3),
+                                      enabled=not self.simplified):
+                    self.simplified = True
             imgui.same_line()
-            if imgui_utils.button("Advanced", width=(width // 2) - (viz.app.spacing * 3), enabled=self.simplified):
-                self.simplified = False
+
+            if not self.simplified:
+                imgui_utils.color_button("Advanced", color=RED, width=(width // 2) - (viz.app.spacing * 3))
+            else:
+                if imgui_utils.button("Advanced", width=(width // 2) - (viz.app.spacing * 3), enabled=self.simplified):
+                    self.simplified = False
             imgui.separator()
             checkbox_size = viz.app.font_size + viz.app.spacing * 2
             draw_list = imgui.get_window_draw_list()
@@ -229,6 +239,10 @@ class LayerWidget:
                             _opened, selected = imgui.selectable(f'##{layer.name}_selectable',
                                                                  width=width - viz.app.button_w,
                                                                  selected=selected)
+                            if layer.name in self.has_osc:
+                                if self.has_osc[layer.name]:
+                                    draw_list.channels_set_current(0)
+                                    selectable_color(*RED)
                             imgui.same_line(checkbox_size + viz.app.spacing)
                             _clicked, selected = imgui_utils.img_checkbox(self.edit_texture.gl_id,
                                                                           selected, width=checkbox_size // 2,
@@ -275,6 +289,10 @@ class LayerWidget:
                         _opened, selected = imgui.selectable(f'##{layer.name}_selectable',
                                                              width=width - viz.app.button_w,
                                                              selected=selected)
+                        if layer.name in self.has_osc:
+                            if self.has_osc[layer.name]:
+                                draw_list.channels_set_current(0)
+                                selectable_color(*RED)
                         imgui.same_line(checkbox_size + viz.app.spacing)
                         _clicked, selected = imgui_utils.img_checkbox(self.edit_texture.gl_id,
                                                                       selected, width=checkbox_size // 2,
@@ -324,8 +342,10 @@ class LayerWidget:
                         _opened, selected = imgui.selectable(f'##{layer.name}_selectable',
                                                              width=width - viz.app.button_w,
                                                              selected=selected)
-
-
+                        if layer.name in self.has_osc:
+                            if self.has_osc[layer.name]:
+                                draw_list.channels_set_current(0)
+                                selectable_color(*RED)
                         imgui.same_line(checkbox_size + viz.app.spacing)
                         _clicked, selected = imgui_utils.img_checkbox(self.edit_texture.gl_id,
                                                                       selected, width=checkbox_size // 2,
@@ -390,11 +410,36 @@ class LayerWidget:
 
                 if len(layers) > 0:
                     self.transform_widget(layers)
-            else:
-                self.adjust_noise()
+
+                # set all has_osc to false
+                for layer in self.has_osc:
+                    self.has_osc[layer] = False
+
                 for i, trans in enumerate(self.cached_transforms):
                     if trans.layerID in self.names:
                         self.has_transforms[trans.layerID] = True
+                    if trans.layerID in self.has_osc:
+                        self.has_osc[trans.layerID] = trans.use_osc
+
+                for noise in self.noises:
+                    if noise in self.has_osc:
+                        if self.has_osc[noise]==False:
+                            self.has_osc[noise] = self.noises[noise]["use_osc"]
+            else:
+                self.adjust_noise()
+                # set all has_osc to false
+                for layer in self.has_osc:
+                    self.has_osc[layer] = False
+                for i, trans in enumerate(self.cached_transforms):
+                    if trans.layerID in self.names:
+                        self.has_transforms[trans.layerID] = True
+                    if trans.layerID in self.has_osc:
+                        self.has_osc[trans.layerID] = trans.use_osc
+
+                for noise in self.noises:
+                    if noise in self.has_osc:
+                        if self.has_osc[noise]==False:
+                            self.has_osc[noise] = self.noises[noise]["use_osc"]
             imgui.end_child()
 
             if self.cur_layer is not None:
@@ -447,7 +492,6 @@ class LayerWidget:
             self.osc_menu()
         # End options.
 
-
         self.base_channel = min(max(self.base_channel, 0), base_channel_max)
         viz.args.layer_name = self.capture_layer if len(layers) > 0 and self.names and self.capture_layer != layers[
             -1].name else None
@@ -495,6 +539,7 @@ class LayerWidget:
             for i, trans in enumerate(self.cached_transforms):
                 if trans.layerID in self.names:
                     self.has_transforms[trans.layerID] = True
+                    self.has_transforms[trans.layerID] = trans.use_osc
                     if trans.layerID == self.cur_layer:
                         u_id = trans.imgui_id
                         if imgui.button(f"x##{u_id}", width=self.viz.app.font_size):
@@ -624,6 +669,7 @@ class LayerWidget:
         if self.cur_layer not in self.noises:
             self.noises[self.cur_layer] = {"strength": 0, "id": self.make_id(), "use_osc": False,
                                            "osc_address": "osc address", "mapping": "x"}
+
         if self.cur_layer in self.noises:
             with imgui_utils.item_width(self.viz.app.button_w * 2 - self.viz.app.spacing * 2):
                 _changed, self.noises[self.cur_layer]["strength"] = imgui.slider_float(
@@ -698,9 +744,13 @@ class LayerWidget:
     def grayscale_osc(self):
         def func(address, *args):
             try:
-                assert (type(args[-1]) is bool, f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {bool}")
+                assert type(args[
+                                -1]) is bool, f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {bool}"
                 if args[-1]:
                     self.sel_channels = 1
+                else:
+                    self.sel_channels = 3
+
 
             except Exception as e:
                 self.viz.print_error(e)
@@ -710,62 +760,10 @@ class LayerWidget:
     def contrast_osc(self):
         def func(address, *args):
             try:
-                assert (type(args[-1]) is type(self.img_scale_db),
+                assert (type(args[-1] is type(self.img_scale_db)),
                         f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {type(self.img_scale_db)}")
                 self.img_scale_db = args[-1]
             except Exception as e:
                 self.viz.print_error(e)
 
         return func
-
-# ----------------------------------------------------------------------------
-
-# adjustment widget currently left out since not happy with how it works
-# @imgui_utils.scoped_by_object_id
-# def adjust_widget(self, layers):
-#
-#     if imgui_utils.button("+##vecs", width=-1, enabled=self.cur_layer is not None):
-#         if not (self.cur_layer in self.cached_adjustments):
-#             self.cached_adjustments[self.cur_layer] = []
-#         adjustment = {"weight": torch.tensor([0]), "dir": torch.randn(1, 512), "path": "", "uid": self.make_id()}
-#         self.cached_adjustments[self.cur_layer].append(adjustment)
-#
-#     remove_idx = None
-#     if self.cur_layer in self.cached_adjustments:
-#         for i, adjustment in enumerate(self.cached_adjustments[self.cur_layer]):
-#             if imgui_utils.button(f"-##remove{adjustment['uid']}",
-#                                   self.viz.app.button_w * (2 / 8) - (self.viz.app.spacing / 2)):
-#                 remove_idx = i
-#             imgui.same_line()
-#             with imgui_utils.item_width(self.viz.app.button_w * (6 / 8) - (self.viz.app.spacing / 2)):
-#                 _, adjustment["weight"] = imgui.slider_float(f"##{adjustment['uid']}",adjustment["weight"], -2, 2,
-#                                                              format='Weight %.3f', power=3)
-#             imgui.same_line()
-#             if imgui_utils.button(f"Randomize##{i}", self.viz.app.button_w):
-#                 adjustment["dir"] = torch.randn(adjustment["dir"].shape)
-#             if imgui_utils.button(f"Load##{i}", self.viz.app.button_w):
-#                 dir = torch.load(adjustment["path"])
-#                 assert dir.shape == adjustment["dir"].shape
-#                 adjustment["dir"] = dir
-#             imgui.separator()
-#
-#         if remove_idx is not None:
-#             self.cached_adjustments[self.cur_layer].pop(remove_idx)
-#             if len(self.cached_adjustments[self.cur_layer]) == 0:
-#                 del self.cached_adjustments[self.cur_layer]
-#     imgui.separator()
-#     _, self.paths[self.cur_layer] = imgui_utils.input_text("Path", self.paths.get(self.cur_layer, ""),
-#                                                            width=self.viz.app.button_w, flags=0, buffer_length=1024)
-#     if imgui_utils.button(f"Load##_all{self.cur_layer}", -1):
-#         if not (self.cur_layer in self.cached_adjustments):
-#             self.cached_adjustments[self.cur_layer] = []
-#         dirs =  torch.from_numpy(np.load(self.paths[self.cur_layer])).squeeze()
-#         for dir in dirs:
-#             self.cached_adjustments[self.cur_layer].append({"weight": torch.tensor([0]), "dir": dir, "path": "", "uid": self.make_id()})
-#
-#
-#     weighted_adjustments = {}
-#     for layer, adjustments in self.cached_adjustments.items():
-#         weighted_adjustments[layer + ".affine"] = torch.stack(
-#             [adj["weight"] * adj["dir"] for adj in adjustments]).sum(dim=0)
-#     self.viz.args.adjustments = weighted_adjustments

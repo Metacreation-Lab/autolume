@@ -43,6 +43,8 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
         if not self._deferred_show:
             glfw.show_window(self._glfw_window)
 
+
+
     def close(self):
         if self._drawing_frame:
             self.end_frame()
@@ -115,6 +117,12 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
 
     def center(self):
         self.set_position((self.monitor_width - self.window_width) // 2, (self.monitor_height - self.window_height) // 2)
+
+    def hide_title_bar(self):
+        glfw.set_window_attrib(self._glfw_window, glfw.DECORATED, False)
+
+    def show_title_bar(self):
+        glfw.set_window_attrib(self._glfw_window, glfw.DECORATED, True)
 
     def set_vsync(self, vsync):
         vsync = bool(vsync)
