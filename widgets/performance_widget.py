@@ -35,9 +35,9 @@ class PerformanceWidget:
         self.scale_factor = 0
         self.device = "cuda" if torch.cuda.is_available() else 'cpu'
         self.custom_kernel_available = False
-        if self.device == "cuda":
-            if upfirdn2d._init():
-                self.custom_kernel_available = True
+        # if self.device == "cuda":
+            # if upfirdn2d._init():
+            #     self.custom_kernel_available = True
         print("CUSTOM KERNEL AVAILABLE:", self.custom_kernel_available)
 
         if self.custom_kernel_available:

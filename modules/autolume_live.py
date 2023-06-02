@@ -88,6 +88,14 @@ class Autolume(imgui_window.ImguiWindow):
         self.menu = Menu(self)
 
     def draw_frame(self):
+
+        if self.state == States.SPLASH:
+            self.set_window_size(self.splash_texture.width//2, self.splash_texture.height//2)
+            self.hide_title_bar()
+
+            # set size of app window/ frame to self.splash_texture.width //2 , self.splash_texture.height //2
+
+
         self.begin_frame()
         self.button_w = self.font_size * 5
         self.label_w = round(self.font_size * 4.5)
@@ -96,19 +104,21 @@ class Autolume(imgui_window.ImguiWindow):
             imgui.set_next_window_position(0, 0)
             imgui.set_next_window_size(self.content_width, self.content_height)
             imgui.begin('##welcome', closable=False,
-                        flags=(imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE))
+                        flags=(imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_SCROLLBAR))
             imgui.image(self.splash_texture.gl_id, self.content_width, self.content_height)
             imgui.end()
             self.splash_delay -= 1
             if self.splash_delay <= 0:
                 self.set_visible_menu()
+                self.set_window_size(3840,2160)
+                self.show_title_bar()
 
 
         if self.state == States.WELCOME:
             imgui.set_next_window_position(0, 0)
             imgui.set_next_window_size(self.content_width, self.content_height)
             imgui.begin('##welcome', closable=False,
-                        flags=(imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE))
+                        flags=(imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE| imgui.WINDOW_NO_SCROLLBAR))
             imgui.image(self.splash_texture.gl_id, self.content_width, self.content_height)
             imgui.end()
             self.state = States.SPLASH
