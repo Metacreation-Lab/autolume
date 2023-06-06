@@ -18,7 +18,7 @@ import torch.nn
 import matplotlib.cm
 import dnnlib
 from bending.transform_layers import ManipulationLayer
-from torch_utils.ops import upfirdn2d
+from torch_utils.ops import upfirdn2d, params
 from torch_utils import legacy
 from architectures import custom_stylegan2
 from super_res.net_base import SRVGGNetPlus
@@ -244,6 +244,7 @@ class Renderer:
         self.G_mixed = None
         self.combined_layers = []
         self.model_changed = False
+        self.checked_custom_kernel = False
 
     def render(self, **args):
         self._is_timing = True
@@ -279,9 +280,12 @@ class Renderer:
         data = self._pkl_data.get(pkl, None)
         if data is None:
             print(f'Loading "{pkl}"... ', end='', flush=True)
+            if not self.checked_custom_kernel:
+                print("Trying to compile custom cuda kernel, this can take a while...", flush=True)
             try:
                 with dnnlib.util.open_url(pkl, verbose=False) as f:
                     data = legacy.load_network_pkl(f, custom=True)
+                    self.checked_custom_kernel = True
                 print('Done.')
             except:
                 data = CapturedException()
@@ -417,7 +421,13 @@ class Renderer:
                      snapped=None,
                      device="cuda"
                      ):
-
+        res.has_custom = params.has_custom
+        if self.checked_custom_kernel:
+            if device == "custom":
+                params.use_custom = True
+            else:
+                params.use_custom = False
+        # Set device.
         if device != self._device.type:
             self.set_device(device)
 
