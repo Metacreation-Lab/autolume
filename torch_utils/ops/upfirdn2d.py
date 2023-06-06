@@ -15,16 +15,15 @@ import torch
 from .. import custom_ops
 from .. import misc
 from . import conv2d_gradfix
-
+from . import params
 #----------------------------------------------------------------------------
 
 _plugin = None
-_use_custom = True
 
 def _init():
-    global _plugin, _use_custom
-    if _plugin is None:
-        if _use_custom:
+    global _plugin
+    if _plugin is None or not params.use_custom:
+        if params.use_custom:
             _plugin = custom_ops.get_plugin(
                 module_name='upfirdn2d_plugin',
                 sources=['upfirdn2d.cpp', 'upfirdn2d.cu'],
@@ -33,10 +32,13 @@ def _init():
                 extra_cuda_cflags=['--use_fast_math', '--allow-unsupported-compiler'],
             )
             if _plugin is None:
-                _use_custom = False
+                print('Compilation failed using native plugin for upfirdn2d_plugin')
+                params.use_custom = False
+                params.has_custom = False
                 return False
+            params.has_custom = True
         else:
-            print('Using native plugin for bias_act')
+            print('Using native plugin for upfirdn2d_plugin')
             return False
     return True
 

@@ -15,16 +15,15 @@ from .. import custom_ops
 from .. import misc
 from . import upfirdn2d
 from . import bias_act
-
+from . import params
 #----------------------------------------------------------------------------
 
 _plugin = None
-_use_custom = True
 
 def _init():
-    global _plugin, _use_custom
-    if _plugin is None:
-        if _use_custom:
+    global _plugin
+    if _plugin is None or not params.use_custom:
+        if params.use_custom:
             _plugin = custom_ops.get_plugin(
                 module_name='filtered_lrelu_plugin',
                 sources=['filtered_lrelu.cpp', 'filtered_lrelu_wr.cu', 'filtered_lrelu_rd.cu', 'filtered_lrelu_ns.cu'],
@@ -33,8 +32,11 @@ def _init():
                 extra_cuda_cflags=['--use_fast_math', '--allow-unsupported-compiler'],
             )
             if _plugin is None:
-                _use_custom = False
+                print('WARNING: Failed to compile filtered_lrelu_plugin. Using slow reference implementation of filtered_lrelu().')
+                params.use_custom = False
+                params.has_custom = False
                 return False
+            params.has_custom = True
         else:
             print('WARNING: Using slow reference implementation of filtered_lrelu(). Set torch_utils.ops.filtered_lrelu._use_custom = True to enable the fast CUDA implementation.')
             return False

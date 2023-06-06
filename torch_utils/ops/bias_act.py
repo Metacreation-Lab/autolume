@@ -15,6 +15,7 @@ import dnnlib
 
 from .. import custom_ops
 from .. import misc
+from . import params
 
 #----------------------------------------------------------------------------
 
@@ -34,12 +35,12 @@ activation_funcs = {
 
 _plugin = None
 _null_tensor = torch.empty([0])
-_use_custom = True
 
 def _init():
-    global _plugin, _use_custom
-    if _plugin is None:
-        if _use_custom:
+    global _plugin
+    print("init", params.use_custom, params.has_custom)
+    if _plugin is None or not params.use_custom:
+        if params.use_custom:
             _plugin = custom_ops.get_plugin(
                 module_name='bias_act_plugin',
                 sources=['bias_act.cpp', 'bias_act.cu'],
@@ -48,8 +49,11 @@ def _init():
                 extra_cuda_cflags=['--use_fast_math', '--allow-unsupported-compiler'],
             )
             if _plugin is None:
-                _use_custom = False
+                params.use_custom = False
+                print("updated", params.use_custom)
+                params.has_custom = False
                 return False
+            params.has_custom = True
         else:
             print('Using native plugin for bias_act')
             return False

@@ -18,10 +18,6 @@ from pythonosc.osc_server import BlockingOSCUDPServer
 from pythonosc.udp_client import SimpleUDPClient
 import NDIlib as ndi
 
-import torch_utils.ops.upfirdn2d as upfirdn2d
-import torch_utils.ops.bias_act as bias_act
-import torch_utils.ops.filtered_lrelu as filtered_lrelu
-
 # ----------------------------------------------------------------------------
 class PerformanceWidget:
     def __init__(self, viz):
@@ -35,29 +31,15 @@ class PerformanceWidget:
         self.scale_factor = 0
         self.device = "cuda" if torch.cuda.is_available() else 'cpu'
         self.custom_kernel_available = False
-        # if self.device == "cuda":
-            # if upfirdn2d._init():
-            #     self.custom_kernel_available = True
-        print("CUSTOM KERNEL AVAILABLE:", self.custom_kernel_available)
-
-        if self.custom_kernel_available:
-            print("IFFFING")
-            bias_act._use_custom = True
-            filtered_lrelu._use_custom = True
-            upfirdn2d._use_custom = True
-            self.device = "custom"
-        else:
-            bias_act._use_custom = False
-            filtered_lrelu._use_custom = False
-            upfirdn2d._use_custom = False
-
-            print("NO CUSTOM KERNEL ------------")
-
 
 
     @imgui_utils.scoped_by_object_id
     def __call__(self, show=True):
         viz = self.viz
+        if "has_custom" in viz.result:
+            self.custom_kernel_available = viz.result.has_custom
+            del viz.result.has_custom
+
         self.gui_times = self.gui_times[1:] + [viz.app.frame_delta]
         if 'render_time' in viz.result:
             self.render_times = self.render_times[1:] + [viz.result.render_time]
