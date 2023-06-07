@@ -87,6 +87,37 @@ case "$gpu_info" in
     ;;
 esac
 
+for preq in "${GIT}" "${python_cmd}"
+do
+    if ! hash "${preq}" &>/dev/null
+    then
+        printf "\n%s\n" "${delimiter}"
+        printf "\e[1m\e[31mERROR: %s is not installed, aborting...\e[0m" "${preq}"
+        printf "\n%s\n" "${delimiter}"
+        exit 1
+    fi
+done
+
+if ! "${python_cmd}" -c "import venv" &>/dev/null
+then
+    printf "\n%s\n" "${delimiter}"
+    printf "\e[1m\e[31mERROR: python3-venv is not installed, aborting...\e[0m"
+    printf "\n%s\n" "${delimiter}"
+    exit 1
+fi
+
+cd "${install_dir}"/ || { printf "\e[1m\e[31mERROR: Can't cd to %s/, aborting...\e[0m" "${install_dir}"; exit 1; }
+if [[ -d "${clone_dir}" ]]
+then
+    cd "${clone_dir}"/ || { printf "\e[1m\e[31mERROR: Can't cd to %s/%s/, aborting...\e[0m" "${install_dir}" "${clone_dir}"; exit 1; }
+else
+    printf "\n%s\n" "${delimiter}"
+    printf "Clone stable-diffusion-webui"
+    printf "\n%s\n" "${delimiter}"
+    "${GIT}" clone https://gitlab.com/jkraasch/autolumelive_colab.git "${clone_dir}"
+    cd "${clone_dir}"/ || { printf "\e[1m\e[31mERROR: Can't cd to %s/%s/, aborting...\e[0m" "${install_dir}" "${clone_dir}"; exit 1; }
+fi
+
 
 if [[ -z "${VIRTUAL_ENV}" ]];
 then
