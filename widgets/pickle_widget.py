@@ -140,29 +140,6 @@ class PickleWidget:
         if paths is not None and len(paths) >= 1:
             self.load_pkl(paths[0], ignore_errors=True)
 
-        _, self.use_osc = imgui.checkbox(f"Use OSC##load", self.use_osc)
-        imgui.same_line()
-        with imgui_utils.grayed_out(not (self.use_osc)):
-
-            changed, osc_address = imgui_utils.input_text(f"##OSC_load",
-                                                          self.osc_addresses,
-                                                          256,
-                                                          imgui.INPUT_TEXT_CHARS_NO_BLANK |
-                                                          (
-                                                              imgui.INPUT_TEXT_READ_ONLY) * (
-                                                              not self.use_osc),
-                                                          width=self.viz.app.font_size * 5,
-                                                          help_text="Osc Address")
-            if changed:
-                try:
-                    viz.osc_dispatcher.unmap(self.osc_addresses,
-                                               self.osc_handler)
-                    self.osc_addresses = osc_address
-                except:
-                    print(f"{self.osc_addresses} is not mapped")
-                viz.osc_dispatcher.map(self.osc_addresses,
-                                         self.osc_handler)
-
         viz.args.pkl = self.cur_pkl
 
     def list_runs_and_pkls(self, parents):

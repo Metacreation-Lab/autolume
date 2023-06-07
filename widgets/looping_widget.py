@@ -1,3 +1,4 @@
+import copy
 import os
 
 import imgui
@@ -116,14 +117,30 @@ class LoopingWidget:
         # flag that tells us we need to stop loop necessary for reverse looping
         self.stop_loop = False
 
-        funcs = dict(zip(["anim", "num_keyframes", "looptime", "index", "mode"], [self.osc_handler(param) for param in
+        funcs = dict(zip(["Animate", "Number of Keyframes", "Time", "Index"], [self.osc_handler(param) for param in
                                                                                   ["anim", "num_keyframes", "looptime",
-                                                                                   "index", "mode"]]))
+                                                                                   "index"]]))
+        funcs["Alpha"] = self.alpha_handler()
 
-        funcs["alpha"] = self.alpha_handler()
+        self.time_osc_menu = osc_menu.OscMenu(self.viz, copy.deepcopy(funcs), None,
+                                         label="##LoopingTimeOSC")
 
-        self.osc_menu = osc_menu.OscMenu(self.viz, funcs, None,
-                                         label="##LoopingOSC")
+        del funcs["Time"]
+
+        funcs["Speed"] = self.speed_handler()
+        self.speed_osc_menu = osc_menu.OscMenu(self.viz, copy.deepcopy(funcs), None,
+                                            label="##LoopingSpeedOSC")
+        del funcs["Number of Keyframes"]
+        del funcs["Index"]
+
+        funcs["Radius"] = self.radius_handler()
+        self.speed_noise_osc_menu = osc_menu.OscMenu(self.viz, copy.deepcopy(funcs), None,
+                                            label="##LoopingSpeedNoiseOSC")
+
+        del funcs["Speed"]
+        funcs["Time"] = self.osc_handler("looptime")
+        self.time_noise_osc_menu = osc_menu.OscMenu(self.viz, copy.deepcopy(funcs), None,
+                                            label="##LoopingTimeNoiseOSC")
 
         self.remove_entry = -1
 
@@ -514,6 +531,16 @@ class LoopingWidget:
             with imgui_utils.grayed_out(True):
                 imgui.checkbox("Looped", self.looped == 1)
                 self.looped = 0
+            if self.loop_type:
+                if self.params.mode:
+                    self.time_osc_menu()
+                else:
+                    self.speed_osc_menu()
+            else:
+                if self.params.mode:
+                    self.time_noise_osc_menu()
+                else:
+                    self.speed_noise_osc_menu()
 
             if self.params.anim:
                 self.update_alpha()
@@ -540,7 +567,26 @@ class LoopingWidget:
                         self.z[0, i] = self.noise_loop_feats[i].get_val((np.pi * 2) * self.alpha)
                     viz.args.vec = self.z
 
-        self.osc_menu()
 
     def snap(self):
         return self.viz.result.get("snap", None)
+
+    def speed_handler(self):
+        def func(address, *args):
+            try:
+                assert (type(args[-1]) is type(self.speed)), f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {type(self.speed)}"
+                self.speed = args[-1]
+                self.update = True
+            except Exception as e:
+                self.viz.print_error(e)
+        return func
+
+    def radius_handler(self):
+        def func(address, *args):
+            try:
+                assert (type(args[-1]) is type(self.radius)), f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {type(self.radius)}"
+                self.radius = args[-1]
+                self.update = True
+            except Exception as e:
+                self.viz.print_error(e)
+        return func
