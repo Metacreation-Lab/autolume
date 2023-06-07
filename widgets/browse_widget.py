@@ -225,7 +225,7 @@ class BrowseWidget():
             with imgui_utils.item_width(self.parent.app.button_w):
                 _changed, self.extension = imgui.combo("##extensions", self.extension, self.extensions, len(self.extensions))
         imgui.same_line()
-        if imgui.button("Select", self.parent.app.button_w):
+        if imgui_utils.button("Select", self.parent.app.button_w, enabled=len(self.selected) > 0):
             self.open = False
             imgui.end_child()
             imgui.end()

@@ -96,6 +96,9 @@ class PresetWidget:
                 if self.active.any():
                     self.save(self.paths[np.where(self.active)].item())
                     self.assigned[np.where(self.active)] = 0
+            with imgui_utils.item_width(viz.app.button_w * 2), imgui_utils.grayed_out(True):
+                imgui.input_text("##preset_path", self.tmp_path, 256, imgui.INPUT_TEXT_READ_ONLY)
+            imgui.same_line()
             _clicked, file_out = self.browser()
 
             if _clicked:

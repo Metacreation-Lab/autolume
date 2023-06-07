@@ -1,10 +1,11 @@
 import glob
-from pathlib import Path
 import shutil
 import multiprocessing
 from modules.autolume_live import Autolume
 from torch_utils.ops import params
 import torch
+
+
 
 def main():
     """Interactive model visualizer.

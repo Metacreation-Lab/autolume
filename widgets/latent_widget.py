@@ -5,6 +5,7 @@
 # and any modifications thereto.  Any use, reproduction, disclosure or
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
+import copy
 import os
 
 import numpy as np
@@ -34,13 +35,18 @@ class LatentWidget:
         self.latent = dnnlib.EasyDict(vec=torch.randn(1, 512), next=torch.randn(1, 512), x=0, y=0, frac_x=0., frac_y=0.,
                                       update_mode=0, speed=0.25, mode=True, project=True)
         self.step_y = 100
-        funcs = dict(zip(["seed", "vector", "project", "x", "y", "anim", "speed"],
+        funcs = dict(zip(["project", "seed",  "anim", "speed"],
                          [self.osc_handler(param) for param in
-                          ["x", "vec", "project", "x", "y", "anim", "speed"]]))
-        funcs["vector"] = self.list_handler("vec")
+                          ["project", "x", "anim", "speed"]]))
         funcs["speed"] = self.speed_handler()
-        self.osc_menu = osc_menu.OscMenu(self.viz, funcs,
-                                         label="##LatentOSC")
+        funcs["model"] = self.model_handler()
+        self.seed_osc_menu = osc_menu.OscMenu(self.viz, copy.deepcopy(funcs),
+                                         label="##SeedOSC")
+        del funcs["seed"]
+        funcs["vector"] = self.list_handler("vec")
+        funcs["randomize"] = self.randomize_handler()
+        self.vec_osc_menu = osc_menu.OscMenu(self.viz, copy.deepcopy(funcs),
+                                            label="##VecOSC")
         self.update = False
         self.latent_def = dnnlib.EasyDict(self.latent)
         self.vec_path   = ""
@@ -61,11 +67,12 @@ class LatentWidget:
 
     def get_params(self):
         print("speed", self.latent.speed)
-        return self.latent, self.osc_menu.get_params()
+        return self.latent, self.seed_osc_menu.get_params(), self.vec_osc_menu.get_params()
 
     def set_params(self, params):
-        self.latent, osc_params = params
-        self.osc_menu.set_params(osc_params)
+        self.latent, osc_params, vec_osc = params
+        self.seed_osc_menu.set_params(osc_params)
+        self.vec_osc_menu.set_params(vec_osc)
 
         self.viz.args.mode = self.latent.mode
         self.viz.args.project = self.latent.project
@@ -225,8 +232,10 @@ class LatentWidget:
                     imgui.same_line()
                     if self.latent.mode:
                         self.seed_viz()
+                        self.seed_osc_menu()
                     else:
                         self.vec_viz()
+                        self.vec_osc_menu()
 
                 except Exception as e:
                     self.viz.print_error(e)
@@ -241,7 +250,35 @@ class LatentWidget:
 
 
 
-        self.osc_menu()
+
+    def model_handler(self):
+        def func(address, *args):
+            try:
+                assert (type(args[-1]) is str), f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {str}"
+                # check if the string that is sent in the message os.exists
+                if os.path.exists(args[-1]):
+                    self.viz.pickle_widget.user_pkl = args[-1]
+                    self.viz.pickle_widget.load()
+            except Exception as e:
+                self.viz.print_error(e)
+        return func
+
+    def randomize_handler(self):
+        def func(address, *args):
+            """
+            OSC Handler for randomizing the vector receives a boolean message and if true randomizes the vector
+            :param address:
+            :param args:
+            :return:
+            """
+            try:
+                assert (type(args[-1]) is bool), f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {bool}"
+                if args[-1]:
+                    self.latent.vec = torch.randn(self.latent.vec.shape)
+                    self.latent.next = torch.randn(self.latent.next.shape)
+            except Exception as e:
+                self.viz.print_error(e)
+        pass
 
 #----------------------------------------------------------------------------
 
