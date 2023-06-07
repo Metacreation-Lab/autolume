@@ -1,11 +1,23 @@
 #!/usr/bin/env bash
 
-
 # Read variables from params.sh
 # shellcheck source=/dev/null
 if [[ -f ./params.sh ]]
 then
     source ./params.sh
+fi
+
+# Set defaults
+# Install directory without trailing slash
+if [[ -z "${install_dir}" ]]
+then
+    install_dir="$(pwd)"
+fi
+
+# Name of the subdirectory (defaults to stable-diffusion-webui)
+if [[ -z "${clone_dir}" ]]
+then
+    clone_dir="autolumelive_colab"
 fi
 
 # python3 executable
@@ -14,6 +26,11 @@ then
     python_cmd="python3"
 fi
 
+# git executable
+if [[ -z "${GIT}" ]]
+then
+    export GIT="git"
+fi
 
 # python3 venv without trailing slash (defaults to ${install_dir}/${clone_dir}/venv)
 if [[ -z "${venv_dir}" ]]
@@ -86,7 +103,41 @@ case "$gpu_info" in
     *)
     ;;
 esac
+if echo "$gpu_info" | grep -q "AMD" && [[ -z "${TORCH_COMMAND}" ]]
+then
+    export TORCH_COMMAND="pip install torch==2.0.1+rocm5.4.2 torchvision==0.15.2+rocm5.4.2 --index-url https://download.pytorch.org/whl/rocm5.4.2"
+fi
 
+for preq in "${GIT}" "${python_cmd}"
+do
+    if ! hash "${preq}" &>/dev/null
+    then
+        printf "\n%s\n" "${delimiter}"
+        printf "\e[1m\e[31mERROR: %s is not installed, aborting...\e[0m" "${preq}"
+        printf "\n%s\n" "${delimiter}"
+        exit 1
+    fi
+done
+
+if ! "${python_cmd}" -c "import venv" &>/dev/null
+then
+    printf "\n%s\n" "${delimiter}"
+    printf "\e[1m\e[31mERROR: python3-venv is not installed, aborting...\e[0m"
+    printf "\n%s\n" "${delimiter}"
+    exit 1
+fi
+
+cd "${install_dir}"/ || { printf "\e[1m\e[31mERROR: Can't cd to %s/, aborting...\e[0m" "${install_dir}"; exit 1; }
+if [[ -d "${clone_dir}" ]]
+then
+    cd "${clone_dir}"/ || { printf "\e[1m\e[31mERROR: Can't cd to %s/%s/, aborting...\e[0m" "${install_dir}" "${clone_dir}"; exit 1; }
+else
+    printf "\n%s\n" "${delimiter}"
+    printf "Clone stable-diffusion-webui"
+    printf "\n%s\n" "${delimiter}"
+    "${GIT}" clone https://gitlab.com/jkraasch/autolumelive_colab.git "${clone_dir}"
+    cd "${clone_dir}"/ || { printf "\e[1m\e[31mERROR: Can't cd to %s/%s/, aborting...\e[0m" "${install_dir}" "${clone_dir}"; exit 1; }
+fi
 
 if [[ -z "${VIRTUAL_ENV}" ]];
 then
@@ -96,19 +147,8 @@ then
     cd "${install_dir}"/"${clone_dir}"/ || { printf "\e[1m\e[31mERROR: Can't cd to %s/%s/, aborting...\e[0m" "${install_dir}" "${clone_dir}"; exit 1; }
     if [[ ! -d "${venv_dir}" ]]
     then
-        # run installer.sh
-        if [[ -f ./installer.sh ]]
-        then
-            printf "\n%s\n" "${delimiter}"
-            printf "Running installer.sh"
-            printf "\n%s\n" "${delimiter}"
-            ./installer.sh
-        else
-            printf "\n%s\n" "${delimiter}"
-            printf "\e[1m\e[31mERROR: Cannot find installer.sh, aborting...\e[0m"
-            printf "\n%s\n" "${delimiter}"
-            exit 1
-        fi
+        "${python_cmd}" -m venv "${venv_dir}"
+        first_launch=1
     fi
     # shellcheck source=/dev/null
     if [[ -f "${venv_dir}"/bin/activate ]]
@@ -139,6 +179,20 @@ prepare_tcmalloc() {
     fi
 }
 
+# Install python dependencies from requirements.txt
+
+printf "\n%s\n" "${delimiter}"
+printf "Install python dependencies"
+printf "\n%s\n" "${delimiter}"
+if [[ -f requirements.txt ]]
+then
+    "${python_cmd}" -m pip install -r requirements.txt
+else
+    printf "\n%s\n" "${delimiter}"
+    printf "\e[1m\e[31mERROR: Cannot find requirements.txt, aborting...\e[0m"
+    printf "\n%s\n" "${delimiter}"
+    exit 1
+fi
 
 
 printf "\n%s\n" "${delimiter}"
