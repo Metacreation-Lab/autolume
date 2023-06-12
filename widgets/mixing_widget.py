@@ -10,6 +10,9 @@ import glob
 import os
 import re
 
+from widgets import browse_widget
+
+
 def _locate_results(pattern):
     return pattern
 
@@ -22,6 +25,7 @@ def extract_mapping_names(model):
     return model_names
 
 def resolve_pkl(pattern):
+        print("RESOLVE", pattern)
         assert isinstance(pattern, str)
         assert pattern != ''
 
@@ -61,6 +65,9 @@ class MixingWidget:
         self.cached_layers = []
         self.mixing = False
 
+        self.browser = browse_widget.BrowseWidget(viz, "Find", ".", [".pkl"], width=self.viz.app.button_w,
+                                                  multiple=False, traverse_folders=False)
+
         for pkl in os.listdir("./models"):
             if pkl.endswith(".pkl"):
                 self.models.append(os.path.join(os.getcwd(),"models",pkl))
@@ -81,6 +88,13 @@ class MixingWidget:
             if imgui_utils.button(f'Browse...##mixingWidget', enabled=len(self.models) > 0):
                 imgui.open_popup(f'browse_pkls_popup##mixingWidget')
                 self.browse_refocus = True
+
+            imgui.same_line()
+            _clicked, pkl = self.browser()
+            if _clicked:
+                print("SELECTED", pkl)
+                self.model_pth = resolve_pkl(pkl[0])
+                model_changed = True
 
             if imgui.begin_popup(f'browse_pkls_popup##mixingWidget'):
                 for pkl in self.models:

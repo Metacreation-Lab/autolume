@@ -19,6 +19,7 @@ import dnnlib
 import imgui
 import numpy as np
 from utils.gui_utils import imgui_utils
+from widgets import browse_widget
 
 from . import renderer
 
@@ -40,6 +41,8 @@ class PickleWidget:
         self.load_pkl('', ignore_errors=True)
         self.use_osc = False
         self.osc_addresses = ""
+
+        self.browser = browse_widget.BrowseWidget(viz, "Find", ".", [".pkl"], width=self.viz.app.button_w, multiple=False, traverse_folders=False)
 
         for pkl in os.listdir("./models"):
             if pkl.endswith(".pkl"):
@@ -102,7 +105,7 @@ class PickleWidget:
             imgui.same_line(viz.app.label_w)
             changed, self.user_pkl = imgui_utils.input_text('##pkl', self.user_pkl, 1024,
                 flags=(imgui.INPUT_TEXT_AUTO_SELECT_ALL | imgui.INPUT_TEXT_ENTER_RETURNS_TRUE),
-                width=(-1 - viz.app.button_w * 2 - viz.app.spacing * 2),
+                width=(-1 - viz.app.button_w * 3 - viz.app.spacing * 3),
                 help_text='<PATH> | <URL> | <RUN_DIR> | <RUN_ID> | <RUN_ID>/<KIMG>.pkl')
             if changed:
                 self.load_pkl(self.user_pkl, ignore_errors=True)
@@ -111,6 +114,11 @@ class PickleWidget:
             imgui.same_line()
             if imgui_utils.button('Recent...', width=viz.app.button_w, enabled=(len(recent_pkls) != 0)):
                 imgui.open_popup('recent_pkls_popup')
+            imgui.same_line()
+            _clicked, pkl = self.browser()
+            if _clicked:
+                print("SELECTED", pkl)
+                self.load_pkl(pkl[0], ignore_errors=True)
             imgui.same_line()
             if imgui_utils.button('Browse...', enabled=len(self.browse_cache) > 0, width=-1):
                 imgui.open_popup('browse_pkls_popup')

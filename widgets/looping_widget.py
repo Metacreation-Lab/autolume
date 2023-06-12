@@ -18,6 +18,8 @@ from widgets.browse_widget import BrowseWidget
 
 from pythonosc.udp_client import SimpleUDPClient
 
+import multiprocessing as mp
+
 
 def valmap(value, istart, istop, ostart, ostop):
     return ostart + (ostop - ostart) * ((value - istart) / (istop - istart))
@@ -79,6 +81,15 @@ def slerp(t, v0, v1, DOT_THRESHOLD=0.9995):
 
 labels = ["Seed", "Vector", "Keyframe"]
 
+def noise_loop(args_queue, results_queue):
+    while True:
+        args = args_queue.get()
+        while args_queue.qsize() > 0:
+            args = args_queue.get()
+        seed, radius = args
+        feats = [OSN(seed + i, radius) for i in range(512)]
+        results_queue.put(feats)
+
 
 class LoopingWidget:
     def __init__(self, viz):
@@ -113,6 +124,10 @@ class LoopingWidget:
         self.radius = 1
         self.noise_seed = 0
         self.noise_loop_feats = [OSN(self.noise_seed + i, self.radius) for i in range(512)]
+        self.args_queue = mp.Queue()
+        self.results_queue = mp.Queue()
+        self.noise_loop_process = mp.Process(target=noise_loop, args=(self.args_queue, self.results_queue), daemon=True)
+        self.noise_loop_process.start()
 
         # flag that tells us we need to stop loop necessary for reverse looping
         self.stop_loop = False
@@ -370,6 +385,9 @@ class LoopingWidget:
 
     @imgui_utils.scoped_by_object_id
     def __call__(self, show=True):
+        if self.results_queue.qsize() > 0:
+            self.noise_loop_feats = self.results_queue.get()
+
         if self.osc_address != "":
             try:
                 self.osc_client.send_message(self.osc_address, self.looped)
@@ -507,7 +525,7 @@ class LoopingWidget:
                 with imgui_utils.item_width(viz.app.font_size * 5):
                     radius_changed, self.radius = imgui.input_float("Radius", self.radius)
                 if seed_changed or radius_changed:
-                    self.noise_loop_feats = [OSN(self.noise_seed + i, self.radius) for i in range(512)]
+                    self.args_queue.put((self.noise_seed, self.radius))
 
             _, self.perfect_loop = imgui.checkbox("Perfect Loop", self.perfect_loop)
             imgui.same_line()

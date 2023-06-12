@@ -162,7 +162,7 @@ then
     fi
 else
     printf "\n%s\n" "${delimiter}"
-    printf "python venv already activate: ${VIRTUAL_ENV}"
+    printf "python venv already activated: ${VIRTUAL_ENV}"
     printf "\n%s\n" "${delimiter}"
 fi
 

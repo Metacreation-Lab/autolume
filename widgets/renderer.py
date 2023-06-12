@@ -227,7 +227,6 @@ class Renderer:
         self._pinned_bufs = dict()  # {(shape, dtype): torch.Tensor, ...}
         self._cmaps = dict()  # {name: torch.Tensor, ...}
         self._is_timing = False
-
         if self._device.type == 'cuda':
             self._start_event = torch.cuda.Event(enable_timing=True)
             self._end_event = torch.cuda.Event(enable_timing=True)
@@ -664,16 +663,16 @@ class Renderer:
         layers = []        
         if not (self.G2 is None) and self.model_changed and len(combined_layers):
             net_state = self.G.state_dict()
-            net2_state = self.G2.state_dict() 
-            
+            net2_state = self.G2.state_dict()
+
             last_index = 0
             for i, entry in enumerate(combined_layers):
                 if entry != "" and entry != "X":
                     last_index = i
             last_entry = {self.combined_layers[last_index]: last_index}
 
-            layer1 = extract_conv_names(self.G)      
-            layer2 = extract_conv_names(self.G2) 
+            layer1 = extract_conv_names(self.G)
+            layer2 = extract_conv_names(self.G2)
             if last_entry.keys() == {"A"}:
                 # get resolution through regex from last entry
                 img_resolution = int(re.search(r'\d+', layer1[last_entry["A"]]).group())

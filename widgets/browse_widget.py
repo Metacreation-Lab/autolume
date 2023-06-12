@@ -232,7 +232,8 @@ class BrowseWidget():
             if self.traverse_folders:
                 return True, self.resolve_selected()
             else:
-                return True, [os.path.join(self.directory, f) for f in self.selected]
+                print("selected", [f for f in self.selected])
+                return True, self.selected
         imgui.same_line()
         if imgui.button("Cancel", self.parent.app.button_w):
             self.selected = []
