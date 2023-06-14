@@ -8,11 +8,12 @@
 
 import contextlib
 import imgui
+from assets.colors import *
 
 
 # ----------------------------------------------------------------------------
 
-def set_default_style(color_scheme='light', spacing=9, indent=23, scrollbar=15):
+def set_default_style(color_scheme='dark', spacing=9, indent=23, scrollbar=15):
     s = imgui.get_style()
     s.window_padding = [spacing, spacing]
     s.item_spacing = [spacing, spacing]
@@ -27,47 +28,39 @@ def set_default_style(color_scheme='light', spacing=9, indent=23, scrollbar=15):
     s.frame_border_size = 1
     s.window_rounding = 0
     s.child_rounding = 0
-    s.popup_rounding = 3
-    s.frame_rounding = 3
-    s.scrollbar_rounding = 3
-    s.grab_rounding = 3
-
-    # Color scheme.
-    red = [235/255,  27/255,  59/255, .7]
-    red_hovered = [235/255,  27/255,  59/255, 1.]
-    red_active = [205/255,  7/255,  39/255, 1.]
-    white = [1.00, 1.00, 1.00, 1.00]
-    black = [0.00, 0.00, 0.00, 1.00]
-    gray = [0.6, 0.6, 0.6, 1]
+    s.popup_rounding = 0
+    s.frame_rounding = 0
+    s.scrollbar_rounding = 0
+    s.grab_rounding = 0
 
     getattr(imgui, f'style_colors_{color_scheme}')(s)
     # s.colors[imgui.COLOR_TEXT] = black
     # s.colors[imgui.COLOR_TEXT_DISABLED] = gray
-    # s.colors[imgui.COLOR_WINDOW_BACKGROUND] = [0.94, 0.94, 0.94, 1.00]
-    # s.colors[imgui.COLOR_CHILD_BACKGROUND] = [0.00, 0.00, 0.00, 1.]
+    # s.colors[imgui.COLOR_WINDOW_BACKGROUND] = GREEN
+    s.colors[imgui.COLOR_CHILD_BACKGROUND] = DARKGRAY
     # s.colors[imgui.COLOR_POPUP_BACKGROUND] = [0., 1., 0., 1.00]
-    # s.colors[imgui.COLOR_BORDER] = [0., 1., 0., 0.00]
+    s.colors[imgui.COLOR_BORDER] = GREEN
     # s.colors[imgui.COLOR_BORDER_SHADOW] = [0., 1., 0., 0.00]
-    # s.colors[imgui.COLOR_FRAME_BACKGROUND] = [235/255,  27/255,  59/255, 0.5]
-    # s.colors[imgui.COLOR_FRAME_BACKGROUND_HOVERED] = red
-    # s.colors[imgui.COLOR_FRAME_BACKGROUND_ACTIVE] = red_active
-    # s.colors[imgui.COLOR_TITLE_BACKGROUND] = red
-    # s.colors[imgui.COLOR_TITLE_BACKGROUND_ACTIVE] = red_active
-    # s.colors[imgui.COLOR_TITLE_BACKGROUND_COLLAPSED] = red
-    # s.colors[imgui.COLOR_MENUBAR_BACKGROUND] = [0., 1., 0., 1.00]
-    # s.colors[imgui.COLOR_SCROLLBAR_BACKGROUND] = [0., 1., 0., 1.00]
+    s.colors[imgui.COLOR_FRAME_BACKGROUND] = DARKGRAY
+    s.colors[imgui.COLOR_FRAME_BACKGROUND_HOVERED] = HOVERGREEN
+    s.colors[imgui.COLOR_FRAME_BACKGROUND_ACTIVE] = GREEN
+    s.colors[imgui.COLOR_TITLE_BACKGROUND] = DARKGREEN
+    s.colors[imgui.COLOR_TITLE_BACKGROUND_ACTIVE] = HOVERGREEN
+    s.colors[imgui.COLOR_TITLE_BACKGROUND_COLLAPSED] = DARKGREEN
+    s.colors[imgui.COLOR_MENUBAR_BACKGROUND] = GRAY
+    s.colors[imgui.COLOR_SCROLLBAR_BACKGROUND] = BLACK
     # s.colors[imgui.COLOR_SCROLLBAR_GRAB] = [0., 1., 0., 1.00]
     # s.colors[imgui.COLOR_SCROLLBAR_GRAB_HOVERED] = [0., 1., 0., 1.00]
     # s.colors[imgui.COLOR_SCROLLBAR_GRAB_ACTIVE] = [0., 1., 0., 1.00]
-    # s.colors[imgui.COLOR_CHECK_MARK] = red
-    # s.colors[imgui.COLOR_SLIDER_GRAB] = red_hovered
-    # s.colors[imgui.COLOR_SLIDER_GRAB_ACTIVE] = red_hovered
-    # s.colors[imgui.COLOR_BUTTON] = red
-    # s.colors[imgui.COLOR_BUTTON_HOVERED] = red_hovered
-    # s.colors[imgui.COLOR_BUTTON_ACTIVE] = red_active
-    # s.colors[imgui.COLOR_HEADER] = red
-    # s.colors[imgui.COLOR_HEADER_HOVERED] = red_hovered
-    # s.colors[imgui.COLOR_HEADER_ACTIVE] = red_active
+    s.colors[imgui.COLOR_CHECK_MARK] = LIGHTGREEN
+    s.colors[imgui.COLOR_SLIDER_GRAB] = GREEN
+    s.colors[imgui.COLOR_SLIDER_GRAB_ACTIVE] = LIGHTGREEN
+    s.colors[imgui.COLOR_BUTTON] = DARKGREEN
+    s.colors[imgui.COLOR_BUTTON_HOVERED] = HOVERGREEN
+    s.colors[imgui.COLOR_BUTTON_ACTIVE] = GREEN
+    s.colors[imgui.COLOR_HEADER] = DARKGREEN
+    s.colors[imgui.COLOR_HEADER_HOVERED] = HOVERGREEN
+    s.colors[imgui.COLOR_HEADER_ACTIVE] = GREEN
     # s.colors[imgui.COLOR_SEPARATOR] = [0., 1., 0., 1.00]
     # s.colors[imgui.COLOR_SEPARATOR_HOVERED] = red_hovered
     # s.colors[imgui.COLOR_SEPARATOR_ACTIVE] = red_active
@@ -89,7 +82,7 @@ def set_default_style(color_scheme='light', spacing=9, indent=23, scrollbar=15):
 
     c0 = s.colors[imgui.COLOR_MENUBAR_BACKGROUND]
     c1 = s.colors[imgui.COLOR_FRAME_BACKGROUND]
-    s.colors[imgui.COLOR_POPUP_BACKGROUND] = [x * 0.7 + y * 0.3 for x, y in zip(c0, c1)][:3] + [1]
+    # s.colors[imgui.COLOR_POPUP_BACKGROUND] = [x * 0.7 + y * 0.3 for x, y in zip(c0, c1)][:3] + [1]
 
 
 # ----------------------------------------------------------------------------
@@ -105,18 +98,19 @@ def grayed_out(cond=True):
         imgui.push_style_color(imgui.COLOR_CHECK_MARK, *grab)
         imgui.push_style_color(imgui.COLOR_SLIDER_GRAB, *grab)
         imgui.push_style_color(imgui.COLOR_SLIDER_GRAB_ACTIVE, *grab)
-        imgui.push_style_color(imgui.COLOR_FRAME_BACKGROUND, *back)
-        imgui.push_style_color(imgui.COLOR_FRAME_BACKGROUND_HOVERED, *back)
-        imgui.push_style_color(imgui.COLOR_FRAME_BACKGROUND_ACTIVE, *back)
-        imgui.push_style_color(imgui.COLOR_BUTTON, *back)
-        imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, *back)
-        imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, *back)
+        imgui.push_style_color(imgui.COLOR_FRAME_BACKGROUND, *GRAY)
+        imgui.push_style_color(imgui.COLOR_FRAME_BACKGROUND_HOVERED, *GRAY)
+        imgui.push_style_color(imgui.COLOR_FRAME_BACKGROUND_ACTIVE, *GRAY)
+        imgui.push_style_color(imgui.COLOR_BUTTON, *GRAY)
+        imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, *GRAY)
+        imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, *GRAY)
         imgui.push_style_color(imgui.COLOR_HEADER, *back)
         imgui.push_style_color(imgui.COLOR_HEADER_HOVERED, *back)
         imgui.push_style_color(imgui.COLOR_HEADER_ACTIVE, *back)
         imgui.push_style_color(imgui.COLOR_POPUP_BACKGROUND, *back)
+        imgui.push_style_color(imgui.COLOR_BORDER, *LIGHTGRAY)
         yield
-        imgui.pop_style_color(14)
+        imgui.pop_style_color(15)
     else:
         yield
 
@@ -148,12 +142,11 @@ def scoped_by_object_id(method):
 # ----------------------------------------------------------------------------
 
 def color_button(label, color, width=0, height=0):
-    red = (235/255,  27/255,  59/255, .7)
     s = imgui.get_style()
-    imgui.push_style_color(imgui.COLOR_BUTTON, *red)
-    imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, *red)
-    imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, *red)
-    clicked = imgui.button(label,width=width, height=height)
+    imgui.push_style_color(imgui.COLOR_BUTTON, *RED)
+    imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, *RED)
+    imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, *RED)
+    clicked = imgui.button(label, width=width, height=height)
     imgui.pop_style_color(3)
     return clicked
 
@@ -269,7 +262,9 @@ def img_checkbox(img, value, width, label=""):
     # draw a square of size width x width
     draw_list = imgui.get_window_draw_list()
     posx, posy = imgui.get_cursor_screen_pos()
-    draw_list.add_rect_filled(posx, posy, posx + width, posy + width, imgui.get_color_u32_rgba(1, 1, 1, 1), 2)
+    draw_list.add_rect_filled(posx, posy, posx + width, posy + width, imgui.get_color_u32_rgba(0,0,0,1), 2)
+    #draw outline of square
+    draw_list.add_rect(posx, posy, posx + width, posy + width, imgui.get_color_u32_rgba(*LIGHTGRAY), 2)
     # if clicked in area of square, change value
     if imgui.is_mouse_clicked(0) and imgui.is_mouse_hovering_rect(posx, posy, posx + width, posy + width):
         clicked = True
@@ -277,7 +272,7 @@ def img_checkbox(img, value, width, label=""):
 
     # draw img in center of box if value is true
     if value:
-        draw_list.add_image(img, (posx, posy), (posx + width, posy + width), col=imgui.get_color_u32_rgba(0.26,0.59,0.98,.67))
+        draw_list.add_image(img, (posx, posy), (posx + width, posy + width), col=imgui.get_color_u32_rgba(1,1,1,1))
 
     dim_color = list(imgui.get_style().colors[imgui.COLOR_TEXT])
     dim_color[-1] *= 0.5
