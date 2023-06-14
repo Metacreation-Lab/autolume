@@ -26,7 +26,7 @@ import yaml
 import dnnlib
 from utils.gui_utils import imgui_utils, gl_utils
 from widgets import osc_menu
-from assets import RED
+from assets.colors import *
 
 # ----------------------------------------------------------------------------
 
@@ -104,16 +104,17 @@ class LayerWidget:
                                              height=self.view_img.shape[0], channels=self.view_img.shape[2])
 
         self.transform_img = cv2.imread("assets/transformation.png")
-        self.transform_img = cv2.cvtColor(self.transform_img, cv2.COLOR_RGB2RGBA)
+        self.transform_img = cv2.cvtColor(self.transform_img, cv2.COLOR_BGR2RGBA)
+        print("UNIQUES", np.unique(self.transform_img))
 
-        self.transform_img[:, :, 3] = np.where(self.transform_img[:, :, 0] == 0, 255, 0)
+        self.transform_img[:, :, 3] = np.where(self.transform_img[:, :, 0] == 255, 255, 0)
         self.transform_texture = gl_utils.Texture(image=self.transform_img, width=self.transform_img.shape[1],
                                                   height=self.transform_img.shape[0],
                                                   channels=self.transform_img.shape[2])
 
         self.noise_img = cv2.imread("assets/noise.png")
-        self.noise_img = cv2.cvtColor(self.noise_img, cv2.COLOR_RGB2RGBA)
-        self.noise_img[:, :, 3] = np.where(self.noise_img[:, :, 0] == 0, 255, 0)
+        self.noise_img = cv2.cvtColor(self.noise_img, cv2.COLOR_BGR2RGBA)
+        self.noise_img[:, :, 3] = np.where(self.noise_img[:, :, 0] == 255, 255, 0)
         self.noise_texture = gl_utils.Texture(image=self.noise_img, width=self.noise_img.shape[1],
                                               height=self.noise_img.shape[0], channels=self.noise_img.shape[2])
 
@@ -181,7 +182,7 @@ class LayerWidget:
         base_channel_max = max(self.capture_channels - self.sel_channels, 0)
 
         if show:
-            bg_color = [0.16, 0.29, 0.48, 0.2]
+            bg_color = DARKGRAY
             dim_color = list(imgui.get_style().colors[imgui.COLOR_TEXT])
             dim_color[-1] *= 0.5
 
@@ -191,18 +192,20 @@ class LayerWidget:
             imgui.push_style_var(imgui.STYLE_FRAME_PADDING, [0, 0])
             imgui.push_style_color(imgui.COLOR_CHILD_BACKGROUND, *bg_color)
             imgui.push_style_color(imgui.COLOR_HEADER, 0, 0, 0, 0)
-            imgui.push_style_color(imgui.COLOR_HEADER_HOVERED, 0.16, 0.29, 0.48, 0.5)
-            imgui.push_style_color(imgui.COLOR_HEADER_ACTIVE, 0.16, 0.29, 0.48, 0.9)
+            imgui.push_style_color(imgui.COLOR_HEADER_HOVERED, *GRAY)
+            imgui.push_style_color(imgui.COLOR_HEADER_ACTIVE, *LIGHTGRAY)
 
             imgui.begin_child('##list', width=width, height=height, border=True,
                               flags=imgui.WINDOW_ALWAYS_VERTICAL_SCROLLBAR)
+
+            imgui.set_cursor_pos((0, -1))
             if self.simplified:
-                imgui_utils.color_button("Simple", color=RED, width=(width // 2) - (viz.app.spacing * 3))
+                imgui_utils.color_button("Simple", color=RED, width=(width // 2))
             else:
-                if imgui_utils.button("Simple", width=(width // 2) - (viz.app.spacing * 3),
+                if imgui_utils.button("Simple", width=(width // 2),
                                       enabled=not self.simplified):
                     self.simplified = True
-            imgui.same_line()
+            imgui.same_line(width//2)
 
             if not self.simplified:
                 imgui_utils.color_button("Advanced", color=RED, width=(width // 2) - (viz.app.spacing * 3))
@@ -384,11 +387,11 @@ class LayerWidget:
             imgui.pop_style_var(1)
             imgui.same_line()
             imgui.begin_child('##adjust', width=-1, height=height, border=True)
-            tab_width = imgui.get_content_region_available_width() // 2 - viz.app.spacing
+            tab_width = imgui.get_content_region_available_width() / 2
             if imgui_utils.button("Activations",
                                   width=tab_width, enabled=self.tab):
                 self.tab = not self.tab
-            imgui.same_line()
+            imgui.same_line(tab_width + viz.app.spacing)
             has_noise = 'torgb' in self.cur_layer or "output" in self.cur_layer if self.cur_layer is not None else True
             if has_noise and self.tab:
                 self.tab = False
