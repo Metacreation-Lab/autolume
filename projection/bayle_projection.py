@@ -27,8 +27,8 @@ import torch.nn.functional as F
 import dnnlib
 from torch_utils import legacy
 
-image_mean = torch.tensor([0.48145466, 0.4578275, 0.40821073]).cuda()
-image_std = torch.tensor([0.26862954, 0.26130258, 0.27577711]).cuda()
+image_mean = torch.tensor([0.48145466, 0.4578275, 0.40821073]).to("cuda" if torch.cuda.is_available() else "cpu")
+image_std = torch.tensor([0.26862954, 0.26130258, 0.27577711]).to("cuda" if torch.cuda.is_available() else "cpu")
 
 def score_images(G, model, text, latents, device, label_class = 0, batch_size = 8):
   scores = []
@@ -312,7 +312,7 @@ def run_projection(
 
     # Load networks.
     reply_queue.put(['Loading networks from "%s"...' % network_pkl, None, False])
-    device = torch.device('cuda')
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     with dnnlib.util.open_url(network_pkl) as fp:
         G = legacy.load_network_pkl(fp)['G_ema'].requires_grad_(False).to(device) # type: ignore
 

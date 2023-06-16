@@ -187,6 +187,7 @@ printf "\n%s\n" "${delimiter}"
 if [[ -f requirements.txt ]]
 then
     "${python_cmd}" -m pip install numpy
+    "${python_cmd}" -m pip install torch torchvision torchaudio
     "${python_cmd}" -m pip install -r requirements.txt
 else
     printf "\n%s\n" "${delimiter}"

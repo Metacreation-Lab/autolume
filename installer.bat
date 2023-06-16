@@ -1,4 +1,4 @@
-@echo off
+@echo on
 
 set PYTHON=
 set GIT=
@@ -49,7 +49,8 @@ goto :install_requirements
 goto :install_requirements
 
 :install_requirements
-%PYTHON% -mpip install -r requirements.txt >tmp/stdout.txt 2>tmp/stderr.txt
+%PYTHON% -mpip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu117
+%PYTHON% -mpip install -r requirements.txt
 if %ERRORLEVEL% == 0 goto :launch
 
 :launch
