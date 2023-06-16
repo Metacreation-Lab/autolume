@@ -20,6 +20,9 @@ class TrainingModule:
         cwd = os.getcwd()
         self.save_path = os.path.join(cwd, "training-runs")
         self.data_path = os.path.join(cwd, "data")
+        # create data folder if not exists
+        if not os.path.exists(os.path.abspath(os.path.join(os.getcwd(),"data"))):
+            os.makedirs(os.path.abspath(os.path.join(os.getcwd(),"data")))
         self.file_dialog = BrowseWidget(menu, "Dataset", os.path.abspath(os.path.join(os.getcwd(),"data")), ["*",""], multiple=False, traverse_folders=False)
 
         self.resume_pkl = ""
@@ -192,8 +195,3 @@ class TrainingModule:
             if imgui_utils.button("Done", enabled=self.done):
                 imgui.close_current_popup()
             imgui.end_popup()
-
-
-
-
-
