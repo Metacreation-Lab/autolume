@@ -16,8 +16,6 @@ PyYAML
 scikit-image
 scikit-learn
 scipy
-torch==1.13.0
-torchaudio==0.13.0
 imgui==1.4.1
 fbpca
 psutil

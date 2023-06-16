@@ -26,8 +26,8 @@ from modules.network_mixing import extract_conv_names, extract_mapping_names
 import os
 import pickle
 
-super_res = SRVGGNetPlus(num_in_ch=3, num_out_ch=3, num_feat=48, upscale=4, act_type='prelu').eval().to('cuda')
-model_sd=torch.load('./sr_models/Fast.pt')
+super_res = SRVGGNetPlus(num_in_ch=3, num_out_ch=3, num_feat=48, upscale=4, act_type='prelu').eval().to("cuda" if torch.cuda.is_available() else "cpu")
+model_sd=torch.load('./sr_models/Fast.pt', map_location=torch.device("cuda" if torch.cuda.is_available() else "cpu"))
 super_res.load_state_dict(model_sd)
 
 # ----------------------------------------------------------------------------
@@ -215,7 +215,7 @@ def slerp(t, v0, v1, DOT_THRESHOLD=0.9995):
     v2 = s0 * v0_copy + s1 * v1_copy
     return torch.from_numpy(v2)
 
-   
+
 
 class Renderer:
     def __init__(self):
@@ -474,12 +474,12 @@ class Renderer:
 
             self.to_device(self.G)
             G = self.G
-            
+
             if save_model:
                 data = self._pkl_data[pkl]
                 data['G_ema'] = self.G_mixed
                 data['G'] = self.G_mixed
-                
+
                 with open(os.path.join(os.getcwd(),"models",save_path+".pkl"), 'wb') as f:
                     pickle.dump(data, f)
 
@@ -489,7 +489,7 @@ class Renderer:
 
 
             mapping_net = G.mapping
-        
+
             res.img_resolution = G.img_resolution
             res.num_ws = G.num_ws
             res.has_noise = any('noise_const' in name for name, _buf in G.synthesis.named_buffers())
@@ -623,15 +623,15 @@ class Renderer:
             img = img * (10 ** (img_scale_db / 20))
             img = (img * 127.5 + 128).clamp(0, 255).to(torch.uint8).permute(1, 2, 0)
             res.image = img
-            
+
 
             del img
             del manip_layers
             del out # Free up GPU memory.
-            
+
     def get_layers(self, net):
         return [name for name, weight in net.named_parameters()]
-        
+
 
     def run_synthesis_net(self,*args, capture_layer=None, transforms=None, ratios=None, adjustments=None,
                           noise_adjustments=None, use_superres=False, global_noise=1, combined_layers=[], mixing=False, **kwargs):
@@ -660,7 +660,7 @@ class Renderer:
             transforms = []
         submodule_names = {mod: name for name, mod in net.named_modules()}
         unique_names = set()
-        layers = []        
+        layers = []
         if not (self.G2 is None) and self.model_changed and len(combined_layers):
             net_state = self.G.state_dict()
             net2_state = self.G2.state_dict()
@@ -709,7 +709,7 @@ class Renderer:
             model_out_dict.update(dict_dest)
             model_out.load_state_dict(dict_dest)
             self.G_mixed = model_out
-                
+
         def adjustment_hook(module, inputs):
             #pre forward hook to add adjustments to the latent vector and resize input to fit ratio
             inps = []
@@ -786,7 +786,7 @@ class Renderer:
             out = e.out
         for hook in hooks:
             hook.remove()
-        return out, layers 
+        return out, layers
 
 # ----------------------------------------------------------------------------
     def process_loop(self, G, looping_list, looping_index, alpha, trunc_psi, trunc_cutoff):
@@ -837,6 +837,3 @@ class Renderer:
             if self.G2 is not None:
                 self.G2 = self.get_network(self.pkl2, 'G_ema')
                 self.model_changed = True
-
-
-
