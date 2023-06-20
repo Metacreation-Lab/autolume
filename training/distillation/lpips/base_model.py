@@ -1,6 +1,8 @@
 import os
 import torch
-import numpy as np
+from torch.autograd import Variable
+from pdb import set_trace as st
+from IPython import embed
 
 class BaseModel():
     def __init__(self):
@@ -44,7 +46,7 @@ class BaseModel():
         print('Loading network from %s'%save_path)
         network.load_state_dict(torch.load(save_path))
 
-    def update_learning_rate(self):
+    def update_learning_rate():
         pass
 
     def get_image_paths(self):

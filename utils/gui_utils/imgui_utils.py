@@ -16,7 +16,7 @@ from assets.colors import *
 def set_default_style(color_scheme='dark', spacing=9, indent=23, scrollbar=15):
     s = imgui.get_style()
     s.window_padding = [spacing, spacing]
-    s.item_spacing = [spacing, spacing]
+    s.item_spacing = [spacing * 3, spacing]
     s.item_inner_spacing = [spacing, spacing]
     s.columns_min_spacing = spacing
     s.indent_spacing = indent
