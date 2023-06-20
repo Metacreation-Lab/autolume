@@ -12,6 +12,7 @@ import cv2
 # import pyaudio
 
 import dnnlib
+from assets import GRAY
 from utils.gui_utils import imgui_utils
 from utils.gui_utils import gl_utils
 from utils.gui_utils import text_utils
@@ -81,6 +82,14 @@ class Visualizer:
         self.collapsed_widget = collapsable_layer.LayerWidget(self)
         # self.audio_widget = audio_widget.AudioWidget(self)
 
+        self.logo = cv2.imread("assets/Autolume-logo.png", cv2.IMREAD_UNCHANGED)
+        self.logo_texture = gl_utils.Texture(image=self.logo, width=self.logo.shape[1], height=self.logo.shape[0],
+                                             channels=self.logo.shape[2])
+
+        self.metacreation = cv2.imread("assets/metalogo.png", cv2.IMREAD_UNCHANGED)
+        self.metacreation_texture = gl_utils.Texture(image=self.metacreation, width=self.metacreation.shape[1],
+                                                     height=self.metacreation.shape[0],
+                                                     channels=self.metacreation.shape[2])
 
     def close(self):
         if self._async_renderer is not None:
@@ -125,8 +134,20 @@ class Visualizer:
         if dragging:
             self.latent_widget.drag(dx, dy)
 
-        # Begin control pane.
         imgui.set_next_window_position(0, 0)
+        imgui.set_next_window_size(self.pane_w, self.logo.shape[0] * 1.5)
+        imgui.begin('##Menu', closable=False, flags=(
+                    imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS | imgui.WINDOW_NO_TITLE_BAR))
+        # set red background
+        imgui.get_window_draw_list().add_rect_filled(0, 0,self.pane_w, self.logo.shape[0] * 1.5,
+                                                     imgui.get_color_u32_rgba(*GRAY))
+        imgui.image(self.logo_texture.gl_id, self.logo.shape[1], self.logo.shape[0])
+        imgui.same_line(self.pane_w - (self.metacreation.shape[1] + self.app.spacing))
+        imgui.image(self.metacreation_texture.gl_id, self.metacreation.shape[1], self.metacreation.shape[0])
+        imgui.end()
+
+        # Begin control pane.
+        imgui.set_next_window_position(0, self.logo.shape[0] * 1.5)
         imgui.set_next_window_size(self.pane_w, self.app.content_height)
         imgui.begin('##control_pane', closable=False, flags=(imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE))
 
