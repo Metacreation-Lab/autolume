@@ -588,7 +588,6 @@ class Renderer:
             # Update layer list.
             cache_key = (G.synthesis, tuple(sorted(synthesis_kwargs.items())))
             if cache_key not in self._net_layers:
-                print("Generating layer list for...")
                 layers = manip_layers
                 if layer_name is not None:
                     torch.manual_seed(random_seed)
@@ -687,12 +686,10 @@ class Renderer:
             dict_dest = model_out.state_dict()
             # depending on what model is used in the first entry extract the mapping layers from the corresponding model and copy them to the new model
             if self.combined_layers[0] == "A":
-                print("MAPPING A")
                 mapping_names = extract_mapping_names(self.G)
                 for name in mapping_names:
                     dict_dest[name] = net_state[name]
             elif self.combined_layers[0] == "B":
-                print("MAPPING B")
                 mapping_names = extract_mapping_names(self.G2)
                 for name in mapping_names:
                     dict_dest[name] = net2_state[name]
@@ -790,7 +787,6 @@ class Renderer:
 
 # ----------------------------------------------------------------------------
     def process_loop(self, G, looping_list, looping_index, alpha, trunc_psi, trunc_cutoff):
-        print("looping", looping_list, looping_index, alpha)
         v0 = self.evaluate(G, looping_list[looping_index-1], trunc_psi, trunc_cutoff)
         v1 = self.evaluate(G, looping_list[looping_index], trunc_psi, trunc_cutoff)
         return slerp(alpha, v0, v1)
@@ -818,7 +814,6 @@ class Renderer:
 
     def set_device(self, device):
         if device != self.kernel_type:
-            print(f"Switching to {device}")
             self.kernel_type = device
             self._device = torch.device("cuda" if device == "custom" else device)
             if self._device.type == 'cuda':

@@ -32,13 +32,11 @@ def _init():
                 extra_cuda_cflags=['--use_fast_math', '--allow-unsupported-compiler'],
             )
             if _plugin is None:
-                print('Compilation failed using native plugin for upfirdn2d_plugin')
                 params.use_custom = False
                 params.has_custom = False
                 return False
             params.has_custom = True
         else:
-            print('Using native plugin for upfirdn2d_plugin')
             return False
     return True
 

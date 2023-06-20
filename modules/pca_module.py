@@ -5,6 +5,7 @@ import multiprocessing as mp
 
 import imgui
 import numpy as np
+import torch.cuda
 
 import dnnlib
 from torch_utils import legacy
@@ -56,17 +57,15 @@ class PCA_Module:
             np.save(os.path.join(self.save_path,f"{filename}_xcomp.npy"), self.X_comp)
             np.save(os.path.join(self.save_path,f"{filename}_zcomp.npy"), self.Z_comp)
 
-
-        imgui.same_line(self.menu.app.label_w)
         changed, self.user_pkl = imgui_utils.input_text('##pkl', self.user_pkl, 1024,
                                                         flags=(imgui.INPUT_TEXT_AUTO_SELECT_ALL |
                                                                imgui.INPUT_TEXT_ENTER_RETURNS_TRUE),
-                                                        width= -1,
+                                                        width= -1 - self.menu.app.button_w - self.menu.app.spacing,
                                                         help_text='<PATH> | <URL> | <RUN_DIR> | <RUN_ID> | <RUN_ID>/<KIMG>.pkl')
         if changed:
             self.load(self.user_pkl)
-
-        if imgui_utils.button('Browse...', enabled=len(self.browse_cache) > 0, width=-1):
+        imgui.same_line()
+        if imgui_utils.button('Models', enabled=len(self.browse_cache) > 0, width=self.menu.app.button_w):
             imgui.open_popup('browse_pkls_popup')
             self.browse_refocus = True
 
@@ -88,18 +87,20 @@ class PCA_Module:
         )
         max_features = 0 if self.G is None else self.G.w_dim
 
-        _, self.num_features = imgui.slider_int(
-            f"num features {max_features}", self.num_features,
-            min_value=0, max_value=max_features,
-            format="%d"
+        _, self.num_features = imgui.input_int(
+            f"Number of features", self.num_features
         )
+        if self.num_features > max_features:
+            self.num_features = max_features
+        if self.num_features < 0:
+            self.num_features = 0
 
         _, self.alpha = imgui.slider_float(
-            "sparsity", self.alpha,
+            "Sparsity", self.alpha,
             min_value=0.0, max_value=1.0,
             format='%.3f', power=3)
 
-        changed, self.save_path = imgui_utils.input_text('SAVE in Folder##save_path', self.save_path, 1024,
+        changed, self.save_path = imgui_utils.input_text('Save in Folder##save_path', self.save_path, 1024,
                                                         flags=(imgui.INPUT_TEXT_AUTO_SELECT_ALL |
                                                                imgui.INPUT_TEXT_ENTER_RETURNS_TRUE),
                                                         width=(-1 - self.menu.app.button_w - self.menu.app.spacing),
@@ -110,7 +111,7 @@ class PCA_Module:
             self.running = True
             self.X_comp, self.Z_comp = None, None
             os.makedirs(self.save_path, exist_ok=True)
-            self.queue.put((pca_modes[self.pca_mode], self.num_features, self.G, "cuda", True, self.alpha))
+            self.queue.put((pca_modes[self.pca_mode], self.num_features, self.G, "cuda" if torch.cuda.is_available() else "cpu", True, self.alpha))
             self.pca_process.start()
 
         if imgui.begin_popup_modal("PCA-popup")[0]:
@@ -153,4 +154,4 @@ class PCA_Module:
         path = self.resolve_pkl(user_pkl)
         with dnnlib.util.open_url(path, verbose=False) as f:
             data = legacy.load_network_pkl(f, custom=True)
-        self.G = data["G"].cuda()
+        self.G = data["G"].to("cuda" if torch.cuda.is_available() else "cpu")

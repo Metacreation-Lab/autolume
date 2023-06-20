@@ -29,9 +29,8 @@ class Autolume(imgui_window.ImguiWindow):
         self.pkls = []
         self.splash_delay = 0
 
-        self.splash = cv2.imread("assets/splashscreen.jpg")
-        print(self.splash.shape)
-        self.splash = cv2.cvtColor(self.splash, cv2.COLOR_BGR2RGB)
+        self.splash = cv2.imread("assets/splashscreen.png", cv2.IMREAD_UNCHANGED)
+        self.splash = cv2.cvtColor(self.splash, cv2.COLOR_BGRA2RGBA)
         self.splash_texture = gl_utils.Texture(image=self.splash, width=self.splash.shape[1],
                                                height=self.splash.shape[0], channels=self.splash.shape[2])
 

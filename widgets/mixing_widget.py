@@ -168,7 +168,7 @@ class MixingWidget:
 
             if l1_res == resolution or l2_res == resolution:
                 imgui.begin_child(f"##{resolution}_global", 0, 14 * 16 if self.collapsed[i] == "v" else 14 * 2.3, border=True,
-                                  flags=imgui.WINDOW_NO_SCROLLBAR if self.collapsed[i] == ">" else 0)
+                                  flags= (imgui.WINDOW_NO_SCROLLBAR|imgui.WINDOW_NO_SCROLL_WITH_MOUSE) if self.collapsed[i] == ">" else 0)
                 imgui.text(self.collapsed[i])
                 if imgui.is_item_clicked():
                     self.collapsed[i] = ">" if self.collapsed[i] == "v" else "v"
@@ -236,13 +236,13 @@ class MixingWidget:
                                 if j == len(layer1) - 1:
                                     self.combined_layers = copy.deepcopy(self.cached_layers)
                     else:
-                        if imgui.button(f"X##{i}"):
+                        if imgui.button(f"X##{i}", width=self.viz.app.font_size * 1.5, height=self.viz.app.font_size * 1.5):
                             self.cached_layers[:i] = copy.deepcopy(self.combined_layers[:i])
                             self.combined_layers[i] = "X"
                             self.combined_layers[i + 1:] = ["X"] * (len(self.combined_layers) - i - 1)
                 else:
-                    imgui.same_line(imgui.get_content_region_available_width() - self.viz.app.button_w)
-                    if self.combined_layers[i] == "X":
+                    imgui.same_line(imgui.get_content_region_available_width() - self.viz.app.button_w + imgui.get_style().scrollbar_size)
+                    if self.combined_layers[i] ==  "X":
                         if imgui.button(f"Recover##{i}"):
                             # find last entry in l1 or l2 that has the same resolution as resolution and copy all the layers from self.cached to self.combined up to that point
                             for j, (l1, l2) in enumerate(zip(layer1, layer2)):
@@ -259,7 +259,7 @@ class MixingWidget:
                                 if j == len(layer1) - 1:
                                     self.combined_layers = copy.deepcopy(self.cached_layers)
                     else:
-                        if imgui.button(f"X##{i}"):
+                        if imgui.button(f"X##{i}", width=self.viz.app.font_size * 1.5, height=self.viz.app.font_size * 1.5):
                             self.cached_layers[:i] = copy.deepcopy(self.combined_layers[:i])
                             self.combined_layers[i] = "X"
                             self.combined_layers[i + 1:] = ["X"] * (len(self.combined_layers) - i - 1)
@@ -272,13 +272,13 @@ class MixingWidget:
                             l2t_res = int(re.search(r'\d+', l2t).group())
                         if l1t_res == resolution or l2t_res == resolution:
                             imgui.text(l1t if l1t else l2t)
-                            imgui.same_line(imgui.get_content_region_available_width() // 3)
+                            imgui.same_line((imgui.get_content_region_available_width() // 3) + imgui.get_style().scrollbar_size - imgui.get_style().item_spacing[0] * 2)
                             with imgui_utils.grayed_out(l1t == '' or self.combined_layers[it]=="X"):
                                 clicked, _ = imgui.checkbox(f"##layer1{i}{it}", self.combined_layers[it] == "A")
                             if clicked and l1t != '' and not(self.combined_layers[it]=="X"):
                                 print("clicked1")
                                 self.combined_layers[it] = "A"
-                            imgui.same_line(imgui.get_content_region_available_width() // 3 * 2)
+                            imgui.same_line((imgui.get_content_region_available_width() // 3 * 2) + imgui.get_style().scrollbar_size - imgui.get_style().item_spacing[0])
                             with imgui_utils.grayed_out(l2t == '' or self.combined_layers[it]=="X"):
                                 clicked, _ = imgui.checkbox(f"##layer2{i}{it}", self.combined_layers[it]=="B")
                             if clicked and l2t != '' and not(self.combined_layers[it]=="X"):

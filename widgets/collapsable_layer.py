@@ -5,6 +5,7 @@
 # and any modifications thereto.  Any use, reproduction, disclosure or
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
+import contextlib
 import re
 
 import cv2
@@ -41,7 +42,7 @@ modes = ["all", "random", "range", "config"]
 def selectable_color(r, g, b, a):
     p_min = imgui.get_item_rect_min()
     p_max = imgui.get_item_rect_max()
-    imgui.get_window_draw_list().add_rect_filled(*p_min, *p_max, imgui.get_color_u32_rgba(r, g, b, a))
+    imgui.get_window_draw_list().add_rect_filled(0, p_min[1], imgui.get_content_region_available_width(), p_max[1], imgui.get_color_u32_rgba(r, g, b, a))
 
 
 def open_path(trans):
@@ -182,38 +183,51 @@ class LayerWidget:
         base_channel_max = max(self.capture_channels - self.sel_channels, 0)
 
         if show:
-            bg_color = DARKGRAY
-            dim_color = list(imgui.get_style().colors[imgui.COLOR_TEXT])
-            dim_color[-1] *= 0.5
 
             # Begin list.
             width = viz.app.font_size * 28
             height = imgui.get_text_line_height_with_spacing() * 12 + viz.app.spacing
-            imgui.push_style_var(imgui.STYLE_FRAME_PADDING, [0, 0])
-            imgui.push_style_color(imgui.COLOR_CHILD_BACKGROUND, *bg_color)
+            # imgui.push_style_var(imgui.STYLE_FRAME_PADDING, [0, 0])
+            imgui.push_style_color(imgui.COLOR_CHILD_BACKGROUND, *OPAQUEDARKGRAY)
+            imgui.push_style_color(imgui.COLOR_WINDOW_BACKGROUND, *OPAQUEDARKGRAY)
+
             imgui.push_style_color(imgui.COLOR_HEADER, 0, 0, 0, 0)
-            imgui.push_style_color(imgui.COLOR_HEADER_HOVERED, *GRAY)
-            imgui.push_style_color(imgui.COLOR_HEADER_ACTIVE, *LIGHTGRAY)
+            imgui.push_style_color(imgui.COLOR_TEXT, 1,1,1,1)
+            imgui.push_style_color(imgui.COLOR_HEADER_HOVERED, 0,0,0,0)
+            imgui.push_style_color(imgui.COLOR_HEADER_ACTIVE, 0,0,0,0)
 
-            imgui.begin_child('##list', width=width, height=height, border=True,
-                              flags=imgui.WINDOW_ALWAYS_VERTICAL_SCROLLBAR)
-
+            imgui.begin_child('##list', width=width, height=height, border=True, flags=imgui.WINDOW_NO_SCROLLBAR|imgui.WINDOW_NO_INPUTS)
+            imgui.begin_child('##list2', width=width, height=self.viz.app.font_size * 1.75, border=False, flags=imgui.WINDOW_NO_SCROLLBAR|imgui.WINDOW_NO_SCROLL_WITH_MOUSE)
             imgui.set_cursor_pos((0, -1))
             if self.simplified:
-                imgui_utils.color_button("Simple", color=RED, width=(width // 2))
+                imgui_utils.color_button("Simple", color=GREEN, width=(width // 2))
             else:
+                imgui.push_style_color(imgui.COLOR_BUTTON, *DARKGRAY)
+                imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, *GRAY)
+                imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, *GREEN)
+                imgui.push_style_color(imgui.COLOR_BORDER, *LIGHTGRAY)
+
                 if imgui_utils.button("Simple", width=(width // 2),
                                       enabled=not self.simplified):
                     self.simplified = True
+                imgui.pop_style_color(4)
             imgui.same_line(width//2)
 
             if not self.simplified:
-                imgui_utils.color_button("Advanced", color=RED, width=(width // 2) - (viz.app.spacing * 3))
+                imgui_utils.color_button("Advanced", color=GREEN, width=(width // 2) - (viz.app.spacing * 3))
             else:
+                imgui.push_style_color(imgui.COLOR_BUTTON, *DARKGRAY)
+                imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, *GRAY)
+                imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, *GREEN)
+                imgui.push_style_color(imgui.COLOR_BORDER, *LIGHTGRAY)
                 if imgui_utils.button("Advanced", width=(width // 2) - (viz.app.spacing * 3), enabled=self.simplified):
                     self.simplified = False
+                imgui.pop_style_color(4)
             imgui.separator()
-            checkbox_size = viz.app.font_size + viz.app.spacing * 2
+            imgui.end_child()
+            imgui.begin_child('##list3', width=width, height=height - self.viz.app.font_size * 1.5, border=False,
+                              flags=imgui.WINDOW_ALWAYS_VERTICAL_SCROLLBAR)
+            checkbox_size = viz.app.font_size
             draw_list = imgui.get_window_draw_list()
             # List items.
             if self.simplified:
@@ -228,7 +242,7 @@ class LayerWidget:
                             selected = (self.cur_layer == layer.name)
                             clicked, state = imgui_utils.img_checkbox(self.view_texture.gl_id,
                                                                       self.capture_layer == f"b{res}.torgb",
-                                                                      width=checkbox_size // 2)
+                                                                      width=checkbox_size)
                             if clicked and not self.capture_layer == layer.name:
                                 self.capture_layer = f"b{res}.torgb"
                                 for ltmp in layers:
@@ -237,18 +251,21 @@ class LayerWidget:
                             # imgui.same_line(viz.app.font_size + viz.app.spacing * 1.5)
                             imgui.set_cursor_pos([imgui.get_cursor_pos()[0] + viz.app.font_size + viz.app.spacing // 2,
                                                   imgui.get_cursor_pos()[1]])
-                            imgui.text("|")
-                            imgui.same_line(checkbox_size + viz.app.spacing)
                             _opened, selected = imgui.selectable(f'##{layer.name}_selectable',
                                                                  width=width - viz.app.button_w,
                                                                  selected=selected)
+
+                            if imgui.is_item_hovered():
+                                selectable_color(*DARKGRAY)
+                            if _opened or (imgui.is_item_hovered() and imgui.is_mouse_down(0)):
+                                selectable_color(*GRAY)
                             if layer.name in self.has_osc:
                                 if self.has_osc[layer.name]:
                                     draw_list.channels_set_current(0)
-                                    selectable_color(*RED)
-                            imgui.same_line(checkbox_size + viz.app.spacing)
+                                    selectable_color(*ACTIVE_RED)
+                            imgui.same_line(checkbox_size + viz.app.spacing * 2)
                             _clicked, selected = imgui_utils.img_checkbox(self.edit_texture.gl_id,
-                                                                          selected, width=checkbox_size // 2,
+                                                                          selected, width=checkbox_size,
                                                                           label=layer.name)
                             if selected:
                                 self.cur_layer = layer.name
@@ -259,9 +276,9 @@ class LayerWidget:
                                     self.refocus = False
                             draw_list.channels_merge()
                             imgui.same_line(width - viz.app.font_size * 13)
-                            imgui.text_colored('x'.join(str(x) for x in layer.shape[2:]), *dim_color)
+                            imgui.text('x'.join(str(x) for x in layer.shape[2:]))
                             imgui.same_line(width - viz.app.font_size * 8)
-                            imgui.text_colored(str(layer.shape[1]), *dim_color)
+                            imgui.text(str(layer.shape[1]))
                             # display if noise or transformation is applied
                             if self.has_transforms[layer.name]:
                                 imgui.same_line(width - viz.app.font_size * 5)
@@ -281,24 +298,28 @@ class LayerWidget:
                         selected = (self.cur_layer == layer.name)
                         clicked, state = imgui_utils.img_checkbox(self.view_texture.gl_id,
                                                                   self.capture_layer == layer.name,
-                                                                  width=checkbox_size // 2)
+                                                                  width=checkbox_size)
                         if clicked and not self.capture_layer == layer.name:
                             self.capture_layer = layer.name
                             self.capture_channels = layer.shape[1]
                         imgui.set_cursor_pos([imgui.get_cursor_pos()[0] + viz.app.font_size + viz.app.spacing // 2,
                                               imgui.get_cursor_pos()[1]])
-                        imgui.text("|")
-                        imgui.same_line(checkbox_size + viz.app.spacing)
                         _opened, selected = imgui.selectable(f'##{layer.name}_selectable',
                                                              width=width - viz.app.button_w,
                                                              selected=selected)
+
+                        if imgui.is_item_hovered():
+                            selectable_color(*DARKGRAY)
+                        if _opened or (imgui.is_item_hovered() and imgui.is_mouse_down(0)):
+                            selectable_color(*GRAY)
+
                         if layer.name in self.has_osc:
                             if self.has_osc[layer.name]:
                                 draw_list.channels_set_current(0)
-                                selectable_color(*RED)
-                        imgui.same_line(checkbox_size + viz.app.spacing)
+                                selectable_color(*ACTIVE_RED)
+                        imgui.same_line(checkbox_size + viz.app.spacing * 2)
                         _clicked, selected = imgui_utils.img_checkbox(self.edit_texture.gl_id,
-                                                                      selected, width=checkbox_size // 2,
+                                                                      selected, width=checkbox_size,
                                                                       label=layer.name)
                         if selected:
                             self.cur_layer = layer.name
@@ -309,9 +330,9 @@ class LayerWidget:
                                 self.refocus = False
                         draw_list.channels_merge()
                         imgui.same_line(width - viz.app.font_size * 13)
-                        imgui.text_colored('x'.join(str(x) for x in layer.shape[2:]), *dim_color)
+                        imgui.text('x'.join(str(x) for x in layer.shape[2:]))
                         imgui.same_line(width - viz.app.font_size * 8)
-                        imgui.text_colored(str(layer.shape[1]), *dim_color)
+                        imgui.text(str(layer.shape[1]))
 
                         # display if noise or transformation is applied
                         if self.has_transforms[layer.name]:
@@ -334,24 +355,28 @@ class LayerWidget:
                         selected = (self.cur_layer == layer.name)
                         clicked, state = imgui_utils.img_checkbox(self.view_texture.gl_id,
                                                                   self.capture_layer == layer.name,
-                                                                  width=checkbox_size // 2)
+                                                                  width=checkbox_size)
                         if clicked and not self.capture_layer == layer.name:
                             self.capture_layer = layer.name
                             self.capture_channels = layer.shape[1]
                         imgui.set_cursor_pos([imgui.get_cursor_pos()[0] + viz.app.font_size + viz.app.spacing // 2,
                                               imgui.get_cursor_pos()[1]])
-                        imgui.text("|")
-                        imgui.same_line(checkbox_size + viz.app.spacing)
                         _opened, selected = imgui.selectable(f'##{layer.name}_selectable',
                                                              width=width - viz.app.button_w,
                                                              selected=selected)
+
+                        if imgui.is_item_hovered():
+                            selectable_color(*DARKGRAY)
+                        if _opened or (imgui.is_item_hovered() and imgui.is_mouse_down(0)):
+                            selectable_color(*GRAY)
+
                         if layer.name in self.has_osc:
                             if self.has_osc[layer.name]:
                                 draw_list.channels_set_current(0)
-                                selectable_color(*RED)
-                        imgui.same_line(checkbox_size + viz.app.spacing)
+                                selectable_color(*ACTIVE_RED)
+                        imgui.same_line(checkbox_size + viz.app.spacing * 2)
                         _clicked, selected = imgui_utils.img_checkbox(self.edit_texture.gl_id,
-                                                                      selected, width=checkbox_size // 2,
+                                                                      selected, width=checkbox_size,
                                                                       label=layer.name)
                         if selected:
                             self.cur_layer = layer.name
@@ -362,9 +387,9 @@ class LayerWidget:
                                 self.refocus = False
                         draw_list.channels_merge()
                         imgui.same_line(width - viz.app.font_size * 13)
-                        imgui.text_colored('x'.join(str(x) for x in layer.shape[2:]), *dim_color)
+                        imgui.text('x'.join(str(x) for x in layer.shape[2:]))
                         imgui.same_line(width - viz.app.font_size * 8)
-                        imgui.text_colored(str(layer.shape[1]), *dim_color)
+                        imgui.text(str(layer.shape[1]))
                         # display if noise or transformation is applied
                         if self.has_transforms[layer.name]:
                             imgui.same_line(width - viz.app.font_size * 5)
@@ -381,23 +406,32 @@ class LayerWidget:
 
             # End list.
             if len(layers) == 0:
-                imgui.text_colored('No layers found', *dim_color)
+                imgui.text_colored('No layers found', *LIGHTGRAY)
             imgui.end_child()
-            imgui.pop_style_color(4)
-            imgui.pop_style_var(1)
+            imgui.end_child()
+            imgui.pop_style_color(6)
+            # imgui.pop_style_var(1)
             imgui.same_line()
             imgui.begin_child('##adjust', width=-1, height=height, border=True)
             tab_width = imgui.get_content_region_available_width() / 2
-            if imgui_utils.button("Activations",
-                                  width=tab_width, enabled=self.tab):
-                self.tab = not self.tab
+            if (self.tab is False) and (len(layers) > 0):
+                if self.has_transforms[layer.name]:
+                    tab_width = (imgui.get_content_region_available_width() - imgui.get_style().scrollbar_size) / 2
+
+            with greened_out((self.tab is False) and (len(layers) > 0)):
+                if imgui_utils.button("Transform",
+                                      width=tab_width,
+                                      enabled=len(layers)>0):
+                    self.tab = not self.tab
+
             imgui.same_line(tab_width + viz.app.spacing)
             has_noise = 'torgb' in self.cur_layer or "output" in self.cur_layer if self.cur_layer is not None else True
             if has_noise and self.tab:
                 self.tab = False
-            if imgui_utils.button("Noise",
-                                  width=tab_width, enabled=not (self.tab or has_noise)):
-                self.tab = not self.tab
+            with greened_out(self.tab):
+                if imgui_utils.button("Noise",
+                                      width=tab_width, enabled=not(has_noise)):
+                    self.tab = not self.tab
             imgui.separator()
             if self.cur_layer is not None:
                 ratio = self.ratios.get(self.cur_layer, (1, 1))
@@ -770,3 +804,23 @@ class LayerWidget:
                 self.viz.print_error(e)
 
         return func
+
+@contextlib.contextmanager
+def greened_out(cond=True):
+    if cond:
+        # change color of button to green
+        imgui.push_style_color(imgui.COLOR_BUTTON, *GREEN)
+        imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, *GREEN)
+        imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, *GREEN)
+        imgui.push_style_color(imgui.COLOR_BORDER, *GREEN)
+        yield
+        imgui.pop_style_color(4)
+
+    else:
+
+        imgui.push_style_color(imgui.COLOR_BUTTON, *DARKGRAY)
+        imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, *GRAY)
+        imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, *GREEN)
+        imgui.push_style_color(imgui.COLOR_BORDER, *GREEN)
+        yield
+        imgui.pop_style_color(4)

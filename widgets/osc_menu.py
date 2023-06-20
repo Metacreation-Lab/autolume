@@ -7,7 +7,7 @@ from utils.gui_utils import imgui_utils
 import numpy as np
 import math
 import torch
-from assets import RED
+from assets import RED, ACTIVE_RED, GRAY
 
 
 class OscMenu:
@@ -103,11 +103,15 @@ class OscMenu:
         imgui.begin_child(self.label, viz.pane_w, viz.app.font_size*1.5,
                           flags=imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_MENU_BAR)
         if imgui.begin_menu_bar():
-            imgui.text("Osc Menu |")
+            imgui.text("OSC Menu |")
             for key in self.funcs.keys():
                 # if self.use_osc[key] we turn the selectable red to indicate that it is active
                 with make_red(self.use_osc[key]):
+                    imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + 6)
+
+                    imgui.push_style_color(imgui.COLOR_HEADER_HOVERED, *GRAY)
                     opened, selected = imgui.selectable(key, (self.hovering == key and self.active) or self.use_osc[key], width=imgui.calc_text_size(key)[0])
+                    imgui.pop_style_color(1)
 
                 if imgui.is_item_hovered():
                     self.hovering = key
@@ -127,9 +131,9 @@ class OscMenu:
 @contextlib.contextmanager
 def make_red(condition=True):
     if condition:
-        imgui.push_style_color(imgui.COLOR_HEADER, *RED)
-        imgui.push_style_color(imgui.COLOR_HEADER_HOVERED, *RED)
-        imgui.push_style_color(imgui.COLOR_HEADER_ACTIVE, *RED)
+        imgui.push_style_color(imgui.COLOR_HEADER, *ACTIVE_RED)
+        imgui.push_style_color(imgui.COLOR_HEADER_HOVERED, *ACTIVE_RED)
+        imgui.push_style_color(imgui.COLOR_HEADER_ACTIVE, *ACTIVE_RED)
         yield
         imgui.pop_style_color(3)
     else:

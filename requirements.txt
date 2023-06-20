@@ -21,3 +21,5 @@ fbpca
 psutil
 matplotlib
 python-osc
+pyaudio
+librosa
