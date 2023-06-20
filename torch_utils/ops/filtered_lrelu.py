@@ -32,13 +32,11 @@ def _init():
                 extra_cuda_cflags=['--use_fast_math', '--allow-unsupported-compiler'],
             )
             if _plugin is None:
-                print('WARNING: Failed to compile filtered_lrelu_plugin. Using slow reference implementation of filtered_lrelu().')
                 params.use_custom = False
                 params.has_custom = False
                 return False
             params.has_custom = True
         else:
-            print('WARNING: Using slow reference implementation of filtered_lrelu(). Set torch_utils.ops.filtered_lrelu._use_custom = True to enable the fast CUDA implementation.')
             return False
     return True
 

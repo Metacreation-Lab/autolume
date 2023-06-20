@@ -70,7 +70,7 @@ class TrainingModule:
 
             print(self.message, self.done)
 
-        imgui.text("Training Module")
+        imgui.text("Train a model on your own data")
 
         _, self.save_path = imgui.input_text("Save Path", self.save_path, 1024)
         _, self.data_path = imgui.input_text("Data Path", self.data_path, 1024)

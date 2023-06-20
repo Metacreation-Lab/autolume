@@ -16,7 +16,7 @@ from assets.colors import *
 def set_default_style(color_scheme='dark', spacing=9, indent=23, scrollbar=15):
     s = imgui.get_style()
     s.window_padding = [spacing, spacing]
-    s.item_spacing = [spacing * 3, spacing]
+    s.item_spacing = [spacing, spacing]
     s.item_inner_spacing = [spacing, spacing]
     s.columns_min_spacing = spacing
     s.indent_spacing = indent
@@ -33,23 +33,21 @@ def set_default_style(color_scheme='dark', spacing=9, indent=23, scrollbar=15):
     s.scrollbar_rounding = 0
     s.grab_rounding = 0
 
-    seethrough_green = [*GREEN]
-    seethrough_green[-1] = 0.3
     getattr(imgui, f'style_colors_{color_scheme}')(s)
     # s.colors[imgui.COLOR_TEXT] = black
     # s.colors[imgui.COLOR_TEXT_DISABLED] = gray
     # s.colors[imgui.COLOR_WINDOW_BACKGROUND] = GREEN
     s.colors[imgui.COLOR_CHILD_BACKGROUND] = DARKGRAY
     # s.colors[imgui.COLOR_POPUP_BACKGROUND] = [0., 1., 0., 1.00]
-    s.colors[imgui.COLOR_BORDER] = seethrough_green
+    s.colors[imgui.COLOR_BORDER] = GREEN
     # s.colors[imgui.COLOR_BORDER_SHADOW] = [0., 1., 0., 0.00]
     s.colors[imgui.COLOR_FRAME_BACKGROUND] = DARKGRAY
-    s.colors[imgui.COLOR_FRAME_BACKGROUND_HOVERED] = HOVERGREEN
+    s.colors[imgui.COLOR_FRAME_BACKGROUND_HOVERED] = GRAY
     s.colors[imgui.COLOR_FRAME_BACKGROUND_ACTIVE] = GREEN
     s.colors[imgui.COLOR_TITLE_BACKGROUND] = DARKGREEN
     s.colors[imgui.COLOR_TITLE_BACKGROUND_ACTIVE] = HOVERGREEN
     s.colors[imgui.COLOR_TITLE_BACKGROUND_COLLAPSED] = DARKGREEN
-    s.colors[imgui.COLOR_MENUBAR_BACKGROUND] = GRAY
+    s.colors[imgui.COLOR_MENUBAR_BACKGROUND] = DARKGRAY
     s.colors[imgui.COLOR_SCROLLBAR_BACKGROUND] = BLACK
     # s.colors[imgui.COLOR_SCROLLBAR_GRAB] = [0., 1., 0., 1.00]
     # s.colors[imgui.COLOR_SCROLLBAR_GRAB_HOVERED] = [0., 1., 0., 1.00]
@@ -145,9 +143,9 @@ def scoped_by_object_id(method):
 
 def color_button(label, color, width=0, height=0):
     s = imgui.get_style()
-    imgui.push_style_color(imgui.COLOR_BUTTON, *RED)
-    imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, *RED)
-    imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, *RED)
+    imgui.push_style_color(imgui.COLOR_BUTTON, *color)
+    imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, *color)
+    imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, *color)
     clicked = imgui.button(label, width=width, height=height)
     imgui.pop_style_color(3)
     return clicked
@@ -266,7 +264,7 @@ def img_checkbox(img, value, width, label=""):
     posx, posy = imgui.get_cursor_screen_pos()
     draw_list.add_rect_filled(posx, posy, posx + width, posy + width, imgui.get_color_u32_rgba(0,0,0,1), 2)
     #draw outline of square
-    draw_list.add_rect(posx, posy, posx + width, posy + width, imgui.get_color_u32_rgba(*LIGHTGRAY), 2)
+    draw_list.add_rect(posx, posy, posx + width, posy + width, imgui.get_color_u32_rgba(*LIGHTGRAY), rounding=0)
     # if clicked in area of square, change value
     if imgui.is_mouse_clicked(0) and imgui.is_mouse_hovering_rect(posx, posy, posx + width, posy + width):
         clicked = True
@@ -274,10 +272,9 @@ def img_checkbox(img, value, width, label=""):
 
     # draw img in center of box if value is true
     if value:
-        draw_list.add_image(img, (posx, posy), (posx + width, posy + width), col=imgui.get_color_u32_rgba(1,1,1,1))
+        draw_list.add_image(img, (posx + (width * 0.2), posy + (width * 0.2)), (posx + (width * 0.8), posy + (width * 0.8)), col=imgui.get_color_u32_rgba(1,1,1,1))
 
     dim_color = list(imgui.get_style().colors[imgui.COLOR_TEXT])
-    dim_color[-1] *= 0.5
     draw_list.add_text(posx + width + 5, posy, imgui.get_color_u32_rgba(*dim_color), label)
 
     return clicked, value

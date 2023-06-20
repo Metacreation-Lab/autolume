@@ -5,6 +5,7 @@ import torch
 from pythonosc.udp_client import SimpleUDPClient
 
 import dnnlib
+from assets import ACTIVE_RED
 from audio import audio_stream
 from utils.gui_utils import imgui_utils
 
@@ -45,7 +46,20 @@ class AudioWidget:
     @imgui_utils.scoped_by_object_id
     def send_osc(self, key, signal):
         viz = self.viz
+
+        draw_list = imgui.get_window_draw_list()
+
+        draw_list.channels_split(2)
+        draw_list.channels_set_current(1)
         _, self.use_osc[key] = imgui.checkbox(f"Use OSC##_{key}", self.use_osc[key])
+        if self.use_osc[key]:
+            draw_list.channels_set_current(0)
+            p_min = imgui.get_item_rect_min()
+            p_max = imgui.get_item_rect_max()
+            draw_list.add_rect_filled(p_min.x + (self.viz.app.font_size * 1.5), p_min.y,
+                                      p_min.x + (self.viz.app.button_w), p_max.y, imgui.get_color_u32_rgba(*ACTIVE_RED))
+
+        draw_list.channels_merge()
         imgui.same_line()
         with imgui_utils.item_width(viz.app.font_size * 5),imgui_utils.grayed_out(not(self.use_osc[key])):
             changed, self.osc_addresses[key] = imgui.input_text(f"##OSC_{key}", self.osc_addresses[key], 256,

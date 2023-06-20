@@ -38,7 +38,6 @@ _null_tensor = torch.empty([0])
 
 def _init():
     global _plugin
-    print("init", params.use_custom, params.has_custom)
     if _plugin is None or not params.use_custom:
         if params.use_custom:
             _plugin = custom_ops.get_plugin(
@@ -50,12 +49,10 @@ def _init():
             )
             if _plugin is None:
                 params.use_custom = False
-                print("updated", params.use_custom)
                 params.has_custom = False
                 return False
             params.has_custom = True
         else:
-            print('Using native plugin for bias_act')
             return False
     return True
 

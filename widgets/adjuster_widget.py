@@ -4,6 +4,9 @@ import imgui
 import numpy as np
 import torch
 import torch.nn.functional as F
+
+from assets import ACTIVE_RED
+
 try:
     import cPickle as pickle
 except ModuleNotFoundError:
@@ -109,20 +112,28 @@ class AdjusterWidget:
             for i in range(len(self.weights)):
                 imgui.begin_group()
                 s = imgui.get_style()
-                font = min((abs(key - self.viz.app.font_size / 8), key) for key in self.viz.app._imgui_fonts.keys())[1]
-                spacing = self.viz.app.spacing / 8
-                s.item_spacing = [spacing, spacing]
-                s.item_inner_spacing = [spacing, spacing]
-                imgui.push_font(self.viz.app._imgui_fonts[font])
-                changed, self.vslide_use_osc[i] = imgui.checkbox(f"##vslide_use_ose{i}", self.vslide_use_osc[i])
-                imgui.pop_font()
+
+                draw_list = imgui.get_window_draw_list()
+
+                draw_list.channels_split(2)
+                draw_list.channels_set_current(1)
+                changed, self.vslide_use_osc[i] = imgui.checkbox(f"Use OSC##vslide_use_ose{i}", self.vslide_use_osc[i])
                 use_osc = self.vslide_use_osc[i]
-                imgui.same_line()
+
+                # if use_osc draw red box under checkbox label
+                if use_osc:
+
+                    draw_list.channels_set_current(0)
+                    p_min = imgui.get_item_rect_min()
+                    p_max = imgui.get_item_rect_max()
+                    draw_list.add_rect_filled(p_min.x + (self.viz.app.font_size * 1.5), p_min.y , p_min.x + (self.viz.app.button_w) , p_max.y, imgui.get_color_u32_rgba(*ACTIVE_RED))
+
+                draw_list.channels_merge()
+
                 with imgui_utils.grayed_out(not use_osc):
                     changed, new_address = imgui_utils.input_text(f"##vslide_osc{i}", self.vslide_address[i], 256,
                                                                   imgui.INPUT_TEXT_CHARS_NO_BLANK | imgui.INPUT_TEXT_ENTER_RETURNS_TRUE,
-                                                                  width=self.viz.app.button_w - (
-                                                                          self.viz.app.font_size + self.viz.app.spacing),
+                                                                  width=self.viz.app.button_w,
                                                                   help_text="osc address")
                     s.item_spacing = [self.viz.app.spacing, self.viz.app.spacing]
                     s.item_inner_spacing = [self.viz.app.spacing, self.viz.app.spacing]

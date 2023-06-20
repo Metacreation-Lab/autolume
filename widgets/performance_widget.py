@@ -110,21 +110,21 @@ class PerformanceWidget:
             imgui.same_line()
             _, self.use_superres = imgui.checkbox('Super Resolution', self.use_superres)
 
-        if imgui.checkbox("CPU", self.device=="cpu")[0]:
-            self.device = "cpu"
+            if imgui.checkbox("CPU", self.device=="cpu")[0]:
+                self.device = "cpu"
 
-        imgui.same_line()
-        with imgui_utils.grayed_out(not torch.cuda.is_available()):
-            if imgui.checkbox("GPU", self.device == "cuda")[0]:
-                if torch.cuda.is_available():
-                    self.device = "cuda"
+            imgui.same_line()
+            with imgui_utils.grayed_out(not torch.cuda.is_available()):
+                if imgui.checkbox("GPU", self.device == "cuda")[0]:
+                    if torch.cuda.is_available():
+                        self.device = "cuda"
 
-        imgui.same_line()
+            imgui.same_line()
 
-        with imgui_utils.grayed_out(not self.custom_kernel_available):
-            if imgui.checkbox("Custom Kernel", self.device == "custom")[0]:
-                if self.custom_kernel_available:
-                    self.device = "custom"
+            with imgui_utils.grayed_out(not self.custom_kernel_available):
+                if imgui.checkbox("Custom Kernel", self.device == "custom")[0]:
+                    if self.custom_kernel_available:
+                        self.device = "custom"
 
         viz.app.set_fps_limit(self.fps_limit)
         viz.app.set_vsync(self.use_vsync)

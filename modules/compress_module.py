@@ -41,7 +41,7 @@ class CompressModule:
 
     @imgui_utils.scoped_by_object_id
     def __call__(self):
-        imgui.text("Compress Module")
+        imgui.text("Prune unnecessary layers from a network")
         _, self.save_path = imgui.input_text("Save Path", self.save_path, 1024)
         _, self.compress_pkl = imgui.input_text("Learner Pkl", self.compress_pkl, 1024)
         imgui.same_line()
@@ -67,7 +67,7 @@ class CompressModule:
                        noise_prob=self.noise_prob, remove_ratio=self.compression_factor)
 
         imgui.separator()
-        imgui.text("Compress Module")
+        imgui.text("Retrain a network with a teacher network")
         _, self.save_path_distill = imgui.input_text("Save Path", self.save_path, 1024)
         _, self.data_path = imgui.input_text("Data Path", self.data_path, 1024)
         _, self.resume_pkl = imgui.input_text("Learner Pkl", self.resume_pkl, 1024)

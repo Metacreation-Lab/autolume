@@ -24,10 +24,14 @@ def create_networks(data, init=True, labels=None, **ex_kwargs):
     from architectures import custom_stylegan2
     oG = data["G"]
     channel_dims = Get_Network_Shape(oG)
-    print(oG.init_kwargs)
     channels_dict = {2**(i+2):shape for i, shape in enumerate(channel_dims[::2])}
+
+    init_res = (4,4)
+    if type(oG) == custom_stylegan2.Generator:
+        init_res = oG.init_res
+
     G = custom_stylegan2.Generator(z_dim = oG.z_dim, w_dim = oG.w_dim, c_dim = oG.c_dim, img_channels= oG.img_channels,
-                                           img_resolution=oG.img_resolution,
+                                           img_resolution=oG.img_resolution, init_res=init_res,
                                            mapping_kwargs=oG.init_kwargs.get('mapping_kwargs', {}),
                                            synthesis_kwargs=oG.init_kwargs.get('synthesis_kwargs', {}),
                                            channels_dict=channels_dict,)

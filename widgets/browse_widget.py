@@ -4,6 +4,7 @@ import cv2
 import imgui
 import torch
 
+from assets import LIGHTGRAY
 from utils.gui_utils import imgui_utils, gl_utils
 from utils.gui_utils import imgui_window
 
@@ -30,11 +31,10 @@ class BrowseWidget():
         self.open = False
 
         # read as rgba
-        self.folder = cv2.imread("assets/folder.png")
-        self.folder = cv2.cvtColor(self.folder, cv2.COLOR_BGR2RGBA)
+        self.folder = cv2.imread("assets/folder.png", cv2.IMREAD_UNCHANGED)
+        self.folder = cv2.cvtColor(self.folder, cv2.COLOR_BGRA2RGBA)
 
         # in the alpha channel we put alpha to 0 where the image is black
-        self.folder[:,:,3] = (self.folder[:,:,0] != 0) * 255
         self.folder_texture = gl_utils.Texture(image=self.folder, width=self.folder.shape[1], height=self.folder.shape[0], channels=self.folder.shape[2])
 
     def resolve_selected(self):
@@ -96,7 +96,7 @@ class BrowseWidget():
                                 break
                 if contains_extension:
 
-                    imgui.image(self.folder_texture.gl_id, self.parent.app.font_size, self.parent.app.font_size, tint_color=(0.26,0.59,0.98,.67))
+                    imgui.image(self.folder_texture.gl_id, self.parent.app.font_size, self.parent.app.font_size, tint_color=(1,1,1,1))
                     imgui.same_line()
                     # single click selects double clicks enters directory_popup
                     if imgui.selectable(f, os.path.join(self.directory, f) in self.selected, imgui.SELECTABLE_ALLOW_DOUBLE_CLICK)[0]:

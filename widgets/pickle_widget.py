@@ -42,7 +42,7 @@ class PickleWidget:
         self.use_osc = False
         self.osc_addresses = ""
 
-        self.browser = browse_widget.BrowseWidget(viz, "Find", ".", [".pkl"], width=self.viz.app.button_w, multiple=False, traverse_folders=False)
+        self.browser = browse_widget.BrowseWidget(viz, "Find", os.path.abspath("."), [".pkl"], width=self.viz.app.button_w, multiple=False, traverse_folders=False)
 
         for pkl in os.listdir("./models"):
             if pkl.endswith(".pkl"):

@@ -9,10 +9,10 @@ import threading
 import numpy as np
 import imgui
 import cv2
-# import pyaudio
+import pyaudio
 
 import dnnlib
-from assets import GRAY
+from assets import GRAY, DARKGRAY, LIGHTGRAY
 from utils.gui_utils import imgui_utils
 from utils.gui_utils import gl_utils
 from utils.gui_utils import text_utils
@@ -22,7 +22,7 @@ from widgets import trunc_noise_widget
 from widgets import performance_widget
 from widgets import layer_widget
 from widgets import adjuster_widget
-# from widgets import audio_widget
+from widgets import audio_widget
 from widgets import looping_widget
 from widgets import preset_widget
 from widgets import mixing_widget
@@ -40,7 +40,7 @@ class Visualizer:
         self.app = app
 
         #COMMUNICATIONS
-        # self.pa = pyaudio.PyAudio()
+        self.pa = pyaudio.PyAudio()
         self.in_ip = "127.0.0.1"
         self.in_port = 1338
         self.osc_dispatcher = Dispatcher()
@@ -80,7 +80,7 @@ class Visualizer:
         self.preset_widget = preset_widget.PresetWidget(self)
         self.mixing_widget = mixing_widget.MixingWidget(self)
         self.collapsed_widget = collapsable_layer.LayerWidget(self)
-        # self.audio_widget = audio_widget.AudioWidget(self)
+        self.audio_widget = audio_widget.AudioWidget(self)
 
         self.logo = cv2.imread("assets/Autolume-logo.png", cv2.IMREAD_UNCHANGED)
         self.logo_texture = gl_utils.Texture(image=self.logo, width=self.logo.shape[1], height=self.logo.shape[0],
@@ -135,22 +135,28 @@ class Visualizer:
             self.latent_widget.drag(dx, dy)
 
         imgui.set_next_window_position(0, 0)
-        imgui.set_next_window_size(self.pane_w, self.logo.shape[0] * 1.5)
-        imgui.begin('##Menu', closable=False, flags=(
-                    imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS | imgui.WINDOW_NO_TITLE_BAR))
-        # set red background
-        imgui.get_window_draw_list().add_rect_filled(0, 0,self.pane_w, self.logo.shape[0] * 1.5,
-                                                     imgui.get_color_u32_rgba(*GRAY))
-        imgui.image(self.logo_texture.gl_id, self.logo.shape[1], self.logo.shape[0])
-        imgui.same_line(self.pane_w - (self.metacreation.shape[1] + self.app.spacing))
-        imgui.image(self.metacreation_texture.gl_id, self.metacreation.shape[1], self.metacreation.shape[0])
-        imgui.end()
-
-        # Begin control pane.
-        imgui.set_next_window_position(0, self.logo.shape[0] * 1.5)
         imgui.set_next_window_size(self.pane_w, self.app.content_height)
         imgui.begin('##control_pane', closable=False, flags=(imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE))
+        # set red background
+        imgui.get_window_draw_list().add_rect_filled(0, 0, self.pane_w, 36,
+                                                     imgui.get_color_u32_rgba(*DARKGRAY))
+        # draw gray line
+        imgui.get_window_draw_list().add_line(0, 36, self.pane_w, 36, imgui.get_color_u32_rgba(*LIGHTGRAY), 1)
 
+        # calculate logo shape ratio
+        logo_ratio = self.logo.shape[1] / self.logo.shape[0]
+        # logo with height of 30px centered in y axis
+        imgui.set_cursor_pos_y(18 - (18 / 2))
+        imgui.set_cursor_pos_x(self.app.spacing * 2)
+        imgui.image(self.logo_texture.gl_id, 18 * logo_ratio, 18, tint_color=(1, 1, 1, 0.5))
+
+        # calculate metacreation shape ratio
+        metacreation_ratio = self.metacreation.shape[1] / self.metacreation.shape[0]
+        # metacreation with height of 30px centered in y axis
+        imgui.same_line(self.pane_w - ((18 * metacreation_ratio) + (self.app.spacing * 6)))
+        imgui.set_cursor_pos_y(18 - (18 / 2))
+        imgui.image(self.metacreation_texture.gl_id, 18 * metacreation_ratio, 18, tint_color=(1, 1, 1, 0.5))
+        imgui.set_cursor_pos_y(36 + self.app.spacing)
         # Widgets.
         expanded, _visible = imgui_utils.collapsing_header('Network & latent', default=True)
         self.pickle_widget(expanded)
@@ -169,8 +175,8 @@ class Visualizer:
         self.mixing_widget(expanded)
         expanded, _visible = imgui_utils.collapsing_header('Presets', default=True)
         self.preset_widget(expanded)
-        # expanded, _visible = imgui_utils.collapsing_header('Audio Module', default=True)
-        # self.audio_widget(expanded)
+        expanded, _visible = imgui_utils.collapsing_header('Audio Module', default=True)
+        self.audio_widget(expanded)
 
         # go back to menu
         imgui.separator()
