@@ -64,7 +64,7 @@ class Menu:
         # metacreation with height of 30px centered in y axis
         imgui.same_line(self.app.content_width - ((30 * metacreation_ratio) + 20))
         imgui.set_cursor_pos_y(25 - (30/2))
-        imgui.image(self.metacreation_texture.gl_id, 30 * metacreation_ratio, 30, tint_color=(1, 1, 1, 0.7))
+        imgui.image(self.metacreation_texture.gl_id, 30 * metacreation_ratio, 30, tint_color=(1, 1, 1, 1))
         imgui.end()
 
         # Begin control pane.
