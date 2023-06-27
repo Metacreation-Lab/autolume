@@ -53,6 +53,7 @@ def score_images(G, model, text, latents, device, label_class = 0, batch_size = 
   return scores, all_images
 
 def project(
+    queue,
     reply_queue,
     G,
     target_image: torch.Tensor, # [C,H,W] and dynamic range [0,255], W & H must match G output resolution
@@ -81,6 +82,7 @@ def project(
     device: torch.device
 ):
     print("target text", target_text, target_text == None, target_text == "")
+    curr_img = None
     if target_image is not None:
         assert target_image.shape == (G.img_channels, G.img_resolution, G.img_resolution)
     else:
@@ -132,7 +134,7 @@ def project(
     # Setup noise inputs.
     noise_bufs = { name: buf for (name, buf) in G.synthesis.named_buffers() if 'noise_const' in name }
 
-    reply_queue.put(['Downloading necessary models ...', None, False])
+    reply_queue.put(['Downloading necessary models ...', (target_image).clamp(0, 255).to(torch.uint8).permute(1, 2, 0).cpu().detach(), False, False])
     # Load VGG16 feature detector.
     if use_vgg:
         url = 'https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/metrics/vgg16.pt'
@@ -144,7 +146,7 @@ def project(
     if use_clip:
         model, transform = clip.load("ViT-B/32", device=device)
 
-    reply_queue.put([f'Analysing image', None, False])
+    reply_queue.put([f'Analysing image', None, False, False])
 
     # Features for target image.
     if target_image is not None:
@@ -182,8 +184,16 @@ def project(
         buf[:] = torch.randn_like(buf)
         buf.requires_grad = True
 
-    reply_queue.put(['Starting projection...', None, False])
+    reply_queue.put(['Starting projection...', None, False, False])
     for step in range(num_steps):
+        halt = False
+        if queue.qsize() > 0:
+            halt = queue.get()
+            while queue.qsize() > 0:
+                halt = queue.get()
+        if halt:
+            break
+
         # Learning rate schedule.
         t = step / num_steps
         w_noise_scale = max_noise * w_std * initial_noise_factor * max(0.0, 1.0 - t / noise_ramp_length) ** 2
@@ -198,6 +208,7 @@ def project(
         w_noise = torch.randn_like(w_opt) * w_noise_scale
         ws = w_opt + w_noise
         synth_images = G.synthesis(torch.clamp(ws,-latent_range,latent_range), noise_mode='const')[0]
+        curr_img = (synth_images * 127.5 + 128)[0].clamp(0, 255).to(torch.uint8).permute(1, 2, 0).cpu().detach()
         # Downsample image to 256x256 if it's larger than that. CLIP was built for 224x224 images.
         synth_images = (torch.clamp(synth_images, -1, 1) + 1) * (255/2)
         small_synth = F.interpolate(synth_images, size=(64, 64), mode='area')
@@ -270,7 +281,7 @@ def project(
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         optimizer.step()
-        reply_queue.put([f'step {step+1:>4d}/{num_steps}: dist {dist:<4.2f} loss {float(loss):<5.2f}', None, False])
+        reply_queue.put([f'step {step+1:>4d}/{num_steps}: dist {dist:<4.2f} loss {float(loss):<5.2f}', curr_img, False, False])
         with torch.no_grad():
             torch.clamp(w_opt,-latent_range,latent_range,out=w_opt)
         # Save projected W for each optimization step.
@@ -281,7 +292,7 @@ def project(
                 buf -= buf.mean()
                 buf *= buf.square().mean().rsqrt()
 
-    reply_queue.put(['Finished projecting', w_out, False])
+    reply_queue.put(['Finished projecting', curr_img, False, False])
     return w_out
 
 #----------------------------------------------------------------------------
@@ -311,12 +322,12 @@ def run_projection(
     torch.manual_seed(seed)
 
     # Load networks.
-    reply_queue.put(['Loading networks from "%s"...' % network_pkl, None, False])
+    reply_queue.put(['Loading networks from "%s"...' % network_pkl, None, False, False])
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     with dnnlib.util.open_url(network_pkl) as fp:
         G = legacy.load_network_pkl(fp)['G_ema'].requires_grad_(False).to(device) # type: ignore
 
-    reply_queue.put([f'Setting up projection for {target_fname}', None, False])
+    reply_queue.put([f'Setting up projection for {target_fname}', None, False, False])
     # Load target image.
     target_image = None
     if target_fname:
@@ -339,6 +350,7 @@ def run_projection(
     # Optimize projection.
     start_time = perf_counter()
     projected_w_steps = project(
+        queue,
         reply_queue,
         G,
         target_image=target_image,
@@ -355,27 +367,43 @@ def run_projection(
         device=device,
         verbose=True
     )
-    reply_queue.put([f'Elapsed: {(perf_counter()-start_time):.1f} s', projected_w_steps, False])
 
     os.makedirs(outdir, exist_ok=True)
+    # get filename without extension
+    save_path = os.path.join(outdir, os.path.splitext(os.path.basename(target_fname))[0])
+    counter = 0
+    og_save_path = save_path
+    while os.path.exists(save_path):
+        save_path = og_save_path + f'_{counter}'
+
+    os.makedirs(save_path, exist_ok=True)
+
     # Save final projected frame and W vector.
     if target_fname:
-        target_pil.save(f'{outdir}/target.png')
+        target_pil.save(f'{save_path}/target.png')
     projected_w = projected_w_steps[-1]
     synth_image = G.synthesis(projected_w.unsqueeze(0), noise_mode='const')[0]
     synth_image = (synth_image + 1) * (255/2)
     synth_image = synth_image.permute(0, 2, 3, 1).clamp(0, 255).to(torch.uint8)[0].cpu().numpy()
-    PIL.Image.fromarray(synth_image, 'RGB').save(f'{outdir}/proj.png')
-    torch.save(projected_w.cpu(), f'{outdir}/projected_w.pt')
-    np.save(f'{outdir}/projected_w.npy', arr=projected_w.unsqueeze(0).cpu().numpy())
+    PIL.Image.fromarray(synth_image, 'RGB').save(f'{save_path}/proj.png')
+    torch.save(projected_w.cpu(), f'{save_path}/projected_w.pt')
+    np.save(f'{save_path}/projected_w.npy', arr=projected_w.unsqueeze(0).cpu().numpy())
+    reply_queue.put([f'Elapsed: {(perf_counter()-start_time):.1f} s', None, True, False])
 
     # Render debug output: optional video and projected image and W vector.
     if save_video:
         print('Generating optimization progress video...')
-        video = imageio.get_writer(f'{outdir}/proj.mp4', mode='I', fps=10, codec='libx264', bitrate='16M')
-        reply_queue.put([f'Saving optimization progress video "{outdir}/proj.mp4"', projected_w_steps, False])
+
+        video = imageio.get_writer(f'{save_path}/proj.mp4', mode='I', fps=10, codec='libx264', bitrate='16M')
+        reply_queue.put([f'Saving optimization progress video "{save_path}/proj.mp4"', None, True, False])
         for i, projected_w in enumerate(projected_w_steps):
-            reply_queue.put([f'Generating frame {i}/{len(projected_w_steps)-1}...', projected_w_steps, False])
+            if queue.qsize() > 0:
+                halt = queue.get()
+                while queue.qsize() > 0:
+                    halt = queue.get()
+            if halt:
+                break
+            reply_queue.put([f'Generating frame {i}/{len(projected_w_steps)-1}...', None, True, False])
             synth_image = G.synthesis(projected_w.unsqueeze(0), noise_mode='const')[0]
             synth_image = (synth_image + 1) * (255/2)
             synth_image = synth_image.permute(0, 2, 3, 1).clamp(0, 255).to(torch.uint8)[0].cpu().numpy()
@@ -384,7 +412,7 @@ def run_projection(
             else:
                 video.append_data(synth_image)
         video.close()
-        reply_queue.put(['Done Saving Video', projected_w_steps, True])
+        reply_queue.put(['Done Saving Video', None, True, True])
 
 #----------------------------------------------------------------------------
 

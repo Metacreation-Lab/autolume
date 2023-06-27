@@ -23,7 +23,7 @@ class TrainingModule:
         # create data folder if not exists
         if not os.path.exists(os.path.abspath(os.path.join(os.getcwd(),"data"))):
             os.makedirs(os.path.abspath(os.path.join(os.getcwd(),"data")))
-        self.file_dialog = BrowseWidget(menu, "Dataset", os.path.abspath(os.path.join(os.getcwd(),"data")), ["*",""], multiple=False, traverse_folders=False)
+        self.file_dialog = BrowseWidget(menu, "Dataset", os.path.abspath(os.path.join(os.getcwd(),"data")), ["*",""], multiple=False, traverse_folders=False, width=menu.app.button_w)
 
         self.resume_pkl = ""
         self.browse_cache = []
@@ -34,6 +34,9 @@ class TrainingModule:
         self.square = True
         self.height = 2
         self.batch_size = 8
+        self.save_path_dialog = BrowseWidget(self, "Save Path", os.path.abspath(os.getcwd()), [""], multiple=False,
+                                             traverse_folders=False, add_folder_button=True, width=menu.app.button_w)
+
         for pkl in os.listdir("./models"):
             if pkl.endswith(".pkl"):
                 print(pkl, os.path.join(os.getcwd(),"models",pkl))
@@ -73,9 +76,18 @@ class TrainingModule:
         imgui.text("Train a model on your own data")
 
         _, self.save_path = imgui.input_text("Save Path", self.save_path, 1024)
+        imgui.same_line()
+        _clicked, save_path = self.save_path_dialog(self.menu.app.button_w)
+        if _clicked:
+            if len(save_path) > 0:
+                self.save_path = save_path[0]
+                print(self.save_path)
+            else:
+                self.save_path = ""
+                print("No path selected")
         _, self.data_path = imgui.input_text("Data Path", self.data_path, 1024)
         imgui.same_line()
-        _clicked, data_path = self.file_dialog()
+        _clicked, data_path = self.file_dialog(self.menu.app.button_w)
         if _clicked:
             self.data_path = data_path[0]
             # find all files in the directory and then check if any are videos

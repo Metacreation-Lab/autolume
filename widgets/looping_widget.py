@@ -299,7 +299,7 @@ class LoopingWidget:
                                                           imgui.INPUT_TEXT_CHARS_NO_BLANK,
                                                           width=viz.app.font_size * 7, help_text="filepath")
         imgui.same_line()
-        _clicked, path = self.file_dialogs[idx]()
+        _clicked, path = self.file_dialogs[idx](self.viz.app.button_w)
         if _clicked:
             self.paths[idx] = path
         imgui.same_line()
@@ -530,17 +530,16 @@ class LoopingWidget:
             _, self.perfect_loop = imgui.checkbox("Perfect Loop", self.perfect_loop)
             imgui.same_line()
             _changed, self.osc_ip = imgui_utils.input_text("OSC IP", self.osc_ip, 256, imgui.INPUT_TEXT_CHARS_NO_BLANK,
-                                                           width=viz.app.font_size * 5)
+                                                           width=viz.app.font_size * 4.5)
             if _changed:
                 self.osc_client = SimpleUDPClient(self.osc_ip, self.osc_port)
-
-            imgui.same_line()
+            imgui.same_line(spacing=viz.app.spacing* 2)
             with imgui_utils.item_width(viz.app.font_size * 6):
                 _changed, self.osc_port = imgui.input_int("OSC Port", self.osc_port)
             if _changed:
                 self.osc_client = SimpleUDPClient(self.osc_ip, self.osc_port)
 
-            imgui.same_line()
+            imgui.same_line(spacing=viz.app.spacing * 2)
             _changed, self.osc_address = imgui_utils.input_text("OSC Address", self.osc_address, 256,
                                                                 imgui.INPUT_TEXT_CHARS_NO_BLANK,
                                                                 width=viz.app.font_size * 7)

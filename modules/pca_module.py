@@ -11,6 +11,7 @@ import dnnlib
 from torch_utils import legacy
 from utils.gui_utils import imgui_utils
 from ganspace.extract_pca import fit
+from widgets.browse_widget import BrowseWidget
 
 
 def _locate_results(pattern):
@@ -24,6 +25,7 @@ class PCA_Module:
     def __init__(self, menu):
         cwd = os.getcwd()
         self.save_path = os.path.join(cwd,"ganspace_features")
+
         self.menu = menu
         self.G = None
         self.user_pkl = ''
@@ -37,6 +39,9 @@ class PCA_Module:
         self.message = ""
         self.pca_process = mp.Process(target=fit, args=(self.queue, self.reply),
                                       daemon=True)
+
+        self.save_path_dialog = BrowseWidget(self, "Save Path", os.path.abspath(os.getcwd()), [""], multiple=False,
+                                             traverse_folders=False, add_folder_button=True, width=self.menu.app.button_w)
         self.X_comp, self.Z_comp = None, None
         self.done = False
         for pkl in os.listdir("./models"):
@@ -60,7 +65,7 @@ class PCA_Module:
         changed, self.user_pkl = imgui_utils.input_text('##pkl', self.user_pkl, 1024,
                                                         flags=(imgui.INPUT_TEXT_AUTO_SELECT_ALL |
                                                                imgui.INPUT_TEXT_ENTER_RETURNS_TRUE),
-                                                        width= -1 - self.menu.app.button_w - self.menu.app.spacing,
+                                                        width=-1 - self.menu.app.button_w - self.menu.app.spacing,
                                                         help_text='<PATH> | <URL> | <RUN_DIR> | <RUN_ID> | <RUN_ID>/<KIMG>.pkl')
         if changed:
             self.load(self.user_pkl)
@@ -81,32 +86,42 @@ class PCA_Module:
                 self.menu.app.skip_frame()  # Focus will change on next frame.
                 self.browse_refocus = False
             imgui.end_popup()
-
-        _, self.pca_mode = imgui.combo(
-            "PCA Estimator", self.pca_mode, pca_modes
-        )
+        with imgui_utils.item_width(-1 - self.menu.app.button_w - self.menu.app.spacing):
+            _, self.pca_mode = imgui.combo(
+                "PCA Estimator", self.pca_mode, pca_modes
+            )
         max_features = 0 if self.G is None else self.G.w_dim
 
-        _, self.num_features = imgui.input_int(
-            f"Number of features", self.num_features
-        )
+        with imgui_utils.item_width(-1 - self.menu.app.button_w - self.menu.app.spacing):
+            _, self.num_features = imgui.input_int(
+                f"Features", self.num_features
+            )
         if self.num_features > max_features:
             self.num_features = max_features
         if self.num_features < 0:
             self.num_features = 0
+        with imgui_utils.item_width(-1 - self.menu.app.button_w - self.menu.app.spacing):
+            _, self.alpha = imgui.slider_float(
+                "Sparsity", self.alpha,
+                min_value=0.0, max_value=1.0,
+                format='%.3f', power=3)
 
-        _, self.alpha = imgui.slider_float(
-            "Sparsity", self.alpha,
-            min_value=0.0, max_value=1.0,
-            format='%.3f', power=3)
-
-        changed, self.save_path = imgui_utils.input_text('Save in Folder##save_path', self.save_path, 1024,
+        changed, self.save_path = imgui_utils.input_text('##save_path', self.save_path, 1024,
                                                         flags=(imgui.INPUT_TEXT_AUTO_SELECT_ALL |
                                                                imgui.INPUT_TEXT_ENTER_RETURNS_TRUE),
                                                         width=(-1 - self.menu.app.button_w - self.menu.app.spacing),
                                                         help_text='Dir to Folder to save GANSPACE')
+        imgui.same_line()
+        _clicked, save_path = self.save_path_dialog(self.menu.app.button_w)
+        if _clicked:
+            if len(save_path) > 0:
+                self.result_path = save_path[0]
+                print(self.result_path)
+            else:
+                self.result_path = ""
+                print("No path selected")
 
-        if imgui_utils.button("GET SALIENT FEATURES", width=self.menu.app.button_w, enabled=self.G is not None):
+        if imgui_utils.button("Get Salient Features", width=imgui.get_content_region_available_width(), enabled=self.G is not None):
             imgui.open_popup("PCA-popup")
             self.running = True
             self.X_comp, self.Z_comp = None, None

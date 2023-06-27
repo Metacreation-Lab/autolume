@@ -13,16 +13,20 @@ import glob
 import os
 import re
 
+
 def _locate_results(pattern):
     return pattern
+
 
 def extract_conv_names(model):
     model_names = [name for name, weight in model.named_parameters() if "mapping" not in name]
     return model_names
 
+
 def extract_mapping_names(model):
     model_names = [name for name, weight in model.named_parameters() if "mapping" in name]
     return model_names
+
 
 class MixingModule:
 
@@ -48,9 +52,9 @@ class MixingModule:
 
         for pkl in os.listdir("./models"):
             if pkl.endswith(".pkl"):
-                self.models.append(os.path.join(os.getcwd(),"models",pkl))
+                self.models.append(os.path.join(os.getcwd(), "models", pkl))
 
-    def load_pkl(self, pkl, m,ignore_errors=False):
+    def load_pkl(self, pkl, m, ignore_errors=False):
         print("loading---------")
         menu = self.menu
         try:
@@ -101,9 +105,7 @@ class MixingModule:
             self.pkl2 = net
             self.data2 = data
 
-
-
-    def model_selection_gui(self, title, m = 1):
+    def model_selection_gui(self, title, m=1):
         imgui.begin_group()
         imgui.text(title)
         imgui.separator()
@@ -111,20 +113,20 @@ class MixingModule:
             model = self.model1
         else:
             model = self.model2
-        changed, model = imgui_utils.input_text(f'##surgery{m}', model , 1024,
-                                                        flags=(
-                                                                    imgui.INPUT_TEXT_AUTO_SELECT_ALL | imgui.INPUT_TEXT_ENTER_RETURNS_TRUE),
-                                                        width=(100),
-                                                        help_text='<PATH> | <URL> | <RUN_DIR> | <RUN_ID> | <RUN_ID>/<KIMG>.pkl')
+        changed, model = imgui_utils.input_text(f'##surgery{m}', model, 1024,
+                                                flags=(
+                                                        imgui.INPUT_TEXT_AUTO_SELECT_ALL | imgui.INPUT_TEXT_ENTER_RETURNS_TRUE),
+                                                width=(100),
+                                                help_text='<PATH> | <URL> | <RUN_DIR> | <RUN_ID> | <RUN_ID>/<KIMG>.pkl')
         if changed:
             if m == 1:
                 self.model1 = model
             else:
                 self.model2 = model
-            self.load_pkl(self.model1 if m == 1 else self.model2, m,ignore_errors=True)
+            self.load_pkl(self.model1 if m == 1 else self.model2, m, ignore_errors=True)
 
         imgui.same_line()
-        if imgui_utils.button(f'Browse...##{m}', enabled=len(self.models) > 0):
+        if imgui_utils.button(f'Browse...##{m}', enabled=len(self.models) > 0, width=self.app.button_w):
             imgui.open_popup(f'browse_pkls_popup##{m}')
             self.browse_refocus = True
 
@@ -162,7 +164,6 @@ class MixingModule:
             self._networks[cache_key] = net
         return net, data
 
-
     def resolve_pkl(self, pattern):
         assert isinstance(pattern, str)
         assert pattern != ''
@@ -190,20 +191,19 @@ class MixingModule:
         self.model_selection_gui("Model 1", 1)
         imgui.same_line()
         self.model_selection_gui("Model 2", 2)
-        if imgui_utils.button("Combine", enabled=self.pkl1 and self.pkl2):
+        if imgui_utils.button("Combine", enabled=self.pkl1 and self.pkl2,
+                              width=imgui.get_content_region_available_width()):
             imgui.set_next_window_size(800, 800)
             imgui.open_popup("Combine")
 
             layers1 = extract_conv_names(self.pkl1)
             layers2 = extract_conv_names(self.pkl2)
 
-
             self.combined_layers = ["A"] * len(layers1)
             if len(layers2) > len(layers1):
                 self.combined_layers = self.combined_layers + ["B"] * (len(layers2) - len(layers1))
-                
+
             self.cached_layers = copy.deepcopy(self.combined_layers)
-            
 
             self.collapsed = [">"] * len(self.combined_layers)
 
@@ -217,13 +217,13 @@ class MixingModule:
             elif len(layer2) > len(layer1):
                 layer1 = layer1 + [''] * (len(layer2) - len(layer1))
 
-
             self.display_layers(layer1, layer2)
-            
+
             imgui.separator()
-            
-            _, self.output_name = imgui_utils.input_text("##network_mixing_pkl", self.output_name, 1024, help_text="Name of the output model",
-                                   flags=(imgui.INPUT_TEXT_AUTO_SELECT_ALL ))
+
+            _, self.output_name = imgui_utils.input_text("##network_mixing_pkl", self.output_name, 1024,
+                                                         help_text="Name of the output model",
+                                                         flags=(imgui.INPUT_TEXT_AUTO_SELECT_ALL))
             imgui.same_line()
             imgui.text(".pkl")
             imgui.same_line()
@@ -232,7 +232,7 @@ class MixingModule:
                 imgui.close_current_popup()
             if imgui.button("Close"):
                 imgui.close_current_popup()
-                
+
             imgui.end_popup()
 
     def display_layers(self, layer1, layer2):
@@ -253,7 +253,8 @@ class MixingModule:
                 l2_res = int(re.search(r'\d+', l2).group())
 
             if l1_res == resolution or l2_res == resolution:
-                imgui.begin_child(f"##{resolution}_global", 0, 14 * 16 if self.collapsed[i] == "v" else 14 * 2.3, border=True,
+                imgui.begin_child(f"##{resolution}_global", 0, 14 * 16 if self.collapsed[i] == "v" else 14 * 2.3,
+                                  border=True,
                                   flags=imgui.WINDOW_NO_SCROLLBAR if self.collapsed[i] == ">" else 0)
                 imgui.text(self.collapsed[i])
                 if imgui.is_item_clicked():
@@ -263,28 +264,30 @@ class MixingModule:
                 if imgui.is_item_clicked():
                     self.collapsed[i] = ">" if self.collapsed[i] == "v" else "v"
                 if self.collapsed[i] == ">":
-                    
+
                     # Check if all the layers with the res in the name are already set to Model A or Model B and display if so otherwise display mixed
                     layer1_matches, layer2_matches = [], []
                     for k, (layer1tmp, layer2_tmp) in enumerate(zip(layer1, layer2)):
                         if layer1tmp:
                             if int(re.search(r'\d+', layer1tmp).group()) == resolution:
                                 layer1_matches += [k]
-                                
+
                         if layer2_tmp:
                             if int(re.search(r'\d+', layer2_tmp).group()) == resolution:
                                 layer2_matches += [k]
                     ckb_display = "A"
                     if all(np.array(self.combined_layers)[layer1_matches] == "A"):
                         ckb_display = "A"
-                    elif all(np.array(self.combined_layers)[layer2_matches] == "B") and len(np.array(self.combined_layers)[layer2_matches]):
+                    elif all(np.array(self.combined_layers)[layer2_matches] == "B") and len(
+                            np.array(self.combined_layers)[layer2_matches]):
                         ckb_display = "B"
-                    elif all(np.array(self.combined_layers)[layer2_matches] == "X") or all(np.array(self.combined_layers)[layer1_matches] == "X"):
+                    elif all(np.array(self.combined_layers)[layer2_matches] == "X") or all(
+                            np.array(self.combined_layers)[layer1_matches] == "X"):
                         ckb_display = "X"
                     else:
                         ckb_display = "Mixed"
                     imgui.same_line(imgui.get_content_region_available_width() // 3)
-                    
+
                     with imgui_utils.grayed_out(l1 == '' or ckb_display == "X"):
                         clicked, _ = imgui.checkbox(f"##layer1{i}", ckb_display == "A" or ckb_display == "Mixed")
                     if clicked and layer1[i] != '' and ckb_display != "X":
@@ -296,9 +299,9 @@ class MixingModule:
                                 if res == resolution and layer1[j]:
                                     self.combined_layers[j] = "A"
                     imgui.same_line(imgui.get_content_region_available_width() // 3 * 2)
-                    with imgui_utils.grayed_out(l2=='' or ckb_display == "X"):
+                    with imgui_utils.grayed_out(l2 == '' or ckb_display == "X"):
                         clicked, _ = imgui.checkbox(f"##layer2{i}", ckb_display == "B" or ckb_display == "Mixed")
-                    if clicked and layer2[i] != ''and ckb_display != "X":
+                    if clicked and layer2[i] != '' and ckb_display != "X":
                         print("clicked2")
                         self.combined_layers[i] = "B"
                         for j in range(i + 1, len(self.combined_layers)):
@@ -306,7 +309,7 @@ class MixingModule:
                                 res = int(re.search(r'\d+', layer2[j]).group())
                                 if res == resolution and layer2[j]:
                                     self.combined_layers[j] = "B"
-                    imgui.same_line(imgui.get_window_width() -self.app.button_w)
+                    imgui.same_line(imgui.get_window_width() - self.app.button_w)
                     if self.combined_layers[i] == "X":
                         if imgui.button(f"Recover##{i}"):
                             # find last entry in l1 or l2 that has the same resolution as resolution and copy all the layers from self.cached to self.combined up to that point
@@ -361,23 +364,22 @@ class MixingModule:
                         if l1t_res == resolution or l2t_res == resolution:
                             imgui.text(l1t if l1t else l2t)
                             imgui.same_line(imgui.get_content_region_available_width() // 3)
-                            with imgui_utils.grayed_out(l1t == '' or self.combined_layers[it]=="X"):
+                            with imgui_utils.grayed_out(l1t == '' or self.combined_layers[it] == "X"):
                                 clicked, _ = imgui.checkbox(f"##layer1{i}{it}", self.combined_layers[it] == "A")
-                            if clicked and l1t != '' and not(self.combined_layers[it]=="X"):
+                            if clicked and l1t != '' and not (self.combined_layers[it] == "X"):
                                 print("clicked1")
                                 self.combined_layers[it] = "A"
                             imgui.same_line(imgui.get_content_region_available_width() // 3 * 2)
-                            with imgui_utils.grayed_out(l2t == '' or self.combined_layers[it]=="X"):
-                                clicked, _ = imgui.checkbox(f"##layer2{i}{it}", self.combined_layers[it]=="B")
-                            if clicked and l2t != '' and not(self.combined_layers[it]=="X"):
+                            with imgui_utils.grayed_out(l2t == '' or self.combined_layers[it] == "X"):
+                                clicked, _ = imgui.checkbox(f"##layer2{i}{it}", self.combined_layers[it] == "B")
+                            if clicked and l2t != '' and not (self.combined_layers[it] == "X"):
                                 print("clicked2")
                                 self.combined_layers[it] = "B"
-                            
 
                 imgui.end_child()
                 res_exp += 1
         imgui.end_group()
-    
+
     def combine_models(self):
         # find last entry in list that is not "" or "X" which might not be the last entry of the list
         last_index = 0
@@ -385,7 +387,6 @@ class MixingModule:
             if entry != "" and entry != "X":
                 last_index = i
         last_entry = {self.combined_layers[last_index]: last_index}
-
 
         layer1 = extract_conv_names(self.pkl1)
         layer2 = extract_conv_names(self.pkl2)
@@ -397,8 +398,9 @@ class MixingModule:
         else:
             raise ValueError("Last entry should be either A or B but is: ", last_entry)
 
-        model_out = custom_stylegan2.Generator(z_dim=self.pkl1.z_dim, w_dim=self.pkl1.w_dim, c_dim=self.pkl1.c_dim, img_channels=self.pkl1.img_channels,
-                                       img_resolution=img_resolution)
+        model_out = custom_stylegan2.Generator(z_dim=self.pkl1.z_dim, w_dim=self.pkl1.w_dim, c_dim=self.pkl1.c_dim,
+                                               img_channels=self.pkl1.img_channels,
+                                               img_resolution=img_resolution)
 
         dict_dest = model_out.state_dict()
         # depending on what model is used in the first entry extract the mapping layers from the corresponding model and copy them to the new model
@@ -428,7 +430,7 @@ class MixingModule:
         print("Saving model...")
         data = dict([('G', None), ('D', None), ('G_ema', None)])
 
-        with open(os.path.join(os.getcwd(),"models",self.output_name+".pkl"), 'wb') as f:
+        with open(os.path.join(os.getcwd(), "models", self.output_name + ".pkl"), 'wb') as f:
             data['G_ema'] = model_out
             data['G'] = model_out
             data['D'] = self.data2['D']

@@ -87,14 +87,14 @@ class Menu:
 
         imgui.set_next_window_position((2 * self.app.content_width)// 4, 50)
         imgui.set_next_window_size(self.app.content_width // 4, (self.app.content_height * 4) // 5 - 50)
-        imgui.begin('GANSPACE##Menu', closable=False, flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS))
+        imgui.begin('Feature Extractor##Menu', closable=False, flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS))
         imgui.text("Extract Meaningful Directions from a Model")
         self.pca()
         imgui.end()
 
         imgui.set_next_window_position((3 * self.app.content_width)// 4, 50)
-        imgui.set_next_window_size(self.app.content_width // 3, (self.app.content_height * 4) // 5 - 50)
-        imgui.begin('Super-res##Menu', closable=False, flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS))
+        imgui.set_next_window_size(self.app.content_width // 4, (self.app.content_height * 4) // 5 - 50)
+        imgui.begin('Super Resolution##Menu', closable=False, flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS))
         imgui.text("Use AI to upscale your images and videos")
         self.super_res()
         imgui.end()

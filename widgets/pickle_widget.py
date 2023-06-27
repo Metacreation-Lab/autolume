@@ -115,12 +115,12 @@ class PickleWidget:
             if imgui_utils.button('Recent...', width=viz.app.button_w, enabled=(len(recent_pkls) != 0)):
                 imgui.open_popup('recent_pkls_popup')
             imgui.same_line()
-            _clicked, pkl = self.browser()
+            _clicked, pkl = self.browser(self.viz.app.button_w)
             if _clicked:
                 print("SELECTED", pkl)
                 self.load_pkl(pkl[0], ignore_errors=True)
             imgui.same_line()
-            if imgui_utils.button('Browse...', enabled=len(self.browse_cache) > 0, width=-1):
+            if imgui_utils.button('Models', enabled=len(self.browse_cache) > 0, width=-1):
                 imgui.open_popup('browse_pkls_popup')
                 self.browse_refocus = True
 

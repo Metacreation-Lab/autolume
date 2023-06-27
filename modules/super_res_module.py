@@ -36,8 +36,8 @@ class SuperResModule:
         self.sharpen = args.sharpen_scale
         self.menu = menu
         self.app = menu.app
-        self.file_dialog = BrowseWidget(self, "Browse", os.path.abspath(os.getcwd()), ["*", ".mp4", ".avi", ".jpg", ".png", ".jpeg", ".bmp"], traverse_folders=True)
-        self.save_path_dialog = BrowseWidget(self, "Save Path", os.path.abspath(os.getcwd()), [""], multiple=False, traverse_folders=False, add_folder_button=True)
+        self.file_dialog = BrowseWidget(self, "Browse", os.path.abspath(os.getcwd()), ["*", ".mp4", ".avi", ".jpg", ".png", ".jpeg", ".bmp"], traverse_folders=True, width=self.app.button_w)
+        self.save_path_dialog = BrowseWidget(self, "Save Path", os.path.abspath(os.getcwd()), [""], multiple=False, traverse_folders=False, add_folder_button=True,  width=self.app.button_w)
         self.scale_mode = 0
         self.running = False
         self.writer = None
@@ -59,7 +59,7 @@ class SuperResModule:
         imgui.text("Files: " + str(self.file_idx + 1) + "/" + str(len(self.files)))
         imgui.text("Current File: " + self.files[self.file_idx])
         imgui.text("Progress: " + "#"*int((self.super_res_idx/self.total_frames*10) + 1) + " " + str((self.super_res_idx+1)/self.total_frames*100) + "%")
-        # self.eta is in seconds so we convert it to hours minutes and seconds if not -1 
+        # self.eta is in seconds so we convert it to hours minutes and seconds if not -1
         if self.eta != -1:
             hours = int(self.eta/3600)
             minutes = int((self.eta - hours*3600)/60)
@@ -76,16 +76,16 @@ class SuperResModule:
             self.display_progress()
 
         joined = '\n'.join(self.input_path)
-        imgui_utils.input_text("##SRINPUT", joined, 1024, flags=imgui.INPUT_TEXT_READ_ONLY, width=-self.app.button_w * 3, help_text="Input Files")
+        imgui_utils.input_text("##SRINPUT", joined, 1024, flags=imgui.INPUT_TEXT_READ_ONLY, width=-(self.app.button_w + self.app.spacing), help_text="Input Files")
         imgui.same_line()
-        _clicked, input = self.file_dialog()
+        _clicked, input = self.file_dialog(self.app.button_w)
         if _clicked:
             self.input_path = input
             print(self.input_path)
 
-        imgui_utils.input_text("##SRRESULT", self.result_path, 1024, flags=imgui.INPUT_TEXT_READ_ONLY, width=-self.app.button_w * 3, help_text="Result Path")
+        imgui_utils.input_text("##SRRESULT", self.result_path, 1024, flags=imgui.INPUT_TEXT_READ_ONLY, width=-(self.app.button_w + self.app.spacing), help_text="Result Path")
         imgui.same_line()
-        _clicked, save_path = self.save_path_dialog()
+        _clicked, save_path = self.save_path_dialog(self.app.button_w)
         if _clicked:
             if len(save_path) > 0:
                 self.result_path = save_path[0]
@@ -95,23 +95,31 @@ class SuperResModule:
                 print("No path selected")
         self.models = ['Quality','Balance','Fast']
         if len(self.models) > 0:
-            _, self.model_selected = imgui.combo("Model", self.model_selected, self.models)
+            with imgui_utils.item_width(-(self.app.button_w + self.app.spacing)):
+                _, self.model_selected = imgui.combo("Model", self.model_selected, self.models)
             self.model_type = self.models[self.model_selected]
-        clicked, self.scale_mode = imgui.combo("Scale Mode", self.scale_mode, ["Custom", "Scale"])
+        with imgui_utils.item_width(-(self.app.button_w + self.app.spacing)):
+            clicked, self.scale_mode = imgui.combo("Scale Mode", self.scale_mode, ["Custom", "Scale"])
         if clicked:
             print(self.scale_mode)
         if self.scale_mode:
-            _, self.out_scale = imgui.combo("Scale Factor", self.out_scale, scale_factor)
+
+            with imgui_utils.item_width(-(self.app.button_w + self.app.spacing)):
+                _, self.out_scale = imgui.combo("Scale Factor", self.out_scale, scale_factor)
         else:
-            _, self.height = imgui.input_int("Height", self.height)
-            _, self.width = imgui.input_int("Width", self.width)
-        _, self.sharpen = imgui.input_int("Sharpening Factor", self.sharpen)
+
+            with imgui_utils.item_width(-(self.app.button_w + self.app.spacing)):
+                _, self.height = imgui.input_int("Height", self.height)
+                _, self.width = imgui.input_int("Width", self.width)
+
+        with imgui_utils.item_width(-(self.app.button_w + self.app.spacing)):
+            _, self.sharpen = imgui.input_int("Sharpening", self.sharpen)
         if self.sharpen<1:
             self.sharpen=1
         if imgui.is_item_hovered():
             imgui.set_tooltip("Additional sharpening performed after super resolution")
         try:
-            if imgui.button("Super Resolution") and not self.running:
+            if imgui.button("Super Resolution", width=imgui.get_content_region_available_width()) and not self.running:
                 self.running = True
                 print("Super Resolution")
                 args.result_path = self.result_path

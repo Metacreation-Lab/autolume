@@ -75,9 +75,9 @@ class OscMenu:
                                                                         imgui.INPUT_TEXT_READ_ONLY * (
                                                                     not self.use_osc[key])))
             if changed:
-                viz.osc_dispatcher.map(self.osc_addresses[key], self.wrapped_funcs[key])
+                viz.osc_dispatcher.map(f"/{self.osc_addresses[key]}", self.wrapped_funcs[key])
                 try:
-                    viz.osc_dispatcher.unmap(self.cached_osc_addresses[key], self.wrapped_funcs[key])
+                    viz.osc_dispatcher.unmap(f"/{self.cached_osc_addresses[key]}", self.wrapped_funcs[key])
                 except:
                     print(self.cached_osc_addresses[key], "is not mapped")
                 self.cached_osc_addresses[key] = self.osc_addresses[key]
@@ -91,11 +91,11 @@ class OscMenu:
 
                 if changed:
                     try:
-                        viz.osc_dispatcher.unmap(self.osc_addresses[key], self.wrapped_funcs[key])
+                        viz.osc_dispatcher.unmap(f"/{self.osc_addresses[key]}", self.wrapped_funcs[key])
                     except:
                         print(self.cached_osc_addresses[key], "is not mapped")
                     self.wrapped_funcs[key] = self.map_func(self.funcs[key], key)
-                    viz.osc_dispatcher.map(self.osc_addresses[key], self.wrapped_funcs[key])
+                    viz.osc_dispatcher.map(f"/{self.osc_addresses[key]}", self.wrapped_funcs[key])
 
     @imgui_utils.scoped_by_object_id
     def __call__(self):

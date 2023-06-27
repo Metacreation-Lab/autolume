@@ -134,11 +134,11 @@ class LatentWidget:
         if _changed:
             self.latent.x += new_frac_x - frac_x
             self.latent.y += new_frac_y - frac_y
-        imgui.same_line()
+        imgui.same_line(spacing=0)
         _clicked, dragging, dx, dy = imgui_utils.drag_button('Drag', width=viz.app.button_w)
         if dragging:
             self.drag(dx, dy)
-        imgui.same_line()
+        imgui.same_line(imgui.get_item_rect_max()[0] + (viz.app.spacing * 2))
         if imgui_utils.button(f"{modes[self.latent.update_mode]}##latent"):
             self.latent.update_mode = (self.latent.update_mode + 1) % len(modes)
         imgui.same_line()
