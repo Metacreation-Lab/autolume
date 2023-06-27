@@ -52,7 +52,7 @@ class AdjusterWidget:
             self.viz.osc_dispatcher.map(new_address,
                                           self.vec_handler(i))
         self.vslide_address = new_addresses
-        self.file_dialogs = [BrowseWidget(viz, f"Vector##vec{i}", os.path.abspath(os.getcwd()), ["*",".pth", ".pt"], width=self.viz.app.button_w, multiple=False, traverse_folders=False) for i in range(len(self.weights))]
+        self.file_dialogs = [BrowseWidget(self.viz, f"Vector##vec{i}", os.path.abspath(os.getcwd()), ["*",".pth", ".pt"], width=self.viz.app.button_w, multiple=False, traverse_folders=False) for i in range(len(self.weights))]
 
 
 
@@ -91,7 +91,7 @@ class AdjusterWidget:
             self.vslide_use_osc = [False] * len(self.weights)
             self.vslide_address = [""] * len(self.weights)
             self.vslide_mappings = ["x"] * len(self.weights)
-            self.file_dialogs = [BrowseWidget(viz, f"Vector##vec{i}", os.path.abspath(os.getcwd()), ["*",".pth", ".pt"], width=self.viz.app.button_w, multiple=False, traverse_folders=False) for i in len(self.weights)]
+            self.file_dialogs = [BrowseWidget(self.viz, f"Vector##vec{i}", os.path.abspath(os.getcwd()), ["*",".pth", ".pt"], width=self.viz.app.button_w, multiple=False, traverse_folders=False) for i in range(len(self.weights))]
 
         except Exception as e:
             print(e)
@@ -158,7 +158,7 @@ class AdjusterWidget:
                 changed, self.paths[i] = imgui_utils.input_text(f"##vec_path{i}", self.paths[i], 256,
                                                                 imgui.INPUT_TEXT_CHARS_NO_BLANK,
                                                                 width=self.viz.app.button_w, help_text="filepath")
-                _clicked, files = self.file_dialogs[i]()
+                _clicked, files = self.file_dialogs[i](self.viz.app.button_w)
                 if _clicked:
                     self.paths[i] = files[0]
                 if imgui_utils.button(f"Load Vec##{i}", (self.viz.app.button_w * (6 / 8) - (self.viz.app.spacing / 2))):
@@ -181,7 +181,7 @@ class AdjusterWidget:
                 self.vslide_use_osc.append(False)
                 self.vslide_address.append("")
                 self.vslide_mappings.append("x")
-                self.file_dialogs.append(BrowseWidget(viz, f"Vector##vec{len(weights)-1}", os.path.abspath(os.getcwd()), ["*",".pth", ".pt"], width=self.viz.app.button_w, multiple=False, traverse_folders=False))
+                self.file_dialogs.append(BrowseWidget(self.viz, f"Vector##vec{len(self.weights)-1}", os.path.abspath(os.getcwd()), ["*",".pth", ".pt"], width=self.viz.app.button_w, multiple=False, traverse_folders=False))
             if imgui_utils.button(f"Randomize##all", self.viz.app.button_w):
                 self.dirs = torch.randn(self.dirs.shape)
             _clicked, files = self.all_dialog()

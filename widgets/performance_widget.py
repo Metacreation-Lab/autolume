@@ -61,7 +61,8 @@ class PerformanceWidget:
                 _changed, self.fps_limit = imgui.input_int('FPS limit', self.fps_limit,
                                                            flags=imgui.INPUT_TEXT_ENTER_RETURNS_TRUE)
                 self.fps_limit = min(max(self.fps_limit, 5), 1000)
-            imgui.same_line(imgui.get_content_region_max()[0] - 1 - viz.app.button_w * 2 - viz.app.spacing)
+            pos_x = imgui.get_item_rect_max()[0] + (viz.app.spacing*3)
+            imgui.same_line(pos_x)
             _clicked, self.use_vsync = imgui.checkbox('Vertical sync', self.use_vsync)
 
         if show:
@@ -75,7 +76,7 @@ class PerformanceWidget:
             imgui.text(f'{t * 1e3:.1f} ms' if t > 0 else 'N/A')
             imgui.same_line(viz.app.label_w + viz.app.font_size * 14)
             imgui.text(f'{1 / t:.1f} FPS' if t > 0 else 'N/A')
-            imgui.same_line(imgui.get_content_region_max()[0] - 1 - viz.app.button_w * 2 - viz.app.spacing)
+            imgui.same_line(pos_x)
             _clicked, self.force_fp32 = imgui.checkbox('Force FP32', self.force_fp32)
 
             imgui.text('Server')
@@ -107,9 +108,6 @@ class PerformanceWidget:
                         ndi.send_destroy(self.viz.ndi_send)
                         self.viz.ndi_send = ndi.send_create(send_settings)
 
-            imgui.same_line()
-            _, self.use_superres = imgui.checkbox('Super Resolution', self.use_superres)
-
             if imgui.checkbox("CPU", self.device=="cpu")[0]:
                 self.device = "cpu"
 
@@ -125,6 +123,10 @@ class PerformanceWidget:
                 if imgui.checkbox("Custom Kernel", self.device == "custom")[0]:
                     if self.custom_kernel_available:
                         self.device = "custom"
+
+
+            imgui.same_line(spacing=viz.app.spacing*3)
+            _, self.use_superres = imgui.checkbox('Super Resolution', self.use_superres)
 
         viz.app.set_fps_limit(self.fps_limit)
         viz.app.set_vsync(self.use_vsync)

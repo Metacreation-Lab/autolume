@@ -63,16 +63,18 @@ class TruncationNoiseWidget:
         has_noise = viz.result.get('has_noise', False)
 
         if show:
-            with imgui_utils.item_width(viz.app.font_size * 10), imgui_utils.grayed_out(num_ws == 0):
+            with imgui_utils.item_width(viz.app.button_w * 1.5), imgui_utils.grayed_out(num_ws == 0):
                 _changed, self.params.trunc_psi = imgui.slider_float('##psi', self.params.trunc_psi, -1, 2, format='Diversity %.2f')
-            imgui.same_line()
+            imgui.same_line(spacing=self.viz.app.spacing*2)
+            imgui.text("|")
+            imgui.same_line(spacing=self.viz.app.spacing*2)
             with imgui_utils.grayed_out(not has_noise):
                 _clicked, self.params.noise_enable = imgui.checkbox('Noise##enable', self.params.noise_enable)
                 imgui.same_line()
 
 
                 with imgui_utils.grayed_out(not self.params.noise_enable):
-                    with imgui_utils.item_width(viz.app.font_size * 10):
+                    with imgui_utils.item_width(viz.app.button_w * 1.5):
                         _changed, g_noise= imgui_utils.drag_float_slider('##global_noise', self.params.global_noise, 0, 2, format='Global Noise %.2f')
                         if _changed and has_noise:
                             self.params.global_noise = g_noise

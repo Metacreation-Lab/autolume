@@ -129,7 +129,7 @@ class LayerWidget:
         for i, trans in enumerate(self.cached_transforms):
             for j in range(len(trans.params)):
                 try:
-                    self.viz.osc_dispatcher.unmap(trans.osc_address[j],
+                    self.viz.osc_dispatcher.unmap(f"/{trans.osc_address[j]}",
                                                   self.transform_osc(trans, param_idx=j))
                 except Exception as e:
                     print(e)
@@ -138,19 +138,19 @@ class LayerWidget:
         self.cached_transforms = cached_transforms
         for i, trans in enumerate(self.cached_transforms):
             for j in range(len(trans.params)):
-                self.viz.osc_dispatcher.map(trans.osc_address[j],
+                self.viz.osc_dispatcher.map(f"/{trans.osc_address[j]}",
                                             self.transform_osc(trans, param_idx=j))
 
         for _, noise in self.noises.items():
             try:
-                self.viz.osc_dispatcher.unmap(noise["osc_address"],
+                self.viz.osc_dispatcher.unmap(f"/{noise['osc_address']}",
                                               self.noise_osc(noise))
             except Exception as e:
                 print(e)
                 print(f"{noise['osc_address']} is not mapped")
         self.noises = noises
         for _, noise in self.noises.items():
-            self.viz.osc_dispatcher.map(noise["osc_address"], self.noise_osc(noise))
+            self.viz.osc_dispatcher.map(f"/{noise['osc_address']}", self.noise_osc(noise))
 
     def save(self, path):
         with open(path, "wb") as f:
@@ -348,8 +348,9 @@ class LayerWidget:
 
                         self.has_transforms[layer.name] = False
             else:
+                print([layer.name for layer in layers])
                 for layer in layers:
-                    if layer.name == 'output' or 'conv' in layer.name or "torgb" in layer.name:
+                    if 'conv' in layer.name or "torgb" in layer.name:
                         draw_list.channels_split(2)
                         draw_list.channels_set_current(1)
                         selected = (self.cur_layer == layer.name)
@@ -403,6 +404,69 @@ class LayerWidget:
                                 imgui.image(self.noise_texture.gl_id, viz.app.font_size, viz.app.font_size * ratio)
 
                             self.has_transforms[layer.name] = False
+
+                    if layer.name == "output":
+                        selected = (self.cur_layer == layer.name)
+                        clicked, state = imgui_utils.img_checkbox(self.view_texture.gl_id,
+                                                                  self.capture_layer == layer.name,
+                                                                  width=checkbox_size)
+                        draw_list.channels_split(2)
+                        draw_list.channels_set_current(1)
+                        selected = (self.cur_layer == layer.name)
+                        clicked, state = imgui_utils.img_checkbox(self.view_texture.gl_id,
+                                                                  self.capture_layer == layer.name,
+                                                                  width=checkbox_size)
+                        if clicked and not self.capture_layer == layer.name:
+                            self.capture_layer = layer.name
+                            self.capture_channels = layer.shape[1]
+                        imgui.set_cursor_pos([imgui.get_cursor_pos()[0] + viz.app.font_size + viz.app.spacing // 2,
+                                              imgui.get_cursor_pos()[1]])
+                        _opened, selected = imgui.selectable(f'##{layer.name}_selectable',
+                                                             width=width - viz.app.button_w,
+                                                             selected=selected)
+
+                        if imgui.is_item_hovered():
+                            selectable_color(*DARKGRAY)
+                        if _opened or (imgui.is_item_hovered() and imgui.is_mouse_down(0)):
+                            selectable_color(*GRAY)
+
+                        if layer.name in self.has_osc:
+                            if self.has_osc[layer.name]:
+                                draw_list.channels_set_current(0)
+                                selectable_color(*ACTIVE_RED)
+                        imgui.same_line(checkbox_size + viz.app.spacing * 2)
+                        _clicked, selected = imgui_utils.img_checkbox(self.edit_texture.gl_id,
+                                                                      selected, width=checkbox_size,
+                                                                      label=layer.name)
+                        if selected:
+                            self.cur_layer = layer.name
+                            self.cur_channels = layer.shape[1]
+                            if self.refocus:
+                                imgui.set_scroll_here()
+                                viz.app.skip_frame()  # Focus will change on next frame.
+                                self.refocus = False
+                        draw_list.channels_merge()
+                        imgui.same_line(width - viz.app.font_size * 13)
+                        imgui.text('x'.join(str(x) for x in layer.shape[2:]))
+                        imgui.same_line(width - viz.app.font_size * 8)
+                        imgui.text(str(layer.shape[1]))
+                        # display if noise or transformation is applied
+                        if self.has_transforms[layer.name]:
+                            imgui.same_line(width - viz.app.font_size * 5)
+                            ratio = self.transform_texture.height / self.transform_texture.width
+                            imgui.image(self.transform_texture.gl_id, viz.app.font_size,
+                                        viz.app.font_size * ratio)
+                        if layer.name in self.noises:
+                            if self.noises[layer.name]["strength"] != 0:
+                                imgui.same_line(width - viz.app.font_size * 3.5)
+                                ratio = self.noise_texture.height / self.noise_texture.width
+                                imgui.image(self.noise_texture.gl_id, viz.app.font_size, viz.app.font_size * ratio)
+
+
+                        imgui.text("")
+
+
+                        self.has_transforms[layer.name] = False
 
             # End list.
             if len(layers) == 0:
@@ -635,7 +699,7 @@ class LayerWidget:
 
                                         if changed:
                                             try:
-                                                self.viz.osc_dispatcher.unmap(trans.osc_address[j],
+                                                self.viz.osc_dispatcher.unmap(f"/{trans.osc_address[j]}",
                                                                               self.osc_funcs[trans.imgui_id][j])
                                                 print(f"Unmapped", trans.osc_address[j])
                                                 print(self.viz.osc_dispatcher.mappings)
@@ -643,7 +707,7 @@ class LayerWidget:
                                                 print(f"{trans.osc_address[j]} is not mapped")
                                                 print(e)
                                                 print(self.viz.osc_dispatcher._map)
-                                            self.viz.osc_dispatcher.map(address,
+                                            self.viz.osc_dispatcher.map(f"/{address}",
                                                                         self.osc_funcs[trans.imgui_id][j])
                                             trans.osc_address[j] = address
                             imgui.separator()
@@ -736,11 +800,11 @@ class LayerWidget:
                         if changed:
 
                             try:
-                                self.viz.osc_dispatcher.unmap(noise["osc_address"],
+                                self.viz.osc_dispatcher.unmap(f"/{noise['osc_address']}",
                                                               self.noise_osc(noise))
                             except:
                                 print(f"{noise['osc_address']} is not mapped")
-                            self.viz.osc_dispatcher.map(address,
+                            self.viz.osc_dispatcher.map(f"/{address}",
                                                         self.noise_osc(noise))
                             noise["osc_address"] = address
 

@@ -250,9 +250,9 @@ class BrowseWidget():
         return False, None
 
     @imgui_utils.scoped_by_object_id
-    def __call__(self, show=True):
+    def __call__(self, width=None,show=True):
         if show:
-            if imgui_utils.button(self.title, enabled=self.enabled, width=self.width):
+            if imgui_utils.button(self.title, enabled=self.enabled, width=self.width if width is None else width):
                 self.open = True
 
             if self.open:
