@@ -672,16 +672,37 @@ class Renderer:
 
             layer1 = extract_conv_names(self.G)
             layer2 = extract_conv_names(self.G2)
+            use_G1 = True
             if last_entry.keys() == {"A"}:
                 # get resolution through regex from last entry
                 img_resolution = int(re.search(r'\d+', layer1[last_entry["A"]]).group())
             elif last_entry.keys() == {"B"}:
                 img_resolution = int(re.search(r'\d+', layer2[last_entry["B"]]).group())
+                use_G1 = False
             else:
                 raise ValueError("Last entry should be either A or B but is: ", last_entry)
+            print("CHANNELS", self.G.synthesis.channels_dict, self.G2.synthesis.channels_dict)
+            print("compare", len(self.combined_layers), len(self.G.synthesis.channels_dict), len(self.G2.synthesis.channels_dict))
+            print("layer1", layer1)
+            print("layer2", layer2)
+
+            # create a new channel dict that takes the entrance of self.G.synthesis.channels_dict and self.G2.synthesis.channels_dict based on whether combined_layers is A or B
+            new_channels_dict = {}
+            for i, entry in enumerate(self.combined_layers):
+                if entry == "A":
+                    cur_res = int(re.search(r'\d+', layer1[i]).group())
+                    new_channels_dict[cur_res] = self.G.synthesis.channels_dict[cur_res]
+                elif entry == "B":
+                    cur_res = int(re.search(r'\d+', layer2[i]).group())
+                    new_channels_dict[cur_res] = self.G2.synthesis.channels_dict[cur_res]
+                elif entry == "X":
+                    pass
+                else:
+                    raise ValueError("Entry should be either A or B but is: ", entry)
+            print("new_channels_dict", new_channels_dict)
 
             model_out = custom_stylegan2.Generator(z_dim=self.G.z_dim, w_dim=self.G.w_dim, c_dim=self.G.c_dim, img_channels=self.G.img_channels,
-                                       img_resolution=img_resolution)
+                                       img_resolution=img_resolution, synthesis_kwargs = {"channels_dict":new_channels_dict})
 
             dict_dest = model_out.state_dict()
             # depending on what model is used in the first entry extract the mapping layers from the corresponding model and copy them to the new model
@@ -698,14 +719,16 @@ class Renderer:
 
             for i, entry in enumerate(self.combined_layers):
                 if entry == "A":
-                    dict_dest[layer1[i]] =net_state[layer1[i]]
+                    dict_dest[layer1[i]] = net_state[layer1[i]]
                 elif entry == "B":
                     dict_dest[layer2[i]] = net2_state[layer2[i]]
-
-            model_out_dict = model_out.state_dict()
-            model_out_dict.update(dict_dest)
-            model_out.load_state_dict(dict_dest)
-            self.G_mixed = model_out
+            try:
+                model_out_dict = model_out.state_dict()
+                model_out_dict.update(dict_dest)
+                model_out.load_state_dict(dict_dest)
+                self.G_mixed = model_out
+            except:
+                raise Exception("These models are incompatible. Compressed models generally can not be used for mixing.")
 
         def adjustment_hook(module, inputs):
             #pre forward hook to add adjustments to the latent vector and resize input to fit ratio
