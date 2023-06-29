@@ -139,7 +139,7 @@ class ProjectionModule:
             imgui.same_line()
         _changed, self.use_center = imgui.checkbox('Use Center##use_center', self.use_center)
 
-        if imgui_utils.button("Project", width=imgui.get_content_region_available_width(), enabled=(self.network_path != "" and self.target_fname != "" and self.outdir != "")):
+        if imgui_utils.button("Project", width=imgui.get_content_region_available_width(), enabled=((self.network_path != "" or self.target_fname != "") and self.outdir != "")):
             imgui.open_popup('Project')
             self.done_projecting = False
             self.done_recording = False
@@ -150,25 +150,31 @@ class ProjectionModule:
             self.projection_process = mp.Process(target=run_projection, args=(self.queue, self.reply),
                                                  daemon=True)
             self.projection_process.start()
-            self.queue.put([self.network_path, self.target_fname[0], self.target_text if self.target_text != "" else None, self.initial_latent, self.outdir, self.save_video, self.seed, self.lr, self.steps, self.use_vgg, self.use_clip, self.use_pixel, self.use_penalty, self.use_center, self.use_kmeans])
+            self.queue.put([self.network_path, self.target_fname[0] if self.target_fname != "" else None, self.target_text if self.target_text != "" else None, self.initial_latent, self.outdir, self.save_video, self.seed, self.lr, self.steps, self.use_vgg, self.use_clip, self.use_pixel, self.use_penalty, self.use_center, self.use_kmeans])
 
 
         # set modal popup size to be 1/2 of the window size
         imgui.set_next_window_size( self.menu.app.content_width // 2, (self.menu.app.content_height // 4) * 3, imgui.ONCE)
         if imgui.begin_popup_modal('Project')[0]:
             imgui.text("Projecting...")
-            self.target_image = PIL.Image.open(self.target_fname[0]).convert('RGB').filter(ImageFilter.SHARPEN)
-            self.target_image = np.array(self.target_image, dtype=np.uint8)
-            self.target_image = torch.tensor(self.target_image, device="cpu")
-            self.target_texture = gl_utils.Texture(image=self.target_image, width=self.target_image.shape[1], height=self.target_image.shape[0], channels=self.target_image.shape[2])
+            if self.target_fname != "":
+                self.target_image = PIL.Image.open(self.target_fname[0]).convert('RGB').filter(ImageFilter.SHARPEN)
+                self.target_image = np.array(self.target_image, dtype=np.uint8)
+                self.target_image = torch.tensor(self.target_image, device="cpu")
+                self.target_texture = gl_utils.Texture(image=self.target_image, width=self.target_image.shape[1], height=self.target_image.shape[0], channels=self.target_image.shape[2])
             if self.message != "":
                 imgui.text(self.message)
             if self.projected_img is not None and self.projected_texture is not None:
-                ratio = self.target_image.shape[1] / self.target_image.shape[0]
+                if self.target_image is not None:
+                    ratio = self.target_image.shape[1] / self.target_image.shape[0]
+                else:
+                    ratio = self.projected_img.shape[1] / self.projected_img.shape[0]
                 shape = ratio*imgui.get_content_region_available_width()//2, imgui.get_content_region_available_width()//2
-                imgui.image(self.target_texture.gl_id, *shape)
-                imgui.same_line()
                 imgui.image(self.projected_texture.gl_id, *shape)
+
+                if self.target_texture is not None:
+                    imgui.same_line()
+                    imgui.image(self.target_texture.gl_id, *shape)
 
             enabled = self.projected_img is not None
 

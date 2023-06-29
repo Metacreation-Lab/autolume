@@ -27,6 +27,25 @@ import torch.nn.functional as F
 import dnnlib
 from torch_utils import legacy
 
+import unicodedata
+import re
+
+def slugify(value, allow_unicode=False):
+    """
+    Taken from https://github.com/django/django/blob/master/django/utils/text.py
+    Convert to ASCII if 'allow_unicode' is False. Convert spaces or repeated
+    dashes to single dashes. Remove characters that aren't alphanumerics,
+    underscores, or hyphens. Convert to lowercase. Also strip leading and
+    trailing whitespace, dashes, and underscores.
+    """
+    value = str(value)
+    if allow_unicode:
+        value = unicodedata.normalize('NFKC', value)
+    else:
+        value = unicodedata.normalize('NFKD', value).encode('ascii', 'ignore').decode('ascii')
+    value = re.sub(r'[^\w\s-]', '', value.lower())
+    return re.sub(r'[-\s]+', '-', value).strip('-_')
+
 image_mean = torch.tensor([0.48145466, 0.4578275, 0.40821073]).to("cuda" if torch.cuda.is_available() else "cpu")
 image_std = torch.tensor([0.26862954, 0.26130258, 0.27577711]).to("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -134,7 +153,7 @@ def project(
     # Setup noise inputs.
     noise_bufs = { name: buf for (name, buf) in G.synthesis.named_buffers() if 'noise_const' in name }
 
-    reply_queue.put(['Downloading necessary models ...', (target_image).clamp(0, 255).to(torch.uint8).permute(1, 2, 0).cpu().detach(), False, False])
+    reply_queue.put(['Downloading necessary models ...', None, False, False])
     # Load VGG16 feature detector.
     if use_vgg:
         url = 'https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/metrics/vgg16.pt'
@@ -146,16 +165,17 @@ def project(
     if use_clip:
         model, transform = clip.load("ViT-B/32", device=device)
 
-    reply_queue.put([f'Analysing image', None, False, False])
 
     # Features for target image.
     if target_image is not None:
+        reply_queue.put([f'Analysing image', (target_image).clamp(0, 255).to(torch.uint8).permute(1, 2, 0).cpu().detach(), False, False])
         target_images = target_image.unsqueeze(0).to(device).to(torch.float32)
         small_target = F.interpolate(target_images, size=(64, 64), mode='area')
         if use_center:
             center_target = F.interpolate(target_images, size=(448, 448), mode='area')[:, :, 112:336, 112:336]
         target_images = F.interpolate(target_images, size=(256, 256), mode='area')
         target_images = target_images[:, :, 16:240, 16:240] # 256 -> 224, center crop
+
 
     if use_vgg:
         vgg_target_features = vgg16(target_images, resize_images=False, return_lpips=True)
@@ -192,6 +212,8 @@ def project(
             while queue.qsize() > 0:
                 halt = queue.get()
         if halt:
+            # cut off w_out to current step
+            w_out = w_out[:step]
             break
 
         # Learning rate schedule.
@@ -327,7 +349,7 @@ def run_projection(
     with dnnlib.util.open_url(network_pkl) as fp:
         G = legacy.load_network_pkl(fp)['G_ema'].requires_grad_(False).to(device) # type: ignore
 
-    reply_queue.put([f'Setting up projection for {target_fname}', None, False, False])
+    reply_queue.put([f'Setting up projection for Image: {target_fname} and Text: {target_text}', None, False, False])
     # Load target image.
     target_image = None
     if target_fname:
@@ -341,6 +363,7 @@ def run_projection(
         target_image = torch.tensor(target_uint8.transpose([2, 0, 1]), device=device)
 
     if target_text:
+        target_str = target_text
         target_text = torch.cat([clip.tokenize(target_text)]).to(device)
 
     if initial_latent is not None:
@@ -370,7 +393,7 @@ def run_projection(
 
     os.makedirs(outdir, exist_ok=True)
     # get filename without extension
-    save_path = os.path.join(outdir, os.path.splitext(os.path.basename(target_fname))[0])
+    save_path = os.path.join(outdir, os.path.splitext(os.path.basename(target_fname))[0] if target_fname else slugify(target_str))
     counter = 0
     og_save_path = save_path
     while os.path.exists(save_path):
@@ -397,6 +420,7 @@ def run_projection(
         video = imageio.get_writer(f'{save_path}/proj.mp4', mode='I', fps=10, codec='libx264', bitrate='16M')
         reply_queue.put([f'Saving optimization progress video "{save_path}/proj.mp4"', None, True, False])
         for i, projected_w in enumerate(projected_w_steps):
+            halt = False
             if queue.qsize() > 0:
                 halt = queue.get()
                 while queue.qsize() > 0:
