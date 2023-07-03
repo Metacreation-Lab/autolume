@@ -10,6 +10,7 @@ import numpy as np
 import imgui
 import cv2
 import pyaudio
+print("imported pyaudio")
 
 import dnnlib
 from assets import GRAY, DARKGRAY, LIGHTGRAY
@@ -43,9 +44,13 @@ class Visualizer:
         self.has_microphone = False
         # check if microphone is available
         try:
+            print("checking for microphone")
             self.pa = pyaudio.PyAudio()
+            print(self.pa)
+            print(self.pa.get_default_input_device_info())
             self.has_microphone = True
         except:
+            print("except no microphone found")
             pass
         self.in_ip = "127.0.0.1"
         self.in_port = 1338
@@ -87,6 +92,7 @@ class Visualizer:
         self.mixing_widget = mixing_widget.MixingWidget(self)
         self.collapsed_widget = collapsable_layer.LayerWidget(self)
         if self.has_microphone:
+            print("Setting up audio widget")
             self.audio_widget = audio_widget.AudioWidget(self)
 
         self.logo = cv2.imread("assets/Autolume-logo.png", cv2.IMREAD_UNCHANGED)
@@ -187,7 +193,8 @@ class Visualizer:
         if self.has_microphone:
             self.audio_widget(expanded)
         else:
-            imgui.text('No microphone detected')
+            if expanded:
+                imgui.text('No microphone detected')
 
 
         # go back to menu
