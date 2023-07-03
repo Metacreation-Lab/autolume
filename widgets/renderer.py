@@ -812,6 +812,11 @@ class Renderer:
     def process_loop(self, G, looping_list, looping_index, alpha, trunc_psi, trunc_cutoff):
         v0 = self.evaluate(G, looping_list[looping_index-1], trunc_psi, trunc_cutoff)
         v1 = self.evaluate(G, looping_list[looping_index], trunc_psi, trunc_cutoff)
+        print("v0", v0.shape, "v1", v1.shape)
+        print(v0)
+        print("v0 unique", torch.unique(v0))
+        print(v1)
+        print("v1 unique", torch.unique(v1))
         return slerp(alpha, v0, v1)
 
     def evaluate(self, G, keyframe, trunc_psi, trunc_cutoff):
@@ -825,13 +830,24 @@ class Renderer:
     def process_vec(self, G, latent, project, trunc_psi, trunc_cutoff):
         mapping_net = G.mapping
         latent = self.to_device(latent[None, ...])
-        if project:
+        print("WE ARE HERE", latent.shape)
+        if project and len(latent.shape) == 2:
             all_cs = np.zeros([len(latent), G.c_dim], dtype=np.float32)
             latent = mapping_net(latent, all_cs, truncation_psi=trunc_psi,
                                truncation_cutoff=trunc_cutoff)
 
         if len(latent.shape) == 2:
+            print("TRYING TO REPEAT")
             latent = latent.repeat(G.num_ws, 1).unsqueeze(0)
+
+        # if the latent isnt the right size i.e. in its second position it doesnt have the right number of ws either cut of the last ws or repeat the last ws
+        if latent.shape[1] > G.num_ws:
+            latent = latent[:, :G.num_ws, :]
+        elif latent.shape[1] < G.num_ws:
+            last_ws = latent[:, -1:, :]
+            repeat_times = G.num_ws - latent.shape[1]
+            repeated_ws = last_ws.repeat(1, repeat_times, 1)
+            latent = torch.cat([latent, repeated_ws], dim=1)
 
         return latent
 

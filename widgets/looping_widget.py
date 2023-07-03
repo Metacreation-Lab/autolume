@@ -97,7 +97,7 @@ class LoopingWidget:
         self.use_osc = dnnlib.EasyDict(zip(self.params.keys(), [False] * len(self.params)))
         self.step_y = 100
         self.viz = viz
-        self.keyframes = torch.randn(self.params.num_keyframes, 512)
+        self.keyframes = [torch.randn(1, 512) for _ in range(self.params.num_keyframes)]
         self.alpha = 0
         self.speed = 0
         self.expand_vec = False
@@ -286,9 +286,18 @@ class LoopingWidget:
 
     def open_vec(self, idx):
         try:
-            vec = torch.load(self.paths[idx]).squeeze()
-            assert vec.shape == self.keyframes[
-                idx].shape, f"The Tensor you are loading has a different shape, Loaded Shape {vec.shape} != Target Shape {self.keyframes[idx].shape}"
+            print(self.paths[idx])
+            # if file ends with pt or pth, load as torch tensor else if ends with npy, load as numpy array and convert to torch tensor
+            if self.paths[idx].endswith(".pt") or self.paths[idx].endswith(".pth"):
+                vec = torch.load(self.paths[idx]).squeeze()
+            elif self.paths[idx].endswith(".npy"):
+                vec = torch.from_numpy(np.load(self.paths[idx])).squeeze()
+            else:
+                raise Exception(
+                    "Filetype not supported, please use .pt, .pth or .npy files for loading vectors, if you are using a .npy file, please ensure that it is a numpy array")
+            assert vec.shape[-1] == self.keyframes[
+                idx].shape[-1], f"The Tensor you are loading has a different shape, Loaded Shape {vec.shape} != Target Shape {self.keyframes[idx].shape}"
+            print("LOADed VEC", vec.shape, torch.unique(vec))
             self.keyframes[idx] = vec
         except Exception as e:
             print(e)
@@ -301,26 +310,22 @@ class LoopingWidget:
         imgui.same_line()
         _clicked, path = self.file_dialogs[idx](self.viz.app.button_w)
         if _clicked:
-            self.paths[idx] = path
+            self.paths[idx] = path[0]
         imgui.same_line()
         if imgui_utils.button(f"Load Vec##loop_{idx}", viz.app.button_w):
             self.open_vec(idx)
         imgui.same_line()
         if imgui_utils.button(f"Snap##{idx}", viz.app.button_w):
             snapped = self.snap()
-            print("snapped", snapped, "-----------------------")
 
             if not (snapped is None):
                 if snapped["mode"] == 0:
-                    print("SEED")
                     self.seeds[idx] = snapped["snap"]
                     self.modes[idx] = snapped["mode"]
                 elif snapped["mode"] == 1:
-                    print("VECTOR")
                     self.keyframes[idx] = snapped["snap"]
                     self.modes[idx] = snapped["mode"]
                 elif snapped["mode"] == 2:
-                    print("getting LOOP")
                     self.looping_snaps[idx] = snapped["snap"]
                     self.modes[idx] = snapped["mode"]
                     print(self.looping_snaps[idx])
@@ -434,7 +439,7 @@ class LoopingWidget:
                 with imgui_utils.item_width(viz.app.font_size * 5):
                     changed, new_keyframes = imgui.input_int("# of Keyframes", self.params.num_keyframes)
                 if changed and new_keyframes > 0:
-                    vecs = torch.randn(new_keyframes, 512)
+                    vecs = [torch.randn(1, 512).cuda() for _ in range(new_keyframes)]
                     vecs[:min(new_keyframes, self.params.num_keyframes)] = self.keyframes[:min(new_keyframes,
                                                                                                self.params.num_keyframes)]
                     self.keyframes = vecs
@@ -485,8 +490,7 @@ class LoopingWidget:
                         for i in range(self.params.num_keyframes):
                             self.key_frame_vizface(i)
                         if self.remove_entry != -1:
-                            self.keyframes = torch.cat(
-                                [self.keyframes[:self.remove_entry], self.keyframes[self.remove_entry + 1:]], dim=0)
+                            del self.keyframes[self.remove_entry]
                             del self.paths[self.remove_entry]
                             del self.project[self.remove_entry]
                             del self.modes[self.remove_entry]

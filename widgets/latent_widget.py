@@ -28,7 +28,7 @@ import imgui
 #----------------------------------------------------------------------------
 
 
-modes = ["Stop", "Anim", "Step"]
+modes = ["Stop", "Anim"]
 class LatentWidget:
     def __init__(self, viz):
         self.viz        = viz

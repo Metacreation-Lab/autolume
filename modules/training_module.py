@@ -14,7 +14,7 @@ augs = ["ADA", "DiffAUG"]
 ada_pipes = ['blit', 'geom', 'color', 'filter', 'noise', 'cutout', 'bg', 'bgc', 'bgcf', 'bgcfn', 'bgcfnc']
 diffaug_pipes = ['color,translation,cutout', 'color,translation', 'color,cutout', 'color',
                  'translation', 'cutout,translation', 'cutout']
-sizes = ["64", "128", "256", "512", "1024"]
+
 class TrainingModule:
     def __init__(self, menu):
         cwd = os.getcwd()
@@ -24,15 +24,17 @@ class TrainingModule:
         if not os.path.exists(os.path.abspath(os.path.join(os.getcwd(),"data"))):
             os.makedirs(os.path.abspath(os.path.join(os.getcwd(),"data")))
         self.file_dialog = BrowseWidget(menu, "Dataset", os.path.abspath(os.path.join(os.getcwd(),"data")), ["*",""], multiple=False, traverse_folders=False, width=menu.app.button_w)
-
+        self.app = menu.app
         self.resume_pkl = ""
         self.browse_cache = []
         self.aug = 0
         self.ada_pipe = 7
         self.diffaug_pipe = 0
-        self.img_size = 2
+        self.img_factor = 4
+        self.height_factor = 4
+        self.img_size = 2 ** self.img_factor
         self.square = True
-        self.height = 2
+        self.height = 2 ** self.height_factor
         self.batch_size = 8
         self.save_path_dialog = BrowseWidget(self, "Save Path", os.path.abspath(os.getcwd()), [""], multiple=False,
                                              traverse_folders=False, add_folder_button=True, width=menu.app.button_w)
@@ -98,6 +100,9 @@ class TrainingModule:
             elif self._file_ext(self.data_path) == '.zip':
                 self._type = 'zip'
                 self._all_fnames = set(self._get_zipfile().namelist())
+            elif self._file_ext(self.data_path) == '.mp4' or self._file_ext(self.data_path) == '.avi':
+                self._type = 'video'
+                self._all_fnames = {self.data_path}
             else:
                 raise IOError('Path must point to a directory or zip')
 
@@ -125,9 +130,27 @@ class TrainingModule:
         else:
             _, self.diffaug_pipe = imgui.combo("Augmentation Pipeline", self.diffaug_pipe, diffaug_pipes)
 
-        _, self.img_size = imgui.combo("Image Size" if self.square else "Width", self.img_size, sizes)
+        label = "Image Size" if self.square else "Width"
+        imgui.input_text(label, str(self.img_size), 512,flags=imgui.INPUT_TEXT_READ_ONLY)
+        imgui.same_line()
+        if imgui.button("-##img_size", width=self.menu.app.font_size):
+            self.img_factor = max(self.img_factor - 1, 1)
+            self.img_size = 2 ** self.img_factor
+        imgui.same_line()
+        if imgui.button("+##img_size", width=self.menu.app.font_size):
+            self.img_factor = self.img_factor + 1
+            self.img_size = 2 ** self.img_factor
+
         if not(self.square):
-            _, self.height = imgui.combo("Height", self.height, sizes)
+            imgui.input_text("Height", str(self.height), 512, flags=imgui.INPUT_TEXT_READ_ONLY)
+            imgui.same_line()
+            if imgui.button("-##height", width=self.menu.app.font_size):
+                self.height_factor = max(self.height_factor - 1, 1)
+                self.height = 2 ** self.height_factor
+            imgui.same_line()
+            if imgui.button("+##height", width=self.menu.app.font_size):
+                self.height_factor = self.height_factor + 1
+                self.height = 2 ** self.height_factor
         else:
             self.height = self.img_size
 
@@ -144,7 +167,7 @@ class TrainingModule:
             self.batch_size = 1
 
 
-        if imgui.button("Train"):
+        if imgui.button("Train", width=-1):
             imgui.open_popup("Training")
             print("training")
             kwargs = dnnlib.EasyDict(
@@ -159,7 +182,7 @@ class TrainingModule:
                 w_dim=512,
                 cond=False,
                 mirror=True,
-                resolution=(int(sizes[self.img_size]), int(sizes[self.height])),
+                resolution=(int(self.img_size), int(self.height)),
                 aug="ada" if augs[self.aug] == "ADA" else "noaug",
                 augpipe=ada_pipes[self.ada_pipe],
                 resume=self.resume_pkl if self.resume_pkl != "" else None,
@@ -174,7 +197,7 @@ class TrainingModule:
                 map_depth=8,
                 mbstd_group=4,
                 initstrength=None,
-                projected=False,
+                projected=True,
                 diffaugment= diffaug_pipes[self.diffaug_pipe] if self.aug == 1 else None,
                 desc="",
                 metrics=[],
