@@ -216,6 +216,9 @@ class ImageFolderDataset(Dataset):
         elif self._file_ext(self._path) == '.zip':
             self._type = 'zip'
             self._all_fnames = set(self._get_zipfile().namelist())
+        elif self._file_ext(self._path) == '.mp4' or self._file_ext(self._path) == '.avi':
+            self._type = 'video'
+            self._all_fnames = [self._path]
         else:
             raise IOError('Path must point to a directory or zip')
 
@@ -224,14 +227,31 @@ class ImageFolderDataset(Dataset):
         for fname in self._all_fnames:
             if fname.endswith('.mp4') or fname.endswith('.avi'):
                 found_video = True
-                # make dir with the name of the video + _frames
-                video_name = os.path.splitext(fname)[0]
-                save_name = video_name + '_frames'
-                save_path = os.path.join(self._path, save_name)
-                if not os.path.exists(save_path):
+                # if self._type is video or zip we have to create a new folder where we save the frames
+                if self._type == 'video' or self._type == 'zip':
+                    # extract the name of the video
+                    video_name = os.path.splitext(fname)[0]
+                    save_name = video_name + '_frames'
+                    # update self._path to be the new folder which we create based on cwd
+                    save_path = os.path.join(os.getcwd(), save_name)
+                    # if file exists we add a number to the end of the folder name
+                    i = 1
+                    while os.path.exists(save_path):
+                        save_path = os.path.join(os.getcwd(), save_name + str(i))
+                        i += 1
+                    # create the folder
                     os.makedirs(save_path)
-                # extract frames from video using ffmpeg
-                video_path = os.path.join(self._path, fname)
+                    self._path = save_path
+                    video_path = os.path.join(fname)
+                else:
+                    # make dir with the name of the video + _frames
+                    video_name = os.path.splitext(fname)[0]
+                    save_name = video_name + '_frames'
+                    save_path = os.path.join(self._path, save_name)
+                    if not os.path.exists(save_path):
+                        os.makedirs(save_path)
+                    # extract frames from video using ffmpeg
+                    video_path = os.path.join(self._path, fname)
                 cmd = 'ffmpeg -i {} -vf fps={} {}/%04d.jpg'.format(video_path, fps, save_path)
                 os.system(cmd)
 
@@ -324,9 +344,7 @@ class ImageFolderDataset(Dataset):
         assert isinstance(image, np.ndarray)
         image_shape = (3, self.width, self.height) if self.height is not None and self.width is not None else self.image_shape
         if list(image.shape) != image_shape:
-            print(image.shape, image_shape, type(image))
             image = cv2.resize(image.transpose(1,2,0), dsize=image_shape[-2:], interpolation=cv2.INTER_CUBIC).transpose(2,0,1)
-        print("DSET", image.shape, self.image_shape, image_shape)
         assert list(image.shape) == self.image_shape
         assert image.dtype == np.uint8
         if self._xflip[idx]:

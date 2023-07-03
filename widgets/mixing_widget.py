@@ -85,7 +85,7 @@ class MixingWidget:
 
 
             imgui.same_line()
-            if imgui_utils.button(f'Browse...##mixingWidget', enabled=len(self.models) > 0):
+            if imgui_utils.button(f'Models##mixingWidget', enabled=len(self.models) > 0):
                 imgui.open_popup(f'browse_pkls_popup##mixingWidget')
                 self.browse_refocus = True
 

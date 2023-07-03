@@ -15,6 +15,9 @@ diffaug_pipes = ['color, translation, cutoff', 'color, translation', 'color, cut
 sizes = ["64", "128", "256", "512", "1024"]
 class CompressModule:
     def __init__(self, menu):
+        self.img_factor = 4
+        self.height_factor = 4
+        self.square = True
         cwd = os.getcwd()
         self.compress_pkl = ""
         self.save_path = os.path.join(cwd, "distillation-runs")
@@ -30,7 +33,8 @@ class CompressModule:
         self.aug = 0
         self.ada_pipe = 7
         self.diffaug_pipe = 0
-        self.img_size = 2
+        self.img_size = 2 ** self.img_factor
+        self.height = 2 ** self.height_factor
         self.batch_size = 8
         for pkl in os.listdir("./models"):
             if pkl.endswith(".pkl"):
@@ -97,8 +101,32 @@ class CompressModule:
             _, self.ada_pipe = imgui.combo("Augmentation Pipeline", self.ada_pipe, ada_pipes)
         else:
             _, self.diffaug_pipe = imgui.combo("Augmentation Pipeline", self.diffaug_pipe, diffaug_pipes)
+        # label = "Image Size" if self.square else "Width"
+        # imgui.input_text(label, str(self.img_size), 512, flags=imgui.INPUT_TEXT_READ_ONLY)
+        # imgui.same_line()
+        # if imgui.button("-##img_size", width=self.menu.app.font_size):
+        #     self.img_factor = max(self.img_factor - 1, 1)
+        #     self.img_size = 2 ** self.img_factor
+        # imgui.same_line()
+        # if imgui.button("+##img_size", width=self.menu.app.font_size):
+        #     self.img_factor = self.img_factor + 1
+        #     self.img_size = 2 ** self.img_factor
+        #
+        # if not (self.square):
+        #     imgui.input_text("Height", str(self.height), 512, flags=imgui.INPUT_TEXT_READ_ONLY)
+        #     imgui.same_line()
+        #     if imgui.button("-##height", width=self.menu.app.font_size):
+        #         self.height_factor = max(self.height_factor - 1, 1)
+        #         self.height = 2 ** self.height_factor
+        #     imgui.same_line()
+        #     if imgui.button("+##height", width=self.menu.app.font_size):
+        #         self.height_factor = self.height_factor + 1
+        #         self.height = 2 ** self.height_factor
+        # else:
+        #     self.height = self.img_size
 
-        _, self.img_size = imgui.combo("Image Size", self.img_size, sizes)
+        imgui.same_line()
+        _, self.square = imgui.checkbox("Square", self.square)
 
         _, self.batch_size = imgui.input_int("Batch Size", self.batch_size)
         if self.batch_size < 1:
@@ -107,8 +135,7 @@ class CompressModule:
         #add distillation params into gui
 
 
-        if imgui.button("Train"):
-            print("training")
+        if imgui.button("Train##compress", width=-1):
             kwargs = dnnlib.EasyDict(
                 outdir=self.save_path_distill,
                 data=self.data_path,

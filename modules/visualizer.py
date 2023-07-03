@@ -40,7 +40,13 @@ class Visualizer:
         self.app = app
 
         #COMMUNICATIONS
-        self.pa = pyaudio.PyAudio()
+        self.has_microphone = False
+        # check if microphone is available
+        try:
+            self.pa = pyaudio.PyAudio()
+            self.has_microphone = True
+        except:
+            pass
         self.in_ip = "127.0.0.1"
         self.in_port = 1338
         self.osc_dispatcher = Dispatcher()
@@ -80,7 +86,8 @@ class Visualizer:
         self.preset_widget = preset_widget.PresetWidget(self)
         self.mixing_widget = mixing_widget.MixingWidget(self)
         self.collapsed_widget = collapsable_layer.LayerWidget(self)
-        self.audio_widget = audio_widget.AudioWidget(self)
+        if self.has_microphone:
+            self.audio_widget = audio_widget.AudioWidget(self)
 
         self.logo = cv2.imread("assets/Autolume-logo.png", cv2.IMREAD_UNCHANGED)
         self.logo_texture = gl_utils.Texture(image=self.logo, width=self.logo.shape[1], height=self.logo.shape[0],
@@ -175,8 +182,13 @@ class Visualizer:
         self.mixing_widget(expanded)
         expanded, _visible = imgui_utils.collapsing_header('Presets', default=True)
         self.preset_widget(expanded)
+
         expanded, _visible = imgui_utils.collapsing_header('Audio Module', default=True)
-        self.audio_widget(expanded)
+        if self.has_microphone:
+            self.audio_widget(expanded)
+        else:
+            imgui.text('No microphone detected')
+
 
         # go back to menu
         imgui.separator()
