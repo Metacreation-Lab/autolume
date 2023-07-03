@@ -26,15 +26,16 @@ class TrainingModule:
         self.file_dialog = BrowseWidget(menu, "Dataset", os.path.abspath(os.path.join(os.getcwd(),"data")), ["*",""], multiple=False, traverse_folders=False, width=menu.app.button_w)
         self.app = menu.app
         self.resume_pkl = ""
+        self.start_res = [4,4]
         self.browse_cache = []
         self.aug = 0
         self.ada_pipe = 7
         self.diffaug_pipe = 0
-        self.img_factor = 4
-        self.height_factor = 4
-        self.img_size = 2 ** self.img_factor
+        self.img_factor = 1
+        self.height_factor = 1
+        self.img_size = self.start_res[0] * (2 ** self.img_factor)
         self.square = True
-        self.height = 2 ** self.height_factor
+        self.height = self.start_res[1] * (2 ** self.height_factor)
         self.batch_size = 8
         self.save_path_dialog = BrowseWidget(self, "Save Path", os.path.abspath(os.getcwd()), [""], multiple=False,
                                              traverse_folders=False, add_folder_button=True, width=menu.app.button_w)
@@ -130,32 +131,35 @@ class TrainingModule:
         else:
             _, self.diffaug_pipe = imgui.combo("Augmentation Pipeline", self.diffaug_pipe, diffaug_pipes)
 
-        label = "Image Size" if self.square else "Width"
-        imgui.input_text(label, str(self.img_size), 512,flags=imgui.INPUT_TEXT_READ_ONLY)
+        _changed, start_res = imgui.input_int2("Start Resolution", *self.start_res)
+        if _changed:
+            if start_res[0] < 1:
+                start_res[0] = 1
+            if start_res[1] < 1:
+                start_res[1] = 1
+            self.start_res = start_res
+            self.img_size = start_res[0] * (2 ** self.img_factor)
+            self.height = start_res[1] * (2 ** self.height_factor)
+
+        imgui.input_text("Width", str(self.img_size), 512,flags=imgui.INPUT_TEXT_READ_ONLY)
         imgui.same_line()
         if imgui.button("-##img_size", width=self.menu.app.font_size):
             self.img_factor = max(self.img_factor - 1, 1)
-            self.img_size = 2 ** self.img_factor
+            self.img_size = self.start_res[0] * (2 ** self.img_factor)
         imgui.same_line()
         if imgui.button("+##img_size", width=self.menu.app.font_size):
             self.img_factor = self.img_factor + 1
-            self.img_size = 2 ** self.img_factor
+            self.img_size = self.start_res[0] * (2 ** self.img_factor)
 
-        if not(self.square):
-            imgui.input_text("Height", str(self.height), 512, flags=imgui.INPUT_TEXT_READ_ONLY)
-            imgui.same_line()
-            if imgui.button("-##height", width=self.menu.app.font_size):
-                self.height_factor = max(self.height_factor - 1, 1)
-                self.height = 2 ** self.height_factor
-            imgui.same_line()
-            if imgui.button("+##height", width=self.menu.app.font_size):
-                self.height_factor = self.height_factor + 1
-                self.height = 2 ** self.height_factor
-        else:
-            self.height = self.img_size
-
+        imgui.input_text("Height", str(self.height), 512, flags=imgui.INPUT_TEXT_READ_ONLY)
         imgui.same_line()
-        _, self.square = imgui.checkbox("Square", self.square)
+        if imgui.button("-##height", width=self.menu.app.font_size):
+            self.height_factor = max(self.height_factor - 1, 1)
+            self.height = self.start_res[1] * (2 ** self.height_factor)
+        imgui.same_line()
+        if imgui.button("+##height", width=self.menu.app.font_size):
+            self.height_factor = self.height_factor + 1
+            self.height = self.start_res[1] * (2 ** self.height_factor)
 
         if self.found_video:
             _, self.fps = imgui.input_int("FPS for frame extraction", self.fps)
