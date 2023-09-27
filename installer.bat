@@ -90,7 +90,6 @@ GOTO :entry_point
 
 :install_requirements
     @REM %PYTHON% -mpip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu117
-    %PYTHON% -mpip install C:\Users\SepehrE\Downloads\torch-2.0.1+cu117-cp310-cp310-win_amd64.whl
     %PYTHON% -mpip install -r requirements.txt
     IF %ERRORLEVEL% == 0 (
         GOTO :launch
