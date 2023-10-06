@@ -4,6 +4,13 @@ $git = "C:\Program Files\Git\cmd\git.exe"
 # Define python path
 $systemPython = "C:\Users\Administrator\AppData\Local\Programs\Python\Python310\python.exe"
 
+#-------------------------------------------------------------------------------------------------#
+#-------------------------------------------------------------------------------------------------#
+#-------------------------------------------------------------------------------------------------#
+#-------------------------------------------------------------------------------------------------#
+#-------------------------------------------------------------------------------------------------#
+#-------------------------------------------------------------------------------------------------#
+
 # Define source path
 $srcDir = (Get-Location).Path
 
@@ -62,34 +69,48 @@ if ($?)
 
 
             Write-Host "Activing Python Virtual Environment..."
-            . Join-Path $venvDir "Scripts\activate"
+
+            $activatePath = Join-Path $venvDir "Scripts\Activate.ps1"
+            & $activatePath
             
             if ($?)
             {
                 Write-Host "Activated Python Virtual Environment successfully."
 
+                Write-Host "Upgrading pip..."
 
-                Write-Host "Installing Torch..."
-                . python -m pip install torch torchvision torchaudio
+                . python -m pip install --upgrade pip
 
                 if ($?)
                 {
-                    Write-Host "Installed Torch successfully."
-
-
-                    Write-Host "Installing Requirements..."
-                    . python -m pip install -r requirements.txt
+                    Write-Host "Upgraded pip successfully."
+                    
+                    Write-Host "Installing Torch..."
+                    . python -m pip install torch torchvision torchaudio
 
                     if ($?)
                     {
-                        Write-Host "Installed Requirements successfully."
+                        Write-Host "Installed Torch successfully."
 
-                        . python main.py
+
+                        Write-Host "Installing Requirements..."
+                        . python -m pip install -r requirements.txt
+
+                        if ($?)
+                        {
+                            Write-Host "Installed Requirements successfully."
+
+                            . python main.py
+                        }
+                    }
+                    else
+                    {
+                        Write-Host "Torch Installation failed."
                     }
                 }
                 else
                 {
-                    Write-Host "Torch Installation failed."
+                    Write-Host "pip Upgrading failed."
                 }
             }
             else
