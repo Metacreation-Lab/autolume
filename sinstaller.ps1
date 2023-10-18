@@ -1,135 +1,171 @@
-# Define git path
-$git = "C:\Program Files\Git\cmd\git.exe"
+param(
+  [switch]$SkipClone,
+  [switch]$OnlyCPU
+)
 
 # Define python path
-$systemPython = "C:\Users\Administrator\AppData\Local\Programs\Python\Python310\python.exe"
+$systemPython = "C:\Users\Metacreation Lab\AppData\Local\Programs\Python\Python310\python.exe"
 
-#-------------------------------------------------------------------------------------------------#
-#-------------------------------------------------------------------------------------------------#
-#-------------------------------------------------------------------------------------------------#
-#-------------------------------------------------------------------------------------------------#
-#-------------------------------------------------------------------------------------------------#
-#-------------------------------------------------------------------------------------------------#
+# Define install location
+$installLocation = "C:\Program Files"
 
-# Define source path
-$srcDir = (Get-Location).Path
+# Go To Install Location -------------------------------------------------------------------------#
 
-# Define Python Virtual Environment path
-$venvDir = Join-Path $srcDir "venv"
+Push-Location $installLocation
 
-# Define torch verison
-$cudaCommand = ""
+# Create Temp Directory --------------------------------------------------------------------------#
 
-#-------------------------------------------------------------------------------------------------#
+$tempDir = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), "autolumelive_colab")
 
-# Define temp path
-$tmpDir = Join-Path $srcDir "tmp"
+if (-not (Test-Path -Path $tempDir -PathType Container)) {
+    New-Item -ItemType Directory -Path $tempDir
 
-if (-not (Test-Path -Path $tmpDir -PathType Container))
-{
-    New-Item -Path $tmpDir -ItemType Directory
+    if (-not $?)
+    {
+        throw "Failed to create temp folder."
+    }
 }
 
-# Define the URL to vs_buildtools.exe
+# Install Git ------------------------------------------------------------------------------------#
+
+Write-Host "=> Step: Install Git"
+
+if (-not (Get-Command git -ErrorAction SilentlyContinue))
+{
+    $gitUrlRepository = "https://api.github.com/repos/git-for-windows/git/releases/latest"
+    $gitDownloadInfo = Invoke-RestMethod -Method Get -Uri $gitUrlRepository | % assets | where name -like "*64-bit.exe"
+    $gitFilePath = [System.IO.Path]::Combine($tempDir, "git.exe")
+
+    Invoke-WebRequest -Uri $gitDownloadInfo.browser_download_url -OutFile $gitFilePath
+
+    $gitInstallArgs = "/SP- /VERYSILENT /SUPPRESSMSGBOXES /NOCANCEL /NORESTART /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS"
+    Start-Process -FilePath $gitFilePath -ArgumentList $gitInstallArgs -Wait
+
+    if (-not $?)
+    {
+        throw "Failed to install git."
+    }
+}
+
+# Clone Repository -------------------------------------------------------------------------------#
+
+Write-Host "=> Step: Clone Repository"
+
+if (-not $SkipClone)
+{
+    if ((Get-ChildItem -Path $installLocation | Measure-Object).Count -eq 0)
+    {
+        $env:GIT_REDIRECT_STDERR = '2>&1'
+        git clone -b windows-installer https://gitlab.com/jkraasch/autolumelive_colab.git $installLocation
+
+        if (-not $?)
+        {
+            throw "Failed to clone the repository."
+        }
+    }
+}
+
+# Install Build Tools ----------------------------------------------------------------------------#
+
+Write-Host "=> Step: Install Build Tools"
+
 $buildToolsDownloadURL = "https://aka.ms/vs/17/release/vs_buildtools.exe"
-
-# Specify the path to save vs_buildtools.exe
-$buildToolsInstallerPath = Join-Path $tmpDir "vs_buildtools.exe"
-
-Write-Host "Downloading Build Tools"
-
-# Download vs_buildtools.exe
+$buildToolsInstallerPath = [System.IO.Path]::Combine($tempDir, "vs_buildtools.exe")
 Invoke-WebRequest -Uri $buildToolsDownloadURL -OutFile $buildToolsInstallerPath
 
-if ($?)
+if (-not $?)
 {
-    Write-Host "Download completed successfully."
-
-    Write-Host "Installing Visual C++ Build Tools..."
-
-    # Specify the installation options (modify as needed)
-    $installOptions = "--add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.Windows10SDK.19041 --quiet --wait --norestart"
-
-    # Install Visual C++ Build Tools
-    Start-Process -FilePath $buildToolsInstallerPath -ArgumentList $installOptions -Wait
-
-    if ($?)
-    {
-        Write-Host "Installed Visual C++ Build Tools successfully."
-
-
-        Write-Host "Creating Python Virtual Environment..."
-
-        # Create Python Virtual Environment
-        . $systemPython -m venv $venvDir
-
-        if ($?)
-        {
-            Write-Host "Created Python Virtual Environment successfully."
-
-
-            Write-Host "Activing Python Virtual Environment..."
-
-            $activatePath = Join-Path $venvDir "Scripts\Activate.ps1"
-            & $activatePath
-            
-            if ($?)
-            {
-                Write-Host "Activated Python Virtual Environment successfully."
-
-                Write-Host "Upgrading pip..."
-
-                . python -m pip install --upgrade pip
-
-                if ($?)
-                {
-                    Write-Host "Upgraded pip successfully."
-                    
-                    Write-Host "Installing Torch..."
-                    . python -m pip install torch torchvision torchaudio
-
-                    if ($?)
-                    {
-                        Write-Host "Installed Torch successfully."
-
-
-                        Write-Host "Installing Requirements..."
-                        . python -m pip install -r requirements.txt
-
-                        if ($?)
-                        {
-                            Write-Host "Installed Requirements successfully."
-
-                            . python main.py
-                        }
-                    }
-                    else
-                    {
-                        Write-Host "Torch Installation failed."
-                    }
-                }
-                else
-                {
-                    Write-Host "pip Upgrading failed."
-                }
-            }
-            else
-            {
-                Write-Host "Activing Python Virtual Environment failed."
-            }
-        }
-        else
-        {
-            Write-Host "Creation Python Virtual Environment failed."
-        }
-    }
-    else
-    {
-        Write-Host "Installation failed. Please check the error messages above."
-    }
-} else
-{
-    Write-Host "Download failed. Please check the error messages above."
+    throw "Failed to download Build Tools."
 }
+
+$buildToolsInstallOptions = "--add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.Windows10SDK.19041 --quiet --wait --norestart"
+Start-Process -FilePath $buildToolsInstallerPath -ArgumentList $buildToolsInstallOptions -Wait
+
+if (-not $?)
+{
+    throw "Failed to install Build Tools."
+}
+
+# Create Python Virtual Environment --------------------------------------------------------------#
+
+Write-Host "=> Step: Create Python Virtual Environment"
+
+$venvDir = [System.IO.Path]::Combine($installLocation, "venv")
+. $systemPython -m venv $venvDir
+
+if (-not $?)
+{
+    throw "Failed to create Python Virtual Environment."
+}
+
+# Activate Python Virtual Environment ------------------------------------------------------------#
+
+$activatePath = [System.IO.Path]::Combine($venvDir, "Scripts\Activate.ps1")
+& $activatePath
+
+if (-not $?)
+{
+    throw "Failed to activate Python Virtual Environment."
+}
+
+# Upgrade pip ------------------------------------------------------------------------------------#
+
+Write-Host "=> Step: Upgrade pip"
+
+. python -m pip install --upgrade pip
+
+if (-not $?)
+{
+    throw "Failed to upgrade pip."
+}
+
+# Install Torch ----------------------------------------------------------------------------------#
+
+Write-Host "=> Step: Install Torch"
+
+
+if ($OnlyCPU)
+{
+    . python -m pip install torch torchvision torchaudio
+}
+else
+{
+    . python -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu117
+}
+
+if (-not $?)
+{
+    throw "Failed to install Torch."
+}
+
+# Install Python Requirements --------------------------------------------------------------------#
+
+Write-Host "=> Step: Install Python Requirements"
+
+. python -m pip install -r requirements.txt
+
+# Create Shortcut on Desktop ---------------------------------------------------------------------#
+
+Write-Host "=> Step: Create Shortcut on Desktop"
+
+$runScriptPath = [System.IO.Path]::Combine($installLocation, "run.ps1")
+$desktopPath = [System.Environment]::GetFolderPath('Desktop')
+$runShortcutPath = [System.IO.Path]::Combine($desktopPath, "AutolumeLiveColab.lnk")
+
+$shell = New-Object -ComObject WScript.Shell
+$shortcut = $shell.CreateShortcut($runShortcutPath)
+$shortcut.TargetPath = "powershell.exe"
+$shortcut.Arguments = " -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$runScriptPath`""
+$shortcut.Save()
+
+# Run --------------------------------------------------------------------------------------------#
+
+Write-Host "=> Runinng"
+
+. python main.py
+
+#-------------------------------------------------------------------------------------------------#
+
+Remove-Item -LiteralPath $tempDir -Force -Recurse
 
 Read-Host -Prompt "Press Enter to exit..."
