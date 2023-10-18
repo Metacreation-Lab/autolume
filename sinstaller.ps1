@@ -1,6 +1,6 @@
 param(
   [switch]$SkipClone,
-  [switch]$OnlyCPU
+  [switch]$CPUOnly
 )
 
 # Define python path
@@ -134,7 +134,7 @@ if (-not $?)
 Write-Host "=> Step: Install Torch"
 
 
-if ($OnlyCPU)
+if ($CPUOnly)
 {
     . python -m pip install torch torchvision torchaudio
 }
