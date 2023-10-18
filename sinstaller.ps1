@@ -7,9 +7,19 @@ param(
 $systemPython = "C:\Users\Metacreation Lab\AppData\Local\Programs\Python\Python310\python.exe"
 
 # Define install location
-$installLocation = "C:\Program Files"
+$installLocation = "$env:LOCALAPPDATA\autolumelive_colab"
+Write-Host $installLocation
 
 # Go To Install Location -------------------------------------------------------------------------#
+
+if (-not (Test-Path -Path $installLocation -PathType Container)) {
+    New-Item -ItemType Directory -Path $installLocation
+
+    if (-not $?)
+    {
+        throw "Failed to create installation folder."
+    }
+}
 
 Push-Location $installLocation
 
