@@ -36,7 +36,6 @@ if (-not (Test-Path -Path $tempDir -PathType Container)) {
     }
 }
 
-=======
 $installLocation = "C:\Users\Metacreation Lab\autolumelive_colab"
 
 # Go To Install Location -------------------------------------------------------------------------#
