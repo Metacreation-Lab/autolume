@@ -1,17 +1,12 @@
 param(
   [switch]$SkipClone,
-<<<<<<< Updated upstream
   [switch]$CPUOnly
-=======
-  [switch]$OnlyCPU
->>>>>>> Stashed changes
 )
 
 # Define python path
 $systemPython = "C:\Users\Metacreation Lab\AppData\Local\Programs\Python\Python310\python.exe"
 
 # Define install location
-<<<<<<< Updated upstream
 $installLocation = "$env:LOCALAPPDATA\autolumelive_colab"
 Write-Host $installLocation
 
@@ -61,7 +56,6 @@ if (-not (Test-Path -Path $tempDir -PathType Container)) {
     }
 }
 
->>>>>>> Stashed changes
 # Install Git ------------------------------------------------------------------------------------#
 
 Write-Host "=> Step: Install Git"
@@ -79,11 +73,7 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue))
 
     if (-not $?)
     {
-<<<<<<< Updated upstream
         throw "Failed to install git."
-=======
-        throw "Failed to installing git."
->>>>>>> Stashed changes
     }
 }
 
@@ -96,19 +86,12 @@ if (-not $SkipClone)
     if ((Get-ChildItem -Path $installLocation | Measure-Object).Count -eq 0)
     {
         $env:GIT_REDIRECT_STDERR = '2>&1'
-<<<<<<< Updated upstream
+
         git clone -b windows-installer https://gitlab.com/jkraasch/autolumelive_colab.git $installLocation
 
         if (-not $?)
         {
             throw "Failed to clone the repository."
-=======
-        git clone https://gitlab.com/jkraasch/autolumelive_colab.git $installLocation
-
-        if (-not $?)
-        {
-            throw "Failed to cloning the repository."
->>>>>>> Stashed changes
         }
     }
 }
@@ -172,11 +155,7 @@ if (-not $?)
 Write-Host "=> Step: Install Torch"
 
 
-<<<<<<< Updated upstream
 if ($CPUOnly)
-=======
-if ($OnlyCPU)
->>>>>>> Stashed changes
 {
     . python -m pip install torch torchvision torchaudio
 }
