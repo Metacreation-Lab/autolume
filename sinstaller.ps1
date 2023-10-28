@@ -36,6 +36,25 @@ if (-not (Test-Path -Path $tempDir -PathType Container)) {
     }
 }
 
+$installLocation = "C:\Users\Metacreation Lab\autolumelive_colab"
+
+# Go To Install Location -------------------------------------------------------------------------#
+
+Push-Location $installLocation
+
+# Create Temp Directory --------------------------------------------------------------------------#
+
+$tempDir = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), "autolumelive_colab")
+
+if (-not (Test-Path -Path $tempDir -PathType Container)) {
+    New-Item -ItemType Directory -Path $tempDir
+
+    if (-not $?)
+    {
+        throw "Failed to create temp folder."
+    }
+}
+
 # Install Git ------------------------------------------------------------------------------------#
 
 Write-Host "=> Step: Install Git"
@@ -66,6 +85,7 @@ if (-not $SkipClone)
     if ((Get-ChildItem -Path $installLocation | Measure-Object).Count -eq 0)
     {
         $env:GIT_REDIRECT_STDERR = '2>&1'
+
         git clone -b windows-installer https://gitlab.com/jkraasch/autolumelive_colab.git $installLocation
 
         if (-not $?)
