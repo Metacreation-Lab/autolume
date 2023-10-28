@@ -96,28 +96,6 @@ if (-not $?)
     throw "Failed to install Build Tools."
 }
 
-# Create Python Virtual Environment --------------------------------------------------------------#
-
-Write-Host "=> Step: Create Python Virtual Environment"
-
-$venvDir = [System.IO.Path]::Combine($installLocation, "venv")
-. $systemPython -m venv $venvDir
-
-if (-not $?)
-{
-    throw "Failed to create Python Virtual Environment."
-}
-
-# Activate Python Virtual Environment ------------------------------------------------------------#
-
-$activatePath = [System.IO.Path]::Combine($venvDir, "Scripts\Activate.ps1")
-& $activatePath
-
-if (-not $?)
-{
-    throw "Failed to activate Python Virtual Environment."
-}
-
 # Upgrade pip ------------------------------------------------------------------------------------#
 
 Write-Host "=> Step: Upgrade pip"
