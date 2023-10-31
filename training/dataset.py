@@ -19,6 +19,8 @@ import torch
 import dnnlib
 import ffmpeg
 
+import sys
+
 try:
     import pyspng
 except ImportError:
@@ -312,10 +314,13 @@ class ImageFolderDataset(Dataset):
     def _load_raw_image(self, raw_idx):
         fname = self._image_fnames[raw_idx]
         with self._open_file(fname) as f:
-            if pyspng is not None and self._file_ext(fname) == '.png':
-                image = pyspng.load(f.read())
-            else:
-                image = np.array(PIL.Image.open(f))
+            # if pyspng is not None and self._file_ext(fname) == '.png':
+            #     image = pyspng.load(f.read())
+            # else:
+            image = PIL.Image.open(f)
+            if image.mode != 'RGB':
+                image = image.convert('RGB')
+            image = np.array(image)
         if image.ndim == 2:
             image = image[:, :, np.newaxis] # HW => HWC
         image = image.transpose(2, 0, 1) # HWC => CHW
