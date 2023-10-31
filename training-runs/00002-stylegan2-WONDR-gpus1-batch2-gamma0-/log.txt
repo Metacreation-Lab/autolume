@@ -1,0 +1,125 @@
+Loading training set...
+/home/arthurdeleu/miniconda3/envs/autolume_test/lib/python3.9/site-packages/torch/utils/data/sampler.py:64: UserWarning: `data_source` argument is not used and will be removed in 2.2.0.You may still have custom implementation that utilizes it.
+  warnings.warn("`data_source` argument is not used and will be removed in 2.2.0."
+
+Num images:  1408
+Image shape: [3, 512, 512]
+Label shape: [0]
+
+Constructing networks...
+starting G epochs:  0.0
+Setting up PyTorch plugin "bias_act_plugin"... Failed!
+
+Generator             Parameters  Buffers  Output shape        Datatype
+---                   ---         ---      ---                 ---     
+mapping.fc0           262656      -        [2, 512]            float32 
+mapping.fc1           262656      -        [2, 512]            float32 
+mapping.fc2           262656      -        [2, 512]            float32 
+mapping.fc3           262656      -        [2, 512]            float32 
+mapping.fc4           262656      -        [2, 512]            float32 
+mapping.fc5           262656      -        [2, 512]            float32 
+mapping.fc6           262656      -        [2, 512]            float32 
+mapping.fc7           262656      -        [2, 512]            float32 
+mapping               -           512      [2, 16, 512]        float32 
+synthesis.b4.conv1    2622465     32       [2, 512, 4, 4]      float32 
+synthesis.b4.torgb    264195      -        [2, 3, 4, 4]        float32 
+synthesis.b4:0        8192        16       [2, 512, 4, 4]      float32 
+synthesis.b4:1        -           -        [2, 3, 4, 4]        float32 
+synthesis.b8.conv0    2622465     80       [2, 512, 8, 8]      float32 
+synthesis.b8.conv1    2622465     80       [2, 512, 8, 8]      float32 
+synthesis.b8.torgb    264195      -        [2, 3, 8, 8]        float32 
+synthesis.b8:0        -           16       [2, 512, 8, 8]      float32 
+synthesis.b8:1        -           -        [2, 3, 8, 8]        float32 
+synthesis.b16.conv0   2622465     272      [2, 512, 16, 16]    float32 
+synthesis.b16.conv1   2622465     272      [2, 512, 16, 16]    float32 
+synthesis.b16.torgb   264195      -        [2, 3, 16, 16]      float32 
+synthesis.b16:0       -           16       [2, 512, 16, 16]    float32 
+synthesis.b16:1       -           -        [2, 3, 16, 16]      float32 
+synthesis.b32.conv0   2622465     1040     [2, 512, 32, 32]    float32 
+synthesis.b32.conv1   2622465     1040     [2, 512, 32, 32]    float32 
+synthesis.b32.torgb   264195      -        [2, 3, 32, 32]      float32 
+synthesis.b32:0       -           16       [2, 512, 32, 32]    float32 
+synthesis.b32:1       -           -        [2, 3, 32, 32]      float32 
+synthesis.b64.conv0   2622465     4112     [2, 512, 64, 64]    float16 
+synthesis.b64.conv1   2622465     4112     [2, 512, 64, 64]    float16 
+synthesis.b64.torgb   264195      -        [2, 3, 64, 64]      float16 
+synthesis.b64:0       -           16       [2, 512, 64, 64]    float16 
+synthesis.b64:1       -           -        [2, 3, 64, 64]      float32 
+synthesis.b128.conv0  1442561     16400    [2, 256, 128, 128]  float16 
+synthesis.b128.conv1  721409      16400    [2, 256, 128, 128]  float16 
+synthesis.b128.torgb  132099      -        [2, 3, 128, 128]    float16 
+synthesis.b128:0      -           16       [2, 256, 128, 128]  float16 
+synthesis.b128:1      -           -        [2, 3, 128, 128]    float32 
+synthesis.b256.conv0  426369      65552    [2, 128, 256, 256]  float16 
+synthesis.b256.conv1  213249      65552    [2, 128, 256, 256]  float16 
+synthesis.b256.torgb  66051       -        [2, 3, 256, 256]    float16 
+synthesis.b256:0      -           16       [2, 128, 256, 256]  float16 
+synthesis.b256:1      -           -        [2, 3, 256, 256]    float32 
+synthesis.b512.conv0  139457      262160   [2, 64, 512, 512]   float16 
+synthesis.b512.conv1  69761       262160   [2, 64, 512, 512]   float16 
+synthesis.b512.torgb  33027       -        [2, 3, 512, 512]    float16 
+synthesis.b512:0      -           16       [2, 64, 512, 512]   float16 
+synthesis.b512:1      -           -        [2, 3, 512, 512]    float32 
+---                   ---         ---      ---                 ---     
+Total                 30276583    699904   -                   -       
+
+
+ProjectedDiscriminator                                               Parameters  Buffers  Output shape       Datatype
+---                                                                  ---         ---      ---                ---     
+feature_network.pretrained.layer0.0                                  864         -        [2, 32, 256, 256]  float32 
+feature_network.pretrained.layer0.1                                  64          65       [2, 32, 256, 256]  float32 
+feature_network.pretrained.layer0.3                                  896         98       [2, 16, 256, 256]  float32 
+feature_network.pretrained.layer0.4                                  13968       1062     [2, 24, 128, 128]  float32 
+feature_network.pretrained.layer1.0                                  39712       1702     [2, 40, 64, 64]    float32 
+feature_network.pretrained.layer2.0                                  198480      5289     [2, 80, 32, 32]    float32 
+feature_network.pretrained.layer2.1                                  446784      7977     [2, 112, 32, 32]   float32 
+feature_network.pretrained.layer3.0                                  1652640     18060    [2, 192, 16, 16]   float32 
+feature_network.pretrained.layer3.1                                  605440      5251     [2, 320, 16, 16]   float32 
+feature_network.scratch.layer0_ccm                                   1600        -        [2, 64, 128, 128]  float32 
+feature_network.scratch.layer1_ccm                                   5248        -        [2, 128, 64, 64]   float32 
+feature_network.scratch.layer2_ccm                                   28928       -        [2, 256, 32, 32]   float32 
+feature_network.scratch.layer3_ccm                                   164352      -        [2, 512, 16, 16]   float32 
+feature_network.scratch.layer3_csm.out_conv                          131328      -        [2, 256, 32, 32]   float32 
+feature_network.scratch.layer2_csm.skip_add.activation_post_process  -           -        [2, 256, 32, 32]   float32 
+feature_network.scratch.layer2_csm.out_conv                          32896       -        [2, 128, 64, 64]   float32 
+feature_network.scratch.layer1_csm.skip_add.activation_post_process  -           -        [2, 128, 64, 64]   float32 
+feature_network.scratch.layer1_csm.out_conv                          8256        -        [2, 64, 128, 128]  float32 
+feature_network.scratch.layer0_csm.skip_add.activation_post_process  -           -        [2, 64, 128, 128]  float32 
+feature_network.scratch.layer0_csm.out_conv                          4160        -        [2, 64, 256, 256]  float32 
+discriminator.mini_discs.0.main                                      190848      12137    [2, 1, 13, 13]     float32 
+discriminator.mini_discs.1.main                                      186048      11807    [2, 1, 13, 13]     float32 
+discriminator.mini_discs.2.main                                      177024      11285    [2, 1, 13, 13]     float32 
+discriminator.mini_discs.3.main                                      142592      10251    [2, 1, 13, 13]     float32 
+discriminator                                                        -           -        [2, 676]           float32 
+---                                                                  ---         ---      ---                ---     
+Total                                                                4032128     84984    -                  -       
+
+Setting up augmentation...
+Distributing across 1 GPUs...
+Setting up training phases...
+Exporting sample images...
+Initializing logs...
+Skipping tfevents export: No module named 'tensorboard'
+Training for 25000 kimg...
+
+Process Process-2:
+Traceback (most recent call last):
+  File "/home/arthurdeleu/miniconda3/envs/autolume_test/lib/python3.9/multiprocessing/process.py", line 315, in _bootstrap
+    self.run()
+  File "/home/arthurdeleu/miniconda3/envs/autolume_test/lib/python3.9/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/media/arthurdeleu/T7/autolumelive_colab/autolumelive_colab/train.py", line 390, in main
+    launch_training(c=c, desc=desc, outdir=opts.outdir, dry_run=opts.dry_run)
+  File "/media/arthurdeleu/T7/autolumelive_colab/autolumelive_colab/train.py", line 99, in launch_training
+    subprocess_fn(rank=0, c=c, temp_dir=temp_dir)
+  File "/media/arthurdeleu/T7/autolumelive_colab/autolumelive_colab/train.py", line 47, in subprocess_fn
+    training_loop.training_loop(rank=rank, **c)
+  File "/media/arthurdeleu/T7/autolumelive_colab/autolumelive_colab/training/training_loop.py", line 289, in training_loop
+    loss.accumulate_gradients(phase=phase.name, real_img=real_img, real_c=real_c, gen_z=gen_z, gen_c=gen_c, gain=phase.interval, cur_nimg=cur_nimg)
+  File "/media/arthurdeleu/T7/autolumelive_colab/autolumelive_colab/training/losses/scratch_loss.py", line 190, in accumulate_gradients
+    loss_Gpl.mean().mul(gain).backward()
+  File "/home/arthurdeleu/miniconda3/envs/autolume_test/lib/python3.9/site-packages/torch/_tensor.py", line 492, in backward
+    torch.autograd.backward(
+  File "/home/arthurdeleu/miniconda3/envs/autolume_test/lib/python3.9/site-packages/torch/autograd/__init__.py", line 251, in backward
+    Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+KeyboardInterrupt

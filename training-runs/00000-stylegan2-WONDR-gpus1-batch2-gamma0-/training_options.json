@@ -1,0 +1,103 @@
+{
+  "G_kwargs": {
+    "class_name": "architectures.custom_stylegan2.Generator",
+    "z_dim": 512,
+    "w_dim": 512,
+    "mapping_kwargs": {
+      "num_layers": 8
+    },
+    "channel_base": 32768,
+    "channel_max": 512,
+    "fused_modconv_default": "inference_only"
+  },
+  "G_opt_kwargs": {
+    "class_name": "torch.optim.Adam",
+    "betas": [
+      0,
+      0.99
+    ],
+    "eps": 1e-08,
+    "lr": 0.002
+  },
+  "D_opt_kwargs": {
+    "class_name": "torch.optim.Adam",
+    "betas": [
+      0,
+      0.99
+    ],
+    "eps": 1e-08,
+    "lr": 0.002
+  },
+  "loss_kwargs": {
+    "class_name": "training.losses.scratch_loss.StyleGAN2Loss",
+    "kd_l1_lambda": 0.0,
+    "kd_lpips_lambda": 0.0,
+    "kd_mode": "Output_Only",
+    "content_aware_KD": false,
+    "LPIPS_IMAGE_SIZE": 256,
+    "r1_gamma": 0,
+    "style_mixing_prob": 0.9,
+    "pl_weight": 2,
+    "pl_no_weight_grad": true
+  },
+  "data_loader_kwargs": {
+    "pin_memory": true,
+    "prefetch_factor": 2,
+    "num_workers": 4
+  },
+  "training_set_kwargs": {
+    "class_name": "training.dataset.ImageFolderDataset",
+    "path": "/media/arthurdeleu/T7/datasets/WONDR",
+    "use_labels": false,
+    "max_size": 704,
+    "xflip": true,
+    "resolution": 512,
+    "height": 512,
+    "width": 512,
+    "fps": 10,
+    "random_seed": 0
+  },
+  "num_gpus": 1,
+  "batch_size": 2,
+  "batch_gpu": 2,
+  "projected": true,
+  "D_kwargs": {
+    "class_name": "architectures.pg_modules.discriminator.ProjectedDiscriminator",
+    "diffaug": true,
+    "interp224": false,
+    "backbone_kwargs": {
+      "cout": 64,
+      "expand": true,
+      "proj_type": 2,
+      "num_discs": 4,
+      "separable": true,
+      "cond": false
+    }
+  },
+  "metrics": [],
+  "total_kimg": 25000,
+  "kimg_per_tick": 4,
+  "image_snapshot_ticks": 1,
+  "network_snapshot_ticks": 1,
+  "random_seed": 0,
+  "ema_kimg": 0.625,
+  "G_reg_interval": 4,
+  "augment_kwargs": {
+    "class_name": "training.augment.AugmentPipe",
+    "xflip": 1,
+    "rotate90": 1,
+    "xint": 1,
+    "scale": 1,
+    "rotate": 1,
+    "aniso": 1,
+    "xfrac": 1,
+    "brightness": 1,
+    "contrast": 1,
+    "lumaflip": 1,
+    "hue": 1,
+    "saturation": 1
+  },
+  "ada_target": 0.6,
+  "nimg": 0,
+  "run_dir": "/media/arthurdeleu/T7/autolumelive_colab/autolumelive_colab/training-runs/00000-stylegan2-WONDR-gpus1-batch2-gamma0-"
+}
