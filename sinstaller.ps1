@@ -4,7 +4,7 @@ param(
 )
 
 # Define python path
-$systemPython = "C:\Users\Metacreation Lab\AppData\Local\Programs\Python\Python310\python.exe"
+$systemPython = "C:\Program Files\Python39\python.exe"
 
 # Define install location
 $installLocation = "$env:LOCALAPPDATA\autolumelive_colab"
@@ -66,7 +66,7 @@ if (-not $SkipClone)
     if ((Get-ChildItem -Path $installLocation | Measure-Object).Count -eq 0)
     {
         $env:GIT_REDIRECT_STDERR = '2>&1'
-        git clone -b windows-installer https://gitlab.com/jkraasch/autolumelive_colab.git $installLocation
+        & git clone -b windows-installer https://gitlab.com/jkraasch/autolumelive_colab.git $installLocation
 
         if (-not $?)
         {
@@ -94,6 +94,35 @@ Start-Process -FilePath $buildToolsInstallerPath -ArgumentList $buildToolsInstal
 if (-not $?)
 {
     throw "Failed to install Build Tools."
+}
+
+# Create Python Virtual Environment --------------------------------------------------------------#
+
+Write-Host "=> Step: Create Python Virtual Environment"
+
+$venvDir = [System.IO.Path]::Combine($installLocation, "venv")
+. $systemPython -m venv $venvDir
+
+if (-not $?)
+{
+    throw "Failed to create Python Virtual Environment."
+}
+
+# Copy Python Libs to Virtual Environment --------------------------------------------------------#
+
+$systemPythonDir = [System.IO.Path]::GetDirectoryName($systemPython)
+$systemPythonLibsDir = [System.IO.Path]::Combine($systemPythonDir, "libs")
+$venvPythonLibsDir = [System.IO.Path]::Combine($venvDir, "Scripts\libs")
+Copy-Item -Path $systemPythonLibsDir -Destination $venvPythonLibsDir -Recurse -Force
+
+# Activate Python Virtual Environment ------------------------------------------------------------#
+
+$activatePath = [System.IO.Path]::Combine($venvDir, "Scripts\Activate.ps1")
+& $activatePath
+
+if (-not $?)
+{
+    throw "Failed to activate Python Virtual Environment."
 }
 
 # Upgrade pip ------------------------------------------------------------------------------------#
