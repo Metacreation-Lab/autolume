@@ -37,7 +37,7 @@ class LatentWidget:
         self.step_y = 100
         funcs = dict(zip(["project", "seed",  "anim", "speed"],
                          [self.osc_handler(param) for param in
-                          ["project", "x", "anim", "speed"]]))
+                          ["project", "x", "update_mode", "speed"]]))
         funcs["speed"] = self.speed_handler()
         funcs["model"] = self.model_handler()
         self.seed_osc_menu = osc_menu.OscMenu(self.viz, copy.deepcopy(funcs),
@@ -108,6 +108,7 @@ class LatentWidget:
         def func(address, *args):
             try:
                 value = torch.as_tensor(args[-1])[None]
+                print(args[-1])
                 assert value.shape == self.latent[
                     param].shape, f"Shapes of osc message and parameter must align, [OSC] {value.shape} != [Param] {self.latent[param].shape}"
                 self.latent[param] = value
@@ -278,6 +279,6 @@ class LatentWidget:
                     self.latent.next = torch.randn(self.latent.next.shape)
             except Exception as e:
                 self.viz.print_error(e)
-        pass
+        return func
 
 #----------------------------------------------------------------------------
