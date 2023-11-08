@@ -107,8 +107,8 @@ class LatentWidget:
     def list_handler(self, param):
         def func(address, *args):
             try:
-                value = torch.as_tensor(args[-1])[None]
-                print(args[-1])
+                value = torch.as_tensor(args)[None]
+                print(value)
                 assert value.shape == self.latent[
                     param].shape, f"Shapes of osc message and parameter must align, [OSC] {value.shape} != [Param] {self.latent[param].shape}"
                 self.latent[param] = value
