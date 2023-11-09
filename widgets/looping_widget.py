@@ -178,11 +178,11 @@ class LoopingWidget:
     def osc_handler(self, param):
         def func(address, *args):
             try:
-                assert (type(args[-1]) is type(self.params[
-                                                   param])), f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {type(self.params[param])}"
+                nec_type = type(self.params[param])
+                # assert (type(args[-1]) is type(self.params[
+                #                                    param])), f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {type(self.params[param])}"
                 self.use_osc[param] = True
-                self.params[param] = args[-1]
-                print(self.params[param], args[-1])
+                self.params[param] = nec_type(args[-1])
             except Exception as e:
                 self.viz.print_error(e)
 
@@ -597,8 +597,8 @@ class LoopingWidget:
     def speed_handler(self):
         def func(address, *args):
             try:
-                assert (type(args[-1]) is type(self.speed)), f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {type(self.speed)}"
-                self.speed = args[-1]
+                # assert (type(args[-1]) is type(self.speed)), f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {type(self.speed)}"
+                self.speed = float(args[-1])
                 self.update = True
             except Exception as e:
                 self.viz.print_error(e)
@@ -607,8 +607,8 @@ class LoopingWidget:
     def radius_handler(self):
         def func(address, *args):
             try:
-                assert (type(args[-1]) is type(self.radius)), f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {type(self.radius)}"
-                self.radius = args[-1]
+                #assert (type(args[-1]) is type(self.radius)), f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {type(self.radius)}"
+                self.radius = float(args[-1])
                 self.update = True
             except Exception as e:
                 self.viz.print_error(e)
@@ -617,8 +617,8 @@ class LoopingWidget:
     def perfect_loop_handler(self):
         def func(address, *args):
             try:
-                assert (type(args[-1]) is type(self.perfect_loop)), f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {type(self.perfect_loop)}"
-                self.perfect_loop = args[-1]
+                #assert (type(args[-1]) is type(self.perfect_loop)), f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {type(self.perfect_loop)}"
+                self.perfect_loop = bool(args[-1])
                 self.update = True
             except Exception as e:
                 self.viz.print_error(e)
