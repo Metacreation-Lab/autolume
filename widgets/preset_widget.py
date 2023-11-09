@@ -145,7 +145,7 @@ class PresetWidget:
 
     def osc_handler(self, address, *args):
         try:
-            value = args[-1]
+            value = int(args[-1])
             if value > len(self.active):
                 value = len(self.active) - 1
             value = max(value, 0)

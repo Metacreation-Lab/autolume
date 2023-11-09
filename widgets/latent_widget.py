@@ -87,9 +87,10 @@ class LatentWidget:
     def osc_handler(self, param):
         def func(address, *args):
             try:
-                assert (type(args[-1]) is type(self.latent[
-                                                   param])), f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {type(self.latent[param])}"
-                self.latent[param] = args[-1]
+                nec_type = type(self.latent[param])
+                # assert (type(args[-1]) is type(self.latent[
+                #                                    param])), f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {type(self.latent[param])}"
+                self.latent[param] = nec_type(args[-1])
             except Exception as e:
                 self.viz.print_error(e)
         return func
@@ -97,8 +98,9 @@ class LatentWidget:
     def speed_handler(self):
         def func(address, *args):
             try:
-                assert (type(args[-1]) is type(self.latent.speed)), f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {type(self.latent.speed)}"
-                self.latent.speed = args[-1]
+                nec_type = type(self.latent.speed)
+                # assert (type(args[-1]) is type(self.latent.speed)), f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {type(self.latent.speed)}"
+                self.latent.speed = nec_type(args[-1])
                 self.update = True
             except Exception as e:
                 self.viz.print_error(e)
@@ -140,8 +142,8 @@ class LatentWidget:
         if dragging:
             self.drag(dx, dy)
         imgui.same_line(imgui.get_item_rect_max()[0] + (viz.app.spacing * 2))
-        if imgui_utils.button(f"{modes[self.latent.update_mode]}##latent"):
-            self.latent.update_mode = (self.latent.update_mode + 1) % len(modes)
+        if imgui_utils.button(f"{modes[(int(self.latent.update_mode) + 1) % len(modes)]}##latent"):
+            self.latent.update_mode = (int(self.latent.update_mode) + 1) % len(modes)
         imgui.same_line()
         with imgui_utils.item_width(viz.app.button_w * 2 - viz.app.spacing * 2):
             changed, speed = imgui.slider_float('##speed', self.latent.speed, -5, 5,
@@ -171,7 +173,7 @@ class LatentWidget:
 
         imgui.same_line()
         if imgui_utils.button(f"{modes[self.latent.update_mode]}##latent"):
-            self.latent.update_mode = (self.latent.update_mode + 1) % len(modes)
+            self.latent.update_mode = (int(self.latent.update_mode) + 1) % len(modes)
         imgui.same_line()
         with imgui_utils.item_width(viz.app.button_w * 2 - viz.app.spacing * 2):
             changed, speed = imgui.slider_float('##speed', self.latent.speed, -5, 5,
@@ -273,8 +275,8 @@ class LatentWidget:
             :return:
             """
             try:
-                assert (type(args[-1]) is bool), f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {bool}"
-                if args[-1]:
+                # assert (type(args[-1]) is bool), f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {bool}"
+                if bool(args[-1]):
                     self.latent.vec = torch.randn(self.latent.vec.shape)
                     self.latent.next = torch.randn(self.latent.next.shape)
             except Exception as e:
