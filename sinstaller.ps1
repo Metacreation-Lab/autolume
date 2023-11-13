@@ -73,6 +73,16 @@ if (-not $SkipClone)
             throw "Failed to clone the repository."
         }
     }
+    else
+    {
+        $env:GIT_REDIRECT_STDERR = '2>&1'
+        & git reset --hard origin/windows-installer
+
+        if (-not $?)
+        {
+            throw "Failed to sync the repository."
+        }
+    }
 }
 
 # Install Build Tools ----------------------------------------------------------------------------#
