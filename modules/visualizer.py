@@ -52,7 +52,7 @@ class Visualizer:
         except:
             print("except no microphone found")
             pass
-        self.in_ip = "127.0.0.1"
+        self.in_ip = "0.0.0.0"
         self.in_port = 1338
         self.out_ip = "127.0.0.1"
         self.out_port = 1337
