@@ -117,7 +117,7 @@ class AdjusterWidget:
 
                 draw_list.channels_split(2)
                 draw_list.channels_set_current(1)
-                changed, self.vslide_use_osc[i] = imgui.checkbox(f"Use OSC##vslide_use_osc{i}", self.vslide_use_osc[i])
+                changed, self.vslide_use_osc[i] = imgui.checkbox(f"Use OSC##vslide_use_ose{i}", self.vslide_use_osc[i])
                 use_osc = self.vslide_use_osc[i]
 
                 # if use_osc draw red box under checkbox label
@@ -138,7 +138,7 @@ class AdjusterWidget:
                     s.item_spacing = [self.viz.app.spacing, self.viz.app.spacing]
                     s.item_inner_spacing = [self.viz.app.spacing, self.viz.app.spacing]
                     if changed:
-                        self.viz.osc_dispatcher.map(f"/{new_address}",
+                        self.viz.osc_dispatcher.map(new_address,
                                                       self.vec_handler(i))
                         try:
                             self.viz.osc_dispatcher.unmap(self.vslide_address[i],

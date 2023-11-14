@@ -135,17 +135,17 @@ class PresetWidget:
                                                               help_text="Osc Address")
                 if changed:
                     try:
-                        viz.osc_dispatcher.unmap(f"/{self.osc_addresses}",
+                        viz.osc_dispatcher.unmap(self.osc_addresses,
                                                    self.osc_handler)
                         self.osc_addresses = osc_address
                     except:
                         print(f"{self.osc_addresses} is not mapped")
-                    viz.osc_dispatcher.map(f"/{self.osc_addresses}",
+                    viz.osc_dispatcher.map(self.osc_addresses,
                                              self.osc_handler)
 
     def osc_handler(self, address, *args):
         try:
-            value = int(args[-1])
+            value = args[-1]
             if value > len(self.active):
                 value = len(self.active) - 1
             value = max(value, 0)

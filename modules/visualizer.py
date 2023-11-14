@@ -52,12 +52,10 @@ class Visualizer:
         except:
             print("except no microphone found")
             pass
-        self.in_ip = "0.0.0.0"
+        self.in_ip = "127.0.0.1"
         self.in_port = 1338
-        self.out_ip = "127.0.0.1"
-        self.out_port = 1337
         self.osc_dispatcher = Dispatcher()
-        self.osc_client = SimpleUDPClient(self.out_ip, self.out_port)
+        self.osc_client = SimpleUDPClient(self.in_ip, self.in_port)
         self.server = BlockingOSCUDPServer((self.in_ip, self.in_port), self.osc_dispatcher)
         self.server_thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.server_thread.start()
