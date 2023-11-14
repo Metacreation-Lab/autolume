@@ -22,10 +22,10 @@ except ModuleNotFoundError:
 class TruncationNoiseWidget:
     def __init__(self, viz):
         self.viz            = viz
-        self.params = dnnlib.EasyDict(trunc_psi=0.8, global_noise =1, noise_enable=True, noise_seed=0, noise_anim=False)
+        self.params = dnnlib.EasyDict(trunc_psi=0.8, global_noise=1, noise_enable=True, noise_seed=0, noise_anim=False, reset=False)
         self.prev_num_ws    = 0
 
-        funcs = dict(zip(["Diversity", "Global Noise", "Noise ON/Off", "Noise Seed", "Animate Noise"], [self.osc_handler(param) for param in
+        funcs = dict(zip(["Diversity", "Global Noise", "Noise On/Off", "Noise Seed", "Animate Noise", "Reset"], [self.osc_handler(param) for param in
                                                      self.params]))
 
         self.osc_menu = osc_menu.OscMenu(self.viz, funcs,
@@ -34,10 +34,11 @@ class TruncationNoiseWidget:
     def osc_handler(self, param):
         def func(address, *args):
             try:
-                assert (type(args[-1]) is type(self.params[
-                                                   param])), f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {type(self.params[param])}"
-
-                self.params[param] = args[-1]
+                nec_type = type(self.params[param])
+                # assert (type(args[-1]) is type(self.params[
+                #                                    param])), f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {type(self.params[param])}"
+                print(self.params)
+                self.params[param] = nec_type(args[-1])
             except Exception as e:
                 print(e)
         return func
@@ -88,12 +89,13 @@ class TruncationNoiseWidget:
             is_def_noise = (self.params.noise_enable and self.params.noise_seed == 0 and not self.params.noise_anim)
             with imgui_utils.grayed_out(is_def_trunc and not has_noise):
                 imgui.same_line(imgui.get_content_region_max()[0] - 1 - viz.app.button_w)
-                if imgui_utils.button('Reset', width=-1, enabled=(not is_def_trunc or not is_def_noise)):
+                if imgui_utils.button('Reset', width=-1, enabled=(not is_def_trunc or not is_def_noise)) or self.params.reset:
                     self.params.trunc_psi = 0.8
                     self.params.noise_enable = True
                     self.params.noise_seed = 0
                     self.params.noise_anim = False
                     self.params.global_noise = 1
+                    self.params.reset = False
 
             self.osc_menu()
         if self.params.noise_anim:
