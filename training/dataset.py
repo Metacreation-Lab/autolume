@@ -19,8 +19,6 @@ import torch
 import dnnlib
 import ffmpeg
 
-import sys
-
 try:
     import pyspng
 except ImportError:
@@ -314,14 +312,10 @@ class ImageFolderDataset(Dataset):
     def _load_raw_image(self, raw_idx):
         fname = self._image_fnames[raw_idx]
         with self._open_file(fname) as f:
-            # if pyspng is not None and self._file_ext(fname) == '.png':
-            #     image = pyspng.load(f.read())
-            # else:
-            image = PIL.Image.open(f)
-            print(image.mode)
-            if image.mode != 'RGB':
-                image = image.convert('RGB')
-            image = np.array(image)
+            if pyspng is not None and self._file_ext(fname) == '.png':
+                image = pyspng.load(f.read())
+            else:
+                image = np.array(PIL.Image.open(f))
         if image.ndim == 2:
             image = image[:, :, np.newaxis] # HW => HWC
         image = image.transpose(2, 0, 1) # HWC => CHW
@@ -350,9 +344,7 @@ class ImageFolderDataset(Dataset):
         assert isinstance(image, np.ndarray)
         image_shape = (3, self.width, self.height) if self.height is not None and self.width is not None else self.image_shape
         if list(image.shape) != image_shape:
-            print(image.shape, image_shape)
             image = cv2.resize(image.transpose(1,2,0), dsize=image_shape[-2:], interpolation=cv2.INTER_CUBIC).transpose(2,0,1)
-            print(image.shape, image_shape)
         assert list(image.shape) == self.image_shape
         assert image.dtype == np.uint8
         if self._xflip[idx]:
