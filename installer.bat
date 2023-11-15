@@ -1,83 +1,135 @@
-@echo on
+@ECHO OFF
 
-set PYTHON=
-set GIT=
-set VENV_DIR=
-set COMMANDLINE_ARGS=
+@REM SET PYTHON=
+@REM SET GIT=
 
-if not defined PYTHON (set PYTHON=python)
-if not defined VENV_DIR (set "VENV_DIR=%~dp0%venv")
+GOTO :entry_point
 
-set ERROR_REPORTING=FALSE
 
-mkdir tmp 2>NUL
+:entry_point
+    IF NOT DEFINED PYTHON (SET PYTHON=python)
+    IF NOT DEFINED GIT (SET GIT=git)
+    IF NOT DEFINED VENV_DIR (SET "VENV_DIR=%~dp0%venv")
 
-%PYTHON% -c "" >tmp/stdout.txt 2>tmp/stderr.txt
-if %ERRORLEVEL% == 0 goto :check_pip
-echo Couldn't launch python
-goto :show_stdout_stderr
+    SET ERROR_REPORTING=FALSE
+    MKDIR tmp 2>NUL
+
+    python --version 2>&1 | FINDSTR /R /C:"^Python 3.10" >NUL
+    IF %ERRORLEVEL% EQU 0 (
+        GOTO :check_requirements
+    )
+    ECHO Couldn't launch python. Please install python 3.10: https://www.python.org/downloads/release/python-3100/
+    GOTO :endofscript
+
+:check_requirements
+    GOTO :check_winsdk_installed
+    GOTO :check_pip
+
+
+:check_winsdk_installed:
+    reg query "HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows Kits\Installed Roots" >NUL
+    IF NOT %ERRORLEVEL% EQU 0 (
+        ECHO Windows Software Development Kit is required: https://developer.microsoft.com/en-us/windows/downloads/windows-sdk/
+        ECHO Microsoft Visual C++ 14.0 or greater is required. Get it with "Microsoft C++ Build Tools": https://visualstudio.microsoft.com/visual-cpp-build-tools/
+        GOTO :endofscript
+    )
 
 :check_pip
-%PYTHON% -mpip --help >tmp/stdout.txt 2>tmp/stderr.txt
-if %ERRORLEVEL% == 0 goto :start_venv
-if "%PIP_INSTALLER_LOCATION%" == "" goto :show_stdout_stderr
-%PYTHON% "%PIP_INSTALLER_LOCATION%" >tmp/stdout.txt 2>tmp/stderr.txt
-if %ERRORLEVEL% == 0 goto :start_venv
-echo Couldn't install pip
-goto :show_stdout_stderr
+    %PYTHON% -mpip --help >tmp/stdout.txt 2>tmp/stderr.txt
+    IF %ERRORLEVEL% == 0 (
+        GOTO :start_venv
+    )
+    IF "%PIP_INSTALLER_LOCATION%" == "" (
+        GOTO :show_stdout_stderr
+    )
+    %PYTHON% "%PIP_INSTALLER_LOCATION%" >tmp/stdout.txt 2>tmp/stderr.txt
+    if %ERRORLEVEL% == 0 (
+        GOTO :start_venv
+    )
+    ECHO Couldn't install pip
+    GOTO :show_stdout_stderr
+
 
 :start_venv
-if ["%VENV_DIR%"] == ["-"] goto :skip_venv
-if ["%SKIP_VENV%"] == ["1"] goto :skip_venv
+    IF ["%VENV_DIR%"] == ["-"] (
+        GOTO :skip_venv
+    )
+    IF ["%SKIP_VENV%"] == ["1"] (
+        GOTO :skip_venv
+    )
 
-dir "%VENV_DIR%\Scripts\Python.exe" >tmp/stdout.txt 2>tmp/stderr.txt
-if %ERRORLEVEL% == 0 goto :activate_venv
+    DIR "%VENV_DIR%\Scripts\Python.exe" >tmp/stdout.txt 2>tmp/stderr.txt
+    IF %ERRORLEVEL% == 0 (
+        GOTO :activate_venv
+    )
 
-for /f "delims=" %%i in ('CALL %PYTHON% -c "import sys; print(sys.executable)"') do set PYTHON_FULLNAME="%%i"
-echo Creating venv in directory %VENV_DIR% using python %PYTHON_FULLNAME%
-%PYTHON_FULLNAME% -m venv "%VENV_DIR%" >tmp/stdout.txt 2>tmp/stderr.txt
-if %ERRORLEVEL% == 0 goto :activate_venv
-echo Unable to create venv in directory "%VENV_DIR%"
-goto :show_stdout_stderr
+    FOR /f "delims=" %%i IN (
+        'CALL %PYTHON% -c "import sys; print(sys.executable)"'
+    ) DO SET PYTHON_FULLNAME="%%i"
+
+    ECHO Creating venv in directory %VENV_DIR% using python %PYTHON_FULLNAME%
+    %PYTHON_FULLNAME% -m venv "%VENV_DIR%" >tmp/stdout.txt 2>tmp/stderr.txt
+
+    IF %ERRORLEVEL% == 0 (
+        GOTO :activate_venv 
+    )
+
+    ECHO Unable to create venv in directory "%VENV_DIR%"
+    GOTO :show_stdout_stderr
+
 
 :activate_venv
-set PYTHON="%VENV_DIR%\Scripts\Python.exe"
-echo venv %PYTHON%
-goto :install_requirements
+    SET PYTHON="%VENV_DIR%\Scripts\Python.exe"
+    ECHO venv %PYTHON%
+    GOTO :install_requirements
+
 
 :skip_venv
-goto :install_requirements
+    GOTO :install_requirements
+
 
 :install_requirements
-%PYTHON% -mpip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu117
-%PYTHON% -mpip install -r requirements.txt
-if %ERRORLEVEL% == 0 goto :launch
+    @REM %PYTHON% -mpip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu117
+    %PYTHON% -mpip install -r requirements.txt
+    IF %ERRORLEVEL% == 0 (
+        GOTO :launch
+    )
+
 
 :launch
-%PYTHON% main.py %*
-pause
-exit /b
+    %PYTHON% main.py %*
+    PAUSE
+    EXIT /b
+
 
 :show_stdout_stderr
+    ECHO.
+    ECHO exit code: %ERRORLEVEL%
 
-echo.
-echo exit code: %errorlevel%
+    FOR /f %%i IN (
+        "tmp\stdout.txt"
+    ) DO SET size=%%~zi
+    IF %size% EQU 0 (
+        GOTO :show_stderr
+    )
+    ECHO.
+    ECHO stdout:
+    TYPE tmp\stdout.txt
 
-for /f %%i in ("tmp\stdout.txt") do set size=%%~zi
-if %size% equ 0 goto :show_stderr
-echo.
-echo stdout:
-type tmp\stdout.txt
 
 :show_stderr
-for /f %%i in ("tmp\stderr.txt") do set size=%%~zi
-if %size% equ 0 goto :show_stderr
-echo.
-echo stderr:
-type tmp\stderr.txt
+    FOR /f %%i IN (
+        "tmp\stderr.txt"
+    ) DO SET size=%%~zi
+    IF %size% EQU 0 (
+        GOTO :show_stderr
+    )
+    ECHO.
+    ECHO stderr:
+    TYPE tmp\stderr.txt
+
 
 :endofscript
-
-echo.
-echo Launch unsuccessful. Exiting.
-pause
+    ECHO.
+    ECHO Launch unsuccessful. Exiting.
+    PAUSE
