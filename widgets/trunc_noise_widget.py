@@ -44,10 +44,11 @@ class TruncationNoiseWidget:
         return func
 
     def get_params(self):
-        return self.params
+        return self.params, self.osc_menu.get_params()
 
     def set_params(self, params):
-        self.params = params
+        self.params, self.osc_params = params
+        self.osc_menu.set_params(self.osc_params)
 
     def save(self, path):
         with open(path, "wb") as f:
