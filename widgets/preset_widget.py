@@ -15,8 +15,13 @@ class PresetWidget:
         self.active = np.asarray([False] * self.num_presets)
 
         self.path = "presets"
+        if len(os.listdir(self.path)) == 0:
+            for i in range(self.num_presets):
+                os.makedirs(self.path + '/' + str(i))
         self.tmp_path = self.path
-        self.paths = np.asarray([f"./{self.path}/{i}" for i in range(self.num_presets)])
+        self.paths = np.asarray([f"{self.path}/{i}" for i in range(self.num_presets)], dtype=object)
+        self.dir_name = np.asarray([f"{i}" for i in range(self.num_presets)], dtype=object)
+        print(self.dir_name)
         self.check_presets()
         self.recent_paths = [self.path]
         self.use_osc = False
@@ -28,15 +33,26 @@ class PresetWidget:
     def check_presets(self):
         if not os.path.exists(self.path):
             os.makedirs(self.path)
+        if len(os.listdir(self.path)) == 0:
+            for i in range(self.num_presets):
+                os.makedirs(self.path + '/' + str(i))
         self.assigned = np.ones(self.num_presets)
+        print(self.assigned)
         for p in os.listdir(self.path):
-            self.assigned[int(p)] = 0
+            #get index of directory
+            print(p)
+            print(self.dir_name)
+            i = np.where(self.dir_name==p)[0]
+            self.assigned[i] = 1
 
     def open_path(self, path):
         try:
             if not os.path.exists(path):
                 os.makedirs(path)
-            self.paths = np.asarray([f"./{self.path}/{i}" for i in range(self.num_presets)])
+            if len(os.listdir(self.path)) == 0:
+                for i in range(self.num_presets):
+                    os.makedirs(self.path + '/' + str(i))
+            self.paths = np.asarray([f"{path}/{i}" for i in range(self.num_presets)], dtype=object)
             self.path = self.tmp_path
             self.check_presets()
         except Exception as e:
@@ -53,6 +69,7 @@ class PresetWidget:
             self.viz.adjuster_widget.save(f"{path}/adjuster.pkl")
             self.viz.looping_widget.save(f"{path}/looper.pkl")
             self.viz.pickle_widget.save(f"{path}/pickle.pkl")
+            self.viz.collapsed_widget.save(f"{path}/collap.pkl")
             self.assigned[np.where(self.active)] = 0
         except Exception as e:
             print(e)
@@ -66,6 +83,7 @@ class PresetWidget:
             self.viz.adjuster_widget.load(f"{path}/adjuster.pkl")
             self.viz.looping_widget.load(f"{path}/looper.pkl")
             self.viz.pickle_widget.load(f"{path}/pickle.pkl")
+            self.viz.collapsed_widget.load(f"{path}/collap.pkl")
             self.viz.app.skip_frame()
         except Exception as e:
             print(e)
@@ -84,9 +102,22 @@ class PresetWidget:
 
         if show:
             for i in range(len(self.active)):
+                imgui.begin_group()
                 self.preset_checkbox(i)
                 imgui.same_line()
-
+                with imgui_utils.item_width(viz.app.button_w * 4):
+                    dir_name_copy = self.dir_name[i]
+                    # print(self.dir_name)
+                    _changed, dir_name = imgui_utils.input_text(f"##preset name {i}", dir_name_copy, 256, flags=imgui.INPUT_TEXT_ENTER_RETURNS_TRUE, help_text="Set name for preset "+str(i))
+                    if _changed:
+                        print(dir_name_copy)
+                        print(dir_name)
+                        self.dir_name[i] = str(dir_name)
+                        self.paths[i] = str(self.tmp_path + '/' + self.dir_name[i])
+                        print(self.paths)
+                        if dir_name_copy in os.listdir(self.path):
+                            os.rename(self.tmp_path + '/' + dir_name_copy,  self.paths[i])
+                imgui.end_group()
             imgui.same_line()
             if imgui_utils.button('Load##presets', width=viz.app.button_w):
                 self.load(self.paths[np.where(self.active)].item())
