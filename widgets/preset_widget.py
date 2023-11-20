@@ -13,14 +13,18 @@ class PresetWidget:
         self.num_presets = 12
         self.c_inactive = imgui.get_style().colors[imgui.COLOR_MENUBAR_BACKGROUND]
         self.active = np.asarray([False] * self.num_presets)
+        self.dir_name = np.asarray([f"{i}" for i in range(self.num_presets)], dtype=object)
 
         self.path = "presets"
         if len(os.listdir(self.path)) == 0:
             for i in range(self.num_presets):
                 os.makedirs(self.path + '/' + str(i))
+        else:
+            print(self.path)
+            for i, dir in enumerate(os.listdir(self.path)):
+                self.dir_name[i] = dir
         self.tmp_path = self.path
         self.paths = np.asarray([f"{self.path}/{i}" for i in range(self.num_presets)], dtype=object)
-        self.dir_name = np.asarray([f"{i}" for i in range(self.num_presets)], dtype=object)
         print(self.dir_name)
         self.check_presets()
         self.recent_paths = [self.path]
@@ -49,10 +53,15 @@ class PresetWidget:
         try:
             if not os.path.exists(path):
                 os.makedirs(path)
-            if len(os.listdir(self.path)) == 0:
+            print(path, os.listdir(path))
+            if len(os.listdir(path)) == 0:
                 for i in range(self.num_presets):
-                    os.makedirs(self.path + '/' + str(i))
-            self.paths = np.asarray([f"{path}/{i}" for i in range(self.num_presets)], dtype=object)
+                    os.makedirs(path + '/' + self.dir_name[i])
+            else:
+                for i, dir in enumerate(os.listdir(path)):
+                    self.dir_name[i] = dir
+            self.paths = np.asarray([f"{path}/{self.dir_name[i]}" for i in range(self.num_presets)], dtype=object)
+            print('paden: ' + str(self.paths))
             self.path = self.tmp_path
             self.check_presets()
         except Exception as e:
