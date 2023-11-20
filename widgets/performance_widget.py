@@ -95,6 +95,7 @@ class PerformanceWidget:
 
             if changed_port or changed_ip:
                 self.viz.server.shutdown()
+                self.viz.server.server_close()
                 self.viz.server_thread.join()
                 self.viz.server = BlockingOSCUDPServer((self.viz.in_ip, self.viz.in_port), self.viz.osc_dispatcher)
                 print("new server", self.viz.in_ip, self.viz.in_port)
