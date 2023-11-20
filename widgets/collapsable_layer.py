@@ -863,7 +863,7 @@ class LayerWidget:
             try:
                 # assert (type(args[-1] is type(self.img_scale_db)),
                 #         f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {type(self.img_scale_db)}")
-                self.img_scale_db = bool(args[-1])
+                self.img_scale_db = float(args[-1])
             except Exception as e:
                 self.viz.print_error(e)
 
