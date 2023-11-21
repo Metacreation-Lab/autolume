@@ -27,6 +27,7 @@ class PCA_Module:
         self.save_path = os.path.join(cwd,"ganspace_features")
 
         self.menu = menu
+        self.app = menu.app
         self.G = None
         self.user_pkl = ''
         self.pca_mode = 0

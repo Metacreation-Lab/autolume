@@ -56,6 +56,7 @@ class PresetWidget:
             print(path, os.listdir(path))
             if len(os.listdir(path)) == 0:
                 for i in range(self.num_presets):
+                    self.dir_name = np.asarray([f"{i}" for i in range(self.num_presets)], dtype=object)
                     os.makedirs(path + '/' + self.dir_name[i])
             else:
                 for i, dir in enumerate(os.listdir(path)):
