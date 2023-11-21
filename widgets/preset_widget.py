@@ -184,13 +184,9 @@ class PresetWidget:
                                              self.osc_handler)
 
     def osc_handler(self, address, *args):
-        try:
-            value = int(args[-1])
-            if value > len(self.active):
-                value = len(self.active) - 1
-            value = max(value, 0)
-            self.active *= False
-            self.active[value] = True
-            self.load(self.paths[np.where(self.active)].item())
-        except Exception as e:
-            print(e, "preset")
+        value = str(args[-1])
+        index = np.where(self.dir_name == value)
+        self.active *= False
+        self.active[index]=True
+        self.load(self.paths[np.where(self.active)].item())
+
