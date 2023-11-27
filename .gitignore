@@ -32,6 +32,9 @@ MANIFEST
 *.manifest
 *.spec
 
+#Don't push models
+models/
+
 # Installer logs
 pip-log.txt
 pip-delete-this-directory.txt

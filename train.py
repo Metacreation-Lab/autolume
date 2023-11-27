@@ -258,7 +258,7 @@ def main(queue, reply):
         c.D_kwargs.backbone_kwargs.num_discs = 4
         c.D_kwargs.backbone_kwargs.separable = True
         c.D_kwargs.backbone_kwargs.cond = opts.cond
-        c.loss_kwargs.r1_gamma = 0
+        c.loss_kwargs.r1_gamma = opts.gamma
     else:
         c.D_kwargs = dnnlib.EasyDict(class_name='architectures.custom_stylegan2.Discriminator',
                                      block_kwargs=dnnlib.EasyDict(), mapping_kwargs=dnnlib.EasyDict(),
