@@ -14,6 +14,7 @@ augs = ["ADA", "DiffAUG"]
 ada_pipes = ['blit', 'geom', 'color', 'filter', 'noise', 'cutout', 'bg', 'bgc', 'bgcf', 'bgcfn', 'bgcfnc']
 diffaug_pipes = ['color,translation,cutout', 'color,translation', 'color,cutout', 'color',
                  'translation', 'cutout,translation', 'cutout']
+configs = ['auto', 'stylegan2', 'paper256', 'paper512', 'paper1024', 'cifar']
 
 class TrainingModule:
     def __init__(self, menu):
@@ -25,6 +26,7 @@ class TrainingModule:
             os.makedirs(os.path.abspath(os.path.join(os.getcwd(),"data")))
         self.file_dialog = BrowseWidget(menu, "Dataset", os.path.abspath(os.path.join(os.getcwd(),"data")), ["*",""], multiple=False, traverse_folders=False, width=menu.app.button_w)
         self.app = menu.app
+        self.config = 1
         self.resume_pkl = ""
         self.start_res = [4,4]
         self.browse_cache = []
@@ -55,6 +57,11 @@ class TrainingModule:
         self.fps = 10
         self.found_video = False
         self._zipfile = None
+        self.gamma = 10
+        self.glr = 0.002
+        self.dlr = 0.002
+        self.snap = 4
+        self.mirror = True
 
     @staticmethod
     def _file_ext(fname):
@@ -169,6 +176,24 @@ class TrainingModule:
         _, self.batch_size = imgui.input_int("Batch Size", self.batch_size)
         if self.batch_size < 1:
             self.batch_size = 1
+        
+        _, self.config = imgui.combo("Configuration", self.config, configs)
+
+        imgui.set_next_window_size( self.menu.app.content_width // 4, (self.menu.app.content_height // 4), imgui.ONCE)
+
+        if imgui.button("Advanced...", width=-1):
+            imgui.open_popup("Advanced...")
+
+        if imgui.begin_popup_modal("Advanced...")[0]:
+            imgui.text("Advanced Training Options")
+            _, self.glr = imgui.input_float("Generator Learning Rate", self.glr)
+            _, self.dlr = imgui.input_float("Discriminator Learning Rate", self.dlr)
+            _, self.gamma = imgui.input_int("Gamma", self.gamma)
+            _, self.snap = imgui.input_int("Number of ticks between snapshots", self.snap)
+            _, self.mirror = imgui.checkbox('Mirror', self.mirror)
+            if imgui_utils.button("Done", enabled=1):
+                imgui.close_current_popup()
+            imgui.end_popup()
 
 
         if imgui.button("Train", width=-1):
@@ -177,15 +202,15 @@ class TrainingModule:
             kwargs = dnnlib.EasyDict(
                 outdir=self.save_path,
                 data=self.data_path,
-                cfg="stylegan2",
+                cfg=configs[self.config],
                 batch=self.batch_size,
                 topk=None,
                 gpus=1,
-                gamma=10,
+                gamma=self.gamma,
                 z_dim=512,
                 w_dim=512,
                 cond=False,
-                mirror=True,
+                mirror=self.mirror,
                 resolution=(int(self.img_size), int(self.height)),
                 aug="ada" if augs[self.aug] == "ADA" else "noaug",
                 augpipe=ada_pipes[self.ada_pipe],
@@ -196,8 +221,8 @@ class TrainingModule:
                 batch_gpu=self.batch_size//1, #gpus param?
                 cbase=32768,
                 cmax=512,
-                glr=None,
-                dlr=0.002,
+                glr=self.glr,
+                dlr=self.dlr,
                 map_depth=8,
                 mbstd_group=4,
                 initstrength=None,
@@ -208,7 +233,7 @@ class TrainingModule:
                 kimg=25000,
                 nkimg=0,
                 tick=4,
-                snap=1,
+                snap=self.snap,
                 seed=0,
                 nobench=False,
                 dry_run=False,
