@@ -77,8 +77,7 @@ class AudioWidget:
         if self.use_osc[key]:
             try:
                 f = lambda x: eval(self.mappings[key])
-                viz.osc_client.send_message(f"/{self.osc_addresses[key]}", [f(signal).tolist()])
-                print(f"/{self.osc_addresses[key]}", f(signal).tolist())
+                viz.osc_client.send_message(self.osc_addresses[key], [f(signal).tolist()])
             except Exception as e:
                 print(e)
     @staticmethod
@@ -93,7 +92,6 @@ class AudioWidget:
                 if use_osc:
                     f = lambda x: eval(mapping)
                     osc_client.send_message(address, [f(signal).tolist()])
-                    print(address, f(signal).tolist())
             except Exception as e:
                 print(e)
 

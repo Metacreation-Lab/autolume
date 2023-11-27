@@ -84,7 +84,7 @@ class LayerWidget:
         self.tab = False
         self.simplified = True
 
-        funcs = {"Grayscale": self.grayscale_osc(), "Contrast": self.contrast_osc(), "Normalize": self.normalize_osc(), "Channels": self.channels_osc()}
+        funcs = {"Grayscale": self.grayscale_osc(), "Contrast": self.contrast_osc()}
         self.osc_menu = osc_menu.OscMenu(self.viz, funcs, None, label="##LayerOSCMenu")
 
         # read as rgba
@@ -845,9 +845,9 @@ class LayerWidget:
     def grayscale_osc(self):
         def func(address, *args):
             try:
-                # assert type(args[
-                #                 -1]) is bool, f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {bool}"
-                if bool(args[-1]):
+                assert type(args[
+                                -1]) is bool, f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {bool}"
+                if args[-1]:
                     self.sel_channels = 1
                 else:
                     self.sel_channels = 3
@@ -868,30 +868,7 @@ class LayerWidget:
                 self.viz.print_error(e)
 
         return func
-    
-    def normalize_osc(self):
-        def func(address, *args):
-            try:
-                # assert (type(args[-1] is type(self.img_normalize)),
-                #         f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {type(self.img_normalize)}")
-                self.img_normalize = bool(args[-1])
-            except Exception as e:
-                self.viz.print_error(e)
 
-        return func
-
-    def channels_osc(self):
-        def func(address, *args):
-            try:
-                nec_type = type(self.base_channel)
-                # assert (type(args[-1] is type(self.base_channel)),
-                #         f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {type(self.img_scale_db)}")
-                base_channel_max = max(self.capture_channels - self.sel_channels, 0)
-                self.base_channel = min(nec_type(args[-1]), base_channel_max)
-            except Exception as e:
-                self.viz.print_error(e)
-
-        return func
 @contextlib.contextmanager
 def greened_out(cond=True):
     if cond:
