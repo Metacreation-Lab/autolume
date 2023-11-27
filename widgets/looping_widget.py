@@ -93,7 +93,7 @@ def noise_loop(args_queue, results_queue):
 
 class LoopingWidget:
     def __init__(self, viz):
-        self.params = dnnlib.EasyDict(num_keyframes=6, mode=True, anim=False, index=0, looptime=4, perfect_loop=False)
+        self.params = dnnlib.EasyDict(num_keyframes=6, mode=True, anim=False, index=0, looptime=4)
         self.use_osc = dnnlib.EasyDict(zip(self.params.keys(), [False] * len(self.params)))
         self.step_y = 100
         self.viz = viz
@@ -132,12 +132,10 @@ class LoopingWidget:
         # flag that tells us we need to stop loop necessary for reverse looping
         self.stop_loop = False
 
-        funcs = dict(zip(["Animate", "Number of Keyframes", "Time", "Index", "Perfect Loop"], [self.osc_handler(param) for param in
+        funcs = dict(zip(["Animate", "Number of Keyframes", "Time", "Index"], [self.osc_handler(param) for param in
                                                                                   ["anim", "num_keyframes", "looptime",
-                                                                                   "index", "perfect_loop"]]))
+                                                                                   "index"]]))
         funcs["Alpha"] = self.alpha_handler()
-
-        funcs["Perfect Loop"] = self.perfect_loop_handler()
 
         self.time_osc_menu = osc_menu.OscMenu(self.viz, copy.deepcopy(funcs), None,
                                          label="##LoopingTimeOSC")
@@ -178,11 +176,11 @@ class LoopingWidget:
     def osc_handler(self, param):
         def func(address, *args):
             try:
-                nec_type = type(self.params[param])
-                # assert (type(args[-1]) is type(self.params[
-                #                                    param])), f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {type(self.params[param])}"
+                assert (type(args[-1]) is type(self.params[
+                                                   param])), f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {type(self.params[param])}"
                 self.use_osc[param] = True
-                self.params[param] = nec_type(args[-1])
+                self.params[param] = args[-1]
+                print(self.params[param], args[-1])
             except Exception as e:
                 self.viz.print_error(e)
 
@@ -597,8 +595,8 @@ class LoopingWidget:
     def speed_handler(self):
         def func(address, *args):
             try:
-                # assert (type(args[-1]) is type(self.speed)), f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {type(self.speed)}"
-                self.speed = float(args[-1])
+                assert (type(args[-1]) is type(self.speed)), f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {type(self.speed)}"
+                self.speed = args[-1]
                 self.update = True
             except Exception as e:
                 self.viz.print_error(e)
@@ -607,20 +605,9 @@ class LoopingWidget:
     def radius_handler(self):
         def func(address, *args):
             try:
-                #assert (type(args[-1]) is type(self.radius)), f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {type(self.radius)}"
-                self.radius = float(args[-1])
+                assert (type(args[-1]) is type(self.radius)), f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {type(self.radius)}"
+                self.radius = args[-1]
                 self.update = True
             except Exception as e:
                 self.viz.print_error(e)
         return func
-    
-    def perfect_loop_handler(self):
-        def func(address, *args):
-            try:
-                #assert (type(args[-1]) is type(self.perfect_loop)), f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {type(self.perfect_loop)}"
-                self.perfect_loop = bool(args[-1])
-                self.update = True
-            except Exception as e:
-                self.viz.print_error(e)
-        return func
-
