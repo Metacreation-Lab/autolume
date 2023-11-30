@@ -15,6 +15,7 @@ import re
 import json
 import tempfile
 import torch
+import traceback
 
 import dnnlib as dnnlib
 from training import training_loop
@@ -24,31 +25,35 @@ from torch_utils import training_stats, custom_ops
 
 #----------------------------------------------------------------------------
 
-def subprocess_fn(rank, c, temp_dir):
+def subprocess_fn(rank, c, temp_dir, queue, reply):
     dnnlib.util.Logger(file_name=os.path.join(c.run_dir, 'log.txt'), file_mode='a', should_flush=True)
 
-    # Init torch.distributed.
-    if c.num_gpus > 1:
-        init_file = os.path.abspath(os.path.join(temp_dir, '.torch_distributed_init'))
-        if os.name == 'nt':
-            init_method = 'file:///' + init_file.replace('\\', '/')
-            torch.distributed.init_process_group(backend='gloo', init_method=init_method, rank=rank, world_size=c.num_gpus)
-        else:
-            init_method = f'file://{init_file}'
-            torch.distributed.init_process_group(backend='nccl', init_method=init_method, rank=rank, world_size=c.num_gpus)
+    try:
+        # Init torch.distributed.
+        if c.num_gpus > 1:
+            init_file = os.path.abspath(os.path.join(temp_dir, '.torch_distributed_init'))
+            if os.name == 'nt':
+                init_method = 'file:///' + init_file.replace('\\', '/')
+                torch.distributed.init_process_group(backend='gloo', init_method=init_method, rank=rank, world_size=c.num_gpus)
+            else:
+                init_method = f'file://{init_file}'
+                torch.distributed.init_process_group(backend='nccl', init_method=init_method, rank=rank, world_size=c.num_gpus)
 
-    # Init torch_utils.
-    sync_device = torch.device('cuda', rank) if c.num_gpus > 1 else None
-    training_stats.init_multiprocessing(rank=rank, sync_device=sync_device)
-    if rank != 0:
-        custom_ops.verbosity = 'none'
+        # Init torch_utils.
+        sync_device = torch.device('cuda', rank) if c.num_gpus > 1 else None
+        training_stats.init_multiprocessing(rank=rank, sync_device=sync_device)
+        print(rank)
+        if rank != 0:
+            custom_ops.verbosity = 'none'
 
-    # Execute training loop.
-    training_loop.training_loop(rank=rank, **c)
+        # Execute training loop.
+        training_loop.training_loop(rank=rank, **c, queue=queue, reply=reply)
+    except:
+        reply.put(['Exception occured in subprocess_fn...', True])
 
 #----------------------------------------------------------------------------
 
-def launch_training(c, desc, outdir, dry_run):
+def launch_training(c, desc, outdir, dry_run, queue, reply):
     dnnlib.util.Logger(should_flush=True)
 
     # Pick output directory.
@@ -64,6 +69,7 @@ def launch_training(c, desc, outdir, dry_run):
     # Print options.
     print()
     print('Training options:')
+    reply.put(['Training options:' + json.dumps(c, indent=2), False])
     print(json.dumps(c, indent=2))
     print()
     print(f'Output directory:    {c.run_dir}')
@@ -93,10 +99,11 @@ def launch_training(c, desc, outdir, dry_run):
     print('Launching processes...')
     try:
         torch.multiprocessing.set_start_method('spawn', force=True)
-    except RuntimeError as e:
-        print(e)
-    with tempfile.TemporaryDirectory() as temp_dir:
-        subprocess_fn(rank=0, c=c, temp_dir=temp_dir)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            print('Got here')
+            subprocess_fn(rank=0, c=c, temp_dir=temp_dir, queue=queue, reply=reply)
+    except:
+        reply.put(['Exception occured in launch_training...', True])
 
 #----------------------------------------------------------------------------
 
@@ -188,206 +195,218 @@ def clickmain(**kwargs):
     main(**kwargs)
 
 def main(queue, reply):
-    """Train a GAN using the techniques described in the paper
-    "Alias-Free Generative Adversarial Networks".
+    try:
+        """Train a GAN using the techniques described in the paper
+        "Alias-Free Generative Adversarial Networks".
 
-    Examples:
+        Examples:
 
-    \b
-    # Train StyleGAN3-T for AFHQv2 using 8 GPUs.
-    python train.py --outdir=~/training-runs --cfg=stylegan3-t --data=~/datasets/afhqv2-512x512.zip \\
-        --gpus=8 --batch=32 --gamma=8.2 --mirror=1
+        \b
+        # Train StyleGAN3-T for AFHQv2 using 8 GPUs.
+        python train.py --outdir=~/training-runs --cfg=stylegan3-t --data=~/datasets/afhqv2-512x512.zip \\
+            --gpus=8 --batch=32 --gamma=8.2 --mirror=1
 
-    \b
-    # Fine-tune StyleGAN3-R for MetFaces-U using 1 GPU, starting from the pre-trained FFHQ-U pickle.
-    python train.py --outdir=~/training-runs --cfg=stylegan3-r --data=~/datasets/metfacesu-1024x1024.zip \\
-        --gpus=8 --batch=32 --gamma=6.6 --mirror=1 --kimg=5000 --snap=5 \\
-        --resume=https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan3/versions/1/files/stylegan3-r-ffhqu-1024x1024.pkl
+        \b
+        # Fine-tune StyleGAN3-R for MetFaces-U using 1 GPU, starting from the pre-trained FFHQ-U pickle.
+        python train.py --outdir=~/training-runs --cfg=stylegan3-r --data=~/datasets/metfacesu-1024x1024.zip \\
+            --gpus=8 --batch=32 --gamma=6.6 --mirror=1 --kimg=5000 --snap=5 \\
+            --resume=https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan3/versions/1/files/stylegan3-r-ffhqu-1024x1024.pkl
 
-    \b
-    # Train StyleGAN2 for FFHQ at 1024x1024 resolution using 8 GPUs.
-    python train.py --outdir=~/training-runs --cfg=stylegan2 --data=~/datasets/ffhq-1024x1024.zip \\
-        --gpus=8 --batch=32 --gamma=10 --mirror=1 --aug=noaug
-    """
+        \b
+        # Train StyleGAN2 for FFHQ at 1024x1024 resolution using 8 GPUs.
+        python train.py --outdir=~/training-runs --cfg=stylegan2 --data=~/datasets/ffhq-1024x1024.zip \\
+            --gpus=8 --batch=32 --gamma=10 --mirror=1 --aug=noaug
+        """
 
-    # Initialize config.
-    kwargs = queue.get()
-    print("kwargs", kwargs)
+        # Initialize config.
+        kwargs = queue.get()
+        print("kwargs", kwargs)
 
-    opts = dnnlib.EasyDict(**kwargs) # Command line arguments.
-    c = dnnlib.EasyDict() # Main config dict.
-    reply.put(['Configuring Models...', False])
-    c.G_kwargs = dnnlib.EasyDict(class_name=None, z_dim=opts.z_dim, w_dim=opts.w_dim, mapping_kwargs=dnnlib.EasyDict())
-    c.G_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=[0, 0.99], eps=1e-8)
-    c.D_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=[0, 0.99], eps=1e-8)
-    c.loss_kwargs = dnnlib.EasyDict(class_name='training.losses.scratch_loss.StyleGAN2Loss', kd_l1_lambda=opts.kd_l1_lambda, kd_lpips_lambda=opts.kd_lpips_lambda, kd_mode=opts.kd_mode,
-                                       content_aware_KD=opts.content_aware_kd, LPIPS_IMAGE_SIZE=opts.lpips_image_size)
-    c.data_loader_kwargs = dnnlib.EasyDict(pin_memory=True, prefetch_factor=2)
+        opts = dnnlib.EasyDict(**kwargs) # Command line arguments.
+        c = dnnlib.EasyDict() # Main config dict.
+        reply.put(['Configuring Models...', False])
+        c.G_kwargs = dnnlib.EasyDict(class_name=None, z_dim=opts.z_dim, w_dim=opts.w_dim, mapping_kwargs=dnnlib.EasyDict())
+        c.G_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=[0, 0.99], eps=1e-8)
+        c.D_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=[0, 0.99], eps=1e-8)
+        c.loss_kwargs = dnnlib.EasyDict(class_name='training.losses.scratch_loss.StyleGAN2Loss', kd_l1_lambda=opts.kd_l1_lambda, kd_lpips_lambda=opts.kd_lpips_lambda, kd_mode=opts.kd_mode,
+                                        content_aware_KD=opts.content_aware_kd, LPIPS_IMAGE_SIZE=opts.lpips_image_size)
+        c.data_loader_kwargs = dnnlib.EasyDict(pin_memory=True, prefetch_factor=2)
 
-    # Training set.
-    c.training_set_kwargs, dataset_name, init_res = init_dataset_kwargs(data=opts.data, resolution=opts.resolution, height=opts.resolution[1], width=opts.resolution[0], fps=opts.fps)
-    if opts.cond and not c.training_set_kwargs.use_labels:
-        raise click.ClickException('--cond=True requires labels specified in dataset.json')
-    c.training_set_kwargs.use_labels = opts.cond
-    c.training_set_kwargs.xflip = opts.mirror
+        # Training set.
+        c.training_set_kwargs, dataset_name, init_res = init_dataset_kwargs(data=opts.data, resolution=opts.resolution, height=opts.resolution[1], width=opts.resolution[0], fps=opts.fps)
+        if opts.cond and not c.training_set_kwargs.use_labels:
+            raise click.ClickException('--cond=True requires labels specified in dataset.json')
+        c.training_set_kwargs.use_labels = opts.cond
+        c.training_set_kwargs.xflip = opts.mirror
 
-    # Hyperparameters & settings.
+        # Hyperparameters & settings.
 
-    c.num_gpus = opts.gpus
-    c.batch_size = opts.batch
-    c.batch_gpu = opts.batch_gpu or opts.batch // opts.gpus
-    c.G_kwargs.channel_base = opts.cbase
-    c.G_kwargs.channel_max = opts.cmax
-    c.G_kwargs.mapping_kwargs.num_layers = (8 if opts.cfg == 'stylegan2' else 2) if opts.map_depth is None else opts.map_depth
-    if opts.teacher is not None:
-        reply.put(['Loading Teacher...', False])
-        assert isinstance(opts.teacher, str)
-        c.teacher = opts.teacher
-    c.projected = opts.projected
-    if opts.projected:
-        reply.put(['Using Projected Discriminator...', False])
-        c.D_kwargs = dnnlib.EasyDict(
-            class_name='architectures.pg_modules.discriminator.ProjectedDiscriminator',
-            diffaug=True,
-            interp224=(c.training_set_kwargs.resolution < 224),
-            backbone_kwargs=dnnlib.EasyDict(),
-        )
-        c.D_kwargs.backbone_kwargs.cout = 64
-        c.D_kwargs.backbone_kwargs.expand = True
-        c.D_kwargs.backbone_kwargs.proj_type = 2
-        c.D_kwargs.backbone_kwargs.num_discs = 4
-        c.D_kwargs.backbone_kwargs.separable = True
-        c.D_kwargs.backbone_kwargs.cond = opts.cond
-        c.loss_kwargs.r1_gamma = opts.gamma
-    else:
-        c.D_kwargs = dnnlib.EasyDict(class_name='architectures.custom_stylegan2.Discriminator',
-                                     block_kwargs=dnnlib.EasyDict(), mapping_kwargs=dnnlib.EasyDict(),
-                                     epilogue_kwargs=dnnlib.EasyDict())
-        c.D_kwargs.channel_base = opts.cbase
-        c.D_kwargs.block_kwargs.freeze_layers = opts.freezed
-        c.D_kwargs.epilogue_kwargs.mbstd_group_size = opts.mbstd_group
-        c.D_kwargs.channel_max = opts.cmax
-        c.loss_kwargs.r1_gamma = opts.gamma
-    c.G_opt_kwargs.lr = (0.002 if opts.cfg == 'stylegan2' else 0.0025) if opts.glr is None else opts.glr
-    c.D_opt_kwargs.lr = opts.dlr
-    c.metrics = opts.metrics
-    c.total_kimg = opts.kimg
-    c.kimg_per_tick = opts.tick
-    c.image_snapshot_ticks = c.network_snapshot_ticks = opts.snap
-    c.random_seed = c.training_set_kwargs.random_seed = opts.seed
-    c.data_loader_kwargs.num_workers = opts.workers
-
-
-    if list(init_res) != [4, 4]:
-        print(' custom init resolution', init_res)
-        c.G_kwargs.init_res = c.D_kwargs.init_res = list(init_res)
-
-    # Sanity checks.
-    if c.batch_size % c.num_gpus != 0:
-        raise click.ClickException('--batch must be a multiple of --gpus')
-    if c.batch_size % (c.num_gpus * c.batch_gpu) != 0:
-        raise click.ClickException('--batch must be a multiple of --gpus times --batch-gpu')
-    if not opts.projected:
-        if c.batch_gpu < c.D_kwargs.epilogue_kwargs.mbstd_group_size:
-            raise click.ClickException('--batch-gpu cannot be smaller than --mbstd')
-    if any(not metric_main.is_valid_metric(metric) for metric in c.metrics):
-        raise click.ClickException('\n'.join(['--metrics can only contain the following values:'] + metric_main.list_valid_metrics()))
-
-    # Base configuration.
-    c.ema_kimg = c.batch_size * 10 / 32
-    if opts.cfg == 'stylegan2':
-        c.G_kwargs.class_name = 'architectures.custom_stylegan2.Generator' if opts.custom else 'architectures.networks_stylegan2.Generator'
-        c.loss_kwargs.style_mixing_prob = 0.9 # Enable style mixing regularization.
-        c.loss_kwargs.pl_weight = 2 # Enable path length regularization.
-        c.G_reg_interval = 4 # Enable lazy regularization for G.
-        c.G_kwargs.fused_modconv_default = 'inference_only' # Speed up training by using regular convolutions instead of grouped convolutions.
-        c.loss_kwargs.pl_no_weight_grad = True # Speed up path length regularization by skipping gradient computation wrt. conv2d weights.
-    else:
-        c.G_kwargs.class_name = 'architectures.networks_stylegan3.Generator'
-        c.G_kwargs.magnitude_ema_beta = 0.5 ** (c.batch_size / (20 * 1e3))
-        if opts.cfg == 'stylegan3-r':
-            c.G_kwargs.conv_kernel = 1 # Use 1x1 convolutions.
-            c.G_kwargs.channel_base *= 2 # Double the number of feature maps.
-            c.G_kwargs.channel_max *= 2
-            c.G_kwargs.use_radial_filters = True # Use radially symmetric downsampling filters.
-            c.loss_kwargs.blur_init_sigma = 10 # Blur the images seen by the discriminator.
-            c.loss_kwargs.blur_fade_kimg = c.batch_size * 200 / 32 # Fade out the blur during the first N kimg.
-
-    if opts.topk is not None:
-        print("topking-------")
-        assert isinstance(opts.topk, float)
-        c.loss_kwargs.G_top_k = True
-        c.loss_kwargs.G_top_k_gamma = opts.topk
-        c.loss_kwargs.G_top_k_frac = 0.5
-
-    augpipe_specs = {
-        'blit': dict(xflip=1, rotate90=1, xint=1),
-        'geom': dict(scale=1, rotate=1, aniso=1, xfrac=1),
-        'color': dict(brightness=1, contrast=1, lumaflip=1, hue=1, saturation=1),
-        'filter': dict(imgfilter=1),
-        'noise': dict(noise=1),
-        'cutout': dict(cutout=1),
-        'bg': dict(xflip=1, rotate90=1, xint=1, scale=1, rotate=1, aniso=1, xfrac=1),
-        'bgc': dict(xflip=1, rotate90=1, xint=1, scale=1, rotate=1, aniso=1, xfrac=1, brightness=1, contrast=1,
-                    lumaflip=1, hue=1, saturation=1),
-        'bgcf': dict(xflip=1, rotate90=1, xint=1, scale=1, rotate=1, aniso=1, xfrac=1, brightness=1, contrast=1,
-                     lumaflip=1, hue=1, saturation=1, imgfilter=1),
-        'bgcfn': dict(xflip=1, rotate90=1, xint=1, scale=1, rotate=1, aniso=1, xfrac=1, brightness=1, contrast=1,
-                      lumaflip=1, hue=1, saturation=1, imgfilter=1, noise=1),
-        'bgcfnc': dict(xflip=1, rotate90=1, xint=1, scale=1, rotate=1, aniso=1, xfrac=1, brightness=1, contrast=1,
-                       lumaflip=1, hue=1, saturation=1, imgfilter=1, noise=1, cutout=1),
-    }
-
-    # Augmentation.
-    aug = opts.aug
-    if opts.aug is None and opts.diffaugment is None:
-        aug = 'ada'
-    elif opts.diffaugment:
-        c.loss_kwargs.diffaugment = opts.diffaugment
-        aug = 'noaug'
+        c.num_gpus = opts.gpus
+        c.batch_size = opts.batch
+        c.batch_gpu = opts.batch_gpu or opts.batch // opts.gpus
+        c.G_kwargs.channel_base = opts.cbase
+        c.G_kwargs.channel_max = opts.cmax
+        c.G_kwargs.mapping_kwargs.num_layers = (8 if opts.cfg == 'stylegan2' else 2) if opts.map_depth is None else opts.map_depth
+        if opts.teacher is not None:
+            reply.put(['Loading Teacher...', False])
+            assert isinstance(opts.teacher, str)
+            c.teacher = opts.teacher
+        c.projected = opts.projected
+        if opts.projected:
+            reply.put(['Using Projected Discriminator...', False])
+            c.D_kwargs = dnnlib.EasyDict(
+                class_name='architectures.pg_modules.discriminator.ProjectedDiscriminator',
+                diffaug=True,
+                interp224=(c.training_set_kwargs.resolution < 224),
+                backbone_kwargs=dnnlib.EasyDict(),
+            )
+            c.D_kwargs.backbone_kwargs.cout = 64
+            c.D_kwargs.backbone_kwargs.expand = True
+            c.D_kwargs.backbone_kwargs.proj_type = 2
+            c.D_kwargs.backbone_kwargs.num_discs = 4
+            c.D_kwargs.backbone_kwargs.separable = True
+            c.D_kwargs.backbone_kwargs.cond = opts.cond
+            c.loss_kwargs.r1_gamma = opts.gamma
+        else:
+            c.D_kwargs = dnnlib.EasyDict(class_name='architectures.custom_stylegan2.Discriminator',
+                                        block_kwargs=dnnlib.EasyDict(), mapping_kwargs=dnnlib.EasyDict(),
+                                        epilogue_kwargs=dnnlib.EasyDict())
+            c.D_kwargs.channel_base = opts.cbase
+            c.D_kwargs.block_kwargs.freeze_layers = opts.freezed
+            c.D_kwargs.epilogue_kwargs.mbstd_group_size = opts.mbstd_group
+            c.D_kwargs.channel_max = opts.cmax
+            c.loss_kwargs.r1_gamma = opts.gamma
+        c.G_opt_kwargs.lr = (0.002 if opts.cfg == 'stylegan2' else 0.0025) if opts.glr is None else opts.glr
+        c.D_opt_kwargs.lr = opts.dlr
+        c.metrics = opts.metrics
+        c.total_kimg = opts.kimg
+        c.kimg_per_tick = opts.tick
+        c.image_snapshot_ticks = c.network_snapshot_ticks = opts.snap
+        c.random_seed = c.training_set_kwargs.random_seed = opts.seed
+        c.data_loader_kwargs.num_workers = opts.workers
 
 
+        if list(init_res) != [4, 4]:
+            print(' custom init resolution', init_res)
+            c.G_kwargs.init_res = c.D_kwargs.init_res = list(init_res)
 
-    if aug != 'noaug':
-        assert opts.augpipe is None or isinstance(opts.augpipe, str)
-        augpipe = opts.augpipe
-        if augpipe is None:
-            augpipe = 'bgc'
-        c.augment_kwargs = dnnlib.EasyDict(class_name='training.augment.AugmentPipe', **augpipe_specs[augpipe])
-        if opts.aug == 'ada':
-            c.ada_target = opts.target
-        if opts.aug == 'fixed':
-            c.augment_p = opts.p
-        if opts.initstrength is not None:
-            assert isinstance(opts.initstrength, float)
-            c.augment_p = opts.initstrength
+        # Sanity checks.
+        if c.batch_size % c.num_gpus != 0:
+            raise click.ClickException('--batch must be a multiple of --gpus')
+        if c.batch_size % (c.num_gpus * c.batch_gpu) != 0:
+            raise click.ClickException('--batch must be a multiple of --gpus times --batch-gpu')
+        if not opts.projected:
+            if c.batch_gpu < c.D_kwargs.epilogue_kwargs.mbstd_group_size:
+                raise click.ClickException('--batch-gpu cannot be smaller than --mbstd')
+        if any(not metric_main.is_valid_metric(metric) for metric in c.metrics):
+            raise click.ClickException('\n'.join(['--metrics can only contain the following values:'] + metric_main.list_valid_metrics()))
 
-    # Resume.
-    if opts.resume is not None:
-        c.resume_pkl = opts.resume
-        c.ada_kimg = 100 # Make ADA react faster at the beginning.
-        c.ema_rampup = None # Disable EMA rampup.
-        c.loss_kwargs.blur_init_sigma = 0 # Disable blur rampup.
+        # Base configuration.
+        c.ema_kimg = c.batch_size * 10 / 32
+        if opts.cfg == 'stylegan2':
+            c.G_kwargs.class_name = 'architectures.custom_stylegan2.Generator' if opts.custom else 'architectures.networks_stylegan2.Generator'
+            c.loss_kwargs.style_mixing_prob = 0.9 # Enable style mixing regularization.
+            c.loss_kwargs.pl_weight = 2 # Enable path length regularization.
+            c.G_reg_interval = 4 # Enable lazy regularization for G.
+            c.G_kwargs.fused_modconv_default = 'inference_only' # Speed up training by using regular convolutions instead of grouped convolutions.
+            c.loss_kwargs.pl_no_weight_grad = True # Speed up path length regularization by skipping gradient computation wrt. conv2d weights.
+        else:
+            c.G_kwargs.class_name = 'architectures.networks_stylegan3.Generator'
+            c.G_kwargs.magnitude_ema_beta = 0.5 ** (c.batch_size / (20 * 1e3))
+            if opts.cfg == 'stylegan3-r':
+                c.G_kwargs.conv_kernel = 1 # Use 1x1 convolutions.
+                c.G_kwargs.channel_base *= 2 # Double the number of feature maps.
+                c.G_kwargs.channel_max *= 2
+                c.G_kwargs.use_radial_filters = True # Use radially symmetric downsampling filters.
+                c.loss_kwargs.blur_init_sigma = 10 # Blur the images seen by the discriminator.
+                c.loss_kwargs.blur_fade_kimg = c.batch_size * 200 / 32 # Fade out the blur during the first N kimg.
 
-    # Performance-related toggles.
-    if opts.fp32:
-        c.G_kwargs.num_fp16_res = c.D_kwargs.num_fp16_res = 0
-        c.G_kwargs.conv_clamp = c.D_kwargs.conv_clamp = None
-    if opts.nobench:
-        c.cudnn_benchmark = False
+        if opts.topk is not None:
+            print("topking-------")
+            assert isinstance(opts.topk, float)
+            c.loss_kwargs.G_top_k = True
+            c.loss_kwargs.G_top_k_gamma = opts.topk
+            c.loss_kwargs.G_top_k_frac = 0.5
 
-    if opts.nkimg is not None:
-        assert isinstance(opts.nkimg, int)
-        c.nimg = opts.nkimg * 1000
+        augpipe_specs = {
+            'blit': dict(xflip=1, rotate90=1, xint=1),
+            'geom': dict(scale=1, rotate=1, aniso=1, xfrac=1),
+            'color': dict(brightness=1, contrast=1, lumaflip=1, hue=1, saturation=1),
+            'filter': dict(imgfilter=1),
+            'noise': dict(noise=1),
+            'cutout': dict(cutout=1),
+            'bg': dict(xflip=1, rotate90=1, xint=1, scale=1, rotate=1, aniso=1, xfrac=1),
+            'bgc': dict(xflip=1, rotate90=1, xint=1, scale=1, rotate=1, aniso=1, xfrac=1, brightness=1, contrast=1,
+                        lumaflip=1, hue=1, saturation=1),
+            'bgcf': dict(xflip=1, rotate90=1, xint=1, scale=1, rotate=1, aniso=1, xfrac=1, brightness=1, contrast=1,
+                        lumaflip=1, hue=1, saturation=1, imgfilter=1),
+            'bgcfn': dict(xflip=1, rotate90=1, xint=1, scale=1, rotate=1, aniso=1, xfrac=1, brightness=1, contrast=1,
+                        lumaflip=1, hue=1, saturation=1, imgfilter=1, noise=1),
+            'bgcfnc': dict(xflip=1, rotate90=1, xint=1, scale=1, rotate=1, aniso=1, xfrac=1, brightness=1, contrast=1,
+                        lumaflip=1, hue=1, saturation=1, imgfilter=1, noise=1, cutout=1),
+        }
 
-    # Description string.
-    desc = f'{opts.cfg:s}-{dataset_name:s}-gpus{c.num_gpus:d}-batch{c.batch_size:d}-gamma{c.loss_kwargs.r1_gamma:g}'
-    if opts.desc is not None:
-        desc += f'-{opts.desc}'
+        # Augmentation.
+        aug = opts.aug
+        if opts.aug is None and opts.diffaugment is None:
+            aug = 'ada'
+        elif opts.diffaugment:
+            c.loss_kwargs.diffaugment = opts.diffaugment
+            aug = 'noaug'
 
-    # Launch.
-    reply.put(["launching", False])
-    launch_training(c=c, desc=desc, outdir=opts.outdir, dry_run=opts.dry_run)
+
+
+        if aug != 'noaug':
+            assert opts.augpipe is None or isinstance(opts.augpipe, str)
+            augpipe = opts.augpipe
+            if augpipe is None:
+                augpipe = 'bgc'
+            c.augment_kwargs = dnnlib.EasyDict(class_name='training.augment.AugmentPipe', **augpipe_specs[augpipe])
+            if opts.aug == 'ada':
+                c.ada_target = opts.target
+            if opts.aug == 'fixed':
+                c.augment_p = opts.p
+            if opts.initstrength is not None:
+                assert isinstance(opts.initstrength, float)
+                c.augment_p = opts.initstrength
+
+        # Resume.
+        if opts.resume is not None:
+            c.resume_pkl = opts.resume
+            c.ada_kimg = 100 # Make ADA react faster at the beginning.
+            c.ema_rampup = None # Disable EMA rampup.
+            c.loss_kwargs.blur_init_sigma = 0 # Disable blur rampup.
+
+        # Performance-related toggles.
+        if opts.fp32:
+            c.G_kwargs.num_fp16_res = c.D_kwargs.num_fp16_res = 0
+            c.G_kwargs.conv_clamp = c.D_kwargs.conv_clamp = None
+        if opts.nobench:
+            c.cudnn_benchmark = False
+
+        if opts.nkimg is not None:
+            assert isinstance(opts.nkimg, int)
+            c.nimg = opts.nkimg * 1000
+
+        # Description string.
+        desc = f'{opts.cfg:s}-{dataset_name:s}-gpus{c.num_gpus:d}-batch{c.batch_size:d}-gamma{c.loss_kwargs.r1_gamma:g}'
+        if opts.desc is not None:
+            desc += f'-{opts.desc}'
+
+        # Launch.
+        reply.put(["Launching...", False])
+        try:
+            # print(queue.get_nowait())
+            if queue.get_nowait() == 'done':
+                reply.put(['Training Process Aborted... Please close this window.', True])
+        except:
+            launch_training(c=c, desc=desc, outdir=opts.outdir, dry_run=opts.dry_run, queue=queue, reply=reply)
+    except Exception as e:
+        print(f"Caught an exception of type: {type(e).__name__}")
+        print(f"Exception message: {str(e)}")
+        print("Traceback:")
+        traceback.print_exc()
+        reply.put(['Training Process Could not Start... Please close this window.', True])
 
 #----------------------------------------------------------------------------
 

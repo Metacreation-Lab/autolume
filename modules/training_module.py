@@ -4,6 +4,7 @@ import zipfile
 import imgui
 import multiprocessing as mp
 
+
 import dnnlib
 from utils.gui_utils import imgui_utils
 from train import main as train_main
@@ -53,7 +54,7 @@ class TrainingModule:
         self.reply = mp.Queue()
         self.message = ""
         self.done = False
-        self.training_process = mp.Process(target=train_main, args=(self.queue, self.reply))
+        self.training_process = mp.Process(target=train_main, args=(self.queue, self.reply), name='TrainingProcess')
         self.fps = 10
         self.found_video = False
         self._zipfile = None
@@ -62,6 +63,7 @@ class TrainingModule:
         self.dlr = 0.002
         self.snap = 4
         self.mirror = True
+        self.done_button = False
 
     @staticmethod
     def _file_ext(fname):
@@ -151,7 +153,7 @@ class TrainingModule:
         imgui.input_text("Width", str(self.img_size), 512,flags=imgui.INPUT_TEXT_READ_ONLY)
         imgui.same_line()
         if imgui.button("-##img_size", width=self.menu.app.font_size):
-            self.img_factor = max(self.img_factor - 1, 1)
+            self.img_factor = max(self.img_factor - 1, 1)   
             self.img_size = self.start_res[0] * (2 ** self.img_factor)
         imgui.same_line()
         if imgui.button("+##img_size", width=self.menu.app.font_size):
@@ -249,13 +251,29 @@ class TrainingModule:
                 fps=self.fps if self.found_video else 10,
             )
 
+            if self.done == True:
+                self.queue = mp.Queue()
+                self.reply = mp.Queue()
+                self.training_process = mp.Process(target=train_main, args=(self.queue, self.reply), name='TrainingProcess')
+                self.done = False
             self.queue.put(kwargs)
             self.training_process.start()
+
+        imgui.set_next_window_size( self.menu.app.content_width // 4, (self.menu.app.content_height // 4), imgui.ONCE)
 
         if imgui.begin_popup_modal("Training")[0]:
             imgui.text("Training...")
             if self.message != "":
                 imgui.text(self.message)
-            if imgui_utils.button("Done", enabled=self.done):
-                imgui.close_current_popup()
+            if imgui_utils.button("Done", enabled=1):
+                self.queue.put('done')
+                self.done_button = True
+            if self.done:
+                self.training_process.terminate()
+                self.training_process.join()
+                if self.done_button == True:
+                    imgui.close_current_popup()
+                    self.message = ''
+                    self.done_button = False
             imgui.end_popup()
+                
