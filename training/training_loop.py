@@ -119,58 +119,77 @@ def training_loop(
     progress_fn             = None,     # Callback function for updating training progress. Called for all ranks.
     nimg                    = 0,        # current image count
     projected = False,
-    teacher = None
+    teacher = None,
+    queue = None,
+    reply = None
 ):
-    # Initialize.
-    start_time = time.time()
-    device = torch.device('cuda', rank)
-    np.random.seed(random_seed * num_gpus + rank)
-    torch.manual_seed(random_seed * num_gpus + rank)
-    torch.backends.cudnn.benchmark = cudnn_benchmark    # Improves training speed.
-    torch.backends.cuda.matmul.allow_tf32 = False       # Improves numerical accuracy.
-    torch.backends.cudnn.allow_tf32 = False             # Improves numerical accuracy.
-    conv2d_gradfix.enabled = True                       # Improves training speed.
-    grid_sample_gradfix.enabled = True                  # Avoids errors with the augmentation pipe.
+    try:
+        # Initialize.
+        start_time = time.time()
+        device = torch.device('cuda', rank)
+        np.random.seed(random_seed * num_gpus + rank)
+        torch.manual_seed(random_seed * num_gpus + rank)
+        torch.backends.cudnn.benchmark = cudnn_benchmark    # Improves training speed.
+        torch.backends.cuda.matmul.allow_tf32 = False       # Improves numerical accuracy.
+        torch.backends.cudnn.allow_tf32 = False             # Improves numerical accuracy.
+        conv2d_gradfix.enabled = True                       # Improves training speed.
+        grid_sample_gradfix.enabled = True                  # Avoids errors with the augmentation pipe.
+    except:
+        reply.put(['Exception occured during Initialization..', True])
 
     # Load training set.
-    if rank == 0:
-        print('Loading training set...')
-    training_set = dnnlib.util.construct_class_by_name(**training_set_kwargs) # subclass of training.dataset.Dataset
-    training_set_sampler = misc.InfiniteSampler(dataset=training_set, rank=rank, num_replicas=num_gpus, seed=random_seed)
-    training_set_iterator = iter(torch.utils.data.DataLoader(dataset=training_set, sampler=training_set_sampler, batch_size=batch_size//num_gpus, **data_loader_kwargs))
-    if rank == 0:
-        print()
-        print('Num images: ', len(training_set))
-        print('Image shape:', training_set.image_shape)
-        print('Label shape:', training_set.label_shape)
-        print()
+    try:
+        if rank == 0:
+            print('Loading training set...')
+            reply.put(['Loading training set...', False])
+        training_set = dnnlib.util.construct_class_by_name(**training_set_kwargs) # subclass of training.dataset.Dataset
+        training_set_sampler = misc.InfiniteSampler(dataset=training_set, rank=rank, num_replicas=num_gpus, seed=random_seed)
+        training_set_iterator = iter(torch.utils.data.DataLoader(dataset=training_set, sampler=training_set_sampler, batch_size=batch_size//num_gpus, **data_loader_kwargs))
+        if rank == 0:
+            print()
+            print('Num images: ', len(training_set))
+            print('Image shape:', training_set.image_shape)
+            print('Label shape:', training_set.label_shape)
+            reply.put(['Num images: ' + str(len(training_set)) + '\n Image shape: ' + str(training_set.image_shape) + '\n Label shape: ' + str(training_set.label_shape), False])
+            print()
+    except:
+        reply.put(['Exception occured during Loading of Training Set..', True])
 
     # Construct networks.
-    if rank == 0:
-        print('Constructing networks...')
-    common_kwargs = dict(c_dim=training_set.label_dim, img_resolution=training_set.resolution, img_channels=training_set.num_channels)
-    G = dnnlib.util.construct_class_by_name(**G_kwargs, **common_kwargs).train().requires_grad_(False).to(device) # subclass of torch.nn.Module
-    D = dnnlib.util.construct_class_by_name(**D_kwargs, **common_kwargs).train().requires_grad_(False).to(device) # subclass of torch.nn.Module
-    G_ema = copy.deepcopy(G).eval()
+    try:
+        if rank == 0:
+            print('Constructing networks...')
+        common_kwargs = dict(c_dim=training_set.label_dim, img_resolution=training_set.resolution, img_channels=training_set.num_channels)
+        G = dnnlib.util.construct_class_by_name(**G_kwargs, **common_kwargs).train().requires_grad_(False).to(device) # subclass of torch.nn.Module
+        D = dnnlib.util.construct_class_by_name(**D_kwargs, **common_kwargs).train().requires_grad_(False).to(device) # subclass of torch.nn.Module
+        G_ema = copy.deepcopy(G).eval()
 
-    G.update_epochs(float(100 * nimg / (total_kimg * 1000)))  # 100 total top k "epochs" in total_kimg
-    print('starting G epochs: ', G.epochs)
+        G.update_epochs(float(100 * nimg / (total_kimg * 1000)))  # 100 total top k "epochs" in total_kimg
+        print('starting G epochs: ', G.epochs)
+    except:
+        reply.put(['Exception occured during Network Construction..', True])
 
     # Resume from existing pickle.
-    if (resume_pkl is not None) and (rank == 0):
-        print(f'Resuming from "{resume_pkl}"')
-        with dnnlib.util.open_url(resume_pkl) as f:
-            resume_data = legacy.load_network_pkl(f)
-        for name, module in [('G', G), ('D', D), ('G_ema', G_ema)]:
-            misc.copy_params_and_buffers(resume_data[name], module, require_all=False)
+    try:
+        if (resume_pkl is not None) and (rank == 0):
+            print(f'Resuming from "{resume_pkl}"')
+            with dnnlib.util.open_url(resume_pkl) as f:
+                resume_data = legacy.load_network_pkl(f)
+            for name, module in [('G', G), ('D', D), ('G_ema', G_ema)]:
+                misc.copy_params_and_buffers(resume_data[name], module, require_all=False)
+    except:
+        reply.put(['Exception occured during Loading of Resume Network..', True])
 
     # Initialize Teacher
-    T = None
-    if teacher is not None:
-        print("TEACHER-----------------")
-        with dnnlib.util.open_url(teacher, verbose=False) as f:
-            og_model = legacy.load_network_pkl(f, custom=True)
-            T, D, = og_model["G"].train().requires_grad_(False).to(device), og_model["D"].train().requires_grad_(False).to(device)
+    try:
+        T = None
+        if teacher is not None:
+            print("TEACHER-----------------")
+            with dnnlib.util.open_url(teacher, verbose=False) as f:
+                og_model = legacy.load_network_pkl(f, custom=True)
+                T, D, = og_model["G"].train().requires_grad_(False).to(device), og_model["D"].train().requires_grad_(False).to(device)
+    except:
+        reply.put(['Exception occured during Teacher Initialization..', True])
 
     # Print network summary tables.
     if rank == 0:
@@ -223,17 +242,20 @@ def training_loop(
             phase.end_event = torch.cuda.Event(enable_timing=True)
 
     # Export sample images.
-    grid_size = None
-    grid_z = None
-    grid_c = None
-    if rank == 0:
-        print('Exporting sample images...')
-        grid_size, images, labels = setup_snapshot_image_grid(training_set=training_set)
-        save_image_grid(images, os.path.join(run_dir, 'reals.png'), drange=[0,255], grid_size=grid_size)
-        grid_z = torch.randn([labels.shape[0], G.z_dim], device=device).split(batch_gpu)
-        grid_c = torch.from_numpy(labels).to(device).split(batch_gpu)
-        images = torch.cat([G_ema(z=z, c=c, noise_mode='const')[0].cpu() for z, c in zip(grid_z, grid_c)]).numpy()
-        save_image_grid(images, os.path.join(run_dir, 'fakes_init.png'), drange=[-1,1], grid_size=grid_size)
+    try:
+        grid_size = None
+        grid_z = None
+        grid_c = None
+        if rank == 0:
+            print('Exporting sample images...')
+            grid_size, images, labels = setup_snapshot_image_grid(training_set=training_set)
+            save_image_grid(images, os.path.join(run_dir, 'reals.png'), drange=[0,255], grid_size=grid_size)
+            grid_z = torch.randn([labels.shape[0], G.z_dim], device=device).split(batch_gpu)
+            grid_c = torch.from_numpy(labels).to(device).split(batch_gpu)
+            images = torch.cat([G_ema(z=z, c=c, noise_mode='const')[0].cpu() for z, c in zip(grid_z, grid_c)]).numpy()
+            save_image_grid(images, os.path.join(run_dir, 'fakes_init.png'), drange=[-1,1], grid_size=grid_size)
+    except:
+        reply.put(['Exception occured during Exporting of Sample Images..', True])
 
     # Initialize logs.
     if rank == 0:
@@ -263,6 +285,16 @@ def training_loop(
     if progress_fn is not None:
         progress_fn(0, total_kimg)
     while True:
+
+        # Check for abort.
+        if ((not done) and (abort_fn is not None) and abort_fn()) or queue.get() == 'done':
+            done = True
+            reply.put(['Exception occured during training..', True])
+            print('done = true')
+            if rank == 0:
+                print()
+                print('Aborting...')
+
         # Fetch training data.
         with torch.autograd.profiler.record_function('data_fetch'):
             phase_real_img, phase_real_c = next(training_set_iterator)
@@ -353,8 +385,10 @@ def training_loop(
             print(' '.join(fields))
 
         # Check for abort.
-        if (not done) and (abort_fn is not None) and abort_fn():
+        if ((not done) and (abort_fn is not None) and abort_fn()) or queue.get() == 'done':
             done = True
+            reply.put(['Exception occured during training..', True])
+            print('done = true')
             if rank == 0:
                 print()
                 print('Aborting...')
