@@ -48,7 +48,11 @@ def subprocess_fn(rank, c, temp_dir, queue, reply):
 
         # Execute training loop.
         training_loop.training_loop(rank=rank, **c, queue=queue, reply=reply)
-    except:
+    except Exception as e:
+        print(f"Caught an exception of type: {type(e).__name__}")
+        print(f"Exception message: {str(e)}")
+        print("Traceback:")
+        traceback.print_exc()
         reply.put(['Exception occured in subprocess_fn...', True])
 
 #----------------------------------------------------------------------------

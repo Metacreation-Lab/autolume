@@ -254,6 +254,7 @@ def training_loop(
             grid_c = torch.from_numpy(labels).to(device).split(batch_gpu)
             images = torch.cat([G_ema(z=z, c=c, noise_mode='const')[0].cpu() for z, c in zip(grid_z, grid_c)]).numpy()
             save_image_grid(images, os.path.join(run_dir, 'fakes_init.png'), drange=[-1,1], grid_size=grid_size)
+            reply.put([str(os.path.join(run_dir, 'fakes_init.png')), False])
     except:
         reply.put(['Exception occured during Exporting of Sample Images..', True])
 
@@ -285,16 +286,6 @@ def training_loop(
     if progress_fn is not None:
         progress_fn(0, total_kimg)
     while True:
-
-        # Check for abort.
-        if ((not done) and (abort_fn is not None) and abort_fn()) or queue.get() == 'done':
-            done = True
-            reply.put(['Exception occured during training..', True])
-            print('done = true')
-            if rank == 0:
-                print()
-                print('Aborting...')
-
         # Fetch training data.
         with torch.autograd.profiler.record_function('data_fetch'):
             phase_real_img, phase_real_c = next(training_set_iterator)
@@ -383,6 +374,7 @@ def training_loop(
         training_stats.report0('Timing/total_days', (tick_end_time - start_time) / (24 * 60 * 60))
         if rank == 0:
             print(' '.join(fields))
+            reply.put([' '.join(fields), False])
 
         # Check for abort.
         if ((not done) and (abort_fn is not None) and abort_fn()) or queue.get() == 'done':
@@ -397,6 +389,7 @@ def training_loop(
         if (rank == 0) and (image_snapshot_ticks is not None) and (done or cur_tick % image_snapshot_ticks == 0):
             images = torch.cat([G_ema(z=z, c=c, noise_mode='const')[0].cpu() for z, c in zip(grid_z, grid_c)]).numpy()
             save_image_grid(images, os.path.join(run_dir, f'fakes{cur_nimg//1000:06d}.png'), drange=[-1,1], grid_size=grid_size)
+            reply.put([str(os.path.join(run_dir, f'fakes{cur_nimg//1000:06d}.png')), False])
 
         # Save network snapshot.
         snapshot_pkl = None
@@ -438,6 +431,9 @@ def training_loop(
                     metric_main.report_metric(result_dict, run_dir=run_dir, snapshot_pkl=snapshot_pkl)
                 stats_metrics.update(result_dict.results)
         del snapshot_data # conserve memory
+
+        metric_line = json.dumps(dict(result_dict, snapshot_pkl=snapshot_pkl, timestamp=time.time()))
+        reply.put([metric_line, False])
 
         # Collect statistics.
         for phase in phases:

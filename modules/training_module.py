@@ -10,6 +10,9 @@ from utils.gui_utils import imgui_utils
 from train import main as train_main
 from utils import dataset_tool
 from widgets.browse_widget import BrowseWidget
+from imgui.integrations.pygame import PygameRenderer
+import cv2
+from utils.gui_utils import gl_utils
 
 augs = ["ADA", "DiffAUG"]
 ada_pipes = ['blit', 'geom', 'color', 'filter', 'noise', 'cutout', 'bg', 'bgc', 'bgcf', 'bgcfn', 'bgcfnc']
@@ -64,6 +67,7 @@ class TrainingModule:
         self.snap = 4
         self.mirror = True
         self.done_button = False
+        self.image_path = ''
 
     @staticmethod
     def _file_ext(fname):
@@ -259,12 +263,21 @@ class TrainingModule:
             self.queue.put(kwargs)
             self.training_process.start()
 
-        imgui.set_next_window_size( self.menu.app.content_width // 4, (self.menu.app.content_height // 4), imgui.ONCE)
+        imgui.set_next_window_size( self.menu.app.content_width // 2, (self.menu.app.content_height // 2), imgui.ONCE)
 
         if imgui.begin_popup_modal("Training")[0]:
             imgui.text("Training...")
-            if self.message != "":
+            if os.path.exists(self.message) and self.image_path != self.message:
+                self.image_path = self.message
+                self.grid = cv2.imread(self.image_path, cv2.IMREAD_UNCHANGED)
+                self.grid = cv2.cvtColor(self.grid, cv2.COLOR_BGRA2RGBA)
+                self.grid_texture = gl_utils.Texture(image=self.grid, width=self.grid.shape[1],
+                                               height=self.grid.shape[0], channels=self.grid.shape[2])
+            elif self.message != "":
                 imgui.text(self.message)
+            if self.image_path != '':
+                imgui.text("Current sample of fake imagery")
+                imgui.image(self.grid_texture.gl_id, self.menu.app.content_width // 1.7, (self.menu.app.content_height // 1.7))
             if imgui_utils.button("Done", enabled=1):
                 self.queue.put('done')
                 self.done_button = True
@@ -275,5 +288,6 @@ class TrainingModule:
                     imgui.close_current_popup()
                     self.message = ''
                     self.done_button = False
+                    self.image_path = ''
             imgui.end_popup()
                 
