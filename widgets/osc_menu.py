@@ -20,7 +20,6 @@ class OscMenu:
         self.active = False
         if use_map is None:
             self.use_map = dict(zip(self.funcs.keys(),[True] * len(self.funcs)))
-        print(self.use_map)
         self.use_osc = dnnlib.EasyDict(zip(funcs.keys(), [False] * len(funcs)))
         self.osc_addresses = dnnlib.EasyDict(zip(funcs.keys(), ["..."] * len(funcs)))
         self.cached_osc_addresses = dnnlib.EasyDict(self.osc_addresses)
@@ -74,6 +73,7 @@ class OscMenu:
                                                                 imgui.INPUT_TEXT_CHARS_NO_BLANK | imgui.INPUT_TEXT_ENTER_RETURNS_TRUE | (
                                                                         imgui.INPUT_TEXT_READ_ONLY * (
                                                                     not self.use_osc[key])))
+            #print(self.osc_addresses)
             if changed:
                 viz.osc_dispatcher.map(f"/{self.osc_addresses[key]}", self.wrapped_funcs[key])
                 try:
@@ -81,14 +81,13 @@ class OscMenu:
                 except:
                     print(self.cached_osc_addresses[key], "is not mapped")
                 self.cached_osc_addresses[key] = self.osc_addresses[key]
-
             if self.use_map.get(key, False):
                 changed, self.mappings[key] = imgui.input_text(f"##Mappings_{self.label}_{key}",
                                                                self.mappings[key], 256,
                                                                imgui.INPUT_TEXT_ENTER_RETURNS_TRUE | (
                                                                        imgui.INPUT_TEXT_READ_ONLY * (
                                                                    not self.use_osc[key])))
-
+                #print(self.mappings[key])
                 if changed:
                     try:
                         viz.osc_dispatcher.unmap(f"/{self.osc_addresses[key]}", self.wrapped_funcs[key])
