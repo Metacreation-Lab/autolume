@@ -4,7 +4,7 @@ param(
 )
 
 # Define python path
-$systemPython = "C:\Program Files\Python39\python.exe"
+$systemPython = "C:\Program Files\Python310\python.exe"
 
 # Define install location
 $installLocation = "$env:LOCALAPPDATA\autolumelive_colab"
@@ -66,7 +66,7 @@ if (-not $SkipClone)
     if ((Get-ChildItem -Path $installLocation | Measure-Object).Count -eq 0)
     {
         $env:GIT_REDIRECT_STDERR = '2>&1'
-        & git clone -b windows-installer https://gitlab.com/jkraasch/autolumelive_colab.git $installLocation
+        & git clone -b bug_fixing_arthur_stable https://gitlab.com/jkraasch/autolumelive_colab.git $installLocation
 
         if (-not $?)
         {
@@ -76,7 +76,7 @@ if (-not $SkipClone)
     else
     {
         $env:GIT_REDIRECT_STDERR = '2>&1'
-        & git reset --hard origin/windows-installer
+        & git reset --hard origin/bug_fixing_arthur_stable
 
         if (-not $?)
         {
