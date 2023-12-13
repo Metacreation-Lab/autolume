@@ -6,6 +6,11 @@ import numpy as np
 import dnnlib
 from utils.gui_utils import imgui_utils
 
+try:
+    import cPickle as pickle
+except ModuleNotFoundError:
+    import pickle
+
 import glob
 import os
 import re
@@ -57,7 +62,7 @@ class MixingWidget:
         self.layer1 = []
         self.layer2 = []
         self.output_name = ""
-        self.save = False
+        self._save = False
 
         self.models = []
         self.combined_layers = []
@@ -117,7 +122,7 @@ class MixingWidget:
             imgui.same_line()
             if imgui_utils.button("Save##mixing widget", enabled=self.output_name != ""):
                 print("saving at", self.output_name)
-                self.save = True
+                self._save = True
             
             imgui.separator()
             if "g2_layers" in self.viz.result and "g1_layers" in self.viz.result:
@@ -145,10 +150,24 @@ class MixingWidget:
         self.viz.args.combined_layers = self.combined_layers
         self.viz.args.pkl2 = self.model_pth
         self.viz.args.mixing = self.mixing
-        self.viz.args.save_model = self.save
+        self.viz.args.save_model = self._save
         self.viz.args.save_path = self.output_name
-        self.save = False
-        
+        self._save = False
+    
+    def save(self, path):
+        with open(path, "wb") as f:
+            pickle.dump(self.get_params(), f)
+
+    def load(self, path):
+        with open(path, "rb") as f:
+            self.set_params(pickle.load(f))
+    
+    def get_params(self):
+        return self.output_name, self.model_pth, self.layer1, self.layer2, self.combined_layers, self.collapsed, self.cached_layers, self.mixing  
+    
+    def set_params(self, params):
+        self.output_name, self.model_pth, self.layer1, self.layer2, self.combined_layers, self.collapsed, self.cached_layers, self.mixing = params
+
     def display_layers(self, layer1, layer2):
         imgui.begin_group()
         imgui.set_cursor_pos((imgui.get_content_region_available_width() // 3, imgui.get_cursor_pos()[1]))

@@ -21,6 +21,7 @@ import dnnlib as dnnlib
 from training import training_loop
 from metrics import metric_main
 from torch_utils import training_stats, custom_ops
+from queue import Empty
 
 
 #----------------------------------------------------------------------------
@@ -59,7 +60,7 @@ def subprocess_fn(rank, c, temp_dir, queue, reply):
 
 def launch_training(c, desc, outdir, dry_run, queue, reply):
     dnnlib.util.Logger(should_flush=True)
-
+    print('GOT HERE')
     # Pick output directory.
     prev_run_dirs = []
     if os.path.isdir(outdir):
@@ -399,12 +400,11 @@ def main(queue, reply):
 
         # Launch.
         reply.put(["Launching...", False])
-        try:
-            # print(queue.get_nowait())
-            if queue.get_nowait() == 'done':
+        # print(queue.get_nowait())
+        if not queue.empty():
+            if queue.get(block=False) == 'done':
                 reply.put(['Training Process Aborted... Please close this window.', True])
-        except:
-            launch_training(c=c, desc=desc, outdir=opts.outdir, dry_run=opts.dry_run, queue=queue, reply=reply)
+        launch_training(c=c, desc=desc, outdir=opts.outdir, dry_run=opts.dry_run, queue=queue, reply=reply)
     except Exception as e:
         print(f"Caught an exception of type: {type(e).__name__}")
         print(f"Exception message: {str(e)}")

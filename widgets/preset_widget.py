@@ -82,6 +82,7 @@ class PresetWidget:
             self.viz.looping_widget.save(f"{path}/looper.pkl")
             self.viz.pickle_widget.save(f"{path}/pickle.pkl")
             self.viz.collapsed_widget.save(f"{path}/collap.pkl")
+            self.viz.mixing_widget.save(f"{path}/mix.pkl")
             self.assigned[np.where(self.active)] = 0
         except Exception as e:
             print(e)
@@ -96,6 +97,7 @@ class PresetWidget:
             self.viz.looping_widget.load(f"{path}/looper.pkl")
             self.viz.pickle_widget.load(f"{path}/pickle.pkl")
             self.viz.collapsed_widget.load(f"{path}/collap.pkl")
+            self.viz.mixing_widget.load(f"{path}/mix.pkl")
             self.viz.app.skip_frame()
         except Exception as e:
             print(e)

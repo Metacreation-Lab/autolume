@@ -10,7 +10,6 @@ from utils.gui_utils import imgui_utils
 from train import main as train_main
 from utils import dataset_tool
 from widgets.browse_widget import BrowseWidget
-from imgui.integrations.pygame import PygameRenderer
 import cv2
 from utils.gui_utils import gl_utils
 
