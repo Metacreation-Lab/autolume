@@ -1,1 +1,0 @@
-# Put StyleGAN2 Checkpoints here

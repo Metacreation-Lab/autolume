@@ -17,9 +17,11 @@ import psutil
 import PIL.Image
 import numpy as np
 import torch
+import traceback
 import dnnlib as dnnlib
 from torch_utils import misc, training_stats, legacy as legacy
 from torch_utils.ops import conv2d_gradfix, grid_sample_gradfix
+from queue import Empty
 
 from metrics import metric_main
 
@@ -255,7 +257,11 @@ def training_loop(
             images = torch.cat([G_ema(z=z, c=c, noise_mode='const')[0].cpu() for z, c in zip(grid_z, grid_c)]).numpy()
             save_image_grid(images, os.path.join(run_dir, 'fakes_init.png'), drange=[-1,1], grid_size=grid_size)
             reply.put([str(os.path.join(run_dir, 'fakes_init.png')), False])
-    except:
+    except Exception as e:
+        print(f"Caught an exception of type: {type(e).__name__}")
+        print(f"Exception message: {str(e)}")
+        print("Traceback:")
+        traceback.print_exc()
         reply.put(['Exception occured during Exporting of Sample Images..', True])
 
     # Initialize logs.
@@ -309,7 +315,7 @@ def training_loop(
             phase.opt.zero_grad(set_to_none=True)
             phase.module.requires_grad_(True)
             for real_img, real_c, gen_z, gen_c in zip(phase_real_img, phase_real_c, phase_gen_z, phase_gen_c):
-                print(real_img.shape)
+                #print(real_img.shape)
                 loss.accumulate_gradients(phase=phase.name, real_img=real_img, real_c=real_c, gen_z=gen_z, gen_c=gen_c, gain=phase.interval, cur_nimg=cur_nimg)
             phase.module.requires_grad_(False)
 
@@ -352,6 +358,16 @@ def training_loop(
             adjust = np.sign(ada_stats['Loss/signs/real'] - ada_target) * (batch_size * ada_interval) / (ada_kimg * 1000)
             augment_pipe.p.copy_((augment_pipe.p + adjust).max(misc.constant(0, device=device)))
 
+        # Check for abort.
+        if not queue.empty():
+            if ((not done) and (abort_fn is not None) and abort_fn()) or queue.get_nowait() == 'done':
+                done = True
+                reply.put(['Exception occured during training..', True])
+                print('done = true')
+                if rank == 0:
+                    print()
+                    print('Aborting...')
+
         # Perform maintenance tasks once per tick.
         done = (cur_nimg >= total_kimg * 1000)
         if (not done) and (cur_tick != 0) and (cur_nimg < tick_start_nimg + kimg_per_tick * 1000):
@@ -377,16 +393,8 @@ def training_loop(
             print(' '.join(fields))
             reply.put([' '.join(fields), False])
 
-        # Check for abort.
-        if ((not done) and (abort_fn is not None) and abort_fn()) or queue.get() == 'done':
-            done = True
-            reply.put(['Exception occured during training..', True])
-            print('done = true')
-            if rank == 0:
-                print()
-                print('Aborting...')
-
         # Save image snapshot.
+        print('Saving image snapshot.')
         if (rank == 0) and (image_snapshot_ticks is not None) and (done or cur_tick % image_snapshot_ticks == 0):
             images = torch.cat([G_ema(z=z, c=c, noise_mode='const')[0].cpu() for z, c in zip(grid_z, grid_c)]).numpy()
             save_image_grid(images, os.path.join(run_dir, f'fakes{cur_nimg//1000:06d}.png'), drange=[-1,1], grid_size=grid_size)
@@ -395,6 +403,7 @@ def training_loop(
         # Save network snapshot.
         snapshot_pkl = None
         snapshot_data = None
+        print('Save network snapshot.')
         if (network_snapshot_ticks is not None) and (done or cur_tick % network_snapshot_ticks == 0):
             snapshot_data = dict(G=G, D=D, G_ema=G_ema, augment_pipe=augment_pipe, training_set_kwargs=dict(training_set_kwargs))
             for key, value in snapshot_data.items():
@@ -422,6 +431,7 @@ def training_loop(
                 D = D.train().requires_grad_(False).to(device)
 
         # Evaluate metrics.
+        print('Evaluating metrics.')
         if (snapshot_data is not None) and (len(metrics) > 0):
             if rank == 0:
                 print('Evaluating metrics...')
@@ -431,13 +441,13 @@ def training_loop(
                 if rank == 0:
                     metric_main.report_metric(result_dict, run_dir=run_dir, snapshot_pkl=snapshot_pkl)
                 stats_metrics.update(result_dict.results)
+                metric_line = json.dumps(dict(result_dict, snapshot_pkl=snapshot_pkl, timestamp=time.time()))
+                reply.put([metric_line, False])
         del snapshot_data # conserve memory
-
-        metric_line = json.dumps(dict(result_dict, snapshot_pkl=snapshot_pkl, timestamp=time.time()))
-        reply.put([metric_line, False])
 
         # Collect statistics.
         for phase in phases:
+            reply.put([phase, False])
             value = []
             if (phase.start_event is not None) and (phase.end_event is not None):
                 phase.end_event.synchronize()
