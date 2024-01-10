@@ -352,6 +352,8 @@ def training_loop(
         cur_nimg += batch_size
         batch_idx += 1
 
+        print(cur_nimg)
+
         # Execute ADA heuristic.
         if (ada_stats is not None) and (batch_idx % ada_interval == 0):
             ada_stats.update()
@@ -447,7 +449,7 @@ def training_loop(
 
         # Collect statistics.
         for phase in phases:
-            reply.put([phase, False])
+            #reply.put([phase, False])
             value = []
             if (phase.start_event is not None) and (phase.end_event is not None):
                 phase.end_event.synchronize()
