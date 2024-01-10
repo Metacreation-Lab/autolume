@@ -19,6 +19,8 @@ import torch
 import dnnlib
 import ffmpeg
 
+import sys
+
 try:
     import pyspng
 except ImportError:
@@ -197,6 +199,26 @@ class Dataset(torch.utils.data.Dataset):
 #----------------------------------------------------------------------------
 
 class ImageFolderDataset(Dataset):
+    def _preprocess_images(self):
+        # Initialize an array to store all preprocessed images
+        self._image_array = np.zeros((len(self._image_fnames), self.height, 3, self.width), dtype=np.uint8)
+
+        for raw_idx in range(len(self._image_fnames)):
+            image = self._load_raw_image(raw_idx)
+            image_shape = (3, self.width, self.height) if self.height is not None and self.width is not None else self.image_shape
+
+            if list(image.shape) != image_shape:
+                image = cv2.resize(image.transpose(1, 2, 0), dsize=image_shape[-2:], interpolation=cv2.INTER_CUBIC).transpose(2, 0, 1)
+
+            assert list(image.shape) == self.image_shape
+            assert image.dtype == np.uint8
+
+            if self._xflip[raw_idx]:
+                assert image.ndim == 3 # CHW
+                image = image[:, :, ::-1]
+
+            self._image_array[raw_idx] = image.transpose(2, 0, 1)
+    
     def __init__(self,
         path,                   # Path to directory or zip.
         resolution      = None, # Ensure specific resolution, None = highest available.
@@ -267,10 +289,6 @@ class ImageFolderDataset(Dataset):
             else:
                 raise IOError('Path must point to a directory or zip')
 
-
-
-
-
         PIL.Image.init()
         self._image_fnames = sorted(fname for fname in self._all_fnames if self._file_ext(fname) in PIL.Image.EXTENSION)
 
@@ -280,7 +298,11 @@ class ImageFolderDataset(Dataset):
         name = os.path.splitext(os.path.basename(self._path))[0]
         img_shape = [3, self.height,self.width]  if self.width is not None and self.height is not None else list(self._load_raw_image(0).shape)
         raw_shape = [len(self._image_fnames)] + img_shape
+
         super().__init__(name=name, raw_shape=raw_shape, **super_kwargs)
+
+        # Check if preprocessed images exist, if not, preprocess and save them
+        self._preprocess_images()
 
     @staticmethod
     def _file_ext(fname):
@@ -312,10 +334,13 @@ class ImageFolderDataset(Dataset):
     def _load_raw_image(self, raw_idx):
         fname = self._image_fnames[raw_idx]
         with self._open_file(fname) as f:
-            if pyspng is not None and self._file_ext(fname) == '.png':
-                image = pyspng.load(f.read())
-            else:
-                image = np.array(PIL.Image.open(f))
+            # if pyspng is not None and self._file_ext(fname) == '.png':
+            #     image = pyspng.load(f.read())
+            # else:
+            image = PIL.Image.open(f)
+            if image.mode != 'RGB':
+                image = image.convert('RGB')
+            image = np.array(image)
         if image.ndim == 2:
             image = image[:, :, np.newaxis] # HW => HWC
         image = image.transpose(2, 0, 1) # HWC => CHW
@@ -340,16 +365,11 @@ class ImageFolderDataset(Dataset):
         return self._load_raw_image(0).shape[1:]
 
     def __getitem__(self, idx):
-        image = self._load_raw_image(self._raw_idx[idx])
+        image = self._image_array[self._raw_idx[idx]]
+        image = image.transpose(1, 2, 0)
         assert isinstance(image, np.ndarray)
-        image_shape = (3, self.width, self.height) if self.height is not None and self.width is not None else self.image_shape
-        if list(image.shape) != image_shape:
-            image = cv2.resize(image.transpose(1,2,0), dsize=image_shape[-2:], interpolation=cv2.INTER_CUBIC).transpose(2,0,1)
         assert list(image.shape) == self.image_shape
         assert image.dtype == np.uint8
-        if self._xflip[idx]:
-            assert image.ndim == 3 # CHW
-            image = image[:, :, ::-1]
         return image.copy(), self.get_label(idx)
 
     @property
@@ -361,4 +381,3 @@ class ImageFolderDataset(Dataset):
         return max_res
 
 #----------------------------------------------------------------------------
-
