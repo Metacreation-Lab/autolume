@@ -74,7 +74,7 @@ class Menu:
 
         self.training()
         imgui.separator()
-        self.compress()
+        #self.compress()
         imgui.end()
 
         imgui.set_next_window_position(self.app.content_width // 4, 50)
