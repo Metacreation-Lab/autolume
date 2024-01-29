@@ -51,7 +51,7 @@ class LatentWidget:
         self.latent_def = dnnlib.EasyDict(self.latent)
         self.vec_path   = ""
         self.vec_save_path = ""
-        self.file_dialog = BrowseWidget(viz, "Browse", os.path.abspath(os.getcwd()),
+        self.file_dialog = BrowseWidget(viz, "Browse", os.path.relpath(os.getcwd()),
                                       ["*", ".pth", ".pt", ".npy", ".npz", ],
                                       width=self.viz.app.button_w, multiple=False, traverse_folders=False)
         self.pt_save_dialog = save_widget.SaveWidget(viz, "Save Vector", os.path.abspath(os.getcwd()), ".pt")
@@ -59,6 +59,7 @@ class LatentWidget:
 
     def save(self, path):
         with open(path, "wb") as f:
+            print(self.get_params())
             pickle.dump(self.get_params(), f)
 
     def load(self, path):

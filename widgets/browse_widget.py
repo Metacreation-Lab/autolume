@@ -65,7 +65,7 @@ class BrowseWidget():
         imgui.begin_child("top_bar", 0, self.parent.app.font_size * 2, border=True, flags=imgui.WINDOW_NO_SCROLLBAR)
 
         if imgui.arrow_button("##up", imgui.DIRECTION_UP):
-            self.directory = os.path.dirname(self.directory)
+            self.directory = os.path.abspath(os.path.join(os.path.dirname(self.directory)))
         
         imgui.same_line()
         _changed,directory = imgui.input_text("##directory", self.directory, 1000, imgui.INPUT_TEXT_ENTER_RETURNS_TRUE)
