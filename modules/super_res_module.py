@@ -168,7 +168,7 @@ class SuperResModule:
             if file[-3:] == 'jpg' or file[-3:] == 'png':
                 data_transformer = transforms.Compose([transforms.ToTensor()])
                 image = cv2.imread(file)
-                input_width, input_height = image.shape[0], image.shape[1]
+                input_height, input_width = image.shape[0], image.shape[1]
                 print("INPUT DIMENSIONS", input_width, input_height, image.shape)
                 image = data_transformer(image).to('cuda')
                 input = torch.unsqueeze(image, 0)
@@ -179,12 +179,13 @@ class SuperResModule:
                     output = F.adjust_sharpness(output, self.args.sharpen_scale) * 255
 
                     output = output[0].permute(1, 2, 0).cpu().numpy().astype(np.uint8)
+                    print('Output shape:' + str(output.shape))
                     if self.args.scale_mode:
                         if self.args.outscale != 4:
                             output = cv2.resize(
                                 output, (
                                     int(input_width * self.args.outscale),
-                                    int(input_width * self.args.outscale),
+                                    int(input_height * self.args.outscale),
                                 ), interpolation=cv2.INTER_LINEAR)
 
 

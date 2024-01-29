@@ -132,7 +132,7 @@ class AdjusterWidget:
 
                 with imgui_utils.grayed_out(not use_osc):
                     changed, new_address = imgui_utils.input_text(f"##vslide_osc{i}", self.vslide_address[i], 256,
-                                                                  imgui.INPUT_TEXT_CHARS_NO_BLANK | imgui.INPUT_TEXT_ENTER_RETURNS_TRUE,
+                                                                  imgui.INPUT_TEXT_CHARS_NO_BLANK,
                                                                   width=self.viz.app.button_w,
                                                                   help_text="osc address")
                     s.item_spacing = [self.viz.app.spacing, self.viz.app.spacing]
