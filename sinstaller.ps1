@@ -171,6 +171,13 @@ Write-Host "=> Step: Install Python Requirements"
 
 . python -m pip install -r requirements.txt
 
+# Re-Install ffmpeg-python --------------------------------------------------------------------#
+
+Write-Host "=> Step: Re-Install Ffmpeg-Python"
+
+. python -m pip uninstall -y ffmpeg-python==0.2.0
+. python -m pip install ffmpeg-python==0.2.0
+
 # Create Shortcut on Desktop ---------------------------------------------------------------------#
 
 Write-Host "=> Step: Create Shortcut on Desktop"

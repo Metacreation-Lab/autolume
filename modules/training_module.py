@@ -122,6 +122,7 @@ class TrainingModule:
             self.found_video = False
             # if any file in self__all_fnames is a video create a new subfolder where we save the frames based on fps using ffmpeg
             for fname in self._all_fnames:
+                print(str(fname))
                 if fname.endswith('.mp4') or fname.endswith('.avi'):
                     self.found_video = True
                     break
