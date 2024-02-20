@@ -258,9 +258,15 @@ class LatentWidget:
             try:
                 assert (type(args[-1]) is str), f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {str}"
                 # check if the string that is sent in the message os.exists
+                print(os.getcwd() + os.sep + 'models' + os.sep + args[-1])
                 if os.path.exists(args[-1]):
+                    print(os.getcwd() + os.sep + 'models' + os.sep + args[-1])
                     self.viz.pickle_widget.user_pkl = args[-1]
-                    self.viz.pickle_widget.load()
+                    self.viz.pickle_widget.load_pkl(args[-1])
+                elif os.path.exists(os.getcwd() + os.sep + 'models' + os.sep + args[-1]):
+                    print(os.getcwd() + os.sep + 'models' + os.sep + args[-1])
+                    self.viz.pickle_widget.user_pkl = os.getcwd() + os.sep + 'models' + os.sep + args[-1]
+                    self.viz.pickle_widget.load_pkl(os.getcwd() + os.sep + 'models' + os.sep + args[-1])
             except Exception as e:
                 self.viz.print_error(e)
         return func
