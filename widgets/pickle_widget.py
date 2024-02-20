@@ -67,6 +67,7 @@ class PickleWidget:
     def load_pkl(self, pkl, ignore_errors=False):
         viz = self.viz
         viz.app.skip_frame() # The input field will change on next frame.
+        print(os.getcwd())
         try:
             resolved = self.resolve_pkl(pkl)
             name = resolved.replace('\\', '/').split('/')[-1]
