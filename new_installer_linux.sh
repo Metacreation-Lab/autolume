@@ -39,15 +39,6 @@ if [ ! $SkipClone ]; then
     fi
 fi
 
-# Install Build Tools
-echo "=> Step: Install Build Tools"
-buildToolsDownloadURL="https://aka.ms/vs/17/release/vs_buildtools.exe"
-buildToolsInstallerPath="$tempDir/vs_buildtools.exe"
-curl -L -o "$buildToolsInstallerPath" "$buildToolsDownloadURL" || { echo "Failed to download Build Tools."; exit 1; }
-
-buildToolsInstallOptions="--add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.Windows10SDK.19041 --quiet --wait --norestart"
-wine start /wait "$buildToolsInstallerPath" $buildToolsInstallOptions || { echo "Failed to install Build Tools."; exit 1; }
-
 # Create Python Virtual Environment
 echo "=> Step: Create Python Virtual Environment"
 venvDir="$installLocation/venv"
