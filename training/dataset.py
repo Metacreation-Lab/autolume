@@ -351,6 +351,15 @@ class ImageFolderDataset(Dataset):
             assert image.ndim == 3 # CHW
             image = image[:, :, ::-1]
         return image.copy(), self.get_label(idx)
+    
+    def save_resized(self, path):
+        for idx in np.arange(self.__len__()):
+            img, label = self.__getitem__(idx)
+            print(img.shape)
+            img = PIL.Image.fromarray(img.astype(np.uint8).transpose(1,2,0), 'RGB')
+            if not os.path.exists(path+str('/resized_images')):
+                os.mkdir(path+str('/resized_images'))
+            img.save(path+str('/resized_images/')+str(idx)+'.png', 'PNG')
 
     @property
     def resolution(self):

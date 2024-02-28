@@ -153,8 +153,14 @@ def training_loop(
             print('Image shape:', training_set.image_shape)
             print('Label shape:', training_set.label_shape)
             reply.put(['Num images: ' + str(len(training_set)) + '\n Image shape: ' + str(training_set.image_shape) + '\n Label shape: ' + str(training_set.label_shape), False])
+            print('Saving Resized Images')
+            training_set.save_resized(run_dir)
             print()
-    except:
+    except Exception as e:
+        print(f"Caught an exception of type: {type(e).__name__}")
+        print(f"Exception message: {str(e)}")
+        print("Traceback:")
+        traceback.print_exc()
         reply.put(['Exception occured during Loading of Training Set..', True])
 
     # Construct networks.
@@ -352,8 +358,6 @@ def training_loop(
         cur_nimg += batch_size
         batch_idx += 1
 
-        print(cur_nimg)
-
         # Execute ADA heuristic.
         if (ada_stats is not None) and (batch_idx % ada_interval == 0):
             ada_stats.update()
@@ -365,7 +369,6 @@ def training_loop(
             if ((not done) and (abort_fn is not None) and abort_fn()) or queue.get_nowait() == 'done':
                 done = True
                 reply.put(['Exception occured during training..', True])
-                print('done = true')
                 if rank == 0:
                     print()
                     print('Aborting...')
