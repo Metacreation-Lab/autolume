@@ -121,7 +121,6 @@ class PresetWidget:
                 imgui.same_line()
                 with imgui_utils.item_width(viz.app.button_w * 4):
                     dir_name_copy = self.dir_name[i]
-                    # print(self.dir_name)
                     _changed, dir_name = imgui_utils.input_text(f"##preset name {i}", dir_name_copy, 256, flags=imgui.INPUT_TEXT_ENTER_RETURNS_TRUE, help_text="Set name for preset "+str(i))
                     if _changed:
                         print(dir_name_copy)
