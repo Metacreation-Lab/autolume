@@ -845,8 +845,6 @@ class LayerWidget:
     def grayscale_osc(self):
         def func(address, *args):
             try:
-                # assert type(args[
-                #                 -1]) is bool, f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {bool}"
                 if bool(args[-1]):
                     self.sel_channels = 1
                 else:
@@ -861,8 +859,6 @@ class LayerWidget:
     def contrast_osc(self):
         def func(address, *args):
             try:
-                # assert (type(args[-1] is type(self.img_scale_db)),
-                #         f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {type(self.img_scale_db)}")
                 self.img_scale_db = float(args[-1])
             except Exception as e:
                 self.viz.print_error(e)
@@ -872,8 +868,6 @@ class LayerWidget:
     def normalize_osc(self):
         def func(address, *args):
             try:
-                # assert (type(args[-1] is type(self.img_normalize)),
-                #         f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {type(self.img_normalize)}")
                 self.img_normalize = bool(args[-1])
             except Exception as e:
                 self.viz.print_error(e)
@@ -884,8 +878,6 @@ class LayerWidget:
         def func(address, *args):
             try:
                 nec_type = type(self.base_channel)
-                # assert (type(args[-1] is type(self.base_channel)),
-                #         f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {type(self.img_scale_db)}")
                 base_channel_max = max(self.capture_channels - self.sel_channels, 0)
                 self.base_channel = min(nec_type(args[-1]), base_channel_max)
             except Exception as e:

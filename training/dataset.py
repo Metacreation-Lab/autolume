@@ -355,7 +355,6 @@ class ImageFolderDataset(Dataset):
     def save_resized(self, path):
         for idx in np.arange(self.__len__()):
             img, label = self.__getitem__(idx)
-            print(img.shape)
             img = PIL.Image.fromarray(img.astype(np.uint8).transpose(1,2,0), 'RGB')
             if not os.path.exists(path+str('/resized_images')):
                 os.mkdir(path+str('/resized_images'))

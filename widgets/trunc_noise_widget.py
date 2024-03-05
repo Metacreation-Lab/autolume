@@ -35,8 +35,6 @@ class TruncationNoiseWidget:
         def func(address, *args):
             try:
                 nec_type = type(self.params[param])
-                # assert (type(args[-1]) is type(self.params[
-                #                                    param])), f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {type(self.params[param])}"
                 print(self.params)
                 self.params[param] = nec_type(args[-1])
             except Exception as e:

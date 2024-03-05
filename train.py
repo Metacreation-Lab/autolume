@@ -60,7 +60,6 @@ def subprocess_fn(rank, c, temp_dir, queue, reply):
 
 def launch_training(c, desc, outdir, dry_run, queue, reply):
     dnnlib.util.Logger(should_flush=True)
-    print('GOT HERE')
     # Pick output directory.
     prev_run_dirs = []
     if os.path.isdir(outdir):
@@ -105,7 +104,6 @@ def launch_training(c, desc, outdir, dry_run, queue, reply):
     try:
         torch.multiprocessing.set_start_method('spawn', force=True)
         with tempfile.TemporaryDirectory() as temp_dir:
-            print('Got here')
             subprocess_fn(rank=0, c=c, temp_dir=temp_dir, queue=queue, reply=reply)
     except:
         reply.put(['Exception occured in launch_training...', True])
@@ -400,7 +398,6 @@ def main(queue, reply):
 
         # Launch.
         reply.put(["Launching...", False])
-        # print(queue.get_nowait())
         if not queue.empty():
             if queue.get(block=False) == 'done':
                 reply.put(['Training Process Aborted... Please close this window.', True])

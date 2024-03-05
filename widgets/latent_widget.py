@@ -88,8 +88,6 @@ class LatentWidget:
         def func(address, *args):
             try:
                 nec_type = type(self.latent[param])
-                # assert (type(args[-1]) is type(self.latent[
-                #                                    param])), f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {type(self.latent[param])}"
                 self.latent[param] = nec_type(args[-1])
             except Exception as e:
                 self.viz.print_error(e)
@@ -99,7 +97,6 @@ class LatentWidget:
         def func(address, *args):
             try:
                 nec_type = type(self.latent.speed)
-                # assert (type(args[-1]) is type(self.latent.speed)), f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {type(self.latent.speed)}"
                 self.latent.speed = nec_type(args[-1])
                 self.update = True
             except Exception as e:
@@ -280,7 +277,6 @@ class LatentWidget:
             :return:
             """
             try:
-                # assert (type(args[-1]) is bool), f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {bool}"
                 if bool(args[-1]):
                     self.latent.vec = torch.randn(self.latent.vec.shape)
                     self.latent.next = torch.randn(self.latent.next.shape)

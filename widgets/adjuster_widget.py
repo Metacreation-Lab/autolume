@@ -77,7 +77,6 @@ class AdjusterWidget:
 
 
     def open_vecs(self):
-        # TODO BUG WHEN LOADING NEW AND ALREADY HAVE OSC
         try:
             vecs = torch.from_numpy(np.load(self.all_dir)).squeeze()
             reshaped_vecs = vecs
