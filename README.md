@@ -15,7 +15,7 @@ To successfully run this program, your system must have a 64-bit Linux operating
 1. Open a terminal.
 2. Clone this repository using the following command:
    ```bash
-   git clone -b git@github.com:Metacreation-Lab/autolume-live.git
+   git clone -b git@github.com:Metacreation-Lab/autolume.git
    ```
 3. `cd` into the cloned repository
 4. Run the installer with `sh installer.sh`
