@@ -20,10 +20,11 @@ To successfully run this program, your system must have a 64-bit Windows operati
 
 1. Open Command Prompt (`windows+R` > `cmd`)
 2. Run the following command: `where python`
-   - If more than one copy of Python 3.10 is found, Ctrl+C the result. It should look like this:
+   - Ctrl+C the result. It should look like this:
      ```
      C:\Path\To\Python310\
      ```
+   - If more than one result is thrown, copy Python 3.10.
 
 3. Click on `sinstaller.ps1` file and open it (located in your Downloads folder).
 4. Paste the outcome of step 2 to the `systemPython` variable under `#Define python path` in the script:
