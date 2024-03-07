@@ -48,20 +48,17 @@ To successfully run this program, your system must have a 64-bit Windows operati
 7. Add `C:\ffmpeg\bin` to the empty field and confirm changes with "OK".
 
 To verify that ffmpeg is correctly added to the Windows PATH, open the Command Prompt or PowerShell and run:
-```cmd
+```powershell
 ffmpeg
 ```
 
 Following output confirms the installation:
 
-![FFMPEG installation check](ffmpeg-check.png)
+![FFMPEG installation check](ffmpeg check.png)
 
-
-             
-Go to Downloads and type PowerShell in the address bar and hit Enter.
-Run the following command inside PowerShell: .\sinstaller.ps1   
-Next time you want to run Autolume, simply click the AutolumeLiveColab shortcut on your Desktop.
-
+8. Go to Downloads and type PowerShell in the address bar and hit Enter.
+9. Run the following command inside PowerShell: `.\sinstaller.ps1`
+10. Next time you want to run Autolume, simply click the AutolumeLiveColab shortcut on your Desktop.
 
 Place your StyleGAN2 checkpoints (https://github.com/NVlabs/stylegan2-ada-pytorch) in the `models` folder.
 Click the AutolumeLiveColab desktop shortcut and get going!
@@ -76,13 +73,6 @@ Installations: \
     https://metacreation.net/autolume-mzton/ \
     https://metacreation.net/autolume-acedia/ 
 
-## In Progress
-- Make start screenlook nicer
-- Training, Compressing, GANspace stop interface and can only be stopped by stopping program
-- Sometimes pytorch slows down (seems to aggregate variables in the background), when clearing with gc.collect overall slowdown in render and gui but more stable (currently commented out)
-- Super resolution: Off-line super-res module via Real-ESRGAN is now added to GUI and wait for testing. An upgrade model of RRDB net can be implemented for best frame quality. Choices of model is yet to be added for the user to choose different super-res style (photo-realistic or anime-artisitc)
-
-
 ## Acknowledgment
 PyTorch StyleGAN2-ada: https://github.com/NVlabs/stylegan2-ada-pytorch \
 Underlying GUI code: https://github.com/NVlabs/stylegan3 \
@@ -91,8 +81,6 @@ GANSpace: https://github.com/harskish/ganspace
 
 ## License
 Some of the dependencies fall under the [Nvidia Source Code License](https://github.com/NVlabs/stylegan3/blob/main/LICENSE.txt).
-
-
 
 ## Project status
 This code base is still open to changes and bugs might still appear. Please create issues and let us know so we can polish for the final release!
