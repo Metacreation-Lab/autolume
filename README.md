@@ -9,12 +9,12 @@ For a detailed Documentation look at the [Wiki](home/documentation)
 To successfully run this program, your system must have a 64-bit Windows operating system, and you must download and install the following prerequisites:
 
 1. **[Autolume Installer](sinstaller.ps1)**
-2. **[Cuda-Toolkit](link-to-cuda-toolkit)**
-3. **[Python 3.10](link-to-python3.10)** (scroll down to files and select a compatible version to your system)
+2. **[Cuda-Toolkit](https://developer.nvidia.com/cuda-11-7-0-download-archive)**
+3. **[Python 3.10](https://www.python.org/downloads/release/python-3100/)** (scroll down to files and select a compatible version to your system)
 
 *While installing Python, make sure to select "Add Python to PATH" as shown below:*
 
-![Add Python to PATH](path-to-image)
+![Add Python to PATH](images/python-install)
 
 ## Installation Steps
 
