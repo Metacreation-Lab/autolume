@@ -21,7 +21,7 @@ To successfully run this program, your system must have a 64-bit Linux operating
 
 #### Adding ffmpeg
 
-1. Update and upgrade the system packages to get the FFmpeg version currently available in the repository. Execute the following command:
+1. Update and upgrade the system packages to get the ffmpeg version currently available in the repository. Execute the following command:
    ```bash
    sudo apt update && sudo apt upgrade
    ```
@@ -29,7 +29,7 @@ To successfully run this program, your system must have a 64-bit Linux operating
    ```bash
    sudo apt install ffmpeg
    ```
-3. Confirm that FFmpeg has been installed with:
+3. Confirm that ffmpeg has been installed with:
    ```bash
    ffmpeg -version
    ```
