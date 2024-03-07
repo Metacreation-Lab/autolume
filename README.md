@@ -16,7 +16,7 @@ To successfully run this program, your system must have a 64-bit Windows operati
 
 ![Add Python to PATH](python-install.png)
 
-## Installation Steps
+#### Installation Steps
 
 1. Open Command Prompt (`windows+R` > `cmd`)
 2. Run the following command: `where python`
