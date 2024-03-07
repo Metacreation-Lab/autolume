@@ -36,15 +36,20 @@ To successfully run this program, your system must have a 64-bit Windows operati
 
 5. If this is the first time running a script in Windows, you have to enable that functionality first. Detailed instructions to do so, can be found **[here](https://medium.com/@dfarkhod/how-to-enable-powershell-script-execution-in-windows-10-49f2b182649d)**
 
-Steps to add ffmpeg:
-Download the ffmpeg from here.
-Extract the downloaded file.
-Rename the extracted folder to ffmpeg.
-Type system variables into the search bar and click the Edit the system environment variables option.
-Under the User variables section, select Path and click the Edit button.
-Choose New from the side menu.
-Add C:\ffmpeg\bin to the empty field and confirm changes with OK.
-To verify the FFmpeg is correctly added to the Windows PATH, open the Command Prompt or PowerShell and run: ffmpeg
+#### Adding ffmpeg
+
+1. Download ffmpeg from [here](link-to-ffmpeg).
+2. Extract the downloaded file.
+3. Rename the extracted folder to `ffmpeg`.
+4. Type "system variables" into the Windows search bar and click the "Edit the system environment variables" option.
+5. Under the "User variables" section, select "Path" and click the "Edit" button.
+6. Choose "New" from the side menu.
+7. Add `C:\ffmpeg\bin` to the empty field and confirm changes with "OK".
+
+To verify that ffmpeg is correctly added to the Windows PATH, open the Command Prompt or PowerShell and run:
+```cmd
+ffmpeg
+
  The output confirms the installation: 
              
 Go to Downloads and type PowerShell in the address bar and hit Enter.
