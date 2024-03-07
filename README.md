@@ -14,7 +14,7 @@ To successfully run this program, your system must have a 64-bit Windows operati
 
 *While installing Python, make sure to select "Add Python to PATH" as shown below:*
 
-![Add Python to PATH](images/python-install)
+![Add Python to PATH](python-install.png)
 
 ## Installation Steps
 
