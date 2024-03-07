@@ -4,8 +4,7 @@ Autolume-Live is a tool for real-time visual performances using StyleGAN2.
 For a detailed Documentation look at the [Wiki](home/documentation)
 
 ## Getting started
-### Windows
-# Windows Autolume Installer Guide
+### Windows Autolume Installer Guide
 
 To successfully run this program, your system must have a 64-bit Windows operating system, and you must download and install the following prerequisites:
 
