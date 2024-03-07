@@ -4,10 +4,12 @@ Autolume-Live is a tool for real-time visual performances using StyleGAN2.
 For a detailed documentation and demos look at the [Metacreation Website](https://www.metacreation.net/autolume).
 
 ## Getting started
-### Linux Autolume Installer Guide
+### Ubuntu Autolume Installer Guide
 To successfully run this program, your system must have a 64-bit Linux operating system, and you must download and install the following prerequisites:
 - [Python 3.10](https://www.python.org/downloads/)
 - [Git](https://git-scm.com/)
+
+#### Installation Steps
 
 1. Open a terminal.
 2. Clone this repository using the following command:
@@ -16,6 +18,21 @@ To successfully run this program, your system must have a 64-bit Linux operating
    ```
 3. `cd` into the cloned repository
 4. Run the installer with `sh installer.sh`
+
+#### Adding ffmpeg
+
+1. Update and upgrade the system packages to get the FFmpeg version currently available in the repository. Execute the following command:
+   ```bash
+   sudo apt update && sudo apt upgrade
+   ```
+2. After upgrading the repository, install ffmpeg by running the following command:
+   ```bash
+   sudo apt install ffmpeg
+   ```
+3. Confirm that FFmpeg has been installed with:
+   ```bash
+   ffmpeg -version
+   ```
 
 ### Windows Autolume Installer Guide
 
