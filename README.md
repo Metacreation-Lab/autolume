@@ -1,4 +1,4 @@
-# Autolume-Live
+# Autolume
 
 Autolume-Live is a tool for real-time visual performances using StyleGAN2.
 
