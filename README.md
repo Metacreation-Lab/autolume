@@ -52,7 +52,7 @@ To successfully run this program, your system must have a 64-bit Windows operati
 
 #### Adding ffmpeg
 
-1. Download ffmpeg from [here](link-to-ffmpeg).
+1. Download ffmpeg from [here](images/link-to-ffmpeg).
 2. Extract the downloaded file.
 3. Rename the extracted folder to `ffmpeg`.
 4. Type "system variables" into the Windows search bar and click the "Edit the system environment variables" option.
@@ -67,7 +67,7 @@ ffmpeg
 
 Following output confirms the installation:
 
-![FFMPEG installation check](ffmpeg-check.png)
+![FFMPEG installation check](images/ffmpeg-check.png)
 
 8. Go to Downloads and type PowerShell in the address bar and hit Enter.
 9. Run the following command inside PowerShell: `.\sinstaller.ps1`
