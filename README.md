@@ -22,14 +22,19 @@ To successfully run this program, your system must have a 64-bit Windows operati
 2. Run the following command: `where python`
    - Ctrl+C the result. It should look like this:
      ```
-     C:\Path\To\Python310\
+     C:\Users\Metacreation Lab>where python
+     C:\Users\Metacreation Lab\AppData\Local\Programs\Python\Python310\python.exe
+     C:\Users\Metacreation Lab\AppData\Local\Microsoft\WindowsApps\python.exe
      ```
    - If more than one result is thrown, copy Python 3.10.
 
-3. Click on `sinstaller.ps1` file and open it (located in your Downloads folder).
+3. Click on the `sinstaller.ps1` file and open it (located in your Downloads folder).
 4. Paste the outcome of step 2 to the `systemPython` variable under `#Define python path` in the script:
    ```powershell
-   $systemPython = "C:\Path\To\Python310\"
+   # Define python path
+   $systemPython = "C:\Users\Metacreation Lab\AppData\Local\Programs\Python\Python310\python.exe"
+
+5. If this is the first time running a script in Windows, you have to enable that functionality first. Detailed instructions to do so, can be found **[here](https://medium.com/@dfarkhod/how-to-enable-powershell-script-execution-in-windows-10-49f2b182649d)**
 
 Steps to add ffmpeg:
 Download the ffmpeg from here.
