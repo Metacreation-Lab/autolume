@@ -1,6 +1,6 @@
 # Autolume-Live
 
-Autolume-Live is a tool for real-time visual performances using StyleGAN2.
+Autolume-Live is a tool for real-time visual performances using StyleGAN2. \\
 For a detailed documentation and demos look at the [Metacreation Website](https://www.metacreation.net/autolume).
 
 ## Getting started
