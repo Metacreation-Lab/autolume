@@ -33,6 +33,7 @@ To successfully run this program, your system must have a 64-bit Windows operati
    ```powershell
    # Define python path
    $systemPython = "C:\Users\Metacreation Lab\AppData\Local\Programs\Python\Python310\python.exe"
+   ```
 
 5. If this is the first time running a script in Windows, you have to enable that functionality first. Detailed instructions to do so, can be found **[here](https://medium.com/@dfarkhod/how-to-enable-powershell-script-execution-in-windows-10-49f2b182649d)**
 
