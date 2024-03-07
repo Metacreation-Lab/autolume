@@ -4,15 +4,51 @@ Autolume-Live is a tool for real-time visual performances using StyleGAN2.
 For a detailed Documentation look at the [Wiki](home/documentation)
 
 ## Getting started
+### Windows
+# Windows Autolume Installer Guide
 
-Clone the repository and install the packages found in requirements.txt
-```
-git clone https://gitlab.com/jkraasch/autolume_live.git
-cd autolume_live
-pip install -r requirements.txt
-```
-Then place your StyleGAN2 checkpoints (https://github.com/NVlabs/stylegan2-ada-pytorch) in the `models` folder.
-Launch the tool by running `python main.py` and get going!
+To successfully run this program, your system must have a 64-bit Windows operating system, and you must download and install the following prerequisites:
+
+1. **[Autolume Installer](link-to-autolume-installer)**
+2. **[Cuda-Toolkit](link-to-cuda-toolkit)**
+3. **[Python 3.10](link-to-python3.10)** (scroll down to files and select a compatible version to your system)
+
+*While installing Python, make sure to select "Add Python to PATH" as shown below:*
+
+![Add Python to PATH](path-to-image)
+
+## Installation Steps
+
+1. Open Command Prompt (`windows+R` > `cmd`)
+2. Run the following command: `where python`
+   - If more than one copy of Python 3.10 is found, Ctrl+C the result. It should look like this:
+     ```
+     C:\Path\To\Python310\
+     ```
+
+3. Click on `sinstaller.ps1` file and open it (located in your Downloads folder).
+4. Paste the outcome of step 2 to the `systemPython` variable under `#Define python path` in the script:
+   ```powershell
+   $systemPython = "C:\Path\To\Python310\"
+
+Steps to add ffmpeg:
+Download the ffmpeg from here.
+Extract the downloaded file.
+Rename the extracted folder to ffmpeg.
+Type system variables into the search bar and click the Edit the system environment variables option.
+Under the User variables section, select Path and click the Edit button.
+Choose New from the side menu.
+Add C:\ffmpeg\bin to the empty field and confirm changes with OK.
+To verify the FFmpeg is correctly added to the Windows PATH, open the Command Prompt or PowerShell and run: ffmpeg
+ The output confirms the installation: 
+             
+Go to Downloads and type PowerShell in the address bar and hit Enter.
+Run the following command inside PowerShell: .\sinstaller.ps1   
+Next time you want to run Autolume, simply click the AutolumeLiveColab shortcut on your Desktop.
+
+
+Place your StyleGAN2 checkpoints (https://github.com/NVlabs/stylegan2-ada-pytorch) in the `models` folder.
+Click the AutolumeLiveColab desktop shortcut and get going!
 
 ## Examples
 
