@@ -8,7 +8,7 @@ For a detailed Documentation look at the [Wiki](home/documentation)
 
 To successfully run this program, your system must have a 64-bit Windows operating system, and you must download and install the following prerequisites:
 
-1. **[Autolume Installer](link-to-autolume-installer)**
+1. **[Autolume Installer](sinstaller.ps1)**
 2. **[Cuda-Toolkit](link-to-cuda-toolkit)**
 3. **[Python 3.10](link-to-python3.10)** (scroll down to files and select a compatible version to your system)
 
