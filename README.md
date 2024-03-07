@@ -9,12 +9,14 @@ To successfully run this program, your system must have a 64-bit Linux operating
 - [Python 3.10](https://www.python.org/downloads/)
 - [Git](https://git-scm.com/)
 
-## Installation Steps
-
 1. Open a terminal.
 2. Clone this repository using the following command:
    ```bash
-   git clone -b main https://gitlab.com/jkraasch/autolumelive_colab.git
+   git clone -b git@github.com:Metacreation-Lab/autolume-live.git
+   ```
+3. `cd` into the cloned repository
+4. Run the installer with `sh installer.sh`
+
 ### Windows Autolume Installer Guide
 
 To successfully run this program, your system must have a 64-bit Windows operating system, and you must download and install the following prerequisites:
