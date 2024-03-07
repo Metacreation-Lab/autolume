@@ -66,7 +66,7 @@ if (-not $SkipClone)
     if ((Get-ChildItem -Path $installLocation | Measure-Object).Count -eq 0)
     {
         $env:GIT_REDIRECT_STDERR = '2>&1'
-        & git clone -b main https://github.com/Metacreation-Lab/autolume-live.git $installLocation
+        & git clone -b main https://github.com/Metacreation-Lab/autolume.git $installLocation
 
         if (-not $?)
         {
