@@ -27,7 +27,7 @@ To successfully run this program, your system must have a 64-bit Windows operati
 
 *While installing Python, make sure to select "Add Python to PATH" as shown below:*
 
-![Add Python to PATH](python-install.png)
+![Add Python to PATH](images/python-install.png)
 
 #### Installation Steps
 
@@ -52,7 +52,7 @@ To successfully run this program, your system must have a 64-bit Windows operati
 
 #### Adding ffmpeg
 
-1. Download ffmpeg from [here](images/link-to-ffmpeg).
+1. Download ffmpeg from [here](https://ffmpeg.org/download.html).
 2. Extract the downloaded file.
 3. Rename the extracted folder to `ffmpeg`.
 4. Type "system variables" into the Windows search bar and click the "Edit the system environment variables" option.
