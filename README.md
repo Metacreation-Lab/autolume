@@ -50,6 +50,7 @@ To successfully run this program, your system must have a 64-bit Windows operati
 To verify that ffmpeg is correctly added to the Windows PATH, open the Command Prompt or PowerShell and run:
 ```cmd
 ffmpeg
+```
 
 Following output confirms the installation:
 
