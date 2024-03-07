@@ -50,7 +50,11 @@ To verify that ffmpeg is correctly added to the Windows PATH, open the Command P
 ```cmd
 ffmpeg
 
- The output confirms the installation: 
+Following output confirms the installation:
+
+![FFMPEG installation check](ffmpeg-check.png)
+
+
              
 Go to Downloads and type PowerShell in the address bar and hit Enter.
 Run the following command inside PowerShell: .\sinstaller.ps1   
