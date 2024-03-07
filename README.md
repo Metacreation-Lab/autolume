@@ -54,7 +54,7 @@ ffmpeg
 
 Following output confirms the installation:
 
-![FFMPEG installation check](ffmpeg check.png)
+![FFMPEG installation check](ffmpeg_check.png)
 
 8. Go to Downloads and type PowerShell in the address bar and hit Enter.
 9. Run the following command inside PowerShell: `.\sinstaller.ps1`
