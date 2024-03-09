@@ -85,16 +85,14 @@ if (-not $SkipClone)
     }
 }
 
-# Clone FFmpeg -----------------------------------------------------------------------------------#
- if ((Get-ChildItem -Path $installLocation | Measure-Object).Count -eq 0)
-    {
-        $env:GIT_REDIRECT_STDERR = '2>&1'
-        & git clone https://git.ffmpeg.org/ffmpeg.git ffmpeg $installLocation
-         if (-not $?)
-        {
-            throw "Failed to clone the repository."
-        }
+# Check for ffmpeg.zip and extract ffmpeg.exe -------------------------------------------------#
+    $ffmpegZipPath = Join-Path -Path $installLocation -ChildPath "autolume_live_colab\ffmpeg.zip"
+    $ffmpegExtractPath = Join-Path -Path $installLocation -ChildPath "autolume_live_colab"
+    $ffmpegExePath = Join-Path -Path $installLocation -ChildPath "ffmpeg.exe"
 
+    if (Test-Path $ffmpegZipPath) {
+        Expand-Archive -Path $ffmpegZipPath -DestinationPath $ffmpegExtractPath
+        Copy-Item -Path (Join-Path -Path $ffmpegExtractPath -ChildPath "ffmpeg.exe") -Destination $ffmpegExePath -Force
     }
 
 # Install Build Tools ----------------------------------------------------------------------------#
