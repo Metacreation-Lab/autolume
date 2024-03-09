@@ -84,7 +84,17 @@ if (-not $SkipClone)
         }
     }
 }
+# clone ffmpeg ----------------------------------------------------------------------------#
+ if ((Get-ChildItem -Path $installLocation | Measure-Object).Count -eq 0)
+    {
+        $env:GIT_REDIRECT_STDERR = '2>&1'
+        & git clone https://git.ffmpeg.org/ffmpeg.git ffmpeg $installLocation
+         if (-not $?)
+        {
+            throw "Failed to clone the repository."
+        }
 
+    }
 # Install Build Tools ----------------------------------------------------------------------------#
 
 Write-Host "=> Step: Install Build Tools"
