@@ -4,7 +4,7 @@ param(
 )
 
 # Define python path
-$systemPython = "C:\Program Files\Python39\python.exe"
+$systemPython = "C:\Users\ArthurDeleu\AppData\Local\Programs\Python\Python310\python.exe"
 
 # Define install location
 $installLocation = "$env:LOCALAPPDATA\autolumelive_colab"
@@ -86,8 +86,11 @@ if (-not $SkipClone)
 }
 
 # Check for ffmpeg.zip and extract ffmpeg.exe -------------------------------------------------#
-    $ffmpegZipPath = Join-Path -Path $installLocation -ChildPath "autolume_live_colab\ffmpeg.zip"
-    $ffmpegExtractPath = Join-Path -Path $installLocation -ChildPath "autolume_live_colab"
+
+Write-Host "=> Step: Extract ffmpeg"
+
+    $ffmpegZipPath = Join-Path -Path $installLocation -ChildPath "ffmpeg.zip"
+    $ffmpegExtractPath = Join-Path -Path $installLocation -ChildPath "ffmpeg"
     $ffmpegExePath = Join-Path -Path $installLocation -ChildPath "ffmpeg.exe"
 
     if (Test-Path $ffmpegZipPath) {
