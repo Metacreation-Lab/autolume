@@ -78,4 +78,4 @@ wcwidth==0.2.8
 wordcloud==1.9.2
 timm==0.5.4
 ninja==1.11.1.1
-kmeans-pytorch=0.3
+kmeans-pytorch==0.3
