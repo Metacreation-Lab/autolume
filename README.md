@@ -68,28 +68,9 @@ To successfully run this program, your system must have a 64-bit Windows operati
 
 5. If this is the first time running a script in Windows, you have to enable that functionality first. Detailed instructions to do so, can be found **[here](https://medium.com/@dfarkhod/how-to-enable-powershell-script-execution-in-windows-10-49f2b182649d)**
 
-#### Adding ffmpeg
-
-1. Download ffmpeg from [here](https://ffmpeg.org/download.html).
-2. Extract the downloaded file.
-3. Rename the extracted folder to `ffmpeg`.
-4. Type "system variables" into the Windows search bar and click the "Edit the system environment variables" option.
-5. Under the "User variables" section, select "Path" and click the "Edit" button.
-6. Choose "New" from the side menu.
-7. Add `C:\ffmpeg\bin` to the empty field and confirm changes with "OK".
-
-To verify that ffmpeg is correctly added to the Windows PATH, open the Command Prompt or PowerShell and run:
-```powershell
-ffmpeg
-```
-
-Following output confirms the installation:
-
-![FFMPEG installation check](images/ffmpeg-check.png)
-
-8. Go to Downloads and type PowerShell in the address bar and hit Enter.
-9. Run the following command inside PowerShell: `.\sinstaller.ps1`
-10. Next time you want to run Autolume, simply click the AutolumeLiveColab shortcut on your Desktop.
+6. Go to Downloads and type PowerShell in the address bar and hit Enter.
+7. Run the following command inside PowerShell: `.\sinstaller.ps1`
+8. Next time you want to run Autolume, simply click the AutolumeLiveColab shortcut on your Desktop.
 
 Place your StyleGAN2 checkpoints (https://github.com/NVlabs/stylegan2-ada-pytorch) in the `models` folder.
 Click the AutolumeLiveColab desktop shortcut and get going!
