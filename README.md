@@ -37,7 +37,7 @@ To successfully run this program, your system must have a 64-bit Linux operating
 
 ### Windows Autolume Installer Guide
 
-To successfully run this program, your system must have a 64-bit Windows operating system, and you must download and install the following prerequisites:
+To successfully run this program, your system must have a 64-bit Windows (Windows 10 & 11 compatible) operating system, and you must download and install the following prerequisites:
 
 - **[Autolume Installer](sinstaller.ps1)**
 - **[Cuda-Toolkit](https://developer.nvidia.com/cuda-11-7-0-download-archive)**
