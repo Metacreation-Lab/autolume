@@ -98,18 +98,24 @@ Write-Host "=> Step: Extract ffmpeg"
         Copy-Item -Path (Join-Path -Path $ffmpegExtractPath -ChildPath "ffmpeg.exe") -Destination $ffmpegExePath -Force
     }
 
+    Remove-Item $ffmpegZipPath -Force
+    Remove-Item $ffmpegExtractPath -Recurse -Force
+
 # Check for ffmpeg.zip and extract ffmpeg.exe -------------------------------------------------#
 
 Write-Host "=> Step: Extract ffprobe"
 
-    $ffmpegZipPath = Join-Path -Path $installLocation -ChildPath "ffprobe.zip"
-    $ffmpegExtractPath = Join-Path -Path $installLocation -ChildPath "ffprobe"
-    $ffmpegExePath = Join-Path -Path $installLocation -ChildPath "ffprobe.exe"
+    $ffprobeZipPath = Join-Path -Path $installLocation -ChildPath "ffprobe.zip"
+    $ffprobeExtractPath = Join-Path -Path $installLocation -ChildPath "ffprobe"
+    $ffprobeExePath = Join-Path -Path $installLocation -ChildPath "ffprobe.exe"
 
-    if (Test-Path $ffmpegZipPath) {
-        Expand-Archive -Path $ffmpegZipPath -DestinationPath $ffmpegExtractPath
-        Copy-Item -Path (Join-Path -Path $ffmpegExtractPath -ChildPath "ffprobe.exe") -Destination $ffmpegExePath -Force
+    if (Test-Path $ffprobeZipPath) {
+        Expand-Archive -Path $ffprobeZipPath -DestinationPath $ffmpegExtractPath
+        Copy-Item -Path (Join-Path -Path $ffprobeExtractPath -ChildPath "ffprobe.exe") -Destination $ffmpegExePath -Force
     }
+
+    Remove-Item $ffprobeZipPath -Force
+    Remove-Item $ffprobeExtractPath -Recurse -Force
 
 # Install Build Tools ----------------------------------------------------------------------------#
 
