@@ -34,6 +34,9 @@ from pythonosc.dispatcher import Dispatcher
 from pythonosc.udp_client import SimpleUDPClient
 import NDIlib as ndi
 
+from PIL import Image
+import datetime
+
 #----------------------------------------------------------------------------
 
 class Visualizer:
@@ -105,6 +108,17 @@ class Visualizer:
         self.metacreation_texture = gl_utils.Texture(image=self.metacreation, width=self.metacreation.shape[1],
                                                      height=self.metacreation.shape[0],
                                                      channels=self.metacreation.shape[2])
+    def capture_screenshot(self, file_path):
+        if 'image' in self.result:
+            image_data = self.result.image  # Convert tensor to numpy array if needed
+
+            # Convert from RGB to BGR
+            image_data = cv2.cvtColor(image_data, cv2.COLOR_RGB2BGRA)
+
+            # Save the image using OpenCV
+            cv2.imwrite(file_path, image_data)
+        else:
+            print("No render result available to capture.")
 
     def close(self):
         if self._async_renderer is not None:
@@ -153,17 +167,26 @@ class Visualizer:
         imgui.set_next_window_size(self.pane_w, self.app.content_height)
         imgui.begin('##control_pane', closable=False, flags=(imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE))
         # set red background
-        imgui.get_window_draw_list().add_rect_filled(0, 0, self.pane_w, 36,
+        imgui.get_window_draw_list().add_rect_filled(0, 0, self.pane_w, 42,
                                                      imgui.get_color_u32_rgba(*DARKGRAY))
         # draw gray line
-        imgui.get_window_draw_list().add_line(0, 36, self.pane_w, 36, imgui.get_color_u32_rgba(*LIGHTGRAY), 1)
+        imgui.get_window_draw_list().add_line(0, 42, self.pane_w, 42, imgui.get_color_u32_rgba(*LIGHTGRAY), 1)
 
         # calculate logo shape ratio
         logo_ratio = self.logo.shape[1] / self.logo.shape[0]
         # logo with height of 30px centered in y axis
         imgui.set_cursor_pos_y(18 - (18 / 2))
         imgui.set_cursor_pos_x(self.app.spacing * 2)
+
         imgui.image(self.logo_texture.gl_id, 18 * logo_ratio, 18, tint_color=(1, 1, 1, 0.5))
+
+        # Position the button in the middle
+        imgui.same_line(self.app.spacing * 18)
+
+        if imgui.button('Screen Capture'):
+            now = datetime.datetime.now()
+            current_time_str = now.strftime("%Y-%m-%d %H-%M-%S")
+            self.capture_screenshot(f'screenshots/{current_time_str}.png')
 
         # calculate metacreation shape ratio
         metacreation_ratio = self.metacreation.shape[1] / self.metacreation.shape[0]
@@ -241,7 +264,7 @@ class Visualizer:
         if 'message' in self.result:
             tex = text_utils.get_texture(self.result.message, size=self.app.font_size, max_width=max_w, max_height=max_h, outline=2)
             tex.draw(pos=pos, align=0.5, rint=True, color=1)
-
+        
         # End frame.
         imgui.end()
 
