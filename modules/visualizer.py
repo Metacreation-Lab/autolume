@@ -6,6 +6,7 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 import threading
+import queue
 import numpy as np
 import imgui
 import cv2
@@ -108,6 +109,38 @@ class Visualizer:
         self.metacreation_texture = gl_utils.Texture(image=self.metacreation, width=self.metacreation.shape[1],
                                                      height=self.metacreation.shape[0],
                                                      channels=self.metacreation.shape[2])
+        
+        self.is_recording = False
+        self.frame_queue = queue.Queue()
+        self.recording_thread = None
+        self.recording_file_path = None
+
+    def start_recording(self, file_path):
+        self.is_recording = True
+        self.recording_file_path = file_path
+
+    def stop_recording(self):
+        self.recording_thread = threading.Thread(target=self._record_frames, daemon=True)
+        self.recording_thread.start()
+        
+        self.is_recording = False
+        if self.recording_thread is not None:
+            self.recording_thread.join()
+            self.recording_thread = None
+
+    def _record_frames(self):
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # H.264 codec
+        out = None
+        while self.is_recording or not self.frame_queue.empty():
+            if not self.frame_queue.empty():
+                frame = self.frame_queue.get()
+                if out is None:
+                    height, width, channels = frame.shape
+                    out = cv2.VideoWriter(self.recording_file_path, fourcc, 30.0, (width, height))
+                out.write(frame)
+        if out is not None:
+            out.release()
+
     def capture_screenshot(self, file_path):
         if 'image' in self.result:
             image_data = self.result.image  # Convert tensor to numpy array if needed
@@ -187,6 +220,20 @@ class Visualizer:
             now = datetime.datetime.now()
             current_time_str = now.strftime("%Y-%m-%d %H-%M-%S")
             self.capture_screenshot(f'screenshots/{current_time_str}.png')
+
+        # Capture frame if recording
+        if self.is_recording and 'image' in self.result:
+            frame = cv2.cvtColor(self.result.image, cv2.COLOR_RGB2BGR)
+            self.frame_queue.put(frame)
+        
+        imgui.same_line()
+        if imgui.button('Start Recording' if not self.is_recording else 'Stop Recording'):
+            if not self.is_recording:
+                now = datetime.datetime.now()
+                current_time_str = now.strftime("%Y-%m-%d %H-%M-%S")
+                self.start_recording(f'recordings/{current_time_str}.mp4')
+            else:
+                self.stop_recording()
 
         # calculate metacreation shape ratio
         metacreation_ratio = self.metacreation.shape[1] / self.metacreation.shape[0]
