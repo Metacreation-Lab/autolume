@@ -13,7 +13,12 @@ from widgets.browse_widget import BrowseWidget
 import cv2
 from utils.gui_utils import gl_utils
 
+from PIL import Image
+import PIL
+import os
+
 augs = ["ADA", "DiffAUG"]
+modes = ["crop", "expand", "nearest", "box", "bilinear", "hamming", "bicubic", "lanczos"]
 ada_pipes = ['blit', 'geom', 'color', 'filter', 'noise', 'cutout', 'bg', 'bgc', 'bgcf', 'bgcfn', 'bgcfnc']
 diffaug_pipes = ['color,translation,cutout', 'color,translation', 'color,cutout', 'color',
                  'translation', 'cutout,translation', 'cutout']
@@ -67,6 +72,9 @@ class TrainingModule:
         self.mirror = True
         self.done_button = False
         self.image_path = ''
+        self.resize = 0
+        self.resized_path = ""
+        self.mode = 1
 
     @staticmethod
     def _file_ext(fname):
@@ -77,6 +85,72 @@ class TrainingModule:
         if self._zipfile is None:
             self._zipfile = zipfile.ZipFile(self.data_path)
         return self._zipfile
+    
+    def get_closest_size(self, size, sizes=[256, 512, 1024, 2048, 4096]):
+        for s in sizes:
+            if size <= s:
+                return s
+        return sizes[-1]
+    
+    def process_image(self, image_path, mode='crop'):
+        with Image.open(image_path) as img:
+            width, height = img.size
+            target_size = self.get_closest_size(max(width, height))
+
+            if mode == modes[0]:
+                # Crop the image to a square
+                min_dim = min(width, height)
+                left = (width - min_dim) // 2
+                top = (height - min_dim) // 2
+                right = (width + min_dim) // 2
+                bottom = (height + min_dim) // 2
+                img = img.crop((left, top, right, bottom))
+            elif mode == modes[1]:
+                # Expand the image to a square by adding a black border
+                new_img = Image.new("RGB", (max(width, height), max(width, height)), (0, 0, 0))
+                new_img.paste(img, (0, 0))
+                img = new_img
+            elif mode == modes[2]:
+                # Resize the image to the target size
+                img = img.resize((target_size, target_size), PIL.Image.NEAREST)
+            elif mode == modes[3]:
+                # Resize the image to the target size
+                img = img.resize((target_size, target_size), PIL.Image.BOX)
+            elif mode == modes[4]:
+                # Resize the image to the target size
+                img = img.resize((target_size, target_size), PIL.Image.BILINEAR)
+            elif mode == modes[5]:
+                # Resize the image to the target size
+                img = img.resize((target_size, target_size), PIL.Image.HAMMING)
+            elif mode == modes[6]:
+                # Resize the image to the target size
+                img = img.resize((target_size, target_size), PIL.Image.BICUBIC)
+            elif mode == modes[7]:
+                # Resize the image to the target size
+                img = img.resize((target_size, target_size), PIL.Image.LANCZOS)
+
+            return img
+    
+    def process_directory(self, directory_path, mode='crop'):
+        # Create the new directory name
+        base_dir, original_dir_name = os.path.split(directory_path.rstrip('/'))
+        resized_dir_name = original_dir_name + '_resized'
+        resized_dir_path = os.path.join(base_dir, resized_dir_name)
+
+        # Create the new directory if it doesn't exist
+        os.makedirs(resized_dir_path, exist_ok=True)
+
+        for filename in os.listdir(directory_path):
+            if filename.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif')):
+                image_path = os.path.join(directory_path, filename)
+                img = self.process_image(image_path, mode)
+
+                # Save the processed image to the new directory
+                new_image_path = os.path.join(resized_dir_path, filename)
+                img.save(new_image_path)
+
+                print(f"Processed image saved at: {new_image_path}")
+        return resized_dir_path
 
     @imgui_utils.scoped_by_object_id
     def __call__(self):
@@ -126,6 +200,17 @@ class TrainingModule:
                 if fname.endswith('.mp4') or fname.endswith('.avi'):
                     self.found_video = True
                     break
+        # _, self.resized_path = imgui.input_text("Resized Images Save Path", self.resized_path)
+        # imgui.same_line()
+        # _clicked, data_path = self.file_dialog(self.menu.app.button_w)
+        # if _clicked:
+        #     self.resized_path = data_path[0]
+        imgui.same_line()
+        _, self.mode = imgui.combo("Resize Mode", self.mode, modes)
+        imgui.same_line()
+        if imgui_utils.button('Resize', width=-1):
+            self.data_path = self.process_directory(self.data_path, mode = modes[self.mode])
+
         _, self.resume_pkl = imgui.input_text("Resume Pkl", self.resume_pkl, 1024)
         imgui.same_line()
         if imgui_utils.button('Browse...', enabled=len(self.browse_cache) > 0, width=-1):
