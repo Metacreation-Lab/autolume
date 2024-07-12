@@ -92,21 +92,25 @@ class DiffusionModule:
 
         _, self.input_path = imgui_utils.input_text(
             "Input Path", self.input_path, 256,
+            flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL,
             width=-(self.app.button_w + self.app.spacing)
         )
 
         _, self.output_path = imgui_utils.input_text(
             "Output Path", self.output_path, 256,
+            flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL,
             width=-(self.app.button_w + self.app.spacing)
         )
 
         _, self.model_id = imgui_utils.input_text(
             "Model ID", self.model_id, 256,
+            flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL,
             width=-(self.app.button_w + self.app.spacing)
         )
 
         _, self.prompt = imgui_utils.input_text(
             "Prompt", self.prompt, 256,
+            flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL,
             width=-(self.app.button_w + self.app.spacing)
         )
 
