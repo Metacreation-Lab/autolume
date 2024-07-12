@@ -20,7 +20,7 @@ from modules.compress_module import CompressModule
 from modules.network_surgery import SurgeryModule
 from modules.projection_module import ProjectionModule
 from modules.network_mixing import MixingModule
-
+from modules.diffusion_module import DiffusionModule
 from modules.super_res_module import SuperResModule
 #----------------------------------------------------------------------------
 class Menu:
@@ -33,6 +33,7 @@ class Menu:
         self.projection = ProjectionModule(self)
         self.super_res = SuperResModule(self)
         self.mixing_module = MixingModule(self)
+        self.diffusion_module = DiffusionModule(self)
         self.logo = cv2.imread("assets/Autolume-logo.png", cv2.IMREAD_UNCHANGED)
         self.logo_texture = gl_utils.Texture(image=self.logo, width=self.logo.shape[1], height=self.logo.shape[0], channels=self.logo.shape[2])
 
@@ -100,14 +101,22 @@ class Menu:
         imgui.end()
 
         imgui.set_next_window_position(0, (self.app.content_height * 3) // 4 + 50)
-        imgui.set_next_window_size(self.app.content_width // 2, (self.app.content_height * 3) // 4 - 50)
+        imgui.set_next_window_size(self.app.content_width // 3, (self.app.content_height * 3) // 4 - 50)
         imgui.begin('Model Mixing##Menu', closable=False, flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE| imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS))
         imgui.text("Combine two models into one")
         self.mixing_module()
         imgui.end()
 
-        imgui.set_next_window_position(self.app.content_width//2,(self.app.content_height * 3) // 4 + 50)
-        imgui.set_next_window_size(self.app.content_width//2, (self.app.content_height * 3) // 4 - 50)
+        imgui.set_next_window_position(self.app.content_width//3, (self.app.content_height * 3) // 4 + 50)
+        imgui.set_next_window_size(self.app.content_width // 3, (self.app.content_height * 3) // 4 - 50)
+        imgui.begin('Diffusion Model##Menu', closable=False,
+                    flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS))
+        imgui.text("Non-realtime diffusion model")
+        self.diffusion_module()
+        imgui.end()
+
+        imgui.set_next_window_position(2 * self.app.content_width//3, (self.app.content_height * 3) // 4 + 50)
+        imgui.set_next_window_size(self.app.content_width // 3, (self.app.content_height * 3) // 4 - 50)
         imgui.begin('Render##Menu', closable=False, flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE| imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS))
         imgui.text("Jump into Autolume-Live")
         if imgui_utils.button("START", width=self.app.button_w):
