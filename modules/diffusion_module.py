@@ -118,21 +118,21 @@ class DiffusionModule:
         _clicked, save_path = self.save_path_dialog(self.app.button_w)
         if _clicked:
             if len(save_path) > 0:
-                self.output_path = os.path.join(save_path[0],"output.mp4")
+                self.output_path = os.path.join(save_path[0], "output.mp4")
                 print(self.output_path)
             else:
                 self.output_path = ""
                 print("No path selected")
 
         changed, self.model_id = imgui_utils.input_text("Model ID", self.model_id, 1024,
-                                               flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL,
-                                               help_text='Model ID',
-                                               width=-self.app.button_w - self.app.spacing, )
+                                                        flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL,
+                                                        help_text='Model ID',
+                                                        width=-self.app.button_w - self.app.spacing, )
 
         changed, self.prompt = imgui_utils.input_text("Prompt", self.prompt, 1024,
-                                             flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL,
-                                             help_text='Prompt to be used for the model',
-                                             width=-self.app.button_w - self.app.spacing, )
+                                                      flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL,
+                                                      help_text='Prompt to be used for the model',
+                                                      width=-self.app.button_w - self.app.spacing, )
 
         changed, self.scale = imgui.slider_float(
             "Scale", float(self.scale), 0.1, 2.0
