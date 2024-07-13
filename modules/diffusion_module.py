@@ -101,7 +101,7 @@ class DiffusionModule:
 
         joined = '\n'.join(self.input_path)
 
-        imgui_utils.input_text("##SRINPUT", joined, 1024, flags=imgui.INPUT_TEXT_READ_ONLY,
+        imgui_utils.input_text("##SRINPUT", self.input_path, 1024, flags=imgui.INPUT_TEXT_READ_ONLY,
                                width=-(self.app.button_w + self.app.spacing), help_text="Input File")
         imgui.same_line()
 
@@ -118,7 +118,7 @@ class DiffusionModule:
         _clicked, save_path = self.save_path_dialog(self.app.button_w)
         if _clicked:
             if len(save_path) > 0:
-                self.output_path = save_path[0]
+                self.output_path = os.path.join(save_path[0],"output.mp4")
                 print(self.output_path)
             else:
                 self.output_path = ""
