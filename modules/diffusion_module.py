@@ -33,15 +33,20 @@ class DiffusionModule:
         self.progress = 0.0
         self.running = False
         self.file_dialog = BrowseWidget(self, "Browse", os.path.abspath(os.getcwd()),
-                                        ["*", ".mp4"], multiple=False, traverse_folders=False,
+                                        [".mp4"], multiple=False, traverse_folders=False,
                                         width=self.app.button_w)
         self.save_path_dialog = BrowseWidget(self, "Save Path", os.path.abspath(os.getcwd()), [""], multiple=False,
                                              traverse_folders=False, add_folder_button=True, width=self.app.button_w)
 
     def display_progress(self):
+        imgui.begin("Diffusion start", False)
         imgui.text("Processing...")
         imgui.progress_bar(self.progress, (0, 0))
-        # imgui.end()
+        imgui.end()
+
+    def start_process_thread(self):
+        process_thread = threading.Thread(target=self.start_process)
+        process_thread.start()
 
     def start_process(self):
         self.progress = 0.0
@@ -104,7 +109,7 @@ class DiffusionModule:
 
         _clicked, input = self.file_dialog(self.app.button_w)
         if _clicked:
-            self.input_path = input
+            self.input_path = input[0]
             print(self.input_path)
 
         imgui_utils.input_text("##SRRESULT", self.output_path, 1024, flags=imgui.INPUT_TEXT_READ_ONLY,
@@ -160,8 +165,8 @@ class DiffusionModule:
                 args.enable_similar_image_filter = self.enable_similar_image_filter
                 args.seed = int(self.seed)
                 self.args = args
-                print("Starting Super Resolution")
-                self.start_process()
+                print("Starting Diffusion Process...")
+                self.start_process_thread()
 
         except Exception as e:
             print("SRR ERROR", e)
