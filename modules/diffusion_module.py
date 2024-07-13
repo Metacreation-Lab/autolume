@@ -1,5 +1,3 @@
-# diffusion_module.py
-
 import os
 import sys
 import threading
@@ -8,37 +6,44 @@ from torchvision.io import read_video, write_video
 from tqdm import tqdm
 import imgui
 
-sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
-
 from utils.wrapper import StreamDiffusionWrapper
 from utils.gui_utils import imgui_utils
+from widgets.browse_widget import BrowseWidget
+from dnnlib import EasyDict
 
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+args = EasyDict(output_path="", input_path="", model_id="KBlueLeaf/kohaku-v2.1",
+                lora_dict=None, prompt="1girl with brown dog ears, thick frame glasses", scale=1.0, acceleration=1,
+                use_denoising_batch=True, enable_similar_image_filter=True, seed=2)
+
 
 class DiffusionModule:
     def __init__(self, menu):
         self.menu = menu
         self.app = menu.app
-        self.input_path = os.path.join(CURRENT_DIR, "images", "inputs", "input.mp4")
-        self.output_path = os.path.join(CURRENT_DIR, "images", "outputs", "output.mp4")
-        self.model_id = "KBlueLeaf/kohaku-v2.1"
-        self.lora_dict = None
-        self.prompt = "1girl with brown dog ears, thick frame glasses"
-        self.scale = 1.0
-        self.acceleration = 1  # 0: none, 1: xformers, 2: tensorrt
-        self.use_denoising_batch = True
-        self.enable_similar_image_filter = True
-        self.seed = 2
+        self.input_path = args.input_path
+        self.output_path = args.output_path
+        self.model_id = args.model_id
+        self.lora_dict = args.lora_dict
+        self.prompt = args.prompt
+        self.scale = args.scale
+        self.acceleration = args.acceleration  # 0: none, 1: xformers, 2: tensorrt
+        self.use_denoising_batch = args.use_denoising_batch
+        self.enable_similar_image_filter = args.enable_similar_image_filter
+        self.seed = int(args.seed)
         self.progress = 0.0
-        self.is_processing = False
+        self.running = False
+        self.file_dialog = BrowseWidget(self, "Browse", os.path.abspath(os.getcwd()),
+                                        ["*", ".mp4"], multiple=False, traverse_folders=False,
+                                        width=self.app.button_w)
+        self.save_path_dialog = BrowseWidget(self, "Save Path", os.path.abspath(os.getcwd()), [""], multiple=False,
+                                             traverse_folders=False, add_folder_button=True, width=self.app.button_w)
 
-    def process_video_threaded(self):
-        self.is_processing = True
-        self.progress = 0.0
-        threading.Thread(target=self._process_video).start()
+    def display_progress(self):
+        imgui.text("Processing...")
+        imgui.progress_bar(self.progress, (0, 0))
+        # imgui.end()
 
-    def _process_video(self):
-        self.is_processing = True
+    def start_process(self):
         self.progress = 0.0
 
         video_info = read_video(self.input_path)
@@ -84,62 +89,79 @@ class DiffusionModule:
         video_result = video_result * 255
         write_video(self.output_path, video_result[2:], fps=fps)
 
-        self.is_processing = False
+        self.running = False
 
     @imgui_utils.scoped_by_object_id
     def __call__(self):
-        imgui.begin("Diffusion Module", True)
+        if self.running:
+            self.display_progress()
 
-        _, self.input_path = imgui_utils.input_text(
-            "Input Path", self.input_path, 256,
-            flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL,
-            width=-(self.app.button_w + self.app.spacing)
+        joined = '\n'.join(self.input_path)
+
+        imgui_utils.input_text("##SRINPUT", joined, 1024, flags=imgui.INPUT_TEXT_READ_ONLY,
+                               width=-(self.app.button_w + self.app.spacing), help_text="Input File")
+        imgui.same_line()
+
+        _clicked, input = self.file_dialog(self.app.button_w)
+        if _clicked:
+            self.input_path = input
+            print(self.input_path)
+
+        imgui_utils.input_text("##SRRESULT", self.output_path, 1024, flags=imgui.INPUT_TEXT_READ_ONLY,
+                               width=-(self.app.button_w + self.app.spacing), help_text="Output Path")
+        imgui.same_line()
+
+        _clicked, save_path = self.save_path_dialog(self.app.button_w)
+        if _clicked:
+            if len(save_path) > 0:
+                self.output_path = save_path[0]
+                print(self.output_path)
+            else:
+                self.output_path = ""
+                print("No path selected")
+
+        changed, self.model_id = imgui_utils.input_text("Model ID", self.model_id, 1024,
+                                               flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL,
+                                               help_text='Model ID',
+                                               width=-self.app.button_w - self.app.spacing, )
+
+        changed, self.prompt = imgui_utils.input_text("Prompt", self.prompt, 1024,
+                                             flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL,
+                                             help_text='Prompt to be used for the model',
+                                             width=-self.app.button_w - self.app.spacing, )
+
+        changed, self.scale = imgui.slider_float(
+            "Scale", float(self.scale), 0.1, 2.0
         )
 
-        _, self.output_path = imgui_utils.input_text(
-            "Output Path", self.output_path, 256,
-            flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL,
-            width=-(self.app.button_w + self.app.spacing)
-        )
+        # acceleration_options = ["none", "xformers", "tensorrt"]
+        # self.acceleration = imgui.combo(
+        #     "Acceleration", self.acceleration, acceleration_options
+        # )
 
-        _, self.model_id = imgui_utils.input_text(
-            "Model ID", self.model_id, 256,
-            flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL,
-            width=-(self.app.button_w + self.app.spacing)
-        )
+        self.use_denoising_batch = imgui.checkbox("Use Denoising Batch", self.use_denoising_batch)
 
-        _, self.prompt = imgui_utils.input_text(
-            "Prompt", self.prompt, 256,
-            flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL,
-            width=-(self.app.button_w + self.app.spacing)
-        )
+        self.enable_similar_image_filter = imgui.checkbox("Enable Similar Image Filter",
+                                                          self.enable_similar_image_filter)
 
-        _, self.scale = imgui.slider_float(
-            "Scale", self.scale, 0.1, 2.0
-        )
+        changed, self.seed = imgui.input_int("Seed", self.seed)
 
-        acceleration_options = ["none", "xformers", "tensorrt"]
-        _, self.acceleration = imgui.combo(
-            "Acceleration", self.acceleration, acceleration_options
-        )
+        try:
+            if imgui.button("Process Video", width=imgui.get_content_region_available_width()) and not self.running:
+                self.running = True
+                print("Process Video using Diffusion model")
+                args.input_path = self.input_path
+                args.output_path = self.output_path
+                args.model_id = self.model_id
+                args.prompt = self.prompt
+                args.scale = self.scale
+                args.acceleration = self.acceleration
+                args.use_denoising_batch = self.use_denoising_batch
+                args.enable_similar_image_filter = self.enable_similar_image_filter
+                args.seed = int(self.seed)
+                self.args = args
+                print("Starting Super Resolution")
+                self.start_process()
 
-        _, self.use_denoising_batch = imgui.checkbox(
-            "Use Denoising Batch", self.use_denoising_batch
-        )
-
-        _, self.enable_similar_image_filter = imgui.checkbox(
-            "Enable Similar Image Filter", self.enable_similar_image_filter
-        )
-
-        _, self.seed = imgui.input_int(
-            "Seed", self.seed
-        )
-
-        if imgui_utils.button("Process Video", width=imgui.get_content_region_available_width()):
-            self.process_video_threaded()
-
-        if self.is_processing:
-            imgui.text("Processing...")
-            imgui.progress_bar(self.progress, (0, 0))
-
-        imgui.end()
+        except Exception as e:
+            print("SRR ERROR", e)
