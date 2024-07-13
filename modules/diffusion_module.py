@@ -33,16 +33,14 @@ class DiffusionModule:
         self.progress = 0.0
         self.running = False
         self.file_dialog = BrowseWidget(self, "Browse", os.path.abspath(os.getcwd()),
-                                        [".mp4"], multiple=False, traverse_folders=False,
+                                        ["*", ".mp4"], multiple=False, traverse_folders=False,
                                         width=self.app.button_w)
         self.save_path_dialog = BrowseWidget(self, "Save Path", os.path.abspath(os.getcwd()), [""], multiple=False,
                                              traverse_folders=False, add_folder_button=True, width=self.app.button_w)
 
     def display_progress(self):
-        imgui.begin("Diffusion start", False)
         imgui.text("Processing...")
         imgui.progress_bar(self.progress, (0, 0))
-        imgui.end()
 
     def start_process_thread(self):
         process_thread = threading.Thread(target=self.start_process)
@@ -109,6 +107,7 @@ class DiffusionModule:
 
         _clicked, input = self.file_dialog(self.app.button_w)
         if _clicked:
+            print(input)
             self.input_path = input[0]
             print(self.input_path)
 
