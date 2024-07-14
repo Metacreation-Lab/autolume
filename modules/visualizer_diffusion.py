@@ -34,16 +34,6 @@ class VisualizerDiffusion:
     def __init__(self, app, renderer):
         self.app = app
 
-        self.input_path = ""
-        self.model_id = "KBlueLeaf/kohaku-v2.1"
-        self.lora_dict = None
-        self.prompt = "1girl with brown dog ears, thick frame glasses"
-        self.scale = 1.0
-        self.acceleration = 1  # 0: none, 1: xformers, 2: tensorrt
-        self.use_denoising_batch = True
-        self.enable_similar_image_filter = True
-        self.seed = 2
-
         # Internals.
         self._async_renderer = renderer
 
@@ -153,13 +143,6 @@ class VisualizerDiffusion:
     def __call__(self):
         self.pane_w = self.app.font_size * 45
         self.args = dnnlib.EasyDict()
-
-        # Detect mouse dragging in the result area.
-        dragging, dx, dy = imgui_utils.drag_hidden_window('##result_area', x=self.pane_w, y=0,
-                                                          width=self.app.content_width - self.pane_w,
-                                                          height=self.app.content_height)
-        if dragging:
-            self.latent_widget.drag(dx, dy)
 
         imgui.set_next_window_position(0, 0)
         imgui.set_next_window_size(self.pane_w, self.app.content_height)

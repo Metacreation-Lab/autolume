@@ -28,6 +28,7 @@ class Autolume(imgui_window.ImguiWindow):
         self.viz = None
         self.diffusion_viz = None
         self.render_loop = None
+        self.diffusion_render = None
         self.pkls = []
         self.splash_delay = 0
 
@@ -77,9 +78,11 @@ class Autolume(imgui_window.ImguiWindow):
 
     # Diffusion model realtime output
     def start_diffusion(self):
+        from modules.diffusion_render import DiffusionRender
         from modules.visualizer_diffusion import VisualizerDiffusion
 
-        self.diffusion_viz = VisualizerDiffusion(self)
+        self.diffusion_render = DiffusionRender()
+        self.diffusion_viz = VisualizerDiffusion(self, self.diffusion_render)
 
         self.state = States.DIFFUSION
         self.menu = None
@@ -92,9 +95,15 @@ class Autolume(imgui_window.ImguiWindow):
         if self.viz is not None:
             self.viz.close()
             self.viz = None
+        if self.diffusion_viz is not None:
+            self.diffusion_viz.close()
+            self.diffusion_viz = None
         if self.render_loop is not None:
             self.render_loop.close()
             self.render_loop = None
+        if self.diffusion_render is not None:
+            self.diffusion_render.close()
+            self.diffusion_render = None
         gc.collect()
         self.menu = Menu(self)
 
