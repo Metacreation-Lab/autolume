@@ -13,6 +13,7 @@ class States(IntEnum):
     MENU = 1
     RENDER = 2
     SPLASH = 3
+    DIFFUSION = 4
 
 
 
@@ -25,6 +26,7 @@ class Autolume(imgui_window.ImguiWindow):
         self.running = True
         self.menu = None
         self.viz = None
+        self.diffusion_viz = None
         self.render_loop = None
         self.pkls = []
         self.splash_delay = 0
@@ -70,6 +72,16 @@ class Autolume(imgui_window.ImguiWindow):
                 self.viz.add_recent_pickle(pkl)
             self.viz.load_pickle(self.pkls[0])
         self.state = States.RENDER
+        self.menu = None
+        gc.collect()
+
+    # Diffusion model realtime output
+    def start_diffusion(self):
+        from modules.visualizer_diffusion import VisualizerDiffusion
+
+        self.diffusion_viz = VisualizerDiffusion(self)
+
+        self.state = States.DIFFUSION
         self.menu = None
         gc.collect()
 
@@ -136,6 +148,12 @@ class Autolume(imgui_window.ImguiWindow):
                 self.state = States.ERROR
             else:
                 self.viz()
+
+        if self.state == States.DIFFUSION:
+            if self.diffusion_viz is None:
+                self.state = States.ERROR
+            else:
+                self.diffusion_viz()
 
         if self.state == States.CLOSE or self.state == States.ERROR:
             self.stop()

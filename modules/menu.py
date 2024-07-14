@@ -112,6 +112,9 @@ class Menu:
         imgui.begin('Diffusion Model##Menu', closable=False, flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS))
         imgui.text("Non-realtime diffusion model")
         self.diffusion_module()
+        imgui.text("Jump into Diffusion-Live")
+        if imgui_utils.button("START", width=self.app.button_w):
+            self.app.start_diffusion()
         imgui.end()
 
         imgui.set_next_window_position(2 * self.app.content_width // 3, (self.app.content_height * 3) // 4)
