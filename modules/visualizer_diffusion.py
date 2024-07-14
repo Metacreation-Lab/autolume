@@ -17,7 +17,7 @@ from utils.gui_utils import imgui_utils
 from utils.gui_utils import gl_utils
 from utils.gui_utils import text_utils
 from widgets import diffusion_widget
-from widgets import pickle_widget
+# from widgets import pickle_widget
 
 from pythonosc.osc_server import BlockingOSCUDPServer
 from pythonosc.dispatcher import Dispatcher
@@ -57,7 +57,7 @@ class VisualizerDiffusion:
         self.result = dnnlib.EasyDict()
 
         # Widgets.
-        self.pickle_widget = pickle_widget.PickleWidget(self)
+        # self.pickle_widget = pickle_widget.PickleWidget(self)
         self.diffusion_widget = diffusion_widget.DiffusionWidget(self)
 
         self.logo = cv2.imread("assets/Autolume-logo.png", cv2.IMREAD_UNCHANGED)
@@ -207,7 +207,7 @@ class VisualizerDiffusion:
             pass
         elif self._defer_rendering > 0:
             self._defer_rendering -= 1
-        else:
+        elif self.args.input is not None:
             self._async_renderer.set_args(**self.args)
             result = self._async_renderer.get_result()
             if result is not None:

@@ -32,9 +32,9 @@ class DiffusionWidget:
         self.enable_similar_image_filter = True
         self.seed = 2
 
-        self.file_dialog = BrowseWidget(self, "Browse", os.path.abspath(os.getcwd()),
-                                        ["*", ".mp4"], multiple=False, traverse_folders=False,
-                                        width=self.viz.app.button_w)
+        self.file_dialog = BrowseWidget(viz, "Browse", os.path.relpath(os.getcwd()),
+                                        ["*", ".mp4", ],
+                                        width=self.viz.app.button_w, multiple=False, traverse_folders=False)
 
     def get_params(self):
         return (self.n_fft, self.osc_addresses, self.mappings, self.use_osc)
@@ -87,3 +87,10 @@ class DiffusionWidget:
 
             changed, self.seed = imgui.input_int("Seed", self.seed)
 
+        viz.args.input = input
+        viz.args.model_id = self.model_id
+        viz.args.prompt = self.prompt
+        viz.args.scale = self.scale
+        viz.args.use_denoising_batch = self.use_denoising_batch
+        viz.args.enable_similar_image_filter = self.enable_similar_image_filter
+        viz.args.seed = self.seed

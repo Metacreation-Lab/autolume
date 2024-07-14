@@ -3,7 +3,7 @@ import multiprocessing
 import torch
 
 import dnnlib
-from widgets import renderer
+from widgets import diffusion_renderer
 
 
 def compare_args(args, cur_args):
@@ -81,7 +81,7 @@ class DiffusionRender:
 
     @staticmethod
     def _process_fn(args_queue, result_queue):
-        renderer_obj = renderer.Renderer()
+        renderer_obj = diffusion_renderer.Renderer()
         args = None
         stamp = 0
         new_arg = False
@@ -92,7 +92,7 @@ class DiffusionRender:
             if new_arg:
                 result = renderer_obj.render(**args)
                 if 'error' in result:
-                    result.error = renderer.CapturedException(result.error)
+                    result.error = diffusion_renderer.CapturedException(result.error)
                 result_queue.put([result, stamp])
                 del result
                 new_arg = False
