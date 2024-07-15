@@ -36,7 +36,8 @@ class Renderer:
                      enable_similar_image_filter=True,
                      seed=2
                      ):
-        video_info = read_video(input[0])
+        print(input)
+        video_info = read_video(input)
         video = video_info[0] / 255
         height = int(video.shape[1] * scale)
         width = int(video.shape[2] * scale)

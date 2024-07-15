@@ -47,10 +47,9 @@ class DiffusionWidget:
 
     @imgui_utils.scoped_by_object_id
     def __call__(self, show=True):
-        viz = self.viz
         if show:
-            width = viz.app.font_size
-            height = imgui.get_text_line_height_with_spacing()
+            # width = viz.app.font_size
+            # height = imgui.get_text_line_height_with_spacing()
             imgui_utils.input_text("##SRINPUT", self.input_path, 1024, flags=imgui.INPUT_TEXT_READ_ONLY,
                                    width=-(self.viz.app.button_w + self.viz.app.spacing), help_text="Input File")
             imgui.same_line()
@@ -87,10 +86,10 @@ class DiffusionWidget:
 
             changed, self.seed = imgui.input_int("Seed", self.seed)
 
-        viz.args.input = input
-        viz.args.model_id = self.model_id
-        viz.args.prompt = self.prompt
-        viz.args.scale = self.scale
-        viz.args.use_denoising_batch = self.use_denoising_batch
-        viz.args.enable_similar_image_filter = self.enable_similar_image_filter
-        viz.args.seed = self.seed
+        self.viz.args.input = self.input_path
+        self.viz.args.model_id = self.model_id
+        self.viz.args.prompt = self.prompt
+        self.viz.args.scale = self.scale
+        self.viz.args.use_denoising_batch = self.use_denoising_batch
+        self.viz.args.enable_similar_image_filter = self.enable_similar_image_filter
+        self.viz.args.seed = self.seed

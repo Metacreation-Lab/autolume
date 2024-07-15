@@ -57,7 +57,6 @@ class VisualizerDiffusion:
         self.result = dnnlib.EasyDict()
 
         # Widgets.
-        # self.pickle_widget = pickle_widget.PickleWidget(self)
         self.diffusion_widget = diffusion_widget.DiffusionWidget(self)
 
         self.logo = cv2.imread("assets/Autolume-logo.png", cv2.IMREAD_UNCHANGED)
