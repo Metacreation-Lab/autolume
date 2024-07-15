@@ -32,7 +32,7 @@ class DiffusionWidget:
         self.enable_similar_image_filter = True
         self.seed = 2
 
-        self.file_dialog = BrowseWidget(viz, "Browse", os.path.relpath(os.getcwd()),
+        self.file_dialog = BrowseWidget(viz, "Browse", os.path.abspath(os.getcwd()),
                                         ["*", ".mp4", ],
                                         width=self.viz.app.button_w, multiple=False, traverse_folders=False)
 

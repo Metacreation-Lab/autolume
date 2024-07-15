@@ -90,11 +90,11 @@ class DiffusionRender:
                 args, stamp = args_queue.get()
                 new_arg = True
             if new_arg:
-                video_info = read_video(args.input[0])
+                video_info = read_video(args['input'])
                 video = video_info[0] / 255
                 fps = video_info[2]["video_fps"]
-                height = int(video.shape[1] * args.scale)
-                width = int(video.shape[2] * args.scale)
+                height = int(video.shape[1] * args['scale'])
+                width = int(video.shape[2] * args['scale'])
 
                 for _ in range(pipeline_obj.stream.batch_size):
                     pipeline_obj.stream(image=video[0].permute(2, 0, 1))

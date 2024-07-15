@@ -34,7 +34,7 @@ class Pipeline:
         res = dnnlib.EasyDict()
         try:
             image_tensor = self.stream.preprocess_image(image)
-            output_image = self.stream(image=image_tensor, prompt=args.prompt)
+            output_image = self.stream(image=image_tensor, prompt=args['prompt'])
             res.image = output_image
         except:
             res.error = CapturedException()

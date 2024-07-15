@@ -206,7 +206,7 @@ class VisualizerDiffusion:
             pass
         elif self._defer_rendering > 0:
             self._defer_rendering -= 1
-        elif self.args.input is not None:
+        elif self.args.input != '':
             self._async_renderer.set_args(**self.args)
             result = self._async_renderer.get_result()
             if result is not None:
@@ -219,6 +219,7 @@ class VisualizerDiffusion:
         if 'image' in self.result:
             if self._tex_img is not self.result.image:
                 self._tex_img = self.result.image
+                self._tex_img = self._tex_img.transpose(1, 2, 0)
                 img = cv2.cvtColor(self._tex_img, cv2.COLOR_RGB2BGRA)
                 self.video_frame.data = img
                 self.video_frame.FourCC = ndi.FOURCC_VIDEO_TYPE_BGRX
