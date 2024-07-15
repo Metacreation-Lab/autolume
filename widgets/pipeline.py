@@ -5,15 +5,37 @@ import torch
 from torchvision.io import read_video
 from utils.wrapper import StreamDiffusionWrapper
 
+default_prompt = "1girl with brown dog ears, thick frame glasses"
 
-class Renderer:
+class Pipeline:
     def __init__(self):
-        self.stream = None
+        self.stream = StreamDiffusionWrapper(
+            model_id_or_path="KBlueLeaf/kohaku-v2.1",
+            lora_dict=None,
+            t_index_list=[35, 45],
+            frame_buffer_size=1,
+            warmup=10,
+            acceleration="xformers",
+            do_add_noise=False,
+            mode="img2img",
+            output_type="pt",
+            enable_similar_image_filter=True,
+            similar_image_filter_threshold=0.98,
+            use_denoising_batch=True,
+            seed=2,
+        )
+        self.last_prompt = default_prompt
+        self.stream.prepare(
+            prompt=default_prompt,
+            num_inference_steps=50,
+        )
 
-    def render(self, **args):
+    def predict(self, image, **args):
         res = dnnlib.EasyDict()
         try:
-            self._render_impl(res, **args)
+            image_tensor = self.stream.preprocess_image(image)
+            output_image = self.stream(image=image_tensor, prompt=args.prompt)
+            res.image = output_image
         except:
             res.error = CapturedException()
         if 'image' in res:
@@ -42,29 +64,7 @@ class Renderer:
         height = int(video.shape[1] * scale)
         width = int(video.shape[2] * scale)
 
-        if self.stream is None:
-            self.stream = StreamDiffusionWrapper(
-                model_id_or_path=model_id,
-                lora_dict=lora_dict,
-                t_index_list=[35, 45],
-                frame_buffer_size=1,
-                width=width,
-                height=height,
-                warmup=10,
-                acceleration=acceleration,
-                do_add_noise=False,
-                mode="img2img",
-                output_type="pt",
-                enable_similar_image_filter=enable_similar_image_filter,
-                similar_image_filter_threshold=0.98,
-                use_denoising_batch=use_denoising_batch,
-                seed=seed,
-            )
 
-        self.stream.prepare(
-            prompt=prompt,
-            num_inference_steps=50,
-        )
 
         for _ in range(self.stream.batch_size):
             self.stream(image=video[0].permute(2, 0, 1))
@@ -75,6 +75,7 @@ class Renderer:
             res.image = img
             res.progress = (i + 1) / video.shape[0]
             del img
+
 
 
 class CapturedException(Exception):

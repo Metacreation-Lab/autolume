@@ -1,10 +1,10 @@
 import gc
 import multiprocessing
 import torch
-
+from torchvision.io import read_video
 import dnnlib
-from widgets import diffusion_renderer
-
+from widgets import pipeline
+from tqdm import tqdm
 
 def compare_args(args, cur_args):
     if args is None or cur_args is None:
@@ -81,7 +81,7 @@ class DiffusionRender:
 
     @staticmethod
     def _process_fn(args_queue, result_queue):
-        renderer_obj = diffusion_renderer.Renderer()
+        pipeline_obj = pipeline.Pipeline()
         args = None
         stamp = 0
         new_arg = False
@@ -90,11 +90,23 @@ class DiffusionRender:
                 args, stamp = args_queue.get()
                 new_arg = True
             if new_arg:
-                result = renderer_obj.render(**args)
-                if 'error' in result:
-                    result.error = diffusion_renderer.CapturedException(result.error)
-                result_queue.put([result, stamp])
-                del result
+                video_info = read_video(args.input[0])
+                video = video_info[0] / 255
+                fps = video_info[2]["video_fps"]
+                height = int(video.shape[1] * args.scale)
+                width = int(video.shape[2] * args.scale)
+
+                for _ in range(pipeline_obj.stream.batch_size):
+                    pipeline_obj.stream(image=video[0].permute(2, 0, 1))
+
+                for i in tqdm(range(video.shape[0])):
+                    input_image = video[i].permute(2, 0, 1)
+                    result = pipeline_obj.predict(input_image, **args)
+
+                    if 'error' in result:
+                        result.error = pipeline.CapturedException(result.error)
+                    result_queue.put([result, stamp])
+                    del result
                 new_arg = False
             # gc.collect() # Putting a garbage collect here stabilizes the memory usage, but slows down the rendering
             # Torch seems to store values in the background even with nograd that slow down StyleGAN2 over time
