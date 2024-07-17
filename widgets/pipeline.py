@@ -7,6 +7,7 @@ from utils.wrapper import StreamDiffusionWrapper
 
 default_prompt = "1girl with brown dog ears, thick frame glasses"
 
+
 class Pipeline:
     def __init__(self):
         self.stream = StreamDiffusionWrapper(
@@ -35,11 +36,19 @@ class Pipeline:
         try:
             image_tensor = self.stream.preprocess_image(image)
             output_image = self.stream(image=image_tensor, prompt=args['prompt'])
+
+            sel_channels = 3
+            base_channel = 0
+            img_normalize = True
+            img_scale_db = 0
+
+
             res.image = output_image
         except:
             res.error = CapturedException()
         if 'image' in res:
-            res.image = self.to_cpu(res.image).numpy()
+            # Move the image tensor to CPU and convert it to a NumPy ndarray
+            res.image = res.image.cpu().permute(1, 2, 0).numpy()
         if 'error' in res:
             res.error = str(res.error)
         return res
@@ -64,8 +73,6 @@ class Pipeline:
         height = int(video.shape[1] * scale)
         width = int(video.shape[2] * scale)
 
-
-
         for _ in range(self.stream.batch_size):
             self.stream(image=video[0].permute(2, 0, 1))
 
@@ -75,7 +82,6 @@ class Pipeline:
             res.image = img
             res.progress = (i + 1) / video.shape[0]
             del img
-
 
 
 class CapturedException(Exception):

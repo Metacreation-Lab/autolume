@@ -219,8 +219,14 @@ class VisualizerDiffusion:
         if 'image' in self.result:
             if self._tex_img is not self.result.image:
                 self._tex_img = self.result.image
-                self._tex_img = self._tex_img.transpose(1, 2, 0)
-                img = cv2.cvtColor(self._tex_img, cv2.COLOR_RGB2BGRA)
+
+                if self._tex_img.dtype != np.float32:
+                    self._tex_img = self._tex_img.astype(np.float32)
+
+                # Scale the image from float32 to 8-bit unsigned integers
+                img_8bit = np.clip(self._tex_img * (255.0 / 65535.0), 0, 255).astype(np.uint8)
+                img = cv2.cvtColor(img_8bit, cv2.COLOR_RGB2BGRA)
+
                 self.video_frame.data = img
                 self.video_frame.FourCC = ndi.FOURCC_VIDEO_TYPE_BGRX
                 ndi.send_send_video_v2(self.ndi_send, self.video_frame)

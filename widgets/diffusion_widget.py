@@ -10,15 +10,9 @@ from audio import audio_stream
 from utils.gui_utils import imgui_utils
 from widgets.browse_widget import BrowseWidget
 
-chromas = ["C", "C/D", "D", "D/E", "E", "E/F", "F", "F/G" "G", "G/A", "A", "A/B", "B"]
 
 
 class DiffusionWidget:
-    """
-    Audio Widget that takes default audio device and performs FFT on signal
-    Input audio signal can be separated into harmonic and percussive components
-    Signal is sent via OSC to Osc-address (self.osc_addresses) if self.use_osc is True
-    """
 
     def __init__(self, viz):
         self.viz = viz
