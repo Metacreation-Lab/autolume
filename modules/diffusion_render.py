@@ -81,13 +81,13 @@ class DiffusionRender:
 
     @staticmethod
     def _process_fn(args_queue, result_queue):
-        pipeline_obj = pipeline.Pipeline()
         args = None
         stamp = 0
         new_arg = False
         while True:
             if args_queue.qsize() > 0:
                 args, stamp = args_queue.get()
+                pipeline_obj = pipeline.Pipeline(**args)
                 new_arg = True
             if new_arg:
                 video_info = read_video(args['input'])

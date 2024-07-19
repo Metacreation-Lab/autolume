@@ -9,21 +9,18 @@ default_prompt = "1girl with brown dog ears, thick frame glasses"
 
 
 class Pipeline:
-    def __init__(self):
+    def __init__(self, **args):
         self.stream = StreamDiffusionWrapper(
-            model_id_or_path="KBlueLeaf/kohaku-v2.1",
-            lora_dict=None,
-            t_index_list=[35, 45],
+            model_id_or_path="stabilityai/sd-turbo",
             frame_buffer_size=1,
             warmup=10,
             acceleration="xformers",
-            do_add_noise=False,
             mode="img2img",
+            t_index_list=[35, 45],
             output_type="pt",
-            enable_similar_image_filter=True,
-            similar_image_filter_threshold=0.98,
             use_denoising_batch=True,
-            seed=2,
+            cfg_type="none",
+            use_lcm_lora=False,
         )
         self.last_prompt = default_prompt
         self.stream.prepare(
@@ -36,12 +33,6 @@ class Pipeline:
         try:
             image_tensor = self.stream.preprocess_image(image)
             output_image = self.stream(image=image_tensor, prompt=args['prompt'])
-
-            sel_channels = 3
-            base_channel = 0
-            img_normalize = True
-            img_scale_db = 0
-
 
             res.image = output_image
         except:

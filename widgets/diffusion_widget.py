@@ -17,7 +17,7 @@ class DiffusionWidget:
     def __init__(self, viz):
         self.viz = viz
         self.input_path = ""
-        self.model_id = "KBlueLeaf/kohaku-v2.1"
+        self.model_id = "stabilityai/sd-turbo"
         self.lora_dict = None
         self.prompt = "1girl with brown dog ears, thick frame glasses"
         self.scale = 1.0
