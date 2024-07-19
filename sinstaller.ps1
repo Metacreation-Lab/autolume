@@ -203,6 +203,14 @@ Write-Host "=> Step: Install Python Requirements"
 
 . python -m pip install -r requirements.txt
 
+# Install Streamdiffusion package --------------------------------------------------------------------#
+
+Write-Host "=> Step: Install Streamdiffusion package"
+
+. python -m pip install git+https://github.com/cumulo-autumn/StreamDiffusion.git@main#egg=streamdiffusion[tensorrt]
+
+. python -m streamdiffusion.tools.install-tensorrt
+
 # Re-Install ffmpeg-python --------------------------------------------------------------------#
 
 Write-Host "=> Step: Re-Install Ffmpeg-Python"
