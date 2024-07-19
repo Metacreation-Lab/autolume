@@ -229,7 +229,10 @@ class VisualizerDiffusion:
 
                 self.video_frame.data = img
                 self.video_frame.FourCC = ndi.FOURCC_VIDEO_TYPE_BGRX
-                ndi.send_send_video_v2(self.ndi_send, self.video_frame)
+                try:
+                    ndi.send_send_video_v2(self.ndi_send, self.video_frame)
+                except TypeError:
+                    var = None
                 if self._tex_obj is None or not self._tex_obj.is_compatible(image=self._tex_img):
                     self._tex_obj = gl_utils.Texture(image=self._tex_img, bilinear=False, mipmap=False)
                 else:
