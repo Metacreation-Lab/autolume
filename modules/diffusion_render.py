@@ -101,6 +101,8 @@ class DiffusionRender:
 
                 for i in tqdm(range(video.shape[0])):
                     input_image = video[i].permute(2, 0, 1)
+                    if args_queue.qsize() > 0:
+                        args, stamp = args_queue.get()
                     result = pipeline_obj.predict(input_image, **args)
 
                     if 'error' in result:
