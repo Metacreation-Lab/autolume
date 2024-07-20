@@ -9,13 +9,18 @@ from assets import ACTIVE_RED
 from audio import audio_stream
 from utils.gui_utils import imgui_utils
 from widgets.browse_widget import BrowseWidget
-
+import NDIlib as ndi
 
 
 class DiffusionWidget:
 
     def __init__(self, viz):
         self.viz = viz
+
+        self.ndi_find = ndi.find_create_v2()
+        self.ndi_sources = []
+        self.current_used_ndi_source = None
+
         self.input_path = ""
         self.model_id = "stabilityai/sd-turbo"
         self.lora_dict = None
@@ -39,20 +44,63 @@ class DiffusionWidget:
     def callback(self, data):
         self.fft.data = np.abs(librosa.stft(data, n_fft=self.n_fft * 2 - 1))
 
+    # def start_processing(self, ignore_errors=False):
+    #     viz = self.viz
+    #     viz.app.skip_frame()  # The input field will change on next frame.
+    #     print(os.getcwd())
+    #     try:
+    #         resolved = self.resolve_pkl(pkl)
+    #         name = resolved.replace('\\', '/').split('/')[-1]
+    #         self.cur_pkl = resolved
+    #         self.user_pkl = resolved
+    #         viz.result.message = f'Loading {name}...'
+    #         viz.defer_rendering()
+    #         if resolved in self.recent_pkls:
+    #             self.recent_pkls.remove(resolved)
+    #         self.recent_pkls.insert(0, resolved)
+    #     except:
+    #         self.cur_pkl = None
+    #         self.user_pkl = pkl
+    #         if pkl == '':
+    #             viz.result = dnnlib.EasyDict(message='No network pickle loaded')
+    #         else:
+    #             viz.result = dnnlib.EasyDict(error=renderer.CapturedException())
+    #         if not ignore_errors:
+    #             raise
+
     @imgui_utils.scoped_by_object_id
     def __call__(self, show=True):
         if show:
             # width = viz.app.font_size
             # height = imgui.get_text_line_height_with_spacing()
-            imgui_utils.input_text("##SRINPUT", self.input_path, 1024, flags=imgui.INPUT_TEXT_READ_ONLY,
-                                   width=-(self.viz.app.button_w + self.viz.app.spacing), help_text="Input File")
-            imgui.same_line()
+            # imgui_utils.input_text("##SRINPUT", self.input_path, 1024, flags=imgui.INPUT_TEXT_READ_ONLY,
+            #                        width=-(self.viz.app.button_w + self.viz.app.spacing), help_text="Input File")
+            # imgui.same_line()
 
-            _clicked, input = self.file_dialog(self.viz.app.button_w)
-            if _clicked:
-                print(input)
-                self.input_path = input[0]
-                print(self.input_path)
+            ndi_find = ndi.find_create_v2()
+            ndi.find_wait_for_sources(ndi_find, 1000)
+            self.ndi_sources = ndi.find_get_current_sources(ndi_find)
+
+            if len(self.ndi_sources) == 0:
+                imgui.text("No NDI sources found. Please start a NDI source and try again.")
+            else:
+                sources_names = [source.ndi_name for source in self.ndi_sources]
+                current_index = sources_names.index(
+                    self.current_used_ndi_source.ndi_name) if self.current_used_ndi_source else -1
+                changed, current_index = imgui.combo("NDI Sources", current_index, sources_names)
+
+                if changed:
+                    self.current_used_ndi_source = self.ndi_sources[current_index]
+                    self.viz.set_ndi_source(self.current_used_ndi_source)
+
+                if imgui.button("Refresh NDI Sources"):
+                    # This will involve calling ndi.find_get_current_sources again and updating self.ndi_sources
+                    ndi.find_wait_for_sources(ndi_find, 1000)
+                    self.ndi_sources = ndi.find_get_current_sources(ndi_find)
+
+            if self.current_used_ndi_source is None:
+                self.viz.result = dnnlib.EasyDict(
+                    message='No NDI sources found. Please start a NDI source and try again.')
 
             changed, self.model_id = imgui_utils.input_text("Model ID", self.model_id, 1024,
                                                             flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL,
@@ -80,7 +128,9 @@ class DiffusionWidget:
 
             changed, self.seed = imgui.input_int("Seed", self.seed)
 
-        self.viz.args.input = self.input_path
+            # if imgui.button("Start Processing", width=imgui.get_content_region_available_width()) and not self.running:
+
+        # self.viz.args.input = self.input_path
         self.viz.args.model_id = self.model_id
         self.viz.args.prompt = self.prompt
         self.viz.args.scale = self.scale

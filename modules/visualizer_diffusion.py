@@ -38,6 +38,8 @@ class VisualizerDiffusion:
         self._async_renderer = renderer
 
         # NDI parameters
+        self.ndi_source = None
+
         self.ndi_name = 'Diffusion Live'
         send_settings = ndi.SendCreate()
         send_settings.ndi_name = self.ndi_name
@@ -138,6 +140,14 @@ class VisualizerDiffusion:
     def clear_result(self):
         self._async_renderer.clear_result()
 
+    def set_ndi_source(self, ndi_source):
+        self.ndi_source = ndi_source
+        if self.ndi_source is not None:
+            recv_create_desc = ndi.RecvCreateV3()
+            recv_create_desc.color_format = ndi.RECV_COLOR_FORMAT_BGRX_BGRA
+            ndi_recv = ndi.recv_create_v3(recv_create_desc)
+            ndi.recv_connect(ndi_recv, self.ndi_source)
+
     @imgui_utils.scoped_by_object_id
     def __call__(self):
         self.pane_w = self.app.font_size * 45
@@ -206,7 +216,7 @@ class VisualizerDiffusion:
             pass
         elif self._defer_rendering > 0:
             self._defer_rendering -= 1
-        elif self.args.input != '':
+        elif self.ndi_source is not None:
             self._async_renderer.set_args(**self.args)
             result = self._async_renderer.get_result()
             if result is not None:
