@@ -18,7 +18,7 @@ class Pipeline:
             acceleration="xformers",
             mode="img2img",
             t_index_list=[35, 45],
-            # output_type="pil",
+            output_type="np",
             use_denoising_batch=True,
             cfg_type="none",
             use_lcm_lora=False,

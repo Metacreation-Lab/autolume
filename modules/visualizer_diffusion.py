@@ -237,28 +237,18 @@ class VisualizerDiffusion:
         if 'image' in self.result:
             if self._tex_img is not self.result.image:
                 self._tex_img = self.result.image
-
-                # 将PIL Image转换为numpy数组
-                img_np = np.array(self._tex_img)
-
-                # 确保图像是RGB格式
-                if img_np.shape[2] == 3:
-                    img = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGRA)
-                else:
-                    img = cv2.cvtColor(img_np, cv2.COLOR_RGBA2BGRA)
-
+                img = (self._tex_img * 255).clip(0, 255).astype(np.uint8)
+                img = cv2.cvtColor(img, cv2.COLOR_RGB2BGRA)
                 self.video_frame.data = img
                 self.video_frame.FourCC = ndi.FOURCC_VIDEO_TYPE_BGRX
                 try:
                     ndi.send_send_video_v2(self.ndi_send, self.video_frame)
-                except TypeError:
-                    pass
-
-                if self._tex_obj is None or not self._tex_obj.is_compatible(image=img_np):
-                    self._tex_obj = gl_utils.Texture(image=img_np, bilinear=False, mipmap=False)
+                except Exception as e:
+                    print(e)
+                if self._tex_obj is None or not self._tex_obj.is_compatible(image=img):
+                    self._tex_obj = gl_utils.Texture(image=img, bilinear=False, mipmap=False)
                 else:
-                    self._tex_obj.update(img_np)
-
+                    self._tex_obj.update(img)
             zoom = min(max_w / self._tex_obj.width, max_h / self._tex_obj.height)
             zoom = np.floor(zoom) if zoom >= 1 else zoom
             self._tex_obj.draw(pos=pos, zoom=zoom, align=0.5, rint=True)

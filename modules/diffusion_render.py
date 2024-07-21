@@ -104,7 +104,7 @@ class DiffusionRender:
             if frame_queue.qsize() > 0 and pipeline_obj is not None:
                 frame = frame_queue.get()
                 frame = frame[:, :, :3]
-                print(frame.shape, frame.dtype)
+                # print(frame.shape, frame.dtype)
                 input_image = Image.fromarray(frame)
                 result = pipeline_obj.predict(input_image, **args)
 
