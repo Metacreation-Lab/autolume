@@ -5,7 +5,8 @@ from torchvision.io import read_video
 import dnnlib
 from widgets import pipeline
 from tqdm import tqdm
-
+from PIL import Image
+import numpy as np
 
 def compare_args(args, cur_args):
     if args is None or cur_args is None:
@@ -101,13 +102,10 @@ class DiffusionRender:
                     pipeline_obj = pipeline.Pipeline(**args)
 
             if frame_queue.qsize() > 0 and pipeline_obj is not None:
-                input_image = frame_queue.get()
-
-                # Ensure the image has 3 channels
-                if input_image.shape[2] == 4:
-                    # Remove the alpha channel
-                    input_image = input_image[:, :, :3]
-
+                frame = frame_queue.get()
+                frame = frame[:, :, :3]
+                print(frame.shape, frame.dtype)
+                input_image = Image.fromarray(frame)
                 result = pipeline_obj.predict(input_image, **args)
 
                 if 'error' in result:

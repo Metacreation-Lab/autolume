@@ -4,6 +4,7 @@ import dnnlib
 import torch
 from torchvision.io import read_video
 from utils.wrapper import StreamDiffusionWrapper
+import numpy as np
 
 default_prompt = "girl with brown dog ears, thick frame glasses"
 
@@ -17,7 +18,7 @@ class Pipeline:
             acceleration="xformers",
             mode="img2img",
             t_index_list=[35, 45],
-            output_type="pt",
+            # output_type="pil",
             use_denoising_batch=True,
             cfg_type="none",
             use_lcm_lora=False,
@@ -33,13 +34,14 @@ class Pipeline:
         try:
             image_tensor = self.stream.preprocess_image(image)
             output_image = self.stream(image=image_tensor, prompt=args['prompt'])
-
             res.image = output_image
         except:
             res.error = CapturedException()
         if 'image' in res:
-            # Move the image tensor to CPU and convert it to a NumPy ndarray
-            res.image = res.image.cpu().permute(1, 2, 0).numpy()
+            # print(res.image.shape, res.image.dtype)
+            # # Move the image tensor to CPU and convert it to a NumPy ndarray
+            # res.image = res.image.cpu().permute(1, 2, 0).numpy()
+            pass
         if 'error' in res:
             res.error = str(res.error)
         return res
