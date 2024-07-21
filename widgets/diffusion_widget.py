@@ -67,45 +67,32 @@ class DiffusionWidget:
     #             viz.result = dnnlib.EasyDict(error=renderer.CapturedException())
     #         if not ignore_errors:
     #             raise
+    def refresh_ndi_sources(self):
+        ndi_find = ndi.find_create_v2()
+        ndi.find_wait_for_sources(ndi_find, 1000)
+        self.ndi_sources = ndi.find_get_current_sources(ndi_find)
 
     @imgui_utils.scoped_by_object_id
     def __call__(self, show=True):
         if show:
-            # width = viz.app.font_size
-            # height = imgui.get_text_line_height_with_spacing()
-            # imgui_utils.input_text("##SRINPUT", self.input_path, 1024, flags=imgui.INPUT_TEXT_READ_ONLY,
-            #                        width=-(self.viz.app.button_w + self.viz.app.spacing), help_text="Input File")
-            # imgui.same_line()
-
-            ndi_find = ndi.find_create_v2()
-            ndi.find_wait_for_sources(ndi_find, 1000)
-            self.ndi_sources = ndi.find_get_current_sources(ndi_find)
-
             if len(self.ndi_sources) == 0:
                 imgui.text("No NDI sources found. Please start a NDI source and try again.")
             else:
                 sources_names = [source.ndi_name for source in self.ndi_sources]
                 current_index = sources_names.index(
-                    self.current_used_ndi_source.ndi_name) if self.current_used_ndi_source else -1
+                    self.current_used_ndi_source.ndi_name) if self.current_used_ndi_source is not None else -1
                 changed, current_index = imgui.combo("NDI Sources", current_index, sources_names)
 
                 if changed:
                     self.current_used_ndi_source = self.ndi_sources[current_index]
                     self.viz.set_ndi_source(self.current_used_ndi_source)
 
-                if imgui.button("Refresh NDI Sources"):
-                    # This will involve calling ndi.find_get_current_sources again and updating self.ndi_sources
-                    ndi.find_wait_for_sources(ndi_find, 1000)
-                    self.ndi_sources = ndi.find_get_current_sources(ndi_find)
+            if imgui.button("Refresh NDI Sources"):
+                self.refresh_ndi_sources()
 
             if self.current_used_ndi_source is None:
                 self.viz.result = dnnlib.EasyDict(
                     message='No NDI sources found. Please start a NDI source and try again.')
-
-            # changed, self.model_id = imgui_utils.input_text("Model ID", self.model_id, 1024,
-            #                                                 flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL,
-            #                                                 help_text='Model ID',
-            #                                                 width=-self.viz.app.button_w - self.viz.app.spacing, )
 
             model_ids = ["stabilityai/sd-turbo", "KBlueLeaf/kohaku-v2.1"]
             current_model_index = model_ids.index(self.model_id)
@@ -122,11 +109,6 @@ class DiffusionWidget:
                 "Scale", float(self.scale), 0.1, 2.0
             )
 
-            # acceleration_options = ["none", "xformers", "tensorrt"]
-            # self.acceleration = imgui.combo(
-            #     "Acceleration", self.acceleration, acceleration_options
-            # )
-
             self.use_denoising_batch = imgui.checkbox("Use Denoising Batch", self.use_denoising_batch)
 
             self.enable_similar_image_filter = imgui.checkbox("Enable Similar Image Filter",
@@ -134,13 +116,13 @@ class DiffusionWidget:
 
             changed, self.seed = imgui.input_int("Seed", self.seed)
 
-            if imgui_utils.button("Start Processing", enabled=(self.model_id != "" and self.current_used_ndi_source is not None)):
+            if imgui_utils.button("Start Processing",
+                                  enabled=(self.model_id != "" and self.current_used_ndi_source is not None)):
                 self.viz.is_processing = True
 
             if imgui_utils.button("Stop Processing"):
                 self.viz.is_processing = False
 
-        # self.viz.args.input = self.input_path
         self.viz.args.model_id = self.model_id
         self.viz.args.prompt = self.prompt
         self.viz.args.scale = self.scale
