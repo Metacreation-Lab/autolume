@@ -120,6 +120,8 @@ class VisualizerDiffusion:
         if 'image' in self.result:
             image_data = self.result.image  # Convert tensor to numpy array if needed
 
+            image_data = (image_data * 255).clip(0, 255).astype(np.uint8)
+
             # Convert from RGB to BGR
             image_data = cv2.cvtColor(image_data, cv2.COLOR_RGB2BGRA)
 
