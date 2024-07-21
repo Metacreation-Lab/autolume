@@ -53,12 +53,19 @@ class DiffusionWidget:
             }
         }
         self.current_params = self.model_params[self.model_id]
+        self.default_params = self.model_params.copy()
 
 
     def refresh_ndi_sources(self):
         ndi_find = ndi.find_create_v2()
         ndi.find_wait_for_sources(ndi_find, 1000)
         self.ndi_sources = ndi.find_get_current_sources(ndi_find)
+
+    def reset_params(self):
+        current_prompt = self.prompt
+        self.current_params = self.default_params[self.model_id].copy()
+        self.t_index_min, self.t_index_max = self.current_params["t_index_list"]
+        self.prompt = current_prompt
 
     @imgui_utils.scoped_by_object_id
     def __call__(self, show=True):
@@ -86,7 +93,8 @@ class DiffusionWidget:
             # Model selection
             model_ids = list(self.model_params.keys())
             current_model_index = model_ids.index(self.model_id)
-            changed, current_model_index = imgui.combo("Model ID", current_model_index, model_ids)
+            with imgui_utils.item_width(self.viz.app.font_size * 12):
+                changed, current_model_index = imgui.combo("Model ID", current_model_index, model_ids)
             if changed:
                 self.model_id = model_ids[current_model_index]
                 self.current_params = self.model_params[self.model_id]
@@ -119,6 +127,9 @@ class DiffusionWidget:
                                                           width=-self.viz.app.button_w - self.viz.app.spacing, )
 
             imgui.text(f'{self.viz.fps:.1f} FPS' if self.viz.fps > 0 else 'N/A')
+
+            if imgui_utils.button("Reset Parameters"):
+                self.reset_params()
 
             if imgui_utils.button("Start Processing",
                                   enabled=(self.model_id != "" and self.current_used_ndi_source is not None)):
