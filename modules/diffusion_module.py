@@ -5,31 +5,21 @@ import torch
 from torchvision.io import read_video, write_video
 from tqdm import tqdm
 import imgui
-
+import datetime
 from utils.wrapper import StreamDiffusionWrapper
 from utils.gui_utils import imgui_utils
 from widgets.browse_widget import BrowseWidget
 from dnnlib import EasyDict
-
-args = EasyDict(output_path="", input_path="", model_id="KBlueLeaf/kohaku-v2.1",
-                lora_dict=None, prompt="1girl with brown dog ears, thick frame glasses", scale=1.0, acceleration=1,
-                use_denoising_batch=True, enable_similar_image_filter=True, seed=2)
 
 
 class DiffusionModule:
     def __init__(self, menu):
         self.menu = menu
         self.app = menu.app
-        self.input_path = args.input_path
-        self.output_path = args.output_path
-        self.model_id = args.model_id
-        self.lora_dict = args.lora_dict
-        self.prompt = args.prompt
-        self.scale = args.scale
-        self.acceleration = args.acceleration  # 0: none, 1: xformers, 2: tensorrt
-        self.use_denoising_batch = args.use_denoising_batch
-        self.enable_similar_image_filter = args.enable_similar_image_filter
-        self.seed = int(args.seed)
+        self.args = EasyDict()
+        self.input_path = ""
+        self.output_path = ""
+        self.model_id = "stabilityai/sd-turbo"
         self.progress = 0.0
         self.running = False
         self.file_dialog = BrowseWidget(self, "Browse", os.path.abspath(os.getcwd()),
@@ -37,6 +27,34 @@ class DiffusionModule:
                                         width=self.app.button_w)
         self.save_path_dialog = BrowseWidget(self, "Save Path", os.path.abspath(os.getcwd()), [""], multiple=False,
                                              traverse_folders=False, add_folder_button=True, width=self.app.button_w)
+        self.prompt = "Portrait of The Joker halloween costume, face painting, with , glare pose, detailed"
+        self.model_params = {
+            "stabilityai/sd-turbo": {
+                "frame_buffer_size": 1,
+                "warmup": 10,
+                "acceleration": "xformers",
+                "mode": "img2img",
+                "t_index_list": [35, 45],
+                "cfg_type": "none",
+                "use_lcm_lora": False,
+            },
+            "KBlueLeaf/kohaku-v2.1": {
+                "lora_dict": None,
+                "t_index_list": [35, 45],
+                "frame_buffer_size": 1,
+                "warmup": 10,
+                "acceleration": "xformers",
+                "do_add_noise": False,
+                "mode": "img2img",
+                "enable_similar_image_filter": True,
+                "similar_image_filter_threshold": 0.98,
+                "seed": 2,
+            }
+        }
+        self.t_index_min = 35
+        self.t_index_max = 45
+        self.current_params = self.model_params[self.model_id]
+        self.default_params = self.model_params.copy()
 
     def display_progress(self):
         imgui.text("Processing...")
@@ -52,27 +70,13 @@ class DiffusionModule:
         video_info = read_video(self.input_path)
         video = video_info[0] / 255
         fps = video_info[2]["video_fps"]
-        height = int(video.shape[1] * self.scale)
-        width = int(video.shape[2] * self.scale)
+        height = int(video.shape[1])
+        width = int(video.shape[2])
 
-        acceleration_options = ["none", "xformers", "tensorrt"]
-        stream = StreamDiffusionWrapper(
-            model_id_or_path=self.model_id,
-            lora_dict=self.lora_dict,
-            t_index_list=[35, 45],
-            frame_buffer_size=1,
-            width=width,
-            height=height,
-            warmup=10,
-            acceleration=acceleration_options[self.acceleration],
-            do_add_noise=False,
-            mode="img2img",
-            output_type="pt",
-            enable_similar_image_filter=self.enable_similar_image_filter,
-            similar_image_filter_threshold=0.98,
-            use_denoising_batch=self.use_denoising_batch,
-            seed=self.seed,
-        )
+        self.args.output_type = "pt"
+        self.args.width = width
+        self.args.height = height
+        stream = StreamDiffusionWrapper(**self.args)
 
         stream.prepare(
             prompt=self.prompt,
@@ -93,6 +97,10 @@ class DiffusionModule:
         write_video(self.output_path, video_result[2:], fps=fps)
 
         self.running = False
+
+    def reset_params(self):
+        self.current_params = self.default_params[self.model_id].copy()
+        self.t_index_min, self.t_index_max = self.current_params["t_index_list"]
 
     @imgui_utils.scoped_by_object_id
     def __call__(self):
@@ -118,52 +126,61 @@ class DiffusionModule:
         _clicked, save_path = self.save_path_dialog(self.app.button_w)
         if _clicked:
             if len(save_path) > 0:
-                self.output_path = os.path.join(save_path[0], "output.mp4")
+                timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+                self.output_path = os.path.join(save_path[0], f"output_{timestamp}.mp4")
                 print(self.output_path)
             else:
                 self.output_path = ""
                 print("No path selected")
 
-        changed, self.model_id = imgui_utils.input_text("Model ID", self.model_id, 1024,
-                                                        flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL,
-                                                        help_text='Model ID',
-                                                        width=-self.app.button_w - self.app.spacing, )
+        # Model selection
+        model_ids = list(self.model_params.keys())
+        current_model_index = model_ids.index(self.model_id)
+        with imgui_utils.item_width(self.app.font_size * 12):
+            changed, current_model_index = imgui.combo("Model ID", current_model_index, model_ids)
+        if changed:
+            self.model_id = model_ids[current_model_index]
+            self.current_params = self.model_params[self.model_id]
+
+        # Display and update parameters based on the current model
+        with imgui_utils.item_width(self.app.font_size * 6):
+            for param, value in self.current_params.items():
+                if param == "seed":
+                    changed, self.current_params[param] = imgui.input_int("Seed", value)
+                elif param in ["enable_similar_image_filter", "use_lcm_lora"]:
+                    changed, self.current_params[param] = imgui.checkbox(param.replace("_", " ").title(), value)
+                elif param in ["warmup"]:
+                    changed, self.current_params[param] = imgui.input_int(param.replace("_", " ").title(), value)
+                elif param == "similar_image_filter_threshold":
+                    changed, self.current_params[param] = imgui.slider_float(
+                        "Similar Image Filter Threshold", value, 0.0, 1.0
+                    )
+                elif param == "t_index_list":
+                    imgui.text("T Index List")
+                    imgui.same_line()
+                    changed_min, self.t_index_min = imgui.input_int("Min", self.t_index_min)
+                    imgui.same_line()
+                    changed_max, self.t_index_max = imgui.input_int("Max", self.t_index_max)
+                    if changed_min or changed_max:
+                        self.current_params[param] = [self.t_index_min, self.t_index_max]
 
         changed, self.prompt = imgui_utils.input_text("Prompt", self.prompt, 1024,
                                                       flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL,
                                                       help_text='Prompt to be used for the model',
                                                       width=-self.app.button_w - self.app.spacing, )
-
-        changed, self.scale = imgui.slider_float(
-            "Scale", float(self.scale), 0.1, 2.0
-        )
-
-        # acceleration_options = ["none", "xformers", "tensorrt"]
-        # self.acceleration = imgui.combo(
-        #     "Acceleration", self.acceleration, acceleration_options
-        # )
-
-        self.use_denoising_batch = imgui.checkbox("Use Denoising Batch", self.use_denoising_batch)
-
-        self.enable_similar_image_filter = imgui.checkbox("Enable Similar Image Filter",
-                                                          self.enable_similar_image_filter)
-
-        changed, self.seed = imgui.input_int("Seed", self.seed)
+        if imgui_utils.button("Reset Parameters"):
+            self.reset_params()
 
         try:
             if imgui.button("Process Video", width=imgui.get_content_region_available_width()) and not self.running:
                 self.running = True
                 print("Process Video using Diffusion model")
-                args.input_path = self.input_path
-                args.output_path = self.output_path
-                args.model_id = self.model_id
-                args.prompt = self.prompt
-                args.scale = self.scale
-                args.acceleration = self.acceleration
-                args.use_denoising_batch = self.use_denoising_batch
-                args.enable_similar_image_filter = self.enable_similar_image_filter
-                args.seed = int(self.seed)
-                self.args = args
+
+                self.args.clear()
+                self.args.model_id_or_path = self.model_id
+                for param, value in self.current_params.items():
+                    setattr(self.args, param, value)
+
                 print("Starting Diffusion Process...")
                 self.start_process_thread()
 
