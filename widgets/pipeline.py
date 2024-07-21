@@ -18,11 +18,11 @@ class Pipeline:
             num_inference_steps=50,
         )
 
-    def predict(self, image, **args):
+    def predict(self, image, prompt):
         res = dnnlib.EasyDict()
         try:
             image_tensor = self.stream.preprocess_image(image)
-            output_image = self.stream(image=image_tensor, prompt=args['prompt'])
+            output_image = self.stream(image=image_tensor, prompt=prompt)
             res.image = output_image
         except:
             res.error = CapturedException()

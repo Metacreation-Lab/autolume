@@ -21,18 +21,35 @@ class DiffusionWidget:
         self.ndi_sources = []
         self.current_used_ndi_source = None
 
-        self.input_path = ""
         self.model_id = "stabilityai/sd-turbo"
-        self.lora_dict = None
         self.prompt = "1girl with brown dog ears, thick frame glasses"
-        self.scale = 1.0
-        self.use_denoising_batch = True
-        self.enable_similar_image_filter = True
-        self.seed = 2
 
-        self.file_dialog = BrowseWidget(viz, "Browse", os.path.abspath(os.getcwd()),
-                                        ["*", ".mp4", ],
-                                        width=self.viz.app.button_w, multiple=False, traverse_folders=False)
+        self.model_params = {
+            "stabilityai/sd-turbo": {
+                "frame_buffer_size": 1,
+                "warmup": 10,
+                "acceleration": "xformers",
+                "mode": "img2img",
+                "t_index_list": [35, 45],
+                "output_type": "np",
+                "cfg_type": "none",
+                "use_lcm_lora": False,
+            },
+            "KBlueLeaf/kohaku-v2.1": {
+                "lora_dict": None,
+                "t_index_list": [35, 45],
+                "frame_buffer_size": 1,
+                "warmup": 10,
+                "acceleration": "xformers",
+                "do_add_noise": False,
+                "mode": "img2img",
+                "output_type": "np",
+                "enable_similar_image_filter": True,
+                "similar_image_filter_threshold": 0.98,
+                "seed": 2,
+            }
+        }
+        self.current_params = self.model_params[self.model_id]
 
     def get_params(self):
         return (self.n_fft, self.osc_addresses, self.mappings, self.use_osc)
@@ -51,6 +68,8 @@ class DiffusionWidget:
     @imgui_utils.scoped_by_object_id
     def __call__(self, show=True):
         if show:
+
+            # NDI settings
             if len(self.ndi_sources) == 0:
                 imgui.text("No NDI sources found. Please start a NDI source and try again.")
             else:
@@ -70,27 +89,25 @@ class DiffusionWidget:
                 self.viz.result = dnnlib.EasyDict(
                     message='No NDI sources found. Please start a NDI source and try again.')
 
-            model_ids = ["stabilityai/sd-turbo", "KBlueLeaf/kohaku-v2.1"]
+            # Model selection
+            model_ids = list(self.model_params.keys())
             current_model_index = model_ids.index(self.model_id)
             changed, current_model_index = imgui.combo("Model ID", current_model_index, model_ids)
             if changed:
                 self.model_id = model_ids[current_model_index]
+                self.current_params = self.model_params[self.model_id]
+
+            # Display and update parameters based on the current model
+            for param, value in self.current_params.items():
+                if param == "seed":
+                    changed, self.current_params[param] = imgui.input_int("Seed", value)
+                elif param in ["enable_similar_image_filter"]:
+                    changed, self.current_params[param] = imgui.checkbox(param.replace("_", " ").title(), value)
 
             changed, self.prompt = imgui_utils.input_text("Prompt", self.prompt, 1024,
                                                           flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL,
                                                           help_text='Prompt to be used for the model',
                                                           width=-self.viz.app.button_w - self.viz.app.spacing, )
-
-            # changed, self.scale = imgui.slider_float(
-            #     "Scale", float(self.scale), 0.1, 2.0
-            # )
-
-            self.use_denoising_batch = imgui.checkbox("Use Denoising Batch", self.use_denoising_batch)
-
-            self.enable_similar_image_filter = imgui.checkbox("Enable Similar Image Filter",
-                                                              self.enable_similar_image_filter)
-
-            changed, self.seed = imgui.input_int("Seed", self.seed)
 
             imgui.text(f'{self.viz.fps:.1f} FPS' if self.viz.fps > 0 else 'N/A')
 
@@ -103,9 +120,8 @@ class DiffusionWidget:
             if imgui_utils.button("Stop Processing"):
                 self.viz.is_processing = False
 
-        self.viz.args.model_id = self.model_id
+        self.viz.args.clear()
+        self.viz.args.model_id_or_path = self.model_id
+        for param, value in self.current_params.items():
+            setattr(self.viz.args, param, value)
         self.viz.args.prompt = self.prompt
-        # self.viz.args.scale = self.scale
-        self.viz.args.use_denoising_batch = self.use_denoising_batch
-        self.viz.args.enable_similar_image_filter = self.enable_similar_image_filter
-        self.viz.args.seed = self.seed
