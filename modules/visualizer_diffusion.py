@@ -198,7 +198,8 @@ class VisualizerDiffusion:
 
         # Capture frame if recording
         if self.is_recording and 'image' in self.result:
-            frame = cv2.cvtColor(self.result.image, cv2.COLOR_RGB2BGR)
+            image_data = (self.result.image * 255).clip(0, 255).astype(np.uint8)
+            frame = cv2.cvtColor(image_data, cv2.COLOR_RGB2BGR)
             self.frame_queue.put(frame)
 
         imgui.same_line()
