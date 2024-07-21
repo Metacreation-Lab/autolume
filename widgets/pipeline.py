@@ -5,13 +5,13 @@ import torch
 from torchvision.io import read_video
 from utils.wrapper import StreamDiffusionWrapper
 
-default_prompt = "1girl with brown dog ears, thick frame glasses"
+default_prompt = "girl with brown dog ears, thick frame glasses"
 
 
 class Pipeline:
     def __init__(self, **args):
         self.stream = StreamDiffusionWrapper(
-            model_id_or_path="stabilityai/sd-turbo",
+            model_id_or_path=args.get("model_id", "stabilityai/sd-turbo"),
             frame_buffer_size=1,
             warmup=10,
             acceleration="xformers",

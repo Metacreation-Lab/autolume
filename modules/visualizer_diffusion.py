@@ -39,6 +39,7 @@ class VisualizerDiffusion:
 
         # NDI parameters
         self.ndi_source = None
+        self.ndi_recv = None
 
         self.ndi_name = 'Diffusion Live'
         send_settings = ndi.SendCreate()
@@ -74,6 +75,8 @@ class VisualizerDiffusion:
         self.frame_queue = queue.Queue()
         self.recording_thread = None
         self.recording_file_path = None
+
+        self.is_processing = False
 
     def start_recording(self, file_path):
         self.is_recording = True
@@ -145,8 +148,8 @@ class VisualizerDiffusion:
         if self.ndi_source is not None:
             recv_create_desc = ndi.RecvCreateV3()
             recv_create_desc.color_format = ndi.RECV_COLOR_FORMAT_BGRX_BGRA
-            ndi_recv = ndi.recv_create_v3(recv_create_desc)
-            ndi.recv_connect(ndi_recv, self.ndi_source)
+            self.ndi_recv = ndi.recv_create_v3(recv_create_desc)
+            ndi.recv_connect(self.ndi_recv, self.ndi_source)
 
     @imgui_utils.scoped_by_object_id
     def __call__(self):
@@ -216,11 +219,16 @@ class VisualizerDiffusion:
             pass
         elif self._defer_rendering > 0:
             self._defer_rendering -= 1
-        elif self.ndi_source is not None:
+        elif self.ndi_recv is not None and self.is_processing:
             self._async_renderer.set_args(**self.args)
-            result = self._async_renderer.get_result()
-            if result is not None:
-                self.result = result
+            t, v, _, _ = ndi.recv_capture_v2(self.ndi_recv, 5000)
+            if t == ndi.FRAME_TYPE_VIDEO:
+                frame = np.copy(v.data)
+                self._async_renderer.set_frame(frame)
+                result = self._async_renderer.get_result()
+                ndi.recv_free_video_v2(self.ndi_recv, v)
+                if result is not None:
+                    self.result = result
 
         # Display.
         max_w = self.app.content_width - self.pane_w
@@ -242,7 +250,7 @@ class VisualizerDiffusion:
                 try:
                     ndi.send_send_video_v2(self.ndi_send, self.video_frame)
                 except TypeError:
-                    var = None
+                    pass
                 if self._tex_obj is None or not self._tex_obj.is_compatible(image=self._tex_img):
                     self._tex_obj = gl_utils.Texture(image=self._tex_img, bilinear=False, mipmap=False)
                 else:

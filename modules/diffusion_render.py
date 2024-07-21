@@ -6,6 +6,7 @@ import dnnlib
 from widgets import pipeline
 from tqdm import tqdm
 
+
 def compare_args(args, cur_args):
     if args is None or cur_args is None:
         return False
@@ -35,8 +36,10 @@ class DiffusionRender:
         self._cur_result = None
         self._cur_stamp = 0
         self._args_queue = multiprocessing.Queue()
+        self._frame_queue = multiprocessing.Queue()
         self._result_queue = multiprocessing.Queue()
-        self._process = multiprocessing.Process(target=self._process_fn, args=(self._args_queue, self._result_queue),
+        self._process = multiprocessing.Process(target=self._process_fn,
+                                                args=(self._args_queue, self._frame_queue, self._result_queue),
                                                 daemon=True)
         self._process.start()
 
@@ -79,37 +82,38 @@ class DiffusionRender:
         self._cur_result = None
         self._cur_stamp += 1
 
+    def set_frame(self, frame):
+        if not self._closed:
+            if self._frame_queue.qsize() == 0:
+                self._frame_queue.put(frame)
+
     @staticmethod
-    def _process_fn(args_queue, result_queue):
+    def _process_fn(args_queue, frame_queue, result_queue):
         args = None
         stamp = 0
-        new_arg = False
+        curr_model_id = None
+        pipeline_obj = None
         while True:
             if args_queue.qsize() > 0:
                 args, stamp = args_queue.get()
-                pipeline_obj = pipeline.Pipeline(**args)
-                new_arg = True
-            if new_arg:
-                video_info = read_video(args['input'])
-                video = video_info[0] / 255
-                fps = video_info[2]["video_fps"]
-                height = int(video.shape[1] * args['scale'])
-                width = int(video.shape[2] * args['scale'])
+                if curr_model_id != args['model_id']:
+                    curr_model_id = args['model_id']
+                    pipeline_obj = pipeline.Pipeline(**args)
 
-                for _ in range(pipeline_obj.stream.batch_size):
-                    pipeline_obj.stream(image=video[0].permute(2, 0, 1))
+            if frame_queue.qsize() > 0 and pipeline_obj is not None:
+                input_image = frame_queue.get()
 
-                for i in tqdm(range(video.shape[0])):
-                    input_image = video[i].permute(2, 0, 1)
-                    if args_queue.qsize() > 0:
-                        args, stamp = args_queue.get()
-                    result = pipeline_obj.predict(input_image, **args)
+                # Ensure the image has 3 channels
+                if input_image.shape[2] == 4:
+                    # Remove the alpha channel
+                    input_image = input_image[:, :, :3]
 
-                    if 'error' in result:
-                        result.error = pipeline.CapturedException(result.error)
-                    result_queue.put([result, stamp])
-                    del result
-                new_arg = False
+                result = pipeline_obj.predict(input_image, **args)
+
+                if 'error' in result:
+                    result.error = pipeline.CapturedException(result.error)
+                result_queue.put([result, stamp])
+                del result
             # gc.collect() # Putting a garbage collect here stabilizes the memory usage, but slows down the rendering
             # Torch seems to store values in the background even with nograd that slow down StyleGAN2 over time
             # This is a workaround to keep the memory usage stable, but conflicts with imgui causing drops in GUI performance

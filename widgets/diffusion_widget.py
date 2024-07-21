@@ -102,10 +102,16 @@ class DiffusionWidget:
                 self.viz.result = dnnlib.EasyDict(
                     message='No NDI sources found. Please start a NDI source and try again.')
 
-            changed, self.model_id = imgui_utils.input_text("Model ID", self.model_id, 1024,
-                                                            flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL,
-                                                            help_text='Model ID',
-                                                            width=-self.viz.app.button_w - self.viz.app.spacing, )
+            # changed, self.model_id = imgui_utils.input_text("Model ID", self.model_id, 1024,
+            #                                                 flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL,
+            #                                                 help_text='Model ID',
+            #                                                 width=-self.viz.app.button_w - self.viz.app.spacing, )
+
+            model_ids = ["stabilityai/sd-turbo", "KBlueLeaf/kohaku-v2.1"]
+            current_model_index = model_ids.index(self.model_id)
+            changed, current_model_index = imgui.combo("Model ID", current_model_index, model_ids)
+            if changed:
+                self.model_id = model_ids[current_model_index]
 
             changed, self.prompt = imgui_utils.input_text("Prompt", self.prompt, 1024,
                                                           flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL,
@@ -128,7 +134,11 @@ class DiffusionWidget:
 
             changed, self.seed = imgui.input_int("Seed", self.seed)
 
-            # if imgui.button("Start Processing", width=imgui.get_content_region_available_width()) and not self.running:
+            if imgui_utils.button("Start Processing", enabled=(self.model_id != "" and self.current_used_ndi_source is not None)):
+                self.viz.is_processing = True
+
+            if imgui_utils.button("Stop Processing"):
+                self.viz.is_processing = False
 
         # self.viz.args.input = self.input_path
         self.viz.args.model_id = self.model_id
