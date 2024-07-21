@@ -85,7 +85,7 @@ class DiffusionRender:
 
     def set_frame(self, frame):
         if not self._closed:
-            if self._frame_queue.qsize() == 0:
+            if self._frame_queue.qsize() <= 2:
                 self._frame_queue.put(frame)
 
     @staticmethod
