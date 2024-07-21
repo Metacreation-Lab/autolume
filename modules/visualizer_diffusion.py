@@ -10,7 +10,7 @@ import queue
 import numpy as np
 import imgui
 import cv2
-
+import time
 import dnnlib
 from assets import GRAY, DARKGRAY, LIGHTGRAY
 from utils.gui_utils import imgui_utils
@@ -78,6 +78,9 @@ class VisualizerDiffusion:
 
         self.is_processing = False
 
+        self.last_frame_time = None
+        self.fps = 0
+
     def start_recording(self, file_path):
         self.is_recording = True
         self.recording_file_path = file_path
@@ -90,6 +93,15 @@ class VisualizerDiffusion:
         if self.recording_thread is not None:
             self.recording_thread.join()
             self.recording_thread = None
+
+    def calculate_fps(self):
+        current_time = time.perf_counter()
+        if self.last_frame_time is not None:
+            time_delta = current_time - self.last_frame_time
+            self.fps = 1 / time_delta if time_delta > 0 else 0
+        self.last_frame_time = current_time
+        # Optionally print or display the FPS
+        print(f"Current FPS: {self.fps}")
 
     def _record_frames(self):
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # H.264 codec
@@ -249,9 +261,11 @@ class VisualizerDiffusion:
                     self._tex_obj = gl_utils.Texture(image=img, bilinear=False, mipmap=False)
                 else:
                     self._tex_obj.update(img)
+                self.calculate_fps()
             zoom = min(max_w / self._tex_obj.width, max_h / self._tex_obj.height)
             zoom = np.floor(zoom) if zoom >= 1 else zoom
             self._tex_obj.draw(pos=pos, zoom=zoom, align=0.5, rint=True)
+
         if 'error' in self.result:
             self.print_error(self.result.error)
             if 'message' not in self.result:
