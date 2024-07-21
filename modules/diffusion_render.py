@@ -8,6 +8,35 @@ from tqdm import tqdm
 from PIL import Image
 import numpy as np
 
+stabilityai_sd_turbo_args = dnnlib.EasyDict({
+    "model_id_or_path": "stabilityai/sd-turbo",
+    "frame_buffer_size": 1,
+    "warmup": 10,
+    "acceleration": "xformers",
+    "mode": "img2img",
+    "t_index_list": [35, 45],
+    "output_type": "np",
+    "use_denoising_batch": True,
+    "cfg_type": "none",
+    "use_lcm_lora": False,
+})
+
+KBlueLeaf_kohaku_v2_1_args = dnnlib.EasyDict({
+    "model_id_or_path": "KBlueLeaf/kohaku-v2.1",
+    "lora_dict": None,
+    "t_index_list": [35, 45],
+    "frame_buffer_size": 1,
+    "warmup": 10,
+    "acceleration": "xformers",
+    "do_add_noise": False,
+    "mode": "img2img",
+    "output_type": "np",
+    "enable_similar_image_filter": True,
+    "similar_image_filter_threshold": 0.98,
+    "use_denoising_batch": True,
+    "seed": 2,
+})
+
 def compare_args(args, cur_args):
     if args is None or cur_args is None:
         return False
@@ -99,7 +128,10 @@ class DiffusionRender:
                 args, stamp = args_queue.get()
                 if curr_model_id != args['model_id']:
                     curr_model_id = args['model_id']
-                    pipeline_obj = pipeline.Pipeline(**args)
+                    if curr_model_id == "stabilityai/sd-turbo":
+                        pipeline_obj = pipeline.Pipeline(**stabilityai_sd_turbo_args)
+                    elif curr_model_id == "KBlueLeaf/kohaku-v2.1":
+                        pipeline_obj = pipeline.Pipeline(**KBlueLeaf_kohaku_v2_1_args)
 
             if frame_queue.qsize() > 0 and pipeline_obj is not None:
                 frame = frame_queue.get()

@@ -11,18 +11,7 @@ default_prompt = "girl with brown dog ears, thick frame glasses"
 
 class Pipeline:
     def __init__(self, **args):
-        self.stream = StreamDiffusionWrapper(
-            model_id_or_path=args.get("model_id", "stabilityai/sd-turbo"),
-            frame_buffer_size=1,
-            warmup=10,
-            acceleration="xformers",
-            mode="img2img",
-            t_index_list=[35, 45],
-            output_type="np",
-            use_denoising_batch=True,
-            cfg_type="none",
-            use_lcm_lora=False,
-        )
+        self.stream = StreamDiffusionWrapper(**args)
         self.last_prompt = default_prompt
         self.stream.prepare(
             prompt=default_prompt,
