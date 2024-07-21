@@ -24,6 +24,9 @@ class DiffusionWidget:
         self.model_id = "stabilityai/sd-turbo"
         self.prompt = "1girl with brown dog ears, thick frame glasses"
 
+        self.t_index_min = 35
+        self.t_index_max = 45
+
         self.model_params = {
             "stabilityai/sd-turbo": {
                 "frame_buffer_size": 1,
@@ -51,14 +54,6 @@ class DiffusionWidget:
         }
         self.current_params = self.model_params[self.model_id]
 
-    def get_params(self):
-        return (self.n_fft, self.osc_addresses, self.mappings, self.use_osc)
-
-    def set_params(self, params):
-        self.n_fft, self.osc_addresses, self.mappings, self.use_osc = params
-
-    def callback(self, data):
-        self.fft.data = np.abs(librosa.stft(data, n_fft=self.n_fft * 2 - 1))
 
     def refresh_ndi_sources(self):
         ndi_find = ndi.find_create_v2()
@@ -68,7 +63,6 @@ class DiffusionWidget:
     @imgui_utils.scoped_by_object_id
     def __call__(self, show=True):
         if show:
-
             # NDI settings
             if len(self.ndi_sources) == 0:
                 imgui.text("No NDI sources found. Please start a NDI source and try again.")
@@ -98,11 +92,26 @@ class DiffusionWidget:
                 self.current_params = self.model_params[self.model_id]
 
             # Display and update parameters based on the current model
-            for param, value in self.current_params.items():
-                if param == "seed":
-                    changed, self.current_params[param] = imgui.input_int("Seed", value)
-                elif param in ["enable_similar_image_filter"]:
-                    changed, self.current_params[param] = imgui.checkbox(param.replace("_", " ").title(), value)
+            with imgui_utils.item_width(self.viz.app.font_size * 6):
+                for param, value in self.current_params.items():
+                    if param == "seed":
+                        changed, self.current_params[param] = imgui.input_int("Seed", value)
+                    elif param in ["enable_similar_image_filter", "use_lcm_lora"]:
+                        changed, self.current_params[param] = imgui.checkbox(param.replace("_", " ").title(), value)
+                    elif param in ["warmup"]:
+                        changed, self.current_params[param] = imgui.input_int(param.replace("_", " ").title(), value)
+                    elif param == "similar_image_filter_threshold":
+                        changed, self.current_params[param] = imgui.slider_float(
+                            "Similar Image Filter Threshold", value, 0.0, 1.0
+                        )
+                    elif param == "t_index_list":
+                        imgui.text("T Index List")
+                        imgui.same_line()
+                        changed_min, self.t_index_min = imgui.input_int("Min", self.t_index_min)
+                        imgui.same_line()
+                        changed_max, self.t_index_max = imgui.input_int("Max", self.t_index_max)
+                        if changed_min or changed_max:
+                            self.current_params[param] = [self.t_index_min, self.t_index_max]
 
             changed, self.prompt = imgui_utils.input_text("Prompt", self.prompt, 1024,
                                                           flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL,
