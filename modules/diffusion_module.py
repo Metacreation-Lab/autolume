@@ -142,6 +142,14 @@ class DiffusionModule:
             self.model_id = model_ids[current_model_index]
             self.current_params = self.model_params[self.model_id]
 
+        # Acceleration selection
+        acceleration_options = ["none", "xformers", "tensorrt"]
+        current_acceleration_index = acceleration_options.index(self.current_params["acceleration"])
+        changed, current_acceleration_index = imgui.combo("Acceleration", current_acceleration_index,
+                                                          acceleration_options)
+        if changed:
+            self.current_params["acceleration"] = acceleration_options[current_acceleration_index]
+
         # Display and update parameters based on the current model
         with imgui_utils.item_width(self.app.font_size * 6):
             for param, value in self.current_params.items():

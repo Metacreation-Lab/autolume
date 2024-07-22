@@ -121,6 +121,14 @@ class DiffusionWidget:
                         if changed_min or changed_max:
                             self.current_params[param] = [self.t_index_min, self.t_index_max]
 
+                # Acceleration selection
+                acceleration_options = ["none", "xformers", "tensorrt"]
+                current_acceleration_index = acceleration_options.index(self.current_params["acceleration"])
+                changed, current_acceleration_index = imgui.combo("Acceleration", current_acceleration_index,
+                                                                  acceleration_options)
+                if changed:
+                    self.current_params["acceleration"] = acceleration_options[current_acceleration_index]
+
             changed, self.prompt = imgui_utils.input_text("Prompt", self.prompt, 1024,
                                                           flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL,
                                                           help_text='Prompt to be used for the model',
