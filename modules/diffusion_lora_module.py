@@ -50,8 +50,15 @@ class DiffusionLoraModule:
         # create data folder if not exists
         if not os.path.exists(os.path.abspath(os.path.join(os.getcwd(), "data"))):
             os.makedirs(os.path.abspath(os.path.join(os.getcwd(), "data")))
-        self.file_dialog = BrowseWidget(menu, "Dataset", os.path.abspath(os.path.join(os.getcwd(), "data")), ["*", ""],
-                                        multiple=False, traverse_folders=False, width=menu.app.button_w)
+
+        self.use_model_name = True
+        self.model_path_dialog = BrowseWidget(self, "Browse", os.path.abspath(os.getcwd()),
+                                              ["*"], multiple=False, traverse_folders=False,
+                                              width=menu.app.button_w)
+
+        self.dataset_dir_dialog = BrowseWidget(menu, "Dataset", os.path.abspath(os.path.join(os.getcwd(), "data")),
+                                               ["*", ""],
+                                               multiple=False, traverse_folders=False, width=menu.app.button_w)
         self.app = menu.app
 
         self.output_dir_dialog = BrowseWidget(self, "Save Path", os.path.abspath(os.getcwd()), [""], multiple=False,
@@ -71,6 +78,10 @@ class DiffusionLoraModule:
         self.mirror = True
         self.done_button = False
 
+        self.model_path = ""
+        self.output_path = ""
+        self.use_dataset_name = True
+
     @imgui_utils.scoped_by_object_id
     def __call__(self):
         if self.reply.qsize() > 0:
@@ -82,46 +93,89 @@ class DiffusionLoraModule:
 
         # imgui.text("Train a diffusion model on your own data with LoRA")
 
-        _, self.args.pretrained_model_name_or_path = imgui.input_text("Pretrained Model Name or Path",
-                                                                      self.args.pretrained_model_name_or_path, 1024)
-
-        _, self.args.output_dir = imgui.input_text("Save Path", self.args.output_dir, 1024)
+        imgui.text("Use Model Name or Model Path")
         imgui.same_line()
-        _clicked, output_dir = self.output_dir_dialog(self.menu.app.button_w)
+        if imgui.radio_button("Use Name", self.use_model_name):
+            self.use_model_name = True
+
+        imgui.same_line()
+
+        if imgui.radio_button("Use Path", not self.use_model_name):
+            self.use_model_name = False
+
+        if self.use_model_name:
+            with imgui_utils.item_width(-(self.app.button_w + self.app.spacing)):
+                _, self.args.pretrained_model_name_or_path = imgui.input_text("Pretrained Model Name",
+                                                                          self.args.pretrained_model_name_or_path, 1024)
+        else:
+            imgui_utils.input_text("##SRModel Path", "", 1024,
+                                   flags=imgui.INPUT_TEXT_READ_ONLY,
+                                   width=-(self.app.button_w + self.app.spacing), help_text="Model Path")
+            imgui.same_line()
+
+            _clicked, model_path = self.model_path_dialog(self.app.button_w)
+            if _clicked and len(model_path) > 0:
+                self.args.pretrained_model_name_or_path = model_path[0]
+                print(self.args.pretrained_model_name_or_path)
+
+        imgui_utils.input_text("##SROUTPUT PATH", self.args.output_dir, 1024, flags=imgui.INPUT_TEXT_READ_ONLY,
+                               width=-(self.app.button_w + self.app.spacing), help_text="Output Path")
+        imgui.same_line()
+
+        _clicked, save_path = self.output_dir_dialog(self.menu.app.button_w)
         if _clicked:
-            if len(output_dir) > 0:
-                self.output_dir = output_dir[0]
-                print(self.output_dir)
+            if len(save_path) > 0:
+                self.args.output_dir = save_path[0]
+                print(self.args.output_dir)
             else:
-                self.save_path = ""
+                self.args.output_dir = ""
                 print("No path selected")
 
-        _, self.args.dataset_name = imgui.input_text("Dataset Name or Path", self.args.dataset_name, 1024)
+        imgui.text("Use Dataset Name or Path")
         imgui.same_line()
-        _clicked, dataset_name = self.file_dialog(self.menu.app.button_w)
-        if _clicked:
-            self.args.dataset_name = dataset_name[0]
+        if imgui.radio_button("Use Name", self.use_dataset_name):
+            self.use_dataset_name = True
 
-        _, self.args.use_ema = imgui.checkbox("Use EMA", self.args.use_ema)
+        imgui.same_line()
 
-        _, self.args.resolution = imgui.input_int("Resolution", self.args.resolution)
-        _, self.args.train_batch_size = imgui.input_int("Train Batch Size", self.args.train_batch_size)
-        _, self.args.gradient_accumulation_steps = imgui.input_int("Gradient Accumulation Steps",
-                                                                   self.args.gradient_accumulation_steps)
-        _, self.args.max_train_steps = imgui.input_int("Max Train Steps", self.args.max_train_steps)
-        _, self.args.learning_rate = imgui.input_float("Learning Rate", self.args.learning_rate)
-        _, self.args.max_grad_norm = imgui.input_float("Max Grad Norm", self.args.max_grad_norm)
-        _, self.args.lr_warmup_steps = imgui.input_int("LR Warmup Steps", self.args.lr_warmup_steps)
+        if imgui.radio_button("Use Path", not self.use_dataset_name):
+            self.use_dataset_name = False
 
-        _, self.args.center_crop = imgui.checkbox("Center Crop", self.args.center_crop)
-        _, self.args.random_flip = imgui.checkbox("Random Flip", self.args.random_flip)
-        _, self.args.gradient_checkpointing = imgui.checkbox("Gradient Checkpointing", self.args.gradient_checkpointing)
+        if self.use_dataset_name:
+            with imgui_utils.item_width(-(self.app.button_w + self.app.spacing)):
+                _, self.args.dataset_name = imgui.input_text("Dataset Name",
+                                                         self.args.dataset_name, 1024)
+        else:
+            imgui_utils.input_text("##SRDATASET PATH", "", 1024,
+                                   flags=imgui.INPUT_TEXT_READ_ONLY,
+                                   width=-(self.app.button_w + self.app.spacing), help_text="Dataset Path")
+            imgui.same_line()
 
-        lr_scheduler_options = ["constant", "linear", "cosine", "cosine_with_restarts", "polynomial",
-                                "constant_with_warmup"]
-        _, selected_lr_scheduler = imgui.combo("LR Scheduler", lr_scheduler_options.index(self.args.lr_scheduler),
-                                               lr_scheduler_options)
-        self.args.lr_scheduler = lr_scheduler_options[selected_lr_scheduler]
+            _clicked, dataset_path = self.dataset_dir_dialog(self.app.button_w)
+            if _clicked and len(dataset_path) > 0:
+                self.args.dataset_name = dataset_path[0]
+                print(self.args.dataset_name)
+        with imgui_utils.item_width(-(self.app.button_w + self.app.spacing)):
+            _, self.args.use_ema = imgui.checkbox("Use EMA", self.args.use_ema)
+
+            _, self.args.resolution = imgui.input_int("Resolution", self.args.resolution)
+            _, self.args.train_batch_size = imgui.input_int("Train Batch Size", self.args.train_batch_size)
+            _, self.args.gradient_accumulation_steps = imgui.input_int("Gradient Accumulation Steps",
+                                                                       self.args.gradient_accumulation_steps)
+            _, self.args.max_train_steps = imgui.input_int("Max Train Steps", self.args.max_train_steps)
+            _, self.args.learning_rate = imgui.input_float("Learning Rate", self.args.learning_rate)
+            _, self.args.max_grad_norm = imgui.input_float("Max Grad Norm", self.args.max_grad_norm)
+            _, self.args.lr_warmup_steps = imgui.input_int("LR Warmup Steps", self.args.lr_warmup_steps)
+
+            _, self.args.center_crop = imgui.checkbox("Center Crop", self.args.center_crop)
+            _, self.args.random_flip = imgui.checkbox("Random Flip", self.args.random_flip)
+            _, self.args.gradient_checkpointing = imgui.checkbox("Gradient Checkpointing", self.args.gradient_checkpointing)
+
+            lr_scheduler_options = ["constant", "linear", "cosine", "cosine_with_restarts", "polynomial",
+                                    "constant_with_warmup"]
+            _, selected_lr_scheduler = imgui.combo("LR Scheduler", lr_scheduler_options.index(self.args.lr_scheduler),
+                                                   lr_scheduler_options)
+            self.args.lr_scheduler = lr_scheduler_options[selected_lr_scheduler]
 
         imgui.set_next_window_size(self.menu.app.content_width // 4, (self.menu.app.content_height // 4), imgui.ONCE)
 

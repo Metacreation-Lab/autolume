@@ -224,9 +224,14 @@ def main(queue, reply):
 
     # Sanity checks
     if args.dataset_name is None and args.train_data_dir is None:
+        reply.put(['Need either a dataset name or a training folder.', True])
         raise ValueError("Need either a dataset name or a training folder.")
     args = update_args(get_default_args(), args)
     if args.report_to == "wandb" and args.hub_token is not None:
+        reply.put([
+            "You cannot use both --report_to=wandb and --hub_token due to a security risk of exposing your token. "
+            "Please use `huggingface-cli login` to authenticate with the Hub.",
+            True])
         raise ValueError(
             "You cannot use both --report_to=wandb and --hub_token due to a security risk of exposing your token."
             " Please use `huggingface-cli login` to authenticate with the Hub."
@@ -530,12 +535,19 @@ def main(queue, reply):
     total_batch_size = args.train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
 
     logger.info("***** Running training *****")
+    reply.put(["***** Running training *****", False])
     logger.info(f"  Num examples = {len(train_dataset)}")
+    reply.put([f"  Num examples = {len(train_dataset)}", False])
     logger.info(f"  Num Epochs = {args.num_train_epochs}")
+    reply.put([f"  Num Epochs = {args.num_train_epochs}", False])
     logger.info(f"  Instantaneous batch size per device = {args.train_batch_size}")
+    reply.put([f"  Instantaneous batch size per device = {args.train_batch_size}", False])
     logger.info(f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}")
+    reply.put([f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}", False])
     logger.info(f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}")
+    reply.put([f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}", False])
     logger.info(f"  Total optimization steps = {args.max_train_steps}")
+    reply.put([f"  Total optimization steps = {args.max_train_steps}", False])
     global_step = 0
     first_epoch = 0
 
