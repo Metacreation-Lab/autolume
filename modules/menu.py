@@ -22,6 +22,7 @@ from modules.projection_module import ProjectionModule
 from modules.network_mixing import MixingModule
 from modules.diffusion_module import DiffusionModule
 from modules.super_res_module import SuperResModule
+from modules.diffusion_lora_module import DiffusionLoraModule
 #----------------------------------------------------------------------------
 class Menu:
     def __init__(self, app):
@@ -34,6 +35,7 @@ class Menu:
         self.super_res = SuperResModule(self)
         self.mixing_module = MixingModule(self)
         self.diffusion_module = DiffusionModule(self)
+        self.diffusion_lora_module = DiffusionLoraModule(self)
         self.logo = cv2.imread("assets/Autolume-logo.png", cv2.IMREAD_UNCHANGED)
         self.logo_texture = gl_utils.Texture(image=self.logo, width=self.logo.shape[1], height=self.logo.shape[0], channels=self.logo.shape[2])
 
@@ -101,14 +103,22 @@ class Menu:
         imgui.end()
 
         imgui.set_next_window_position(0, (self.app.content_height // 2) + 20)
-        imgui.set_next_window_size(self.app.content_width // 3, (self.app.content_height // 2) - 20)
+        imgui.set_next_window_size(self.app.content_width // 4, (self.app.content_height // 2) - 20)
         imgui.begin('Model Mixing##Menu', closable=False, flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS))
         imgui.text("Combine two models into one")
         self.mixing_module()
         imgui.end()
 
-        imgui.set_next_window_position(self.app.content_width // 3, (self.app.content_height // 2) + 20)
-        imgui.set_next_window_size(self.app.content_width // 3, (self.app.content_height // 2) - 20)
+        imgui.set_next_window_position(self.app.content_width // 4, (self.app.content_height // 2) + 20)
+        imgui.set_next_window_size(self.app.content_width // 4, (self.app.content_height // 2) - 20)
+        imgui.begin('Diffusion LoRA Training##Menu', closable=False,
+                    flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS))
+        imgui.text("Train a diffusion model on your own data with LoRA")
+        self.diffusion_lora_module()
+        imgui.end()
+
+        imgui.set_next_window_position(2 * self.app.content_width // 4, (self.app.content_height // 2) + 20)
+        imgui.set_next_window_size(self.app.content_width // 4, (self.app.content_height // 2) - 20)
         imgui.begin('Diffusion Model##Menu', closable=False, flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS))
         imgui.text("Non-realtime diffusion model")
         self.diffusion_module()
@@ -117,8 +127,8 @@ class Menu:
             self.app.start_diffusion()
         imgui.end()
 
-        imgui.set_next_window_position(2 * self.app.content_width // 3, (self.app.content_height // 2) + 20)
-        imgui.set_next_window_size(self.app.content_width // 3, (self.app.content_height // 2) - 20)
+        imgui.set_next_window_position(3 * self.app.content_width // 4, (self.app.content_height // 2) + 20)
+        imgui.set_next_window_size(self.app.content_width // 4, (self.app.content_height // 2) - 20)
         imgui.begin('Render##Menu', closable=False, flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS))
         imgui.text("Jump into Autolume-Live")
         if imgui_utils.button("START", width=self.app.button_w):
