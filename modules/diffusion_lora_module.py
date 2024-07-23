@@ -38,7 +38,7 @@ class DiffusionLoraModule:
             train_batch_size=1,
             gradient_accumulation_steps=4,
             gradient_checkpointing=True,
-            max_train_steps=5,
+            max_train_steps=1,
             learning_rate=1e-05,
             max_grad_norm=1,
             lr_scheduler="constant",
@@ -46,7 +46,7 @@ class DiffusionLoraModule:
             output_dir="sd-naruto-model",
         )
 
-        self.output_dir = os.path.join(cwd, "training-runs")
+        self.args.output_dir = os.path.join(cwd, "training-runs")
         # create data folder if not exists
         if not os.path.exists(os.path.abspath(os.path.join(os.getcwd(), "data"))):
             os.makedirs(os.path.abspath(os.path.join(os.getcwd(), "data")))
@@ -80,12 +80,12 @@ class DiffusionLoraModule:
 
             print(self.message, self.done)
 
-        imgui.text("Train a diffusion model on your own data with LoRA")
+        # imgui.text("Train a diffusion model on your own data with LoRA")
 
         _, self.args.pretrained_model_name_or_path = imgui.input_text("Pretrained Model Name or Path",
                                                                       self.args.pretrained_model_name_or_path, 1024)
 
-        _, self.output_dir = imgui.input_text("Save Path", self.output_dir, 1024)
+        _, self.args.output_dir = imgui.input_text("Save Path", self.args.output_dir, 1024)
         imgui.same_line()
         _clicked, output_dir = self.output_dir_dialog(self.menu.app.button_w)
         if _clicked:
@@ -135,6 +135,7 @@ class DiffusionLoraModule:
                 self.training_process = mp.Process(target=train_main, args=(self.queue, self.reply),
                                                    name='TrainingProcess')
                 self.done = False
+            print(self.args)
             self.queue.put(self.args)
             self.training_process.start()
 
