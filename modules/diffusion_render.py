@@ -1,5 +1,7 @@
 import gc
 import multiprocessing
+import time
+
 import torch
 from torchvision.io import read_video
 import dnnlib
@@ -108,10 +110,18 @@ class DiffusionRender:
             if frame_queue.qsize() > 0 and pipeline_obj is not None:
                 frame = frame_queue.get()
                 frame = frame[:, :, :3]
+
                 # print(frame.shape, frame.dtype)
                 input_image = Image.fromarray(frame)
                 args, stamp = args_queue.get()
+                # Record start time
+                start_time = time.time()
                 result = pipeline_obj.predict(input_image, args['prompt'])
+                # Record end time
+                end_time = time.time()
+
+                execution_time_ms = (end_time - start_time) * 1000
+                print(f"Execution time: {execution_time_ms:.2f} ms")
 
                 if 'error' in result:
                     result.error = pipeline.CapturedException(result.error)
