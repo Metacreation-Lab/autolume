@@ -136,7 +136,7 @@ class DiffusionModule:
         # Model selection
         model_ids = list(self.model_params.keys())
         current_model_index = model_ids.index(self.model_id)
-        with imgui_utils.item_width(self.app.font_size * 12):
+        with imgui_utils.item_width(-(self.app.button_w + self.app.spacing)):
             changed, current_model_index = imgui.combo("Model ID", current_model_index, model_ids)
         if changed:
             self.model_id = model_ids[current_model_index]
@@ -145,13 +145,14 @@ class DiffusionModule:
         # Acceleration selection
         acceleration_options = ["none", "xformers", "tensorrt"]
         current_acceleration_index = acceleration_options.index(self.current_params["acceleration"])
-        changed, current_acceleration_index = imgui.combo("Acceleration", current_acceleration_index,
+        with imgui_utils.item_width(-(self.app.button_w + self.app.spacing)):
+            changed, current_acceleration_index = imgui.combo("Acceleration", current_acceleration_index,
                                                           acceleration_options)
         if changed:
             self.current_params["acceleration"] = acceleration_options[current_acceleration_index]
 
         # Display and update parameters based on the current model
-        with imgui_utils.item_width(self.app.font_size * 6):
+        with imgui_utils.item_width(-(self.app.button_w + self.app.spacing)):
             for param, value in self.current_params.items():
                 if param == "seed":
                     changed, self.current_params[param] = imgui.input_int("Seed", value)
@@ -167,6 +168,7 @@ class DiffusionModule:
                     imgui.text("T Index List")
                     imgui.same_line()
                     changed_min, self.t_index_min = imgui.input_int("Min", self.t_index_min)
+                    imgui.text("T Index List")
                     imgui.same_line()
                     changed_max, self.t_index_max = imgui.input_int("Max", self.t_index_max)
                     if changed_min or changed_max:

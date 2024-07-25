@@ -39,7 +39,7 @@ class DiffusionLoraModule:
             gradient_accumulation_steps=4,
             gradient_checkpointing=True,
             max_train_steps=1,
-            learning_rate=1e-05,
+            learning_rate=0.0005,
             max_grad_norm=1,
             lr_scheduler="constant",
             lr_warmup_steps=0,
@@ -159,14 +159,14 @@ class DiffusionLoraModule:
             _, self.args.use_ema = imgui.checkbox("Use EMA", self.args.use_ema)
 
             _, self.args.resolution = imgui.input_int("Resolution", self.args.resolution)
-            _, self.args.train_batch_size = imgui.input_int("Train Batch Size", self.args.train_batch_size)
-            _, self.args.gradient_accumulation_steps = imgui.input_int("Gradient Accumulation Steps",
-                                                                       self.args.gradient_accumulation_steps)
-            _, self.args.max_train_steps = imgui.input_int("Max Train Steps", self.args.max_train_steps)
-            _, self.args.learning_rate = imgui.input_float("Learning Rate", self.args.learning_rate)
-            _, self.args.max_grad_norm = imgui.input_float("Max Grad Norm", self.args.max_grad_norm)
-            _, self.args.lr_warmup_steps = imgui.input_int("LR Warmup Steps", self.args.lr_warmup_steps)
-
+        _, self.args.train_batch_size = imgui.input_int("Train Batch Size", self.args.train_batch_size)
+        _, self.args.gradient_accumulation_steps = imgui.input_int("Gradient Accumulation Steps",
+                                                                   self.args.gradient_accumulation_steps)
+        _, self.args.max_train_steps = imgui.input_int("Max Train Steps", self.args.max_train_steps)
+        _, self.args.learning_rate = imgui.input_float("Learning Rate", self.args.learning_rate)
+        _, self.args.max_grad_norm = imgui.input_float("Max Grad Norm", self.args.max_grad_norm)
+        _, self.args.lr_warmup_steps = imgui.input_int("LR Warmup Steps", self.args.lr_warmup_steps)
+        with imgui_utils.item_width(-(self.app.button_w + self.app.spacing)):
             _, self.args.center_crop = imgui.checkbox("Center Crop", self.args.center_crop)
             _, self.args.random_flip = imgui.checkbox("Random Flip", self.args.random_flip)
             _, self.args.gradient_checkpointing = imgui.checkbox("Gradient Checkpointing", self.args.gradient_checkpointing)
