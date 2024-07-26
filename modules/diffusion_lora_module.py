@@ -106,7 +106,8 @@ class DiffusionLoraModule:
         if self.use_model_name:
             with imgui_utils.item_width(-(self.app.button_w + self.app.spacing)):
                 _, self.args.pretrained_model_name_or_path = imgui.input_text("Pretrained Model Name",
-                                                                          self.args.pretrained_model_name_or_path, 1024)
+                                                                              self.args.pretrained_model_name_or_path,
+                                                                              1024)
         else:
             imgui_utils.input_text("##SRModel Path", "", 1024,
                                    flags=imgui.INPUT_TEXT_READ_ONLY,
@@ -144,7 +145,7 @@ class DiffusionLoraModule:
         if self.use_dataset_name:
             with imgui_utils.item_width(-(self.app.button_w + self.app.spacing)):
                 _, self.args.dataset_name = imgui.input_text("Dataset Name",
-                                                         self.args.dataset_name, 1024)
+                                                             self.args.dataset_name, 1024)
         else:
             imgui_utils.input_text("##SRDATASET PATH", "", 1024,
                                    flags=imgui.INPUT_TEXT_READ_ONLY,
@@ -169,7 +170,8 @@ class DiffusionLoraModule:
         with imgui_utils.item_width(-(self.app.button_w + self.app.spacing)):
             _, self.args.center_crop = imgui.checkbox("Center Crop", self.args.center_crop)
             _, self.args.random_flip = imgui.checkbox("Random Flip", self.args.random_flip)
-            _, self.args.gradient_checkpointing = imgui.checkbox("Gradient Checkpointing", self.args.gradient_checkpointing)
+            _, self.args.gradient_checkpointing = imgui.checkbox("Gradient Checkpointing",
+                                                                 self.args.gradient_checkpointing)
 
             lr_scheduler_options = ["constant", "linear", "cosine", "cosine_with_restarts", "polynomial",
                                     "constant_with_warmup"]
@@ -190,6 +192,14 @@ class DiffusionLoraModule:
                                                    name='TrainingProcess')
                 self.done = False
             print(self.args)
+
+            # Check if the process is already running before starting it
+            if self.training_process.is_alive():
+                self.training_process.terminate()
+                self.training_process.join()
+
+            # Create a new process object and start it
+            self.training_process = mp.Process(target=train_main, args=(self.queue, self.reply), name='TrainingProcess')
             self.queue.put(self.args)
             self.training_process.start()
 
@@ -205,8 +215,10 @@ class DiffusionLoraModule:
             if self.done:
                 self.training_process.terminate()
                 self.training_process.join()
-                if self.done_button == True:
-                    imgui.close_current_popup()
-                    self.message = ''
-                    self.done_button = False
+            if self.done_button:
+                self.training_process.terminate()
+                self.training_process.join()
+                imgui.close_current_popup()
+                self.message = ''
+                self.done_button = False
             imgui.end_popup()
