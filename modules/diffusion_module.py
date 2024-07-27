@@ -199,7 +199,8 @@ class DiffusionModule:
                         lcm_lora_options = ["latent-consistency/lcm-lora-sdv1-5"]
                         current_lcm_lora_index = lcm_lora_options.index(self.lcm_lora_id)
                         with imgui_utils.item_width(-(self.app.button_w + self.app.spacing)):
-                            changed, current_lcm_lora_index = imgui.combo("LCM LoRA ID", current_lcm_lora_index, lcm_lora_options)
+                            changed, current_lcm_lora_index = imgui.combo("LCM LoRA ID", current_lcm_lora_index,
+                                                                          lcm_lora_options)
                         if changed:
                             self.lcm_lora_id = lcm_lora_options[current_lcm_lora_index]
                 elif param in ["warmup"]:
@@ -218,10 +219,12 @@ class DiffusionModule:
                     if changed_min or changed_max:
                         self.current_params[param] = [self.t_index_min, self.t_index_max]
 
-        changed, self.prompt = imgui_utils.input_text("Prompt", self.prompt, 1024,
-                                                      flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL,
-                                                      help_text='Prompt to be used for the model',
-                                                      width=-self.app.button_w - self.app.spacing, )
+        changed, prompt = imgui_utils.input_text("Prompt", self.prompt, 1024,
+                                                 flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL,
+                                                 help_text='Prompt to be used for the model',
+                                                 width=-self.app.button_w - self.app.spacing, )
+        if changed:
+            self.prompt = prompt
         if imgui_utils.button("Reset Parameters"):
             self.reset_params()
 
@@ -298,12 +301,17 @@ class DiffusionModule:
                 print(self.text2image_args.pretrained_model_name_or_path)
 
         # Prompt
-        changed, self.text2image_args.prompt = imgui_utils.input_text("##SRPrompt", self.text2image_args.prompt, 1024,
+        changed, prompt = imgui_utils.input_text("##SRPrompt", self.text2image_args.prompt, 1024,
                                                                       flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL,
                                                                       help_text='Prompt to be used for the image generation',
                                                                       width=-self.app.button_w - self.app.spacing, )
+        if changed:
+            self.text2image_args.prompt = prompt
 
         if imgui.button("Generate Images", width=imgui.get_content_region_available_width()) and not self.running:
             self.running = True
             print("Starting Image Diffusion Process...")
-            self.start_image_process_thread()
+            try:
+                self.start_image_process_thread()
+            except Exception as e:
+                print("SRR ERROR", e)
