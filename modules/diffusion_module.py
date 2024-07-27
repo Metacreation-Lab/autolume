@@ -10,6 +10,7 @@ from utils.wrapper import StreamDiffusionWrapper
 from utils.gui_utils import imgui_utils
 from widgets.browse_widget import BrowseWidget
 from dnnlib import EasyDict
+from streamdiffusion.text_to_image_generator_lora import ImageGenerator
 
 
 class DiffusionModule:
@@ -25,6 +26,7 @@ class DiffusionModule:
         self.file_dialog = BrowseWidget(self, "Browse", os.path.abspath(os.getcwd()),
                                         ["*", ".mp4"], multiple=False, traverse_folders=False,
                                         width=self.app.button_w)
+
         self.save_path_dialog = BrowseWidget(self, "Save Path", os.path.abspath(os.getcwd()), [""], multiple=False,
                                              traverse_folders=False, add_folder_button=True, width=self.app.button_w)
         self.prompt = "Portrait of The Joker halloween costume, face painting, with , glare pose, detailed"
@@ -55,6 +57,26 @@ class DiffusionModule:
         self.t_index_max = 45
         self.current_params = self.model_params[self.model_id]
         self.default_params = self.model_params.copy()
+
+        self.text2image_args = EasyDict()
+        self.text2image_file_dialog = BrowseWidget(self, "Browse", os.path.abspath(os.getcwd()),
+                                                   ["*", ".safetensors"], multiple=False, traverse_folders=False,
+                                                   width=self.app.button_w)
+
+        self.text2image_save_path_dialog = BrowseWidget(self, "Save Path", os.path.abspath(os.getcwd()), [""],
+                                                        multiple=False,
+                                                        traverse_folders=False, add_folder_button=True,
+                                                        width=self.app.button_w)
+
+        self.use_model_name = True
+        self.text2image_args.pretrained_model_name_or_path = "CompVis/stable-diffusion-v1-4"
+        self.text2image_args.prompt = "Joker from Batman"
+        self.text2image_args.model_path = ""
+        timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        self.text2image_args.save_path = os.path.join(os.path.abspath(os.getcwd()), f"output_{timestamp}.png")
+        self.text2image_model_path_dialog = BrowseWidget(self, "Browse", os.path.abspath(os.getcwd()),
+                                                         ["*", ".safetensors"], multiple=False, traverse_folders=False,
+                                                         width=self.app.button_w)
 
     def display_progress(self):
         imgui.text("Processing...")
@@ -102,6 +124,17 @@ class DiffusionModule:
         self.current_params = self.default_params[self.model_id].copy()
         self.t_index_min, self.t_index_max = self.current_params["t_index_list"]
 
+    def start_image_process_thread(self):
+        process_thread = threading.Thread(target=self.start_image_process)
+        process_thread.start()
+
+    def start_image_process(self):
+        print("Generate images with LoRA")
+        generator = ImageGenerator()
+        generator.predict(**self.text2image_args)
+        print("Images saved to", self.text2image_args.save_path)
+        self.running = False
+
     @imgui_utils.scoped_by_object_id
     def __call__(self):
         if self.running:
@@ -147,7 +180,7 @@ class DiffusionModule:
         current_acceleration_index = acceleration_options.index(self.current_params["acceleration"])
         with imgui_utils.item_width(-(self.app.button_w + self.app.spacing)):
             changed, current_acceleration_index = imgui.combo("Acceleration", current_acceleration_index,
-                                                          acceleration_options)
+                                                              acceleration_options)
         if changed:
             self.current_params["acceleration"] = acceleration_options[current_acceleration_index]
 
@@ -196,3 +229,68 @@ class DiffusionModule:
 
         except Exception as e:
             print("SRR ERROR", e)
+
+        imgui.text("Generate images with LoRA")
+
+        # Model LoRA file selection
+        imgui_utils.input_text("##SRINPUTFILE", self.text2image_args.model_path, 1024, flags=imgui.INPUT_TEXT_READ_ONLY,
+                               width=-(self.app.button_w + self.app.spacing), help_text="safetensors file")
+        imgui.same_line()
+
+        _clicked, model_path = self.text2image_file_dialog(self.app.button_w)
+        if _clicked:
+            self.text2image_args.model_path = model_path[0]
+            print(self.text2image_args.model_path)
+
+        # Save path
+        imgui_utils.input_text("##SRRESULTFILE", self.text2image_args.save_path, 1024, flags=imgui.INPUT_TEXT_READ_ONLY,
+                               width=-(self.app.button_w + self.app.spacing), help_text="Output Path")
+        imgui.same_line()
+
+        _clicked, save_path = self.text2image_save_path_dialog(self.app.button_w)
+        if _clicked:
+            if len(save_path) > 0:
+                timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+                self.text2image_args.save_path = os.path.join(save_path[0], f"output_{timestamp}.png")
+                print(self.text2image_args.save_path)
+            else:
+                self.text2image_args.save_path = ""
+                print("No path selected")
+
+        # Model name
+        imgui.text("Use Model Name or Model Path")
+        imgui.same_line()
+        if imgui.radio_button("Use Name", self.use_model_name):
+            self.use_model_name = True
+
+        imgui.same_line()
+
+        if imgui.radio_button("Use Path", not self.use_model_name):
+            self.use_model_name = False
+
+        if self.use_model_name:
+            with imgui_utils.item_width(-(self.app.button_w + self.app.spacing)):
+                _, self.text2image_args.pretrained_model_name_or_path = imgui.input_text("Pretrained Model Name",
+                                                                                         self.text2image_args.pretrained_model_name_or_path,
+                                                                                         1024)
+        else:
+            imgui_utils.input_text("##SRModel Path", "", 1024,
+                                   flags=imgui.INPUT_TEXT_READ_ONLY,
+                                   width=-(self.app.button_w + self.app.spacing), help_text="Model Path")
+            imgui.same_line()
+
+            _clicked, model_path = self.text2image_model_path_dialog(self.app.button_w)
+            if _clicked and len(model_path) > 0:
+                self.text2image_args.pretrained_model_name_or_path = model_path[0]
+                print(self.text2image_args.pretrained_model_name_or_path)
+
+        # Prompt
+        changed, self.text2image_args.prompt = imgui_utils.input_text("Prompt", self.text2image_args.prompt, 1024,
+                                                                      flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL,
+                                                                      help_text='Prompt to be used for the image generation',
+                                                                      width=-self.app.button_w - self.app.spacing, )
+
+        if imgui.button("Generate Images", width=imgui.get_content_region_available_width()) and not self.running:
+            self.running = True
+            print("Starting Image Diffusion Process...")
+            self.start_image_process_thread()
