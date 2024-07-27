@@ -51,10 +51,12 @@ class DiffusionModule:
                 "enable_similar_image_filter": True,
                 "similar_image_filter_threshold": 0.98,
                 "seed": 2,
+                "use_lcm_lora": False,
             }
         }
         self.t_index_min = 35
         self.t_index_max = 45
+        self.lcm_lora_id = "latent-consistency/lcm-lora-sdv1-5"
         self.current_params = self.model_params[self.model_id]
         self.default_params = self.model_params.copy()
 
@@ -189,8 +191,17 @@ class DiffusionModule:
             for param, value in self.current_params.items():
                 if param == "seed":
                     changed, self.current_params[param] = imgui.input_int("Seed", value)
-                elif param in ["enable_similar_image_filter", "use_lcm_lora"]:
+                elif param in ["enable_similar_image_filter"]:
                     changed, self.current_params[param] = imgui.checkbox(param.replace("_", " ").title(), value)
+                elif param in ["use_lcm_lora"]:
+                    changed, self.current_params[param] = imgui.checkbox(param.replace("_", " ").title(), value)
+                    if self.current_params[param]:
+                        lcm_lora_options = ["latent-consistency/lcm-lora-sdv1-5"]
+                        current_lcm_lora_index = lcm_lora_options.index(self.lcm_lora_id)
+                        with imgui_utils.item_width(-(self.app.button_w + self.app.spacing)):
+                            changed, current_lcm_lora_index = imgui.combo("LCM LoRA ID", current_lcm_lora_index, lcm_lora_options)
+                        if changed:
+                            self.lcm_lora_id = lcm_lora_options[current_lcm_lora_index]
                 elif param in ["warmup"]:
                     changed, self.current_params[param] = imgui.input_int(param.replace("_", " ").title(), value)
                 elif param == "similar_image_filter_threshold":
@@ -223,6 +234,8 @@ class DiffusionModule:
                 self.args.model_id_or_path = self.model_id
                 for param, value in self.current_params.items():
                     setattr(self.args, param, value)
+                if self.args.use_lcm_lora:
+                    self.args.lcm_lora_id = self.lcm_lora_id
 
                 print("Starting Diffusion Process...")
                 self.start_process_thread()
@@ -285,7 +298,7 @@ class DiffusionModule:
                 print(self.text2image_args.pretrained_model_name_or_path)
 
         # Prompt
-        changed, self.text2image_args.prompt = imgui_utils.input_text("Prompt", self.text2image_args.prompt, 1024,
+        changed, self.text2image_args.prompt = imgui_utils.input_text("##SRPrompt", self.text2image_args.prompt, 1024,
                                                                       flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL,
                                                                       help_text='Prompt to be used for the image generation',
                                                                       width=-self.app.button_w - self.app.spacing, )
