@@ -20,7 +20,7 @@ class DiffusionModule:
         self.args = EasyDict()
         self.input_path = ""
         self.output_path = ""
-        self.model_id = "stabilityai/sd-turbo"
+        self.model_id = "KBlueLeaf/kohaku-v2.1"
         self.progress = 0.0
         self.running = False
         self.file_dialog = BrowseWidget(self, "Browse", os.path.abspath(os.getcwd()),
@@ -29,7 +29,7 @@ class DiffusionModule:
 
         self.save_path_dialog = BrowseWidget(self, "Save Path", os.path.abspath(os.getcwd()), [""], multiple=False,
                                              traverse_folders=False, add_folder_button=True, width=self.app.button_w)
-        self.prompt = "Portrait of The Joker halloween costume, face painting, with , glare pose, detailed"
+        self.prompt = "girl with brown dog ears, thick frame glasses"
         self.model_params = {
             "stabilityai/sd-turbo": {
                 "frame_buffer_size": 1,
@@ -100,7 +100,27 @@ class DiffusionModule:
         self.args.output_type = "pt"
         self.args.width = width
         self.args.height = height
+        self.args.use_denoising_batch = True
+        self.args.use_lcm_lora = True
+        self.args.do_add_noise = False
         stream = StreamDiffusionWrapper(**self.args)
+        # stream = StreamDiffusionWrapper(
+        #     model_id_or_path="KBlueLeaf/kohaku-v2.1",
+        #     lora_dict=None,
+        #     t_index_list=[35, 45],
+        #     frame_buffer_size=1,
+        #     width=int(video.shape[2] * 1.0),
+        #     height=int(video.shape[1] * 1.0),
+        #     warmup=10,
+        #     acceleration="xformers",
+        #     do_add_noise=False,
+        #     mode="img2img",
+        #     output_type="pt",
+        #     enable_similar_image_filter=True,
+        #     similar_image_filter_threshold=0.98,
+        #     use_denoising_batch=True,
+        #     seed=2,
+        # )
 
         stream.prepare(
             prompt=self.prompt,
@@ -112,7 +132,7 @@ class DiffusionModule:
         for _ in range(stream.batch_size):
             stream(image=video[0].permute(2, 0, 1))
 
-        for i in range(video.shape[0]):
+        for i in tqdm(range(video.shape[0])):
             output_image = stream(video[i].permute(2, 0, 1))
             video_result[i] = output_image.permute(1, 2, 0)
             self.progress = (i + 1) / video.shape[0]
@@ -302,9 +322,9 @@ class DiffusionModule:
 
         # Prompt
         changed, prompt = imgui_utils.input_text("##SRPrompt", self.text2image_args.prompt, 1024,
-                                                                      flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL,
-                                                                      help_text='Prompt to be used for the image generation',
-                                                                      width=-self.app.button_w - self.app.spacing, )
+                                                 flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL,
+                                                 help_text='Prompt to be used for the image generation',
+                                                 width=-self.app.button_w - self.app.spacing, )
         if changed:
             self.text2image_args.prompt = prompt
 
