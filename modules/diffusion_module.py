@@ -226,9 +226,10 @@ class DiffusionModule:
                 elif param in ["warmup"]:
                     changed, self.current_params[param] = imgui.input_int(param.replace("_", " ").title(), value)
                 elif param == "similar_image_filter_threshold":
-                    changed, self.current_params[param] = imgui.slider_float(
-                        "Similar Image Filter Threshold", value, 0.0, 1.0
-                    )
+                    with imgui_utils.item_width(-(self.app.button_w + self.app.spacing) * 2):
+                        changed, self.current_params[param] = imgui.slider_float(
+                            "Similar Image Filter Threshold", value, 0.0, 1.0
+                        )
                 elif param == "t_index_list":
                     imgui.text("T Index List")
                     imgui.same_line()
@@ -268,16 +269,6 @@ class DiffusionModule:
 
         imgui.text("Generate images with LoRA")
 
-        # Model LoRA file selection
-        imgui_utils.input_text("##SRINPUTFILE", self.text2image_args.model_path, 1024, flags=imgui.INPUT_TEXT_READ_ONLY,
-                               width=-(self.app.button_w + self.app.spacing), help_text="safetensors file")
-        imgui.same_line()
-
-        _clicked, model_path = self.text2image_file_dialog(self.app.button_w)
-        if _clicked:
-            self.text2image_args.model_path = model_path[0]
-            print(self.text2image_args.model_path)
-
         # Save path
         imgui_utils.input_text("##SRRESULTFILE", self.text2image_args.save_path, 1024, flags=imgui.INPUT_TEXT_READ_ONLY,
                                width=-(self.app.button_w + self.app.spacing), help_text="Output Path")
@@ -305,7 +296,7 @@ class DiffusionModule:
             self.use_model_name = False
 
         if self.use_model_name:
-            with imgui_utils.item_width(-(self.app.button_w + self.app.spacing)):
+            with imgui_utils.item_width(-(self.app.button_w + self.app.spacing) * 1.7):
                 _, self.text2image_args.pretrained_model_name_or_path = imgui.input_text("Pretrained Model Name",
                                                                                          self.text2image_args.pretrained_model_name_or_path,
                                                                                          1024)
@@ -319,6 +310,17 @@ class DiffusionModule:
             if _clicked and len(model_path) > 0:
                 self.text2image_args.pretrained_model_name_or_path = model_path[0]
                 print(self.text2image_args.pretrained_model_name_or_path)
+
+        # Model LoRA file selection
+        imgui_utils.input_text("##SRINPUTFILE", self.text2image_args.model_path, 1024,
+                               flags=imgui.INPUT_TEXT_READ_ONLY,
+                               width=-(self.app.button_w + self.app.spacing), help_text="safetensors file")
+        imgui.same_line()
+
+        _clicked, model_path = self.text2image_file_dialog(self.app.button_w)
+        if _clicked:
+            self.text2image_args.model_path = model_path[0]
+            print(self.text2image_args.model_path)
 
         # Prompt
         changed, prompt = imgui_utils.input_text("##SRPrompt", self.text2image_args.prompt, 1024,
