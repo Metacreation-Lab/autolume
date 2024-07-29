@@ -30,7 +30,7 @@ class DiffusionLoraModule:
             train_batch_size=1,
             num_train_epochs=100,
             checkpointing_steps=5000,
-            learning_rate=0.0001,
+            learning_rate=0.001,
             lr_scheduler="constant",
             lr_warmup_steps=0,
             seed=42,
@@ -74,6 +74,7 @@ class DiffusionLoraModule:
         self.output_path = ""
         self.use_dataset_name = True
         self.validation_prompt = "cute dragon creature"
+        self.caption_column = "text"
 
     @imgui_utils.scoped_by_object_id
     def __call__(self):
@@ -154,6 +155,12 @@ class DiffusionLoraModule:
                 print(self.args.dataset_name)
 
         with imgui_utils.item_width(-(self.app.button_w + self.app.spacing) * 1.7):
+            changed, caption_column = imgui_utils.input_text("Caption Column", self.caption_column, 1024,
+                                                             flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL,
+                                                             help_text='The column of the dataset containing a caption or a list of captions.',
+                                                             width=-(self.app.button_w + self.app.spacing) * 1.7, )
+            if changed:
+                self.args.caption_column = caption_column
             _, self.args.resolution = imgui.input_int("Resolution", self.args.resolution)
             _, self.args.random_flip = imgui.checkbox("Random Flip", self.args.random_flip)
             _, self.args.train_batch_size = imgui.input_int("Train Batch Size", self.args.train_batch_size)
@@ -168,7 +175,7 @@ class DiffusionLoraModule:
             _, self.args.lr_warmup_steps = imgui.input_int("LR Warmup Steps", self.args.lr_warmup_steps)
 
             _, self.args.seed = imgui.input_int("Seed", self.args.seed)
-            changed, validation_prompt = imgui_utils.input_text("Prompt", self.validation_prompt, 1024,
+            changed, validation_prompt = imgui_utils.input_text("Validation Prompt", self.validation_prompt, 1024,
                                                                 flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL,
                                                                 help_text='A prompt that is sampled during training for inference.',
                                                                 width=-(self.app.button_w + self.app.spacing) * 1.7, )
