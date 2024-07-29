@@ -17,13 +17,6 @@ from PIL import Image
 import PIL
 import os
 
-augs = ["ADA", "DiffAUG"]
-modes = ["crop", "expand", "nearest", "box", "bilinear", "hamming", "bicubic", "lanczos"]
-ada_pipes = ['blit', 'geom', 'color', 'filter', 'noise', 'cutout', 'bg', 'bgc', 'bgcf', 'bgcfn', 'bgcfnc']
-diffaug_pipes = ['color,translation,cutout', 'color,translation', 'color,cutout', 'color',
-                 'translation', 'cutout,translation', 'cutout']
-configs = ['auto', 'stylegan2', 'paper256', 'paper512', 'paper1024', 'cifar']
-
 
 class DiffusionLoraModule:
     def __init__(self, menu):
@@ -31,19 +24,18 @@ class DiffusionLoraModule:
         self.args = EasyDict(
             pretrained_model_name_or_path="CompVis/stable-diffusion-v1-4",
             dataset_name="lambdalabs/naruto-blip-captions",
-            use_ema=True,
+            caption_column="text",
             resolution=512,
-            center_crop=True,
             random_flip=True,
             train_batch_size=1,
-            gradient_accumulation_steps=4,
-            gradient_checkpointing=True,
-            max_train_steps=1,
-            learning_rate=0.0005,
-            max_grad_norm=1,
+            num_train_epochs=100,
+            checkpointing_steps=5000,
+            learning_rate=0.0001,
             lr_scheduler="constant",
             lr_warmup_steps=0,
-            output_dir="sd-naruto-model",
+            seed=42,
+            output_dir="sd-naruto-model-lora",
+            validation_prompt="cute dragon creature",
         )
 
         self.args.output_dir = os.path.join(cwd, "training-runs")
@@ -81,6 +73,7 @@ class DiffusionLoraModule:
         self.model_path = ""
         self.output_path = ""
         self.use_dataset_name = True
+        self.validation_prompt = "cute dragon creature"
 
     @imgui_utils.scoped_by_object_id
     def __call__(self):
@@ -91,7 +84,7 @@ class DiffusionLoraModule:
 
             print(self.message, self.done)
 
-        # imgui.text("Train a diffusion model on your own data with LoRA")
+        # pretrained_model_name_or_path
 
         imgui.text("Use Model Name or Model Path")
         imgui.same_line()
@@ -104,7 +97,7 @@ class DiffusionLoraModule:
             self.use_model_name = False
 
         if self.use_model_name:
-            with imgui_utils.item_width(-(self.app.button_w + self.app.spacing)):
+            with imgui_utils.item_width(-(self.app.button_w + self.app.spacing) * 1.7):
                 _, self.args.pretrained_model_name_or_path = imgui.input_text("Pretrained Model Name",
                                                                               self.args.pretrained_model_name_or_path,
                                                                               1024)
@@ -119,8 +112,10 @@ class DiffusionLoraModule:
                 self.args.pretrained_model_name_or_path = model_path[0]
                 print(self.args.pretrained_model_name_or_path)
 
-        imgui_utils.input_text("##SROUTPUT PATH", self.args.output_dir, 1024, flags=imgui.INPUT_TEXT_READ_ONLY,
-                               width=-(self.app.button_w + self.app.spacing), help_text="Output Path")
+        # output_dir
+        with imgui_utils.item_width(-(self.app.button_w + self.app.spacing) * 1.7):
+            imgui_utils.input_text("##SROUTPUT PATH", self.args.output_dir, 1024, flags=imgui.INPUT_TEXT_READ_ONLY,
+                                   width=-(self.app.button_w + self.app.spacing) * 1.7, help_text="Output Path")
         imgui.same_line()
 
         _clicked, save_path = self.output_dir_dialog(self.menu.app.button_w)
@@ -132,6 +127,7 @@ class DiffusionLoraModule:
                 self.args.output_dir = ""
                 print("No path selected")
 
+        # dataset_name
         imgui.text("Use Dataset Name or Path")
         imgui.same_line()
         if imgui.radio_button("Use Name", self.use_dataset_name):
@@ -143,7 +139,7 @@ class DiffusionLoraModule:
             self.use_dataset_name = False
 
         if self.use_dataset_name:
-            with imgui_utils.item_width(-(self.app.button_w + self.app.spacing)):
+            with imgui_utils.item_width(-(self.app.button_w + self.app.spacing) * 1.7):
                 _, self.args.dataset_name = imgui.input_text("Dataset Name",
                                                              self.args.dataset_name, 1024)
         else:
@@ -156,28 +152,28 @@ class DiffusionLoraModule:
             if _clicked and len(dataset_path) > 0:
                 self.args.dataset_name = dataset_path[0]
                 print(self.args.dataset_name)
-        with imgui_utils.item_width(-(self.app.button_w + self.app.spacing)):
-            _, self.args.use_ema = imgui.checkbox("Use EMA", self.args.use_ema)
 
+        with imgui_utils.item_width(-(self.app.button_w + self.app.spacing) * 1.7):
             _, self.args.resolution = imgui.input_int("Resolution", self.args.resolution)
-        _, self.args.train_batch_size = imgui.input_int("Train Batch Size", self.args.train_batch_size)
-        _, self.args.gradient_accumulation_steps = imgui.input_int("Gradient Accumulation Steps",
-                                                                   self.args.gradient_accumulation_steps)
-        _, self.args.max_train_steps = imgui.input_int("Max Train Steps", self.args.max_train_steps)
-        _, self.args.learning_rate = imgui.input_float("Learning Rate", self.args.learning_rate)
-        _, self.args.max_grad_norm = imgui.input_float("Max Grad Norm", self.args.max_grad_norm)
-        _, self.args.lr_warmup_steps = imgui.input_int("LR Warmup Steps", self.args.lr_warmup_steps)
-        with imgui_utils.item_width(-(self.app.button_w + self.app.spacing)):
-            _, self.args.center_crop = imgui.checkbox("Center Crop", self.args.center_crop)
             _, self.args.random_flip = imgui.checkbox("Random Flip", self.args.random_flip)
-            _, self.args.gradient_checkpointing = imgui.checkbox("Gradient Checkpointing",
-                                                                 self.args.gradient_checkpointing)
-
+            _, self.args.train_batch_size = imgui.input_int("Train Batch Size", self.args.train_batch_size)
+            _, self.args.num_train_epochs = imgui.input_int("Num Train Epochs", self.args.num_train_epochs)
+            _, self.args.checkpointing_steps = imgui.input_int("Checkpointing Steps", self.args.checkpointing_steps)
+            _, self.args.learning_rate = imgui.input_float("Learning Rate", self.args.learning_rate)
             lr_scheduler_options = ["constant", "linear", "cosine", "cosine_with_restarts", "polynomial",
                                     "constant_with_warmup"]
             _, selected_lr_scheduler = imgui.combo("LR Scheduler", lr_scheduler_options.index(self.args.lr_scheduler),
                                                    lr_scheduler_options)
             self.args.lr_scheduler = lr_scheduler_options[selected_lr_scheduler]
+            _, self.args.lr_warmup_steps = imgui.input_int("LR Warmup Steps", self.args.lr_warmup_steps)
+
+            _, self.args.seed = imgui.input_int("Seed", self.args.seed)
+            changed, validation_prompt = imgui_utils.input_text("Prompt", self.validation_prompt, 1024,
+                                                                flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL,
+                                                                help_text='A prompt that is sampled during training for inference.',
+                                                                width=-(self.app.button_w + self.app.spacing) * 1.7, )
+            if changed:
+                self.args.validation_prompt = validation_prompt
 
         imgui.set_next_window_size(self.menu.app.content_width // 4, (self.menu.app.content_height // 4), imgui.ONCE)
 
