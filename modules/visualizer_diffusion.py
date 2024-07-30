@@ -5,6 +5,8 @@
 # and any modifications thereto.  Any use, reproduction, disclosure or
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
+
+# Some of the code is from ChatGPT
 import threading
 import queue
 import numpy as np
@@ -17,14 +19,8 @@ from utils.gui_utils import imgui_utils
 from utils.gui_utils import gl_utils
 from utils.gui_utils import text_utils
 from widgets import diffusion_widget
-# from widgets import pickle_widget
-
-from pythonosc.osc_server import BlockingOSCUDPServer
-from pythonosc.dispatcher import Dispatcher
-from pythonosc.udp_client import SimpleUDPClient
 import NDIlib as ndi
 
-from PIL import Image
 import datetime
 
 
@@ -100,9 +96,9 @@ class VisualizerDiffusion:
             time_delta = current_time - self.last_frame_time
             self.fps = 1 / time_delta if time_delta > 0 else 0
         self.last_frame_time = current_time
-        # Optionally print or display the FPS
         print(f"Current FPS: {self.fps}")
 
+    # Source code from visualizer.py
     def _record_frames(self):
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # H.264 codec
         out = None
