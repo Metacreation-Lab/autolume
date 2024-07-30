@@ -37,6 +37,11 @@ class DiffusionWidget:
                 "output_type": "np",
                 "cfg_type": "none",
                 "use_lcm_lora": False,
+                "use_tiny_vae": True,
+                "vae_id": None,
+                "use_denoising_batch": True,
+                "use_safety_checker": False,
+                "engine_dir": 'engines',
             },
             "KBlueLeaf/kohaku-v2.1": {
                 "lora_dict": None,

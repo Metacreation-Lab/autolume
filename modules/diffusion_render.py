@@ -90,8 +90,6 @@ class DiffusionRender:
 
     @staticmethod
     def _process_fn(args_queue, frame_queue, result_queue):
-        args = dnnlib.EasyDict()
-        stamp = 0
         curr_args = dnnlib.EasyDict()
         pipeline_obj = None
         while True:
