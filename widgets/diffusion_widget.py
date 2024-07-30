@@ -1,14 +1,6 @@
 import imgui
-import librosa
-import numpy as np
-import torch
-from pythonosc.udp_client import SimpleUDPClient
-import os
 import dnnlib
-from assets import ACTIVE_RED
-from audio import audio_stream
 from utils.gui_utils import imgui_utils
-from widgets.browse_widget import BrowseWidget
 import NDIlib as ndi
 
 
@@ -33,7 +25,7 @@ class DiffusionWidget:
                 "warmup": 10,
                 "acceleration": "xformers",
                 "mode": "img2img",
-                "t_index_list": [35, 45],
+                "t_index_list": [30, 45],
                 "output_type": "np",
                 "cfg_type": "none",
                 "use_lcm_lora": False,
