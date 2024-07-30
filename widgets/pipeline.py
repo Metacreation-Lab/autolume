@@ -46,36 +46,6 @@ class Pipeline:
             self.res.error = str(self.res.error)
         return self.res
 
-    def to_cpu(self, tensor):
-        return tensor.detach().cpu()
-
-    def _render_impl(self, res,
-                     input="",
-                     model_id="KBlueLeaf/kohaku-v2.1",
-                     lora_dict=None,
-                     prompt="1girl with brown dog ears, thick frame glasses",
-                     scale=1.0,
-                     acceleration="xformers",
-                     use_denoising_batch=True,
-                     enable_similar_image_filter=True,
-                     seed=2
-                     ):
-        print(input)
-        video_info = read_video(input)
-        video = video_info[0] / 255
-        height = int(video.shape[1] * scale)
-        width = int(video.shape[2] * scale)
-
-        for _ in range(self.stream.batch_size):
-            self.stream(image=video[0].permute(2, 0, 1))
-
-        res.progress = 0.0
-        for i in range(video.shape[0]):
-            img = self.stream(video[i].permute(2, 0, 1))
-            res.image = img
-            res.progress = (i + 1) / video.shape[0]
-            del img
-
 
 class CapturedException(Exception):
     def __init__(self, msg=None):

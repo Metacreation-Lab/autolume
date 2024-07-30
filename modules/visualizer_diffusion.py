@@ -139,12 +139,6 @@ class VisualizerDiffusion:
             ndi.send_destroy(self.ndi_send)
             self.ndi_send = None
 
-    def add_recent_pickle(self, pkl, ignore_errors=False):
-        self.pickle_widget.add_recent(pkl, ignore_errors=ignore_errors)
-
-    def load_pickle(self, pkl, ignore_errors=False):
-        self.pickle_widget.load(pkl, ignore_errors=ignore_errors)
-
     def print_error(self, error):
         error = str(error)
         if error != self._last_error_print:
