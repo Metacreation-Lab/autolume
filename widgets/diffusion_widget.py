@@ -104,7 +104,7 @@ class DiffusionWidget:
                 for param, value in self.current_params.items():
                     if param == "seed":
                         changed, self.current_params[param] = imgui.input_int("Seed", value)
-                    elif param in ["enable_similar_image_filter", "use_lcm_lora"]:
+                    elif param in ["enable_similar_image_filter"]:
                         changed, self.current_params[param] = imgui.checkbox(param.replace("_", " ").title(), value)
                     elif param in ["warmup"]:
                         changed, self.current_params[param] = imgui.input_int(param.replace("_", " ").title(), value)
