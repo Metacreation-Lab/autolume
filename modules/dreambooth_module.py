@@ -36,7 +36,7 @@ class DreamboothModule:
             max_grad_norm=1.0
         )
 
-        self.args.output_dir = os.path.join(cwd, "training-runs")
+
         if not os.path.exists(os.path.abspath(os.path.join(os.getcwd(), "data"))):
             os.makedirs(os.path.abspath(os.path.join(os.getcwd(), "data")))
 
@@ -45,7 +45,7 @@ class DreamboothModule:
                                               ["*"], multiple=False, traverse_folders=False,
                                               width=menu.app.button_w)
 
-        self.dataset_dir_dialog = BrowseWidget(menu, "Dataset", os.path.abspath(os.path.join(os.getcwd(), "data")),
+        self.dataset_dir_dialog = BrowseWidget(menu, "Class Data Dir", os.path.abspath(os.path.join(os.getcwd(), "data")),
                                                ["*", ""],
                                                multiple=False, traverse_folders=False, width=menu.app.button_w)
         self.app = menu.app
@@ -53,12 +53,16 @@ class DreamboothModule:
         self.output_dir_dialog = BrowseWidget(self, "Save Path", os.path.abspath(os.getcwd()), [""], multiple=False,
                                               traverse_folders=False, add_folder_button=True, width=menu.app.button_w)
 
+        self.instance_data_dir_dialog = BrowseWidget(self, "Instance Data Dir", os.path.abspath(os.getcwd()), [""], multiple=False,
+                                              traverse_folders=False, add_folder_button=True, width=menu.app.button_w)
+
         self.menu = menu
         self.predefined_configs = {
             "default": {
                 "pretrained_model_name_or_path": "CompVis/stable-diffusion-v1-4",
                 "instance_data_dir": "path/to/instance/data",
-                "output_dir": "path-to-save-model",
+                "class_data_dir": "",
+                "output_dir": os.path.join(cwd, "training-runs"),
                 "instance_prompt": "a photo of sks dog",
                 "resolution": 512,
                 "train_batch_size": 1,
@@ -72,7 +76,7 @@ class DreamboothModule:
                 "pretrained_model_name_or_path": "CompVis/stable-diffusion-v1-4",
                 "instance_data_dir": "path/to/instance/data",
                 "class_data_dir": "path-to-class-images",
-                "output_dir": "path-to-save-model",
+                "output_dir": os.path.join(cwd, "training-runs"),
                 "with_prior_preservation": True,
                 "prior_loss_weight": 1.0,
                 "instance_prompt": "a photo of sks dog",
@@ -88,9 +92,9 @@ class DreamboothModule:
             },
             "16gb_gpu": {
                 "pretrained_model_name_or_path": "CompVis/stable-diffusion-v1-4",
-                "instance_data_dir": "path/to/instance/data",
-                "class_data_dir": "path-to-class-images",
-                "output_dir": "path-to-save-model",
+                "instance_data_dir": "",
+                "class_data_dir": "",
+                "output_dir": os.path.join(cwd, "training-runs"),
                 "with_prior_preservation": True,
                 "prior_loss_weight": 1.0,
                 "instance_prompt": "a photo of sks dog",
@@ -100,7 +104,7 @@ class DreamboothModule:
                 "gradient_accumulation_steps": 2,
                 "gradient_checkpointing": True,
                 "use_8bit_adam": True,
-                "learning_rate": 5e-6,
+                "learning_rate": 0.005,
                 "lr_scheduler": "constant",
                 "lr_warmup_steps": 0,
                 "num_class_images": 200,
@@ -110,7 +114,7 @@ class DreamboothModule:
                 "pretrained_model_name_or_path": "CompVis/stable-diffusion-v1-4",
                 "instance_data_dir": "path/to/instance/data",
                 "class_data_dir": "path-to-class-images",
-                "output_dir": "path-to-save-model",
+                "output_dir": os.path.join(cwd, "training-runs"),
                 "with_prior_preservation": True,
                 "prior_loss_weight": 1.0,
                 "instance_prompt": "a photo of sks dog",
@@ -132,7 +136,7 @@ class DreamboothModule:
                 "pretrained_model_name_or_path": "CompVis/stable-diffusion-v1-4",
                 "instance_data_dir": "path/to/instance/data",
                 "class_data_dir": "path-to-class-images",
-                "output_dir": "path-to-save-model",
+                "output_dir": os.path.join(cwd, "training-runs"),
                 "with_prior_preservation": True,
                 "prior_loss_weight": 1.0,
                 "instance_prompt": "a photo of sks dog",
@@ -149,6 +153,7 @@ class DreamboothModule:
                 "max_train_steps": 800,
             },
         }
+
         self.queue = mp.Queue()
         self.reply = mp.Queue()
         self.message = ""
@@ -165,6 +170,8 @@ class DreamboothModule:
 
         self.model_path = ""
         self.output_path = ""
+        self.instance_data_dir = ""
+        self.class_data_dir = ""
         self.use_dataset_name = True
 
     @imgui_utils.scoped_by_object_id
@@ -177,11 +184,12 @@ class DreamboothModule:
 
         # Configuration selection
         config_options = list(self.predefined_configs.keys())
-        _, selected_config = imgui.combo(
-            "GPU Configuration",
-            config_options.index(self.current_config),
-            config_options
-        )
+        with imgui_utils.item_width(-(self.app.button_w + self.app.spacing) * 1.7):
+            _, selected_config = imgui.combo(
+                "GPU Configuration",
+                config_options.index(self.current_config),
+                config_options
+            )
 
         if config_options[selected_config] != self.current_config:
             self.current_config = config_options[selected_config]
@@ -198,7 +206,7 @@ class DreamboothModule:
             self.use_model_name = False
 
         if self.use_model_name:
-            with imgui_utils.item_width(-(self.app.button_w + self.app.spacing)):
+            with imgui_utils.item_width(-(self.app.button_w + self.app.spacing)*1.7):
                 _, self.args.pretrained_model_name_or_path = imgui.input_text(
                     "Pretrained Model Name",
                     self.args.pretrained_model_name_or_path,
@@ -225,7 +233,7 @@ class DreamboothModule:
             self.args.output_dir,
             1024,
             flags=imgui.INPUT_TEXT_READ_ONLY,
-            width=-(self.app.button_w + self.app.spacing),
+            width=-(self.app.button_w + self.app.spacing) * 1.7,
             help_text="Output Path"
         )
         imgui.same_line()
@@ -238,33 +246,70 @@ class DreamboothModule:
                 self.args.output_dir = ""
                 print("No output path selected")
 
-        # Instance data directory selection
-        imgui.text("Instance Data Directory")
-        imgui.same_line()
-        _clicked, instance_data_dir = self.dataset_dir_dialog(self.app.button_w)
-        if _clicked and len(instance_data_dir) > 0:
-            self.args.instance_data_dir = instance_data_dir[0]
-            print(f"Selected instance data directory: {self.args.instance_data_dir}")
+        # # Instance data directory selection
+        # imgui.text("Instance Data Directory")
+        # imgui.same_line()
+        # _clicked, instance_data_dir = self.dataset_dir_dialog(self.app.button_w)
+        # if _clicked and len(instance_data_dir) > 0:
+        #     self.args.instance_data_dir = instance_data_dir[0]
+        #     print(f"Selected instance data directory: {self.args.instance_data_dir}")
 
-        # Class data directory selection
-        imgui.text("Class Data Directory")
+        # Instance Data Directory selection
+        imgui_utils.input_text(
+            "##SRInstance Data Directory",
+            self.args.instance_data_dir,
+            1024,
+            flags=imgui.INPUT_TEXT_READ_ONLY,
+            width=-(self.app.button_w + self.app.spacing) * 1.7,
+            help_text="Instance Data Directory"
+        )
+        imgui.same_line()
+        _clicked, instance_data_dir = self.instance_data_dir_dialog(self.app.button_w)
+        if _clicked:
+            if len(instance_data_dir) > 0:
+                self.args.instance_data_dir = instance_data_dir[0]
+                print(f"Selected Instance Data Directory: {self.args.instance_data_dir}")
+            else:
+                self.args.instance_data_dir = ""
+                print("No Instance Data Directory selected")
+
+        # # Class data directory selection
+        # imgui.text("Class Data Directory")
+        # imgui.same_line()
+        # _clicked, class_data_dir = self.dataset_dir_dialog(self.app.button_w)
+        # if _clicked:
+        #     if len(class_data_dir) > 0:
+        #         self.args.class_data_dir = class_data_dir[0]
+        #         print(f"Selected class data directory: {self.args.class_data_dir}")
+        #     else:
+        #         self.args.class_data_dir = None
+        #         print("No class data directory selected")
+
+        # class data directory selection
+        imgui_utils.input_text(
+            "##SRclass data directory",
+            self.args.class_data_dir,
+            1024,
+            flags=imgui.INPUT_TEXT_READ_ONLY,
+            width=-(self.app.button_w + self.app.spacing) *1.7,
+            help_text="Class Data Directory"
+        )
         imgui.same_line()
         _clicked, class_data_dir = self.dataset_dir_dialog(self.app.button_w)
         if _clicked:
             if len(class_data_dir) > 0:
                 self.args.class_data_dir = class_data_dir[0]
-                print(f"Selected class data directory: {self.args.class_data_dir}")
+                print(f"Selected Instance Data Directory: {self.args.class_data_dir}")
             else:
-                self.args.class_data_dir = None
-                print("No class data directory selected")
+                self.args.class_data_dir = ""
+                print("No Instance Data Directory selected")
 
         # Training parameters
-        with imgui_utils.item_width(-(self.app.button_w + self.app.spacing)):
+        with imgui_utils.item_width(-(self.app.button_w + self.app.spacing) *1.7):
             _, self.args.instance_prompt = imgui.input_text("Instance Prompt", self.args.instance_prompt, 1024)
             _, self.args.resolution = imgui.input_int("Resolution", self.args.resolution)
             _, self.args.train_batch_size = imgui.input_int("Train Batch Size", self.args.train_batch_size)
-            _, self.args.gradient_accumulation_steps = imgui.input_int("Gradient Accumulation Steps",
-                                                                       self.args.gradient_accumulation_steps)
+
             _, self.args.learning_rate = imgui.input_float("Learning Rate", self.args.learning_rate)
             _, self.args.max_train_steps = imgui.input_int("Max Train Steps", self.args.max_train_steps)
 
@@ -275,7 +320,9 @@ class DreamboothModule:
             self.args.lr_scheduler = lr_scheduler_options[selected_lr_scheduler]
 
             _, self.args.lr_warmup_steps = imgui.input_int("LR Warmup Steps", self.args.lr_warmup_steps)
-
+        with imgui_utils.item_width(-(self.app.button_w + self.app.spacing) * 1.9):
+            _, self.args.gradient_accumulation_steps = imgui.input_int("Gradient Accumulation Steps",
+                                                                   self.args.gradient_accumulation_steps)
         # Advanced options
         _, self.args.with_prior_preservation = imgui.checkbox("With Prior Preservation",
                                                               self.args.get("with_prior_preservation", False))
@@ -287,6 +334,7 @@ class DreamboothModule:
                                                             self.args.get("num_class_images", 200))
 
         _, self.args.use_8bit_adam = imgui.checkbox("Use 8-bit Adam", self.args.get("use_8bit_adam", False))
+        imgui.same_line()
         _, self.args.gradient_checkpointing = imgui.checkbox("Gradient Checkpointing",
                                                              self.args.get("gradient_checkpointing", False))
         _, self.args.enable_xformers_memory_efficient_attention = imgui.checkbox(
@@ -312,17 +360,19 @@ class DreamboothModule:
         # Training popup
         imgui.set_next_window_size(self.menu.app.content_width // 2, (self.menu.app.content_height // 2), imgui.ONCE)
         if imgui.begin_popup_modal("Training")[0]:
-            imgui.text("Training in progress...")
+            imgui.text("Training...")
             if self.message != "":
                 imgui.text(self.message)
-            if imgui_utils.button("Stop Training", enabled=1):
+            if imgui_utils.button("Done", enabled=1):
                 self.queue.put('done')
                 self.done_button = True
             if self.done:
                 self.training_process.terminate()
                 self.training_process.join()
-                if self.done_button:
-                    imgui.close_current_popup()
-                    self.message = ''
-                    self.done_button = False
+            if self.done_button:
+                self.training_process.terminate()
+                self.training_process.join()
+                imgui.close_current_popup()
+                self.message = ''
+                self.done_button = False
             imgui.end_popup()
