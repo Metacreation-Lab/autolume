@@ -832,11 +832,11 @@ def encode_prompt(text_encoder, input_ids, attention_mask, text_encoder_use_atte
 
 def main(queue, reply):
     args = queue.get()
-    if args.report_to == "wandb" and args.hub_token is not None:
-        raise ValueError(
-            "You cannot use both --report_to=wandb and --hub_token due to a security risk of exposing your token."
-            " Please use `huggingface-cli login` to authenticate with the Hub."
-        )
+    # if args.report_to == "wandb" and args.hub_token is not None:
+    #     raise ValueError(
+    #         "You cannot use both --report_to=wandb and --hub_token due to a security risk of exposing your token."
+    #         " Please use `huggingface-cli login` to authenticate with the Hub."
+    #     )
 
     args = update_args(get_default_args(), args)
 
@@ -1195,7 +1195,7 @@ def main(queue, reply):
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
         tracker_config = vars(copy.deepcopy(args))
-        tracker_config.pop("validation_images")
+        tracker_config.pop("validation_images", None)
         accelerator.init_trackers("dreambooth", config=tracker_config)
 
     # Train!
