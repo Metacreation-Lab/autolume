@@ -23,6 +23,7 @@ from modules.network_mixing import MixingModule
 from modules.diffusion_module import DiffusionModule
 from modules.super_res_module import SuperResModule
 from modules.diffusion_lora_module import DiffusionLoraModule
+from modules.dreambooth_module import DreamboothModule
 #----------------------------------------------------------------------------
 class Menu:
     def __init__(self, app):
@@ -36,6 +37,7 @@ class Menu:
         self.mixing_module = MixingModule(self)
         self.diffusion_module = DiffusionModule(self)
         self.diffusion_lora_module = DiffusionLoraModule(self)
+        self.dreambooth_module = DreamboothModule(self)
         self.logo = cv2.imread("assets/Autolume-logo.png", cv2.IMREAD_UNCHANGED)
         self.logo_texture = gl_utils.Texture(image=self.logo, width=self.logo.shape[1], height=self.logo.shape[0], channels=self.logo.shape[2])
 
@@ -102,24 +104,46 @@ class Menu:
         self.super_res()
         imgui.end()
 
-        imgui.set_next_window_position(0, (self.app.content_height // 2) + 20)
-        imgui.set_next_window_size(self.app.content_width // 4, (self.app.content_height // 2) - 20)
-        imgui.begin('Model Mixing##Menu', closable=False, flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS))
+        # Second row modules
+        total_width = self.app.content_width
+        render_width = total_width // 10  # Half of the previous width
+        remaining_width = total_width - render_width
+        module_width = remaining_width // 4  # Divide the remaining space among 4 modules
+        module_height = (self.app.content_height // 2) - 20
+        base_y = (self.app.content_height // 2) + 20
+
+        # Model Mixing
+        imgui.set_next_window_position(0, base_y)
+        imgui.set_next_window_size(module_width, module_height)
+        imgui.begin('Model Mixing##Menu', closable=False,
+                    flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS))
         imgui.text("Combine two models into one")
         self.mixing_module()
         imgui.end()
 
-        imgui.set_next_window_position(self.app.content_width // 4, (self.app.content_height // 2) + 20)
-        imgui.set_next_window_size(self.app.content_width // 4, (self.app.content_height // 2) - 20)
+        # Diffusion LoRA Training
+        imgui.set_next_window_position(module_width, base_y)
+        imgui.set_next_window_size(module_width, module_height)
         imgui.begin('Diffusion LoRA Training##Menu', closable=False,
                     flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS))
         imgui.text("Train a diffusion model on your own data with LoRA")
         self.diffusion_lora_module()
         imgui.end()
 
-        imgui.set_next_window_position(2 * self.app.content_width // 4, (self.app.content_height // 2) + 20)
-        imgui.set_next_window_size(self.app.content_width // 4, (self.app.content_height // 2) - 20)
-        imgui.begin('Diffusion Model##Menu', closable=False, flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS))
+        # Dreambooth Training
+        imgui.set_next_window_position(2 * module_width, base_y)
+        imgui.set_next_window_size(module_width, module_height)
+        imgui.begin('Dreambooth Training##Menu', closable=False,
+                    flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS))
+        imgui.text("Train a model with Dreambooth")
+        self.dreambooth_module()
+        imgui.end()
+
+        # Diffusion Model
+        imgui.set_next_window_position(3 * module_width, base_y)
+        imgui.set_next_window_size(module_width, module_height)
+        imgui.begin('Diffusion Model##Menu', closable=False,
+                    flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS))
         imgui.text("Non-realtime diffusion model")
         self.diffusion_module()
         imgui.text("Jump into Diffusion-Live")
@@ -127,16 +151,14 @@ class Menu:
             self.app.start_diffusion()
         imgui.end()
 
-        imgui.set_next_window_position(3 * self.app.content_width // 4, (self.app.content_height // 2) + 20)
-        imgui.set_next_window_size(self.app.content_width // 4, (self.app.content_height // 2) - 20)
-        imgui.begin('Render##Menu', closable=False, flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS))
+        # Render (half width)
+        imgui.set_next_window_position(4 * module_width, base_y)
+        imgui.set_next_window_size(render_width, module_height)
+        imgui.begin('Render##Menu', closable=False,
+                    flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS))
         imgui.text("Jump into Autolume-Live")
-        if imgui_utils.button("START", width=self.app.button_w):
+        if imgui_utils.button("START", width=min(self.app.button_w, render_width - 20)):
             self.app.start_renderer()
         imgui.end()
 
         imgui.pop_style_color(3)
-
-
-
-
