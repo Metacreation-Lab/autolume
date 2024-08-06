@@ -23,7 +23,7 @@ class DiffusionLoraModule:
         cwd = os.getcwd()
         self.args = EasyDict(
             pretrained_model_name_or_path="CompVis/stable-diffusion-v1-4",
-            dataset_name="lambdalabs/naruto-blip-captions",
+            train_data_dir=os.path.abspath(os.path.join(cwd, "data")),
             caption_column="text",
             resolution=512,
             random_flip=True,
@@ -34,11 +34,11 @@ class DiffusionLoraModule:
             lr_scheduler="constant",
             lr_warmup_steps=0,
             seed=42,
-            output_dir="sd-naruto-model-lora",
+            output_dir="sd-model-finetuned-lora",
             validation_prompt="cute dragon creature",
         )
 
-        self.args.output_dir = os.path.join(cwd, "training-runs")
+        self.args.output_dir = os.path.join(cwd, "sd-model-finetuned-lora")
         # create data folder if not exists
         if not os.path.exists(os.path.abspath(os.path.join(os.getcwd(), "data"))):
             os.makedirs(os.path.abspath(os.path.join(os.getcwd(), "data")))
@@ -129,30 +129,16 @@ class DiffusionLoraModule:
                 print("No path selected")
 
         # dataset_name
-        imgui.text("Use Dataset Name or Path")
-        imgui.same_line()
-        if imgui.radio_button("Use Name", self.use_dataset_name):
-            self.use_dataset_name = True
-
-        imgui.same_line()
-
-        if imgui.radio_button("Use Path", not self.use_dataset_name):
-            self.use_dataset_name = False
-
-        if self.use_dataset_name:
-            with imgui_utils.item_width(-(self.app.button_w + self.app.spacing) * 1.7):
-                _, self.args.dataset_name = imgui.input_text("Dataset Name",
-                                                             self.args.dataset_name, 1024)
-        else:
-            imgui_utils.input_text("##SRDATASET PATH", "", 1024,
+        with imgui_utils.item_width(-(self.app.button_w + self.app.spacing) * 1.7):
+            imgui_utils.input_text("##SRDATASET PATH", self.args.train_data_dir, 1024,
                                    flags=imgui.INPUT_TEXT_READ_ONLY,
                                    width=-(self.app.button_w + self.app.spacing), help_text="Dataset Path")
             imgui.same_line()
 
             _clicked, dataset_path = self.dataset_dir_dialog(self.app.button_w)
             if _clicked and len(dataset_path) > 0:
-                self.args.dataset_name = dataset_path[0]
-                print(self.args.dataset_name)
+                self.args.train_data_dir = dataset_path[0]
+                print(self.args.train_data_dir)
 
         with imgui_utils.item_width(-(self.app.button_w + self.app.spacing) * 1.7):
             changed, caption_column = imgui_utils.input_text("Caption Column", self.caption_column, 1024,

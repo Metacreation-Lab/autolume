@@ -217,7 +217,7 @@ DATASET_NAME_MAPPING = {
 
 def main(queue, reply):
     args = queue.get()
-
+    args = update_args(get_default_args(), args)
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
     if env_local_rank != -1 and env_local_rank != args.local_rank:
         args.local_rank = env_local_rank
@@ -226,7 +226,7 @@ def main(queue, reply):
     if args.dataset_name is None and args.train_data_dir is None:
         reply.put(['Need either a dataset name or a training folder.', True])
         raise ValueError("Need either a dataset name or a training folder.")
-    args = update_args(get_default_args(), args)
+
     if args.report_to == "wandb" and args.hub_token is not None:
         reply.put([
             "You cannot use both --report_to=wandb and --hub_token due to a security risk of exposing your token. "
