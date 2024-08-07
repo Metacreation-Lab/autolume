@@ -314,7 +314,7 @@ class DiffusionModule:
         # Model LoRA file selection
         imgui_utils.input_text("##SRINPUTFILE", self.text2image_args.model_path, 1024,
                                flags=imgui.INPUT_TEXT_READ_ONLY,
-                               width=-(self.app.button_w + self.app.spacing), help_text="safetensors file")
+                               width=-(self.app.button_w + self.app.spacing), help_text="LoRA safetensors file, can be empty")
         imgui.same_line()
 
         _clicked, model_path = self.text2image_file_dialog(self.app.button_w)
