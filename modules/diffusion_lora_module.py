@@ -128,17 +128,16 @@ class DiffusionLoraModule:
                 self.args.output_dir = ""
                 print("No path selected")
 
-        # dataset_name
-        with imgui_utils.item_width(-(self.app.button_w + self.app.spacing) * 1.7):
-            imgui_utils.input_text("##SRDATASET PATH", self.args.train_data_dir, 1024,
-                                   flags=imgui.INPUT_TEXT_READ_ONLY,
-                                   width=-(self.app.button_w + self.app.spacing), help_text="Dataset Path")
-            imgui.same_line()
+        # dataset_path
+        imgui_utils.input_text("##SRDATASET PATH", self.args.train_data_dir, 1024,
+                               flags=imgui.INPUT_TEXT_READ_ONLY,
+                               width=-(self.app.button_w + self.app.spacing) * 1.7, help_text="Dataset Path")
+        imgui.same_line()
 
-            _clicked, dataset_path = self.dataset_dir_dialog(self.app.button_w)
-            if _clicked and len(dataset_path) > 0:
-                self.args.train_data_dir = dataset_path[0]
-                print(self.args.train_data_dir)
+        _clicked, dataset_path = self.dataset_dir_dialog(self.app.button_w)
+        if _clicked and len(dataset_path) > 0:
+            self.args.train_data_dir = dataset_path[0]
+            print(self.args.train_data_dir)
 
         with imgui_utils.item_width(-(self.app.button_w + self.app.spacing) * 1.7):
             changed, caption_column = imgui_utils.input_text("Caption Column", self.caption_column, 1024,
