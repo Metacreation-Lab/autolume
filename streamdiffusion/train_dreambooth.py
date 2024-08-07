@@ -1254,7 +1254,7 @@ def main(queue, reply):
         # Only show the progress bar once on each machine.
         disable=not accelerator.is_local_main_process,
     )
-
+    reply.put(["Training started", False])
     for epoch in range(first_epoch, args.num_train_epochs):
         unet.train()
         if args.train_text_encoder:
@@ -1373,6 +1373,20 @@ def main(queue, reply):
                 progress_bar.update(1)
                 global_step += 1
 
+                # Get the progress bar string
+                progress_str = str(progress_bar)
+
+                # Extract progress percentage
+                progress = global_step / args.max_train_steps
+
+                # Get the current loss
+                loss_value = loss.detach().item()
+
+                # Combine all information
+                info_str = f"{progress_str}, Loss: {loss_value:.4f}"
+
+                reply.put([info_str, False])
+
                 if accelerator.is_main_process:
                     if global_step % args.checkpointing_steps == 0:
                         # _before_ saving state, check if this save would set us over the `checkpoints_total_limit`
@@ -1421,6 +1435,10 @@ def main(queue, reply):
 
             if global_step >= args.max_train_steps:
                 break
+
+
+    reply.put(["Training completed", True])
+    print(f"Sent progress update: {info_str}")  # for debug
 
     # Create the pipeline using the trained modules and save it.
     accelerator.wait_for_everyone()
