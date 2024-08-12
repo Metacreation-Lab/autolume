@@ -85,6 +85,34 @@ if (-not $SkipClone)
     }
 }
 
+# Clone, Install, and Remove Diffusers ----------------------------------------------------------#
+
+Write-Host "=> Step: Clone, Install, and Remove Diffusers"
+
+$diffusersPath = Join-Path -Path $installLocation -ChildPath "diffusers"
+& git clone https://github.com/huggingface/diffusers $diffusersPath
+
+if (-not $?)
+{
+    throw "Failed to clone the diffusers repository."
+}
+
+Push-Location $diffusersPath
+& pip install .
+if (-not $?)
+{
+    throw "Failed to install diffusers."
+}
+Pop-Location
+
+# Remove the diffusers directory after installation
+Remove-Item -Path $diffusersPath -Recurse -Force
+
+if (-not $?)
+{
+    Write-Host "Warning: Failed to remove the diffusers directory. You may want to delete it manually."
+}
+
 # Check for ffmpeg.zip and extract ffmpeg.exe -------------------------------------------------#
 
 Write-Host "=> Step: Extract ffmpeg"
