@@ -198,7 +198,7 @@ class DiffusionLoraModule:
             if self.message != "":
                 imgui.text(self.message)
             if imgui_utils.button("Done", enabled=1):
-                self.queue.put('done')
+                # self.queue.put('done')
                 self.done_button = True
             if self.done:
                 self.training_process.terminate()
