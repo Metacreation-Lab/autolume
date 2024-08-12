@@ -195,6 +195,10 @@ class DiffusionLoraModule:
 
         if imgui.begin_popup_modal("Training")[0]:
             imgui.text("Training...")
+
+            while self.reply.qsize() > 0:
+                self.message, self.done = self.reply.get()
+
             if self.message != "":
                 imgui.text(self.message)
             if imgui_utils.button("Done", enabled=1):
