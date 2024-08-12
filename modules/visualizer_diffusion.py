@@ -34,7 +34,7 @@ class VisualizerDiffusion:
         self._async_renderer = renderer
 
         # NDI parameters
-        self.ndi_source = None
+        self.ndi_signal = None
         self.ndi_recv = None
 
         self.ndi_name = 'Diffusion Live'
@@ -147,13 +147,13 @@ class VisualizerDiffusion:
     def clear_result(self):
         self._async_renderer.clear_result()
 
-    def set_ndi_source(self, ndi_source):
-        self.ndi_source = ndi_source
-        if self.ndi_source is not None:
+    def set_ndi_source(self, ndi_signal):
+        self.ndi_signal = ndi_signal
+        if self.ndi_signal is not None:
             recv_create_desc = ndi.RecvCreateV3()
             recv_create_desc.color_format = ndi.RECV_COLOR_FORMAT_BGRX_BGRA
             self.ndi_recv = ndi.recv_create_v3(recv_create_desc)
-            ndi.recv_connect(self.ndi_recv, self.ndi_source)
+            ndi.recv_connect(self.ndi_recv, self.ndi_signal)
 
     @imgui_utils.scoped_by_object_id
     def __call__(self):
