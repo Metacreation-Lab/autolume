@@ -710,6 +710,10 @@ def main(queue, reply):
             logs = {"step_loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
             progress_bar.set_postfix(**logs)
 
+            # convert progress_bar to string
+            progress_str = str(progress_bar)
+            reply.put([progress_str, False])
+
             if global_step >= args.max_train_steps:
                 break
 
