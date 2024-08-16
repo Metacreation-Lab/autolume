@@ -4,7 +4,7 @@ param(
 )
 
 # Define python path
-$systemPython = "C:\Users\ArthurDeleu\AppData\Local\Programs\Python\Python310\python.exe"
+$systemPython = "C:\Users\ericu\AppData\Local\Programs\Python\Python310\python.exe"
 
 # Define install location
 $installLocation = "$env:LOCALAPPDATA\autolumelive_colab"
@@ -66,51 +66,34 @@ if (-not $SkipClone)
     if ((Get-ChildItem -Path $installLocation | Measure-Object).Count -eq 0)
     {
         $env:GIT_REDIRECT_STDERR = '2>&1'
-        & git clone --depth 1 -b main https://github.com/Metacreation-Lab/autolume.git $installLocation
-
-        if (-not $?)
-        {
+        try {
+            $env:GIT_CLONE_PROTECTION_ACTIVE = "false"
+            & git clone --depth 1 -b streamdiffusion https://gitlab.com/jkraasch/autolumelive_colab.git $installLocation
+            if (-not $?)
+            {
+                throw "Failed to clone the repository."
+            }
+        }
+        catch {
+            Write-Host "Error during git clone: $_"
             throw "Failed to clone the repository."
         }
     }
     else
     {
         $env:GIT_REDIRECT_STDERR = '2>&1'
-        & git reset --hard origin/windows-installer
-
-        if (-not $?)
-        {
+        try {
+            & git reset --hard origin/windows-installer
+            if (-not $?)
+            {
+                throw "Failed to sync the repository."
+            }
+        }
+        catch {
+            Write-Host "Error during git reset: $_"
             throw "Failed to sync the repository."
         }
     }
-}
-
-# Clone, Install, and Remove Diffusers ----------------------------------------------------------#
-
-Write-Host "=> Step: Clone, Install, and Remove Diffusers"
-
-$diffusersPath = Join-Path -Path $installLocation -ChildPath "diffusers"
-& git clone https://github.com/huggingface/diffusers $diffusersPath
-
-if (-not $?)
-{
-    throw "Failed to clone the diffusers repository."
-}
-
-Push-Location $diffusersPath
-& pip install .
-if (-not $?)
-{
-    throw "Failed to install diffusers."
-}
-Pop-Location
-
-# Remove the diffusers directory after installation
-Remove-Item -Path $diffusersPath -Recurse -Force
-
-if (-not $?)
-{
-    Write-Host "Warning: Failed to remove the diffusers directory. You may want to delete it manually."
 }
 
 # Check for ffmpeg.zip and extract ffmpeg.exe -------------------------------------------------#
@@ -217,19 +200,13 @@ if ($CPUOnly)
 }
 else
 {
-    . python -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu117
+    . python -m pip install torch==2.1.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 }
 
 if (-not $?)
 {
     throw "Failed to install Torch."
 }
-
-# Install Python Requirements --------------------------------------------------------------------#
-
-Write-Host "=> Step: Install Python Requirements"
-
-. python -m pip install -r requirements.txt
 
 # Install Streamdiffusion package --------------------------------------------------------------------#
 
@@ -238,6 +215,16 @@ Write-Host "=> Step: Install Streamdiffusion package"
 . python -m pip install git+https://github.com/cumulo-autumn/StreamDiffusion.git@main#egg=streamdiffusion[tensorrt]
 
 . python -m streamdiffusion.tools.install-tensorrt
+
+# Install Diffuser package --------------------------------------------------------------------#
+
+. python -m pip install git+https://github.com/huggingface/diffusers.git@main
+
+# Install Python Requirements --------------------------------------------------------------------#
+
+Write-Host "=> Step: Install Python Requirements"
+
+. python -m pip install -r requirements.txt
 
 # Re-Install ffmpeg-python --------------------------------------------------------------------#
 
