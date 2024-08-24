@@ -694,8 +694,7 @@ class LayerWidget:
                                                                             (
                                                                                 imgui.INPUT_TEXT_READ_ONLY) * (
                                                                                 not trans.use_osc))
-                                        if j < len(trans.params) - 1:
-                                            imgui.same_line()
+
 
                                         if changed:
                                             try:
@@ -710,6 +709,16 @@ class LayerWidget:
                                             self.viz.osc_dispatcher.map(f"/{address}",
                                                                         self.osc_funcs[trans.imgui_id][j])
                                             trans.osc_address[j] = address
+
+                                        imgui.same_line()
+                                        changed, trans.mapping[j] = imgui.input_text(f"test##mappings_{j}_{u_id}",
+                                                                                     trans.mapping[j], 256,
+                                                                                     imgui.INPUT_TEXT_CHARS_NO_BLANK | imgui.INPUT_TEXT_ENTER_RETURNS_TRUE |
+                                                                                     (
+                                                                                         imgui.INPUT_TEXT_READ_ONLY) * (
+                                                                                         not trans.use_osc))
+                                        if j < len(trans.params) - 1:
+                                            imgui.same_line()
                             imgui.separator()
 
         for idx in to_remove:
