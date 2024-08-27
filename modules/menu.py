@@ -69,7 +69,7 @@ class Menu:
 
         # Begin control pane.
         imgui.set_next_window_position(0, 50)
-        imgui.set_next_window_size(self.app.content_width//4, (self.app.content_height * 4) //5 - 50)
+        imgui.set_next_window_size(self.app.content_width // 4, (self.app.content_height * 3) // 4 - 50)
         imgui.begin('Train##Menu', closable=False, flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS))
 
         self.training()
@@ -78,36 +78,36 @@ class Menu:
         imgui.end()
 
         imgui.set_next_window_position(self.app.content_width // 4, 50)
-        imgui.set_next_window_size(self.app.content_width // 4, (self.app.content_height * 4) // 5 - 50)
+        imgui.set_next_window_size(self.app.content_width // 4, (self.app.content_height * 3) // 4 - 50)
         imgui.begin('Projection##Menu', closable=False, flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS))
         imgui.text("Find the closest match to your image")
 
         self.projection()
         imgui.end()
 
-        imgui.set_next_window_position((2 * self.app.content_width)// 4, 50)
-        imgui.set_next_window_size(self.app.content_width // 4, (self.app.content_height * 4) // 5 - 50)
+        imgui.set_next_window_position((2 * self.app.content_width) // 4, 50)
+        imgui.set_next_window_size(self.app.content_width // 4, (self.app.content_height * 3) // 4 - 50)
         imgui.begin('Feature Extractor##Menu', closable=False, flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS))
         imgui.text("Extract Meaningful Directions from a Model")
         self.pca()
         imgui.end()
 
-        imgui.set_next_window_position((3 * self.app.content_width)// 4, 50)
-        imgui.set_next_window_size(self.app.content_width // 4, (self.app.content_height * 4) // 5 - 50)
+        imgui.set_next_window_position((3 * self.app.content_width) // 4, 50)
+        imgui.set_next_window_size(self.app.content_width // 4, (self.app.content_height * 3) // 4 - 50)
         imgui.begin('Super Resolution##Menu', closable=False, flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS))
         imgui.text("Use AI to upscale your images and videos")
         self.super_res()
         imgui.end()
 
-        imgui.set_next_window_position(0, (self.app.content_height * 3) // 4 + 50)
-        imgui.set_next_window_size(self.app.content_width // 2, (self.app.content_height * 3) // 4 - 50)
+        imgui.set_next_window_position(0, (self.app.content_height * 3) // 4)
+        imgui.set_next_window_size(self.app.content_width // 2, self.app.content_height // 4)
         imgui.begin('Model Mixing##Menu', closable=False, flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE| imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS))
         imgui.text("Combine two models into one")
         self.mixing_module()
         imgui.end()
 
-        imgui.set_next_window_position(self.app.content_width//2,(self.app.content_height * 3) // 4 + 50)
-        imgui.set_next_window_size(self.app.content_width//2, (self.app.content_height * 3) // 4 - 50)
+        imgui.set_next_window_position(self.app.content_width // 2, (self.app.content_height * 3) // 4)
+        imgui.set_next_window_size(self.app.content_width // 2, self.app.content_height // 4)
         imgui.begin('Render##Menu', closable=False, flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE| imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS))
         imgui.text("Jump into Autolume-Live")
         if imgui_utils.button("START", width=self.app.button_w):
