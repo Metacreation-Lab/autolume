@@ -7,6 +7,9 @@
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 import threading
 import numpy as np
+import queue
+import datetime
+
 import imgui
 import cv2
 import pyaudio
@@ -105,6 +108,52 @@ class Visualizer:
         self.metacreation_texture = gl_utils.Texture(image=self.metacreation, width=self.metacreation.shape[1],
                                                      height=self.metacreation.shape[0],
                                                      channels=self.metacreation.shape[2])
+        
+        #Screen capture and screen recording
+        self.is_recording = False
+        self.frame_queue = queue.Queue()
+        self.recording_thread = None
+        self.recording_file_path = None
+
+    def start_recording(self, file_path):
+        self.is_recording = True
+        self.recording_file_path = file_path
+
+    def stop_recording(self):
+        self.recording_thread = threading.Thread(target=self._record_frames, daemon=True)
+        self.recording_thread.start()
+        
+        self.is_recording = False
+        if self.recording_thread is not None:
+            self.recording_thread.join()
+            self.recording_thread = None
+
+    def _record_frames(self):
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # H.264 codec
+        out = None
+        while self.is_recording or not self.frame_queue.empty():
+            if not self.frame_queue.empty():
+                frame = self.frame_queue.get()
+                if out is None:
+                    height, width, channels = frame.shape
+                    out = cv2.VideoWriter(self.recording_file_path, fourcc, 30.0, (width, height))
+                out.write(frame)
+        if out is not None:
+            out.release()
+
+    def capture_screenshot(self, file_path):
+        if 'image' in self.result:
+            image_data = self.result.image  # Convert tensor to numpy array if needed
+
+            # Convert from RGB to BGR
+            image_data = cv2.cvtColor(image_data, cv2.COLOR_RGB2BGRA)
+
+            # Save the image using OpenCV
+            cv2.imwrite(file_path, image_data)
+        else:
+            print("No render result available to capture.")
+
+
 
     def close(self):
         if self._async_renderer is not None:
@@ -164,6 +213,28 @@ class Visualizer:
         imgui.set_cursor_pos_y(18 - (18 / 2))
         imgui.set_cursor_pos_x(self.app.spacing * 2)
         imgui.image(self.logo_texture.gl_id, 18 * logo_ratio, 18, tint_color=(1, 1, 1, 0.5))
+
+        # Position the button in the middle
+        imgui.same_line(self.app.spacing * 18)
+
+        if imgui.button('Screen Capture'):
+            now = datetime.datetime.now()
+            current_time_str = now.strftime("%Y-%m-%d %H-%M-%S")
+            self.capture_screenshot(f'screenshots/{current_time_str}.png')
+
+        # Capture frame if recording
+        if self.is_recording and 'image' in self.result:
+            frame = cv2.cvtColor(self.result.image, cv2.COLOR_RGB2BGR)
+            self.frame_queue.put(frame)
+        
+        imgui.same_line()
+        if imgui.button('Start Recording' if not self.is_recording else 'Stop Recording'):
+            if not self.is_recording:
+                now = datetime.datetime.now()
+                current_time_str = now.strftime("%Y-%m-%d %H-%M-%S")
+                self.start_recording(f'recordings/{current_time_str}.mp4')
+            else:
+                self.stop_recording()
 
         # calculate metacreation shape ratio
         metacreation_ratio = self.metacreation.shape[1] / self.metacreation.shape[0]

@@ -44,7 +44,7 @@ def create_networks(data, init=True, labels=None, **ex_kwargs):
 
 
 def load_network_pkl(f, force_fp16=False, custom=True, **ex_kwargs):
-    data = _LegacyUnpickler(f).load()
+    data = _LegacyUnpickler(f, encoding='latin1').load()
     # Legacy TensorFlow pickle => convert.
     if isinstance(data, tuple) and len(data) == 3 and all(isinstance(net, _TFNetworkStub) for net in data):
         tf_G, tf_D, tf_Gs = data
@@ -184,6 +184,10 @@ def convert_tf_generator(tf_G, custom=False, **ex_kwargs):
         ),
     )
 
+    if 'resolution_w' in tf_kwargs:
+        tf_kwargs.pop('resolution_w', None)
+        tf_kwargs.pop('resolution_h', None)
+
     # Check for unknown kwargs.
     kwarg('truncation_psi')
     kwarg('truncation_cutoff')
@@ -287,7 +291,11 @@ def convert_tf_discriminator(tf_D):
             activation          = kwarg('nonlinearity',         'lrelu'),
         ),
     )
-
+    
+    if 'resolution_w' in tf_kwargs:
+        tf_kwargs.pop('resolution_w', None)
+        tf_kwargs.pop('resolution_h', None)
+    
     # Check for unknown kwargs.
     kwarg('structure')
     kwarg('conditioning')

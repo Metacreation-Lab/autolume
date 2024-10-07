@@ -73,13 +73,22 @@ class PresetWidget:
             if not os.path.exists(path):
                 os.makedirs(path)
             # self.inter.terminal_widget.cached_text.append(f"Saving Preset at {path}")
-            self.viz.latent_widget.save(f"{path}/latent.pkl")
-            self.viz.trunc_noise_widget.save(f"{path}/trunc.pkl")
-            self.viz.layer_widget.save(f"{path}/layer.pkl")
-            self.viz.adjuster_widget.save(f"{path}/adjuster.pkl")
-            self.viz.looping_widget.save(f"{path}/looper.pkl")
-            self.viz.pickle_widget.save(f"{path}/pickle.pkl")
-            self.viz.collapsed_widget.save(f"{path}/collap.pkl")
+            # self.viz.latent_widget.save(f"{path}/latent.pkl")
+            # self.viz.trunc_noise_widget.save(f"{path}/trunc.pkl")
+            # self.viz.layer_widget.save(f"{path}/layer.pkl")
+            # self.viz.adjuster_widget.save(f"{path}/adjuster.pkl")
+            # self.viz.looping_widget.save(f"{path}/looper.pkl")
+            # self.viz.pickle_widget.save(f"{path}/pickle.pkl")
+            # self.viz.collapsed_widget.save(f"{path}/collap.pkl")
+            # self.viz.mixing_widget.save(f"{path}/mix.pkl")
+            self.viz.latent_widget.save(os.path.join(path, "latent.pkl"))
+            self.viz.trunc_noise_widget.save(os.path.join(path, "trunc.pkl"))
+            self.viz.layer_widget.save(os.path.join(path, "layer.pkl"))
+            self.viz.adjuster_widget.save(os.path.join(path, "adjuster.pkl"))
+            self.viz.looping_widget.save(os.path.join(path, "looper.pkl"))
+            self.viz.pickle_widget.save(os.path.join(path, "pickle.pkl"))
+            self.viz.collapsed_widget.save(os.path.join(path, "collap.pkl"))
+            self.viz.mixing_widget.save(os.path.join(path, "mix.pkl"))
             self.assigned[np.where(self.active)] = 0
         except Exception as e:
             print(e)
@@ -87,14 +96,41 @@ class PresetWidget:
     def load(self, path):
         try:
             # self.viz.terminal_widget.cached_text.append(f"Loading Preset from {path}")
-            self.viz.latent_widget.load(f"{path}/latent.pkl")
-            self.viz.trunc_noise_widget.load(f"{path}/trunc.pkl")
-            self.viz.layer_widget.load(f"{path}/layer.pkl")
-            self.viz.adjuster_widget.load(f"{path}/adjuster.pkl")
-            self.viz.looping_widget.load(f"{path}/looper.pkl")
-            self.viz.pickle_widget.load(f"{path}/pickle.pkl")
+            # self.viz.latent_widget.load(f"{path}/latent.pkl")
+            # self.viz.trunc_noise_widget.load(f"{path}/trunc.pkl")
+            # self.viz.collapsed_widget.load(f"{path}/collap.pkl")
+
+            # self.viz.layer_widget.load(f"{path}/layer.pkl")
+
+            # # self.viz.layer_widget.load(f"{path}/collap.pkl")
+
+            # self.viz.adjuster_widget.load(f"{path}/adjuster.pkl")
+            # self.viz.looping_widget.load(f"{path}/looper.pkl")
+            # self.viz.pickle_widget.load(f"{path}/pickle.pkl")
+            # # self.viz.collapsed_widget.load(f"{path}/collap.pkl")
+            # self.viz.mixing_widget.load(f"{path}/mix.pkl")
+            # self.viz.app.skip_frame()
+            self.viz.latent_widget.load(os.path.join(path, "latent.pkl"))
+            self.viz.trunc_noise_widget.load(os.path.join(path, "trunc.pkl"))
+            # self.viz.collapsed_widget.load(os.path.join(path, "collap.pkl"))
+
+            self.viz.layer_widget.load(os.path.join(path, "layer.pkl"))
+
+            # self.viz.layer_widget.load(f"{path}/collap.pkl")
+
+            self.viz.adjuster_widget.load(os.path.join(path, "adjuster.pkl"))
+            self.viz.looping_widget.load(os.path.join(path, "looper.pkl"))
+
+            # self.viz.collapsed_widget.load(f"{path}/collap.pkl")
+            try: 
+                self.viz.pickle_widget.load(os.path.join(path, "pickle.pkl"))
+            except Exception as e:
+                print(f"Ignored error while loading pickle.pkl: {e}")
             self.viz.collapsed_widget.load(f"{path}/collap.pkl")
+            self.viz.mixing_widget.load(os.path.join(path, "mix.pkl"))
             self.viz.app.skip_frame()
+            # self.viz.pickle_widget.load(os.path.join(path, "pickle.pkl"))
+
         except Exception as e:
             print(e)
 
@@ -130,7 +166,11 @@ class PresetWidget:
                 imgui.end_group()
             imgui.same_line()
             if imgui_utils.button('Load##presets', width=viz.app.button_w):
-                self.load(self.paths[np.where(self.active)].item())
+                indices = np.where(self.active)
+                if len(indices[0]) > 0:  # 检查是否有结果
+                    self.load(self.paths[indices[0][0]])  # 只处理第一个结果
+                else:
+                    print("Error: No active elements found.")
 
             imgui.same_line()
             if imgui_utils.button("Save##presets", width=viz.app.button_w):

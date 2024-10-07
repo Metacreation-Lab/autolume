@@ -119,7 +119,13 @@ class StyleGAN2Loss(Loss):
                 cutoff = torch.empty([], dtype=torch.int64, device=ws.device).random_(1, ws.shape[1])
                 cutoff = torch.where(torch.rand([], device=ws.device) < self.style_mixing_prob, cutoff, torch.full_like(cutoff, ws.shape[1]))
                 ws[:, cutoff:] = self.G.mapping(torch.randn_like(z), c, update_emas=False)[:, cutoff:]
-        img, rgb = self.G.synthesis(ws, update_emas=update_emas, get_rgb_list=get_rgb_list)
+        result = self.G.synthesis(ws, update_emas=update_emas, get_rgb_list=get_rgb_list)
+        # 根据返回的结果数量来解包
+        if isinstance(result, tuple) and len(result) == 2:
+            img, rgb = result
+        else:
+            img = result  # 只处理返回的一个值
+            rgb = torch.zeros_like(img)  # 返回一个与 img 形状相同的空 tensor
         return img, rgb, ws
 
     def run_D(self, img, c, blur_sigma=0, update_emas=False):

@@ -836,6 +836,10 @@ class Discriminator(torch.nn.Module):
         for res in self.block_resolutions:
             block = getattr(self, f'b{res}')
             x, img = block(x, img, **block_kwargs)
+            if isinstance(x, tuple):
+                x = x[0]
+            if isinstance(img, tuple):
+                img = img[0]
 
         cmap = None
         if self.c_dim > 0:
