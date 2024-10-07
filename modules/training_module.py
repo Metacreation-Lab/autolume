@@ -4,11 +4,14 @@ import zipfile
 import imgui
 import multiprocessing as mp
 
+
 import dnnlib
 from utils.gui_utils import imgui_utils
 from train import main as train_main
 from utils import dataset_tool
 from widgets.browse_widget import BrowseWidget
+import cv2
+from utils.gui_utils import gl_utils
 
 augs = ["ADA", "DiffAUG"]
 ada_pipes = ['blit', 'geom', 'color', 'filter', 'noise', 'cutout', 'bg', 'bgc', 'bgcf', 'bgcfn', 'bgcfnc']
@@ -53,7 +56,7 @@ class TrainingModule:
         self.reply = mp.Queue()
         self.message = ""
         self.done = False
-        self.training_process = mp.Process(target=train_main, args=(self.queue, self.reply))
+        self.training_process = mp.Process(target=train_main, args=(self.queue, self.reply), name='TrainingProcess')
         self.fps = 10
         self.found_video = False
         self._zipfile = None
@@ -62,6 +65,8 @@ class TrainingModule:
         self.dlr = 0.002
         self.snap = 4
         self.mirror = True
+        self.done_button = False
+        self.image_path = ''
 
     @staticmethod
     def _file_ext(fname):
@@ -117,6 +122,7 @@ class TrainingModule:
             self.found_video = False
             # if any file in self__all_fnames is a video create a new subfolder where we save the frames based on fps using ffmpeg
             for fname in self._all_fnames:
+                print(str(fname))
                 if fname.endswith('.mp4') or fname.endswith('.avi'):
                     self.found_video = True
                     break
@@ -151,7 +157,7 @@ class TrainingModule:
         imgui.input_text("Width", str(self.img_size), 512,flags=imgui.INPUT_TEXT_READ_ONLY)
         imgui.same_line()
         if imgui.button("-##img_size", width=self.menu.app.font_size):
-            self.img_factor = max(self.img_factor - 1, 1)
+            self.img_factor = max(self.img_factor - 1, 1)   
             self.img_size = self.start_res[0] * (2 ** self.img_factor)
         imgui.same_line()
         if imgui.button("+##img_size", width=self.menu.app.font_size):
@@ -224,9 +230,9 @@ class TrainingModule:
                 glr=self.glr,
                 dlr=self.dlr,
                 map_depth=8,
-                mbstd_group=4,
+                mbstd_group=2,
                 initstrength=None,
-                projected=True,
+                projected=False,
                 diffaugment= diffaug_pipes[self.diffaug_pipe] if self.aug == 1 else None,
                 desc="",
                 metrics=[],
@@ -249,13 +255,39 @@ class TrainingModule:
                 fps=self.fps if self.found_video else 10,
             )
 
+            if self.done == True:
+                self.queue = mp.Queue()
+                self.reply = mp.Queue()
+                self.training_process = mp.Process(target=train_main, args=(self.queue, self.reply), name='TrainingProcess')
+                self.done = False
             self.queue.put(kwargs)
             self.training_process.start()
 
+        imgui.set_next_window_size( self.menu.app.content_width // 2, (self.menu.app.content_height // 2), imgui.ONCE)
+
         if imgui.begin_popup_modal("Training")[0]:
             imgui.text("Training...")
-            if self.message != "":
+            if os.path.exists(self.message) and self.image_path != self.message:
+                self.image_path = self.message
+                self.grid = cv2.imread(self.image_path, cv2.IMREAD_UNCHANGED)
+                self.grid = cv2.cvtColor(self.grid, cv2.COLOR_BGRA2RGBA)
+                self.grid_texture = gl_utils.Texture(image=self.grid, width=self.grid.shape[1],
+                                               height=self.grid.shape[0], channels=self.grid.shape[2])
+            elif self.message != "":
                 imgui.text(self.message)
-            if imgui_utils.button("Done", enabled=self.done):
-                imgui.close_current_popup()
+            if self.image_path != '':
+                imgui.text("Current sample of fake imagery")
+                imgui.image(self.grid_texture.gl_id, self.menu.app.content_width // 1.7, (self.menu.app.content_height // 1.7))
+            if imgui_utils.button("Done", enabled=1):
+                self.queue.put('done')
+                self.done_button = True
+            if self.done:
+                self.training_process.terminate()
+                self.training_process.join()
+                if self.done_button == True:
+                    imgui.close_current_popup()
+                    self.message = ''
+                    self.done_button = False
+                    self.image_path = ''
             imgui.end_popup()
+                

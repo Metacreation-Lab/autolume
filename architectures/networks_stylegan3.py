@@ -326,7 +326,7 @@ class SynthesisLayer(torch.nn.Module):
         pad_hi = pad_total - pad_lo
         self.padding = [int(pad_lo[0]), int(pad_hi[0]), int(pad_lo[1]), int(pad_hi[1])]
 
-    def forward(self, x, w, noise_mode='random', force_fp32=False, update_emas=False):
+    def forward(self, x, w, noise_mode='random', force_fp32=False, update_emas=False, get_rgb_list=False):
         assert noise_mode in ['random', 'const', 'none'] # unused
         misc.assert_shape(x, [None, self.in_channels, int(self.in_size[1]), int(self.in_size[0])])
         misc.assert_shape(w, [x.shape[0], self.w_dim])
@@ -494,6 +494,8 @@ class Generator(torch.nn.Module):
         w_dim,                      # Intermediate latent (W) dimensionality.
         img_resolution,             # Output resolution.
         img_channels,               # Number of output color channels.
+        epochs = 0.,
+
         mapping_kwargs      = {},   # Arguments for MappingNetwork.
         **synthesis_kwargs,         # Arguments for SynthesisNetwork.
     ):
@@ -511,5 +513,8 @@ class Generator(torch.nn.Module):
         ws = self.mapping(z, c, truncation_psi=truncation_psi, truncation_cutoff=truncation_cutoff, update_emas=update_emas)
         img = self.synthesis(ws, update_emas=update_emas, **synthesis_kwargs)
         return img
+
+    def update_epochs(self, epoch):
+        self.epochs = epoch
 
 #----------------------------------------------------------------------------

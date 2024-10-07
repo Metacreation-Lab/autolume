@@ -123,9 +123,30 @@ class LayerWidget:
         return self.mode, self.cached_transforms, self.names, self.has_transforms, self.cached_adjustments, \
             self.noises, self.ratios, self.paths, self.imgui_ids, self.capture_layer, self.capture_channels, \
             self.tab, self.img_scale_db, self.img_normalize
+    
+    def get_collapsable_params(self):
+        return self.get_params()
 
     def set_params(self, param):
+        print(1)
+        self.mode = param[0]
+        print(2)
+        self.names = param[2]
+        print(3)
+        self.ratios = param[6]
+        print(4)
+        self.capture_layer = param[9]
+        print(5)
+        self.capture_channels = param[10]
+        print(6)
+        self.tab = param[11]
+        print(7)
+        self.img_scale_db = param[12]
+        print(8)
+        self.img_normalize = param[13]
+        print(9)
         self.mode, cached_transforms, self.names, self.has_transforms, cached_adjustments, noises, self.ratios, self.paths, self.imgui_ids, self.capture_layer, self.capture_channels, self.tab, self.img_scale_db, self.img_normalize = param
+        print("success")
         for i, trans in enumerate(self.cached_transforms):
             for j in range(len(trans.params)):
                 try:
@@ -157,8 +178,11 @@ class LayerWidget:
             pickle.dump(self.get_params(), f)
 
     def load(self, path):
+        print("collapsabLe load function is called!")  
         with open(path, "rb") as f:
-            self.set_params(pickle.load(f))
+            data = pickle.load(f)
+            print("collapsabLe: ",data)
+            self.set_params(data)
 
     @imgui_utils.scoped_by_object_id
     def __call__(self, show=True):
@@ -239,12 +263,19 @@ class LayerWidget:
                             resolution *= 2
                             draw_list.channels_split(2)
                             draw_list.channels_set_current(1)
+                            
                             selected = (self.cur_layer == layer.name)
+                            
                             clicked, state = imgui_utils.img_checkbox(self.view_texture.gl_id,
                                                                       self.capture_layer == f"b{res}.torgb",
                                                                       width=checkbox_size)
+                            if clicked:
+                                print("After checkbox", clicked)
                             if clicked and not self.capture_layer == layer.name:
+                                print(f"Layer switched to: {layer.name}")  # 调试打印
                                 self.capture_layer = f"b{res}.torgb"
+                                # self.cur_layer = layer.name
+                                # print("目前layer:",self.cur_layer)
                                 for ltmp in layers:
                                     if ltmp.name == self.capture_layer:
                                         self.capture_channels = ltmp.shape[1]

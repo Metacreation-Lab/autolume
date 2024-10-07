@@ -71,11 +71,34 @@ def save_image_grid(img, fname, drange, grid_size):
     img = np.rint(img).clip(0, 255).astype(np.uint8)
 
     gw, gh = grid_size
-    _N, C, H, W = img.shape
+    # _N, C, H, W = img.shape
+    if len(img.shape) == 4:
+        _N, C, H, W = img.shape
+    elif len(img.shape) == 3:
+        C, H, W = img.shape
+        _N = 1  # 你可以设置一个默认值，例如1，或者根据具体场景设置
+    # img = img.reshape([gh, gw, C, H, W])
+    if img.size != gh * gw * C * H * W:
+        # 计算正确的 grid_size，确保 reshape 能够成功
+        gw, gh = int(np.sqrt(img.size / (C * H * W))), int(np.sqrt(img.size / (C * H * W)))
     img = img.reshape([gh, gw, C, H, W])
+
     img = img.transpose(0, 3, 1, 4, 2)
     img = img.reshape([gh * H, gw * W, C])
 
+    print(f"C = {C}")
+    if C not in [1, 3]:
+        if C > 3:
+            if len(img.shape) == 5:
+                img = img[:, :, :, :, :3]  # 如果是5维，取前三个通道
+            elif len(img.shape) == 4:
+                img = img[:, :, :, :3]  # 如果是4维，取前三个通道
+            elif len(img.shape) == 3:   
+                img = img[:, :, :3]  # 如果是3维，取前三个通道
+            C = 3  # 更新通道数
+        else:
+            print(f"Skipping image saving for C = {C}")
+            return
     assert C in [1, 3]
     if C == 1:
         PIL.Image.fromarray(img[:, :, 0], 'L').save(fname)
@@ -176,7 +199,7 @@ def training_loop(
     if rank == 0:
         z = torch.empty([batch_gpu, G.z_dim], device=device)
         c = torch.empty([batch_gpu, G.c_dim], device=device)
-        img, _ = misc.print_module_summary(G, [z, c])
+        img = misc.print_module_summary(G, [z, c])
         misc.print_module_summary(D, [img, c])
 
     # Setup augmentation.
