@@ -66,7 +66,7 @@ if (-not $SkipClone)
     if ((Get-ChildItem -Path $installLocation | Measure-Object).Count -eq 0)
     {
         $env:GIT_REDIRECT_STDERR = '2>&1'
-        & git clone --depth 1 -b main https://github.com/Metacreation-Lab/autolume.git $installLocation
+        & git clone --depth 1 -b bug_fixing_Wenhao https://gitlab.com/jkraasch/autolumelive_colab.git $installLocation
 
         if (-not $?)
         {
@@ -76,7 +76,10 @@ if (-not $SkipClone)
     else
     {
         $env:GIT_REDIRECT_STDERR = '2>&1'
-        & git reset --hard origin/main
+        Set-Location -Path $installLocation
+        & git fetch origin bug_fixing_Wenhao
+        & git checkout bug_fixing_Wenhao
+        & git reset --hard origin/bug_fixing_Wenhao
 
         if (-not $?)
         {
@@ -84,6 +87,7 @@ if (-not $SkipClone)
         }
     }
 }
+
 
 # Check for ffmpeg.zip and extract ffmpeg.exe -------------------------------------------------#
 
