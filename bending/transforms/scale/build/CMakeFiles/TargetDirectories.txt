@@ -1,3 +1,0 @@
-/home/olaf/PycharmProjects/Ray_Autolume/bending/transforms/scale/build/CMakeFiles/scale.dir
-/home/olaf/PycharmProjects/Ray_Autolume/bending/transforms/scale/build/CMakeFiles/edit_cache.dir
-/home/olaf/PycharmProjects/Ray_Autolume/bending/transforms/scale/build/CMakeFiles/rebuild_cache.dir
