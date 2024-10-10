@@ -70,10 +70,9 @@ class OscMenu:
         with imgui_utils.grayed_out(not self.use_osc[key]):
             changed, self.osc_addresses[key] = imgui.input_text(f"##OSCAddress_{self.label}_{key}",
                                                                 self.osc_addresses[key], 256,
-                                                                imgui.INPUT_TEXT_CHARS_NO_BLANK | imgui.INPUT_TEXT_ENTER_RETURNS_TRUE | (
+                                                                imgui.INPUT_TEXT_CHARS_NO_BLANK | (
                                                                         imgui.INPUT_TEXT_READ_ONLY * (
                                                                     not self.use_osc[key])))
-            #print(self.osc_addresses)
             if changed:
                 viz.osc_dispatcher.map(f"/{self.osc_addresses[key]}", self.wrapped_funcs[key])
                 try:
@@ -84,10 +83,9 @@ class OscMenu:
             if self.use_map.get(key, False):
                 changed, self.mappings[key] = imgui.input_text(f"##Mappings_{self.label}_{key}",
                                                                self.mappings[key], 256,
-                                                               imgui.INPUT_TEXT_ENTER_RETURNS_TRUE | (
+                                                                (
                                                                        imgui.INPUT_TEXT_READ_ONLY * (
                                                                    not self.use_osc[key])))
-                #print(self.mappings[key])
                 if changed:
                     try:
                         viz.osc_dispatcher.unmap(f"/{self.osc_addresses[key]}", self.wrapped_funcs[key])

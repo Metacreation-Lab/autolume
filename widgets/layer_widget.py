@@ -18,9 +18,6 @@ import imgui
 import numpy as np
 import torch
 import yaml
-import sys
-from widgets.collapsable_layer import LayerWidget
-
 
 import dnnlib
 from utils.gui_utils import imgui_utils
@@ -78,8 +75,6 @@ class LayerWidget:
         self.capture_channels = 0
         self.tab = False
 
-
-
     def get_params(self):
         return self.mode, self.cached_transforms, self.names, self.has_transforms, self.cached_adjustments, \
                self.noises, self.ratios, self.paths, self.imgui_ids, self.capture_layer, self.capture_channels, \
@@ -114,31 +109,12 @@ class LayerWidget:
             self.viz.osc_dispatcher.map(noise["osc_address"], self.noise_osc(noise))
 
     def save(self, path):
-
-        # test = self.parse_args_from_viz()
-        # print("测试:",test)
-        
-        # params = self.get_params()  # 获取将要保存的数据
-        # print("Saving data:", params)  # 打印数据
         with open(path, "wb") as f:
             pickle.dump(self.get_params(), f)
-            # pickle.dump(test, f)
-
 
     def load(self, path):
-        # with open(path, "rb") as f:
-        #     self.set_params(pickle.load(f))
-        try:
-            with open(path, 'rb') as f:
-                data = pickle.load(f)
-                print("Loaded layer data:", data)  # 打印加载的数据
-                self.set_params(data)  # 更新层信息
-                print("层1: ", self.cur_layer)
-                self.cur_layer = data[9]
-                print("层2: ", self.cur_layer)
-                print("Layer information updated successfully.")
-        except Exception as e:
-            print(f"Error loading layer data: {e}")
+        with open(path, "rb") as f:
+            self.set_params(pickle.load(f))
 
     @imgui_utils.scoped_by_object_id
     def __call__(self, show=True):
@@ -184,17 +160,8 @@ class LayerWidget:
                     draw_list.channels_split(2)
                     draw_list.channels_set_current(1)
                     selected = (self.cur_layer == layer.name)
-                    # print("Before checkbox")
-
                     clicked, state = imgui.checkbox(f"##{layer.name}", self.capture_layer == layer.name)
-                    # print(f"用户 switched to: {layer.name}")  # 调试打印
-
-                    # if clicked:
-                    #     print("After checkbox", clicked)
-
                     if clicked and not self.capture_layer == layer.name:
-                        # print(f"Layer switched to: {layer.name}")  # 调试打印
-
                         self.capture_layer = layer.name
                         self.capture_channels = layer.shape[1]
                     imgui.same_line(viz.app.font_size + viz.app.spacing * 1.5)
@@ -339,7 +306,6 @@ class LayerWidget:
 
     @imgui_utils.scoped_by_object_id
     def transform_widget(self, layers):
-        print("改变layer-----------------------------------------------")
         # Widget to add manipulations to the activations of the layers
         with imgui_utils.item_width(-1):
             clicked, current = imgui.combo("##Transformation", 0, transforms.tolist())
@@ -572,25 +538,6 @@ class LayerWidget:
                     noise["strength"] = args[-1]
 
         return func
-
-    
-    def parse_args_from_viz(self):
-        mode = self.mode
-        cached_transforms = self.viz.args.get('latent_transforms', [])
-        names = [layer.name for layer in self.viz.args.get('layers', [])]  # 如果你需要手动获取 names
-        has_transforms = {layer.name: True for layer in self.cached_transforms}
-        cached_adjustments = {}  # 这里需要根据你的逻辑生成
-        noises = self.viz.args.get('noise_adjustments', {})
-        ratios = self.viz.args.get('ratios', {})
-        paths = self.viz.args.get('paths', {})
-        imgui_ids = set()  # 需要手动管理
-        capture_layer = self.viz.args.get('layer_name', "output")
-        capture_channels = self.viz.args.get('capture_channels', 0)
-        tab = self.viz.args.get('tab', False)
-        img_scale_db = self.viz.args.get('img_scale_db', 0)
-        img_normalize = self.viz.args.get('img_normalize', False)
-        return   mode, cached_transforms,names,has_transforms,cached_adjustments,noises,ratios,paths,imgui_ids,capture_layer,capture_channels,tab,img_scale_db,img_normalize
-
 
 # ----------------------------------------------------------------------------
 

@@ -67,6 +67,7 @@ class PickleWidget:
     def load_pkl(self, pkl, ignore_errors=False):
         viz = self.viz
         viz.app.skip_frame() # The input field will change on next frame.
+        print(os.getcwd())
         try:
             resolved = self.resolve_pkl(pkl)
             name = resolved.replace('\\', '/').split('/')[-1]
@@ -94,6 +95,26 @@ class PickleWidget:
     def load(self, path):
         with open(path, "rb") as f:
             self.set_params(pickle.load(f))
+        if not os.path.exists(self.user_pkl):
+            head, tail = os.path.split(self.user_pkl)
+            if os.path.exists(os.getcwd() + os.sep + 'models' + os.sep + tail):
+                self.user_pkl = os.getcwd() + os.sep + 'models' + os.sep + tail
+            else:
+                print('ERROR: Model does not exist in the model folder.')
+        if not os.path.exists(self.cur_pkl):
+            head, tail = os.path.split(self.cur_pkl)
+            if os.path.exists(os.getcwd() + os.sep + 'models' + os.sep + tail):
+                self.cur_pkl = os.getcwd() + os.sep + 'models' + os.sep + tail
+            else:
+                print('ERROR: Model does not exist in the model folder.')
+        for recent_pkl in self.recent_pkls:
+            if not os.path.exists(self.recent_pkl):
+                head, tail = os.path.split(self.recent_pkl)
+                if os.path.exists(os.getcwd() + os.sep + 'models' + os.sep + tail):
+                    self.cur_pkl = os.getcwd() + os.sep + 'models' + os.sep + tail
+                else:
+                    print('ERROR: Model does not exist in the model folder.')
+        
 
 
     @imgui_utils.scoped_by_object_id

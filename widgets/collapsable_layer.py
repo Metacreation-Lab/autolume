@@ -123,9 +123,6 @@ class LayerWidget:
         return self.mode, self.cached_transforms, self.names, self.has_transforms, self.cached_adjustments, \
             self.noises, self.ratios, self.paths, self.imgui_ids, self.capture_layer, self.capture_channels, \
             self.tab, self.img_scale_db, self.img_normalize
-    
-    def get_collapsable_params(self):
-        return self.get_params()
 
     def set_params(self, param):
         print(1)
@@ -178,11 +175,8 @@ class LayerWidget:
             pickle.dump(self.get_params(), f)
 
     def load(self, path):
-        print("collapsabLe load function is called!")  
         with open(path, "rb") as f:
-            data = pickle.load(f)
-            print("collapsabLe: ",data)
-            self.set_params(data)
+            self.set_params(pickle.load(f))
 
     @imgui_utils.scoped_by_object_id
     def __call__(self, show=True):
@@ -263,19 +257,12 @@ class LayerWidget:
                             resolution *= 2
                             draw_list.channels_split(2)
                             draw_list.channels_set_current(1)
-                            
                             selected = (self.cur_layer == layer.name)
-                            
                             clicked, state = imgui_utils.img_checkbox(self.view_texture.gl_id,
                                                                       self.capture_layer == f"b{res}.torgb",
                                                                       width=checkbox_size)
-                            if clicked:
-                                print("After checkbox", clicked)
                             if clicked and not self.capture_layer == layer.name:
-                                print(f"Layer switched to: {layer.name}")  # 调试打印
                                 self.capture_layer = f"b{res}.torgb"
-                                # self.cur_layer = layer.name
-                                # print("目前layer:",self.cur_layer)
                                 for ltmp in layers:
                                     if ltmp.name == self.capture_layer:
                                         self.capture_channels = ltmp.shape[1]
@@ -876,8 +863,6 @@ class LayerWidget:
     def grayscale_osc(self):
         def func(address, *args):
             try:
-                # assert type(args[
-                #                 -1]) is bool, f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {bool}"
                 if bool(args[-1]):
                     self.sel_channels = 1
                 else:
@@ -892,8 +877,6 @@ class LayerWidget:
     def contrast_osc(self):
         def func(address, *args):
             try:
-                # assert (type(args[-1] is type(self.img_scale_db)),
-                #         f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {type(self.img_scale_db)}")
                 self.img_scale_db = float(args[-1])
             except Exception as e:
                 self.viz.print_error(e)
@@ -903,8 +886,6 @@ class LayerWidget:
     def normalize_osc(self):
         def func(address, *args):
             try:
-                # assert (type(args[-1] is type(self.img_normalize)),
-                #         f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {type(self.img_normalize)}")
                 self.img_normalize = bool(args[-1])
             except Exception as e:
                 self.viz.print_error(e)
@@ -915,8 +896,6 @@ class LayerWidget:
         def func(address, *args):
             try:
                 nec_type = type(self.base_channel)
-                # assert (type(args[-1] is type(self.base_channel)),
-                #         f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {type(self.img_scale_db)}")
                 base_channel_max = max(self.capture_channels - self.sel_channels, 0)
                 self.base_channel = min(nec_type(args[-1]), base_channel_max)
             except Exception as e:

@@ -4,7 +4,7 @@ param(
 )
 
 # Define python path
-$systemPython = "C:\Program Files\Python310\python.exe"
+$systemPython = "C:\Users\ArthurDeleu\AppData\Local\Programs\Python\Python310\python.exe"
 
 # Define install location
 $installLocation = "$env:LOCALAPPDATA\autolumelive_colab"
@@ -66,7 +66,7 @@ if (-not $SkipClone)
     if ((Get-ChildItem -Path $installLocation | Measure-Object).Count -eq 0)
     {
         $env:GIT_REDIRECT_STDERR = '2>&1'
-        & git clone -b bug_fixing_arthur_stable https://gitlab.com/jkraasch/autolumelive_colab.git $installLocation
+        & git clone --depth 1 -b main https://github.com/Metacreation-Lab/autolume.git $installLocation
 
         if (-not $?)
         {
@@ -76,7 +76,7 @@ if (-not $SkipClone)
     else
     {
         $env:GIT_REDIRECT_STDERR = '2>&1'
-        & git reset --hard origin/bug_fixing_arthur_stable
+        & git reset --hard origin/main
 
         if (-not $?)
         {
@@ -84,17 +84,39 @@ if (-not $SkipClone)
         }
     }
 }
-# clone ffmpeg ----------------------------------------------------------------------------#
- if ((Get-ChildItem -Path $installLocation | Measure-Object).Count -eq 0)
-    {
-        $env:GIT_REDIRECT_STDERR = '2>&1'
-        & git clone https://git.ffmpeg.org/ffmpeg.git ffmpeg $installLocation
-         if (-not $?)
-        {
-            throw "Failed to clone the repository."
-        }
 
+# Check for ffmpeg.zip and extract ffmpeg.exe -------------------------------------------------#
+
+Write-Host "=> Step: Extract ffmpeg"
+
+    $ffmpegZipPath = Join-Path -Path $installLocation -ChildPath "ffmpeg.zip"
+    $ffmpegExtractPath = Join-Path -Path $installLocation -ChildPath "ffmpeg"
+    $ffmpegExePath = Join-Path -Path $installLocation -ChildPath "ffmpeg.exe"
+
+    if (Test-Path $ffmpegZipPath) {
+        Expand-Archive -Path $ffmpegZipPath -DestinationPath $ffmpegExtractPath
+        Copy-Item -Path (Join-Path -Path $ffmpegExtractPath -ChildPath "ffmpeg.exe") -Destination $ffmpegExePath -Force
     }
+
+    Remove-Item $ffmpegZipPath -Force
+    Remove-Item $ffmpegExtractPath -Recurse -Force
+
+# Check for ffmpeg.zip and extract ffmpeg.exe -------------------------------------------------#
+
+Write-Host "=> Step: Extract ffprobe"
+
+    $ffprobeZipPath = Join-Path -Path $installLocation -ChildPath "ffprobe.zip"
+    $ffprobeExtractPath = Join-Path -Path $installLocation -ChildPath "ffprobe"
+    $ffprobeExePath = Join-Path -Path $installLocation -ChildPath "ffprobe.exe"
+
+    if (Test-Path $ffprobeZipPath) {
+        Expand-Archive -Path $ffprobeZipPath -DestinationPath $ffmpegExtractPath
+        Copy-Item -Path (Join-Path -Path $ffprobeExtractPath -ChildPath "ffprobe.exe") -Destination $ffmpegExePath -Force
+    }
+
+    Remove-Item $ffprobeZipPath -Force
+    Remove-Item $ffprobeExtractPath -Recurse -Force
+
 # Install Build Tools ----------------------------------------------------------------------------#
 
 Write-Host "=> Step: Install Build Tools"
@@ -180,6 +202,13 @@ if (-not $?)
 Write-Host "=> Step: Install Python Requirements"
 
 . python -m pip install -r requirements.txt
+
+# Re-Install ffmpeg-python --------------------------------------------------------------------#
+
+Write-Host "=> Step: Re-Install Ffmpeg-Python"
+
+. python -m pip uninstall -y ffmpeg-python==0.2.0
+. python -m pip install ffmpeg-python==0.2.0
 
 # Create Shortcut on Desktop ---------------------------------------------------------------------#
 

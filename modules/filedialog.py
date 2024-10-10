@@ -208,4 +208,3 @@ class FileDialog():
         imgui.end()
         return False, None
 
-

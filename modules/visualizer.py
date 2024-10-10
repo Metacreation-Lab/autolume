@@ -9,7 +9,6 @@ import threading
 import numpy as np
 import queue
 import datetime
-
 import imgui
 import cv2
 import pyaudio
@@ -108,8 +107,8 @@ class Visualizer:
         self.metacreation_texture = gl_utils.Texture(image=self.metacreation, width=self.metacreation.shape[1],
                                                      height=self.metacreation.shape[0],
                                                      channels=self.metacreation.shape[2])
-        
-        #Screen capture and screen recording
+    
+    #Screen capture and screen recording
         self.is_recording = False
         self.frame_queue = queue.Queue()
         self.recording_thread = None
@@ -215,7 +214,7 @@ class Visualizer:
         imgui.image(self.logo_texture.gl_id, 18 * logo_ratio, 18, tint_color=(1, 1, 1, 0.5))
 
         # Position the button in the middle
-        imgui.same_line(self.app.spacing * 18)
+        imgui.same_line(self.app.spacing * 25)
 
         if imgui.button('Screen Capture'):
             now = datetime.datetime.now()

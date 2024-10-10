@@ -17,7 +17,7 @@ from torch.nn import functional as F
 
 from training.distillation import lpips
 from training.distillation.Util.content_aware_pruning import Get_Parsing_Net, Batch_Img_Parsing, Get_Masked_Tensor
-
+from architectures.networks_stylegan3 import SynthesisNetwork
 
 
 def Downsample_Image_256(im_tensor):
@@ -113,32 +113,50 @@ class StyleGAN2Loss(Loss):
         return kd_l1_loss, kd_lpips_loss
 
     def run_G(self, z, c, update_emas=False, get_rgb_list=False):
+        print(f"run_G: z shape: {z.shape}, c shape: {c.shape}")
+
         ws = self.G.mapping(z, c, update_emas=update_emas)
+        print(f"run_G: ws (W space) shape: {ws.shape}")
+
         if self.style_mixing_prob > 0:
             with torch.autograd.profiler.record_function('style_mixing'):
                 cutoff = torch.empty([], dtype=torch.int64, device=ws.device).random_(1, ws.shape[1])
                 cutoff = torch.where(torch.rand([], device=ws.device) < self.style_mixing_prob, cutoff, torch.full_like(cutoff, ws.shape[1]))
                 ws[:, cutoff:] = self.G.mapping(torch.randn_like(z), c, update_emas=False)[:, cutoff:]
-        result = self.G.synthesis(ws, update_emas=update_emas, get_rgb_list=get_rgb_list)
-        # 根据返回的结果数量来解包
-        if isinstance(result, tuple) and len(result) == 2:
-            img, rgb = result
+        # img, rgb = self.G.synthesis(ws, update_emas=update_emas, get_rgb_list=get_rgb_list)
+        # print(f"run_G: img shape: {img.shape}, rgb shape: {rgb.shape}")
+        if isinstance(self.G.synthesis, SynthesisNetwork):
+            img = self.G.synthesis(ws, update_emas=update_emas)
+            rgb = None  # No rgb list in StyleGAN3
         else:
-            img = result  # 只处理返回的一个值
-            rgb = torch.zeros_like(img)  # 返回一个与 img 形状相同的空 tensor
+            img, rgb = self.G.synthesis(ws, update_emas=update_emas, get_rgb_list=get_rgb_list)
         return img, rgb, ws
 
     def run_D(self, img, c, blur_sigma=0, update_emas=False):
+        if img.ndim == 3:
+            img = img.unsqueeze(0)  # 将 img 的维度从 [C, H, W] 变为 [N, C, H, W]
+        print(f"run_D: img shape before blur: {img.shape}")
+        
+
         blur_size = np.floor(blur_sigma * 3)
         if blur_size > 0:
             with torch.autograd.profiler.record_function('blur'):
                 f = torch.arange(-blur_size, blur_size + 1, device=img.device).div(blur_sigma).square().neg().exp2()
                 img = upfirdn2d.filter2d(img, f / f.sum())
+        print(f"run_D: img shape after blur: {img.shape}")
+
         if self.augment_pipe is not None:
+            print(f"Shape of img before augment_pipe: {img.shape}")
+
             img = self.augment_pipe(img)
+            print(f"run_D: img shape after augment_pipe: {img.shape}")
         if self.diffaugment:
+            print(f"run_D: img shape before DiffAugment: {img.shape}")
+
             img = DiffAugment(img, policy=self.diffaugment)
+            print(f"run_D: img shape after DiffAugment: {img.shape}")
         logits = self.D(img, c, update_emas=update_emas)
+        print(f"run_D: logits shape: {logits.shape}")
         return logits
 
     def accumulate_gradients(self, phase, real_img, real_c, gen_z, gen_c, gain, cur_nimg):

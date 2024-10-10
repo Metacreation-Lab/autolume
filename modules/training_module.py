@@ -144,35 +144,43 @@ class TrainingModule:
         else:
             _, self.diffaug_pipe = imgui.combo("Augmentation Pipeline", self.diffaug_pipe, diffaug_pipes)
 
-        _changed, start_res = imgui.input_int2("Start Resolution", *self.start_res)
-        if _changed:
-            if start_res[0] < 1:
-                start_res[0] = 1
-            if start_res[1] < 1:
-                start_res[1] = 1
-            self.start_res = start_res
-            self.img_size = start_res[0] * (2 ** self.img_factor)
-            self.height = start_res[1] * (2 ** self.height_factor)
+        # _changed, start_res = imgui.input_int2("Start Resolution", *self.start_res)
+        # if _changed:
+        #     if start_res[0] < 1:
+        #         start_res[0] = 1
+        #     if start_res[1] < 1:
+        #         start_res[1] = 1
+        #     self.start_res = start_res
+        #     self.img_size = start_res[0] * (2 ** self.img_factor)
+        #     self.height = start_res[1] * (2 ** self.height_factor)
 
         imgui.input_text("Width", str(self.img_size), 512,flags=imgui.INPUT_TEXT_READ_ONLY)
         imgui.same_line()
         if imgui.button("-##img_size", width=self.menu.app.font_size):
             self.img_factor = max(self.img_factor - 1, 1)   
             self.img_size = self.start_res[0] * (2 ** self.img_factor)
+            self.height = self.img_size #同步
         imgui.same_line()
         if imgui.button("+##img_size", width=self.menu.app.font_size):
             self.img_factor = self.img_factor + 1
             self.img_size = self.start_res[0] * (2 ** self.img_factor)
+            self.height = self.img_size #同步
 
         imgui.input_text("Height", str(self.height), 512, flags=imgui.INPUT_TEXT_READ_ONLY)
         imgui.same_line()
         if imgui.button("-##height", width=self.menu.app.font_size):
-            self.height_factor = max(self.height_factor - 1, 1)
-            self.height = self.start_res[1] * (2 ** self.height_factor)
+            # self.height_factor = max(self.height_factor - 1, 1)
+            self.img_factor = max(self.img_factor - 1, 1)   
+
+            self.height = self.start_res[0] * (2 ** self.img_factor)
+            self.img_size = self.height #同步
         imgui.same_line()
         if imgui.button("+##height", width=self.menu.app.font_size):
-            self.height_factor = self.height_factor + 1
-            self.height = self.start_res[1] * (2 ** self.height_factor)
+            # self.height_factor = self.height_factor + 1
+            self.img_factor = self.img_factor + 1
+
+            self.height = self.start_res[0] * (2 ** self.img_factor)
+            self.img_size = self.height #同步
 
         if self.found_video:
             _, self.fps = imgui.input_int("FPS for frame extraction", self.fps)

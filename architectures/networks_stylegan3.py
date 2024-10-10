@@ -467,14 +467,19 @@ class SynthesisNetwork(torch.nn.Module):
 
         # Execute layers.
         x = self.input(ws[0])
+        print(f"After input layer: {x.shape}")  # 确保 input 层输出具有 batch_size
+
+        print(f"After input layer: {x.shape}")
         for name, w in zip(self.layer_names, ws[1:]):
             x = getattr(self, name)(x, w, **layer_kwargs)
+            print(f"After {name}: {x.shape}")
         if self.output_scale != 1:
             x = x * self.output_scale
 
         # Ensure correct shape and dtype.
         misc.assert_shape(x, [None, self.img_channels, self.img_resolution, self.img_resolution])
         x = x.to(torch.float32)
+        print(f"Final output shape: {x.shape}")  # 最终输出形状
         return x
 
     def extra_repr(self):
@@ -493,9 +498,8 @@ class Generator(torch.nn.Module):
         c_dim,                      # Conditioning label (C) dimensionality.
         w_dim,                      # Intermediate latent (W) dimensionality.
         img_resolution,             # Output resolution.
-        img_channels,               # Number of output color channels.
-        epochs = 0.,
-
+        img_channels, # Number of output color channels.
+        epochs=0,              
         mapping_kwargs      = {},   # Arguments for MappingNetwork.
         **synthesis_kwargs,         # Arguments for SynthesisNetwork.
     ):
@@ -505,15 +509,18 @@ class Generator(torch.nn.Module):
         self.w_dim = w_dim
         self.img_resolution = img_resolution
         self.img_channels = img_channels
+        self.epochs = epochs
         self.synthesis = SynthesisNetwork(w_dim=w_dim, img_resolution=img_resolution, img_channels=img_channels, **synthesis_kwargs)
         self.num_ws = self.synthesis.num_ws
         self.mapping = MappingNetwork(z_dim=z_dim, c_dim=c_dim, w_dim=w_dim, num_ws=self.num_ws, **mapping_kwargs)
 
     def forward(self, z, c, truncation_psi=1, truncation_cutoff=None, update_emas=False, **synthesis_kwargs):
         ws = self.mapping(z, c, truncation_psi=truncation_psi, truncation_cutoff=truncation_cutoff, update_emas=update_emas)
+        print(f"ws shape: {ws.shape}")
         img = self.synthesis(ws, update_emas=update_emas, **synthesis_kwargs)
+        print(f"img shape: {img.shape}")
         return img
-
+    
     def update_epochs(self, epoch):
         self.epochs = epoch
 

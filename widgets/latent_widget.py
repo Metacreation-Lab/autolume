@@ -51,7 +51,7 @@ class LatentWidget:
         self.latent_def = dnnlib.EasyDict(self.latent)
         self.vec_path   = ""
         self.vec_save_path = ""
-        self.file_dialog = BrowseWidget(viz, "Browse", os.path.abspath(os.getcwd()),
+        self.file_dialog = BrowseWidget(viz, "Browse", os.path.relpath(os.getcwd()),
                                       ["*", ".pth", ".pt", ".npy", ".npz", ],
                                       width=self.viz.app.button_w, multiple=False, traverse_folders=False)
         self.pt_save_dialog = save_widget.SaveWidget(viz, "Save Vector", os.path.abspath(os.getcwd()), ".pt")
@@ -59,6 +59,7 @@ class LatentWidget:
 
     def save(self, path):
         with open(path, "wb") as f:
+            print(self.get_params())
             pickle.dump(self.get_params(), f)
 
     def load(self, path):
@@ -66,7 +67,6 @@ class LatentWidget:
             self.set_params(pickle.load(f))
 
     def get_params(self):
-        print("speed", self.latent.speed)
         return self.latent, self.seed_osc_menu.get_params(), self.vec_osc_menu.get_params()
 
     def set_params(self, params):
@@ -88,8 +88,6 @@ class LatentWidget:
         def func(address, *args):
             try:
                 nec_type = type(self.latent[param])
-                # assert (type(args[-1]) is type(self.latent[
-                #                                    param])), f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {type(self.latent[param])}"
                 self.latent[param] = nec_type(args[-1])
             except Exception as e:
                 self.viz.print_error(e)
@@ -99,7 +97,6 @@ class LatentWidget:
         def func(address, *args):
             try:
                 nec_type = type(self.latent.speed)
-                # assert (type(args[-1]) is type(self.latent.speed)), f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {type(self.latent.speed)}"
                 self.latent.speed = nec_type(args[-1])
                 self.update = True
             except Exception as e:
@@ -110,7 +107,6 @@ class LatentWidget:
         def func(address, *args):
             try:
                 value = torch.as_tensor(args)[None]
-                print(value)
                 assert value.shape == self.latent[
                     param].shape, f"Shapes of osc message and parameter must align, [OSC] {value.shape} != [Param] {self.latent[param].shape}"
                 self.latent[param] = value
@@ -259,9 +255,15 @@ class LatentWidget:
             try:
                 assert (type(args[-1]) is str), f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {str}"
                 # check if the string that is sent in the message os.exists
+                print(os.getcwd() + os.sep + 'models' + os.sep + args[-1])
                 if os.path.exists(args[-1]):
+                    print(os.getcwd() + os.sep + 'models' + os.sep + args[-1])
                     self.viz.pickle_widget.user_pkl = args[-1]
-                    self.viz.pickle_widget.load()
+                    self.viz.pickle_widget.load_pkl(args[-1])
+                elif os.path.exists(os.getcwd() + os.sep + 'models' + os.sep + args[-1]):
+                    print(os.getcwd() + os.sep + 'models' + os.sep + args[-1])
+                    self.viz.pickle_widget.user_pkl = os.getcwd() + os.sep + 'models' + os.sep + args[-1]
+                    self.viz.pickle_widget.load_pkl(os.getcwd() + os.sep + 'models' + os.sep + args[-1])
             except Exception as e:
                 self.viz.print_error(e)
         return func
@@ -275,7 +277,6 @@ class LatentWidget:
             :return:
             """
             try:
-                # assert (type(args[-1]) is bool), f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {bool}"
                 if bool(args[-1]):
                     self.latent.vec = torch.randn(self.latent.vec.shape)
                     self.latent.next = torch.randn(self.latent.next.shape)
