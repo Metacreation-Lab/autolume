@@ -39,7 +39,6 @@ MANIFEST
 *.spec
 
 #Don't push models
-models/
 training-runs/*
 !training-runs/.gitkeep
 
