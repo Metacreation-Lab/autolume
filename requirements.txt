@@ -66,9 +66,9 @@ sympy==1.12
 termcolor==2.3.0
 threadpoolctl==3.2.0
 tifffile==2023.9.26
-# torch==2.0.1+cu117
-# torchaudio==2.0.2+cu117
-# torchvision==0.15.2+cu117
+torch==2.0.1+cu117
+torchaudio==2.0.2+cu117
+torchvision==0.15.2+cu117
 tqdm==4.66.1
 typing_extensions==4.4.0
 tzdata==2023.3
