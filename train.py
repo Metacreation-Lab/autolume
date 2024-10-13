@@ -113,10 +113,10 @@ def launch_training(c, desc, outdir, dry_run, queue, reply):
 
 #----------------------------------------------------------------------------
 
-def init_dataset_kwargs(data, resolution=None, height = None, width = None, fps=10):
+def init_dataset_kwargs(data, resolution=None, height = None, width = None, fps=10, resize_mode='stretch'):
     try:
         print("RESOLUTION: ", resolution, height, width)
-        dataset_kwargs = dnnlib.EasyDict(class_name='training.dataset.ImageFolderDataset', path=data, use_labels=True, max_size=None, xflip=False, resolution=resolution, height=height, width=width, fps=fps)
+        dataset_kwargs = dnnlib.EasyDict(class_name='training.dataset.ImageFolderDataset', path=data, use_labels=True, max_size=None, xflip=False, resolution=resolution, height=height, width=width, fps=fps, resize_mode=resize_mode)
         dataset_obj = dnnlib.util.construct_class_by_name(**dataset_kwargs) # Subclass of training.dataset.Dataset.
         dataset_kwargs.resolution = dataset_obj.resolution # Be explicit about resolution.
         dataset_kwargs.use_labels = dataset_obj.has_labels # Be explicit about labels.
@@ -148,6 +148,7 @@ def parse_comma_separated_list(s):
 @click.option('--batch',        help='Total batch size', metavar='INT',                         type=click.IntRange(min=1), required=True)
 @click.option('--resolution',   help='Dataset resolution', metavar='TUPLE',                     type=tuple, default=None)
 @click.option('--gamma',        help='R1 regularization weight', metavar='FLOAT',               type=click.FloatRange(min=0), required=True)
+@click.option('--resize_mode', help='Image resize mode (stretch or center crop)', type=click.Choice(['stretch', 'center crop']), default='stretch', show_default=True)
 @click.option('--topk', help='Enable topk training [default: None]', type=float, metavar='FLOAT')
 
 # Generator Options
@@ -239,7 +240,7 @@ def main(queue, reply):
         c.data_loader_kwargs = dnnlib.EasyDict(pin_memory=True, prefetch_factor=2)
 
         # Training set.
-        c.training_set_kwargs, dataset_name, init_res = init_dataset_kwargs(data=opts.data, resolution=opts.resolution, height=opts.resolution[1], width=opts.resolution[0], fps=opts.fps)
+        c.training_set_kwargs, dataset_name, init_res = init_dataset_kwargs(data=opts.data, resolution=opts.resolution, height=opts.resolution[1], width=opts.resolution[0], fps=opts.fps, resize_mode=opts.resize_mode)
         if opts.cond and not c.training_set_kwargs.use_labels:
             raise click.ClickException('--cond=True requires labels specified in dataset.json')
         c.training_set_kwargs.use_labels = opts.cond

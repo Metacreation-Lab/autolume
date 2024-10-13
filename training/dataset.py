@@ -14,6 +14,7 @@ import cv2
 import numpy as np
 import zipfile
 import PIL.Image
+import torchvision.transforms
 import json
 import torch
 import dnnlib
@@ -114,6 +115,8 @@ class Dataset(torch.utils.data.Dataset):
 
     def __len__(self):
         return self._raw_idx.size
+
+    
 
     def __getitem__(self, idx):
         image = self._load_raw_image(self._raw_idx[idx])
@@ -217,6 +220,7 @@ class ImageFolderDataset(Dataset):
         resolution      = None, # Ensure specific resolution, None = highest available.
         height = None,
         width   = None, # Override resolution.
+        resize_mode = "stretch",
         fps = 10,
         **super_kwargs,         # Additional arguments for the Dataset base class.
     ):
@@ -224,6 +228,7 @@ class ImageFolderDataset(Dataset):
         self._zipfile = None
         self.height = height
         self.width = width
+        self.resize_mode = resize_mode
 
         if os.path.isdir(self._path):
             self._type = 'dir'
@@ -370,8 +375,19 @@ class ImageFolderDataset(Dataset):
         image_shape = (3, self.width, self.height) if self.height is not None and self.width is not None else self.image_shape
         print(f"Target image shape: {image_shape}")  # 调试信息
         if list(image.shape) != image_shape:
-            image = cv2.resize(image.transpose(1,2,0), dsize=image_shape[-2:], interpolation=cv2.INTER_CUBIC).transpose(2,0,1)
-            print(f"Resized image shape: {image.shape}")  # 调试信息
+            if self.resize_mode == "stretch":
+                image = cv2.resize(image.transpose(1,2,0), dsize=image_shape[-2:], interpolation=cv2.INTER_CUBIC).transpose(2,0,1)
+                print(f"Resized image shape: {image.shape}")  # 调试信息
+            else:
+                image = image.transpose(1, 2, 0)
+                pil_image = PIL.Image.fromarray(image.astype(np.uint8))  # Convert NumPy array to PIL Image
+                resize_transform = torchvision.transforms.Resize(min(self.height, self.width))  # 先等比例缩放
+                resized_image = resize_transform(pil_image)  # 应用 Resize 变换
+                crop_transform  = torchvision.transforms.CenterCrop((self.height, self.width))  # Target size
+                cropped_image = crop_transform(resized_image )  # Perform the center crop
+                image = np.array(cropped_image)  # Convert back to NumPy array
+                print(f"Resized image shape (center crop): {image.shape}")
+                image = image.transpose(2,0,1)
         assert list(image.shape) == self.image_shape
         assert image.dtype == np.uint8
         if self._xflip[idx]:
