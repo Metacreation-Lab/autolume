@@ -117,9 +117,24 @@ class Dataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         image = self._load_raw_image(self._raw_idx[idx])
+        print(f"Original image shape: {image.shape}")  # 调试信息
         assert isinstance(image, np.ndarray)
+
+        # 如果是灰度图，将其转换为RGB
+        if image.shape[0] == 1:
+            image = np.repeat(image, 3, axis=0)
+            print("Converted grayscale to RGB")
+
+        # 如果图像有4个通道（RGBA），转换为3通道（RGB）
+        if image.shape[0] == 4:
+            image = image[:3, :, :]
+            print("Converted RGBA to RGB")
+        image_shape = (3, self.width, self.height) if self.height is not None and self.width is not None else self.image_shape
+        
+        print(f"Target image shape: {image_shape}")  # 调试信息
         if list(image.shape) != self.image_shape:
             image = cv2.resize(image.transpose(1,2,0), dsize=self.image_shape[-2:], interpolation=cv2.INTER_CUBIC).transpose(2,0,1)
+            print(f"Resized image shape: {image.shape}")  # 调试信息
         assert list(image.shape) == self.image_shape
         assert image.dtype == np.uint8
         if self._xflip[idx]:
@@ -216,7 +231,8 @@ class ImageFolderDataset(Dataset):
         elif self._file_ext(self._path) == '.zip':
             self._type = 'zip'
             self._all_fnames = set(self._get_zipfile().namelist())
-        elif self._file_ext(self._path) == '.mp4' or self._file_ext(self._path) == '.avi':
+        # elif self._file_ext(self._path) == '.mp4' or self._file_ext(self._path) == '.avi':
+        elif self._file_ext(self._path) in ['.mp4', '.avi', '.gif']:
             self._type = 'video'
             self._all_fnames = [self._path]
         else:
@@ -225,7 +241,8 @@ class ImageFolderDataset(Dataset):
         found_video = False
         # if any file in self__all_fnames is a video create a new subfolder where we save the frames based on fps using ffmpeg
         for fname in self._all_fnames:
-            if fname.endswith('.mp4') or fname.endswith('.avi'):
+            # if fname.endswith('.mp4') or fname.endswith('.avi'):
+            if fname.endswith(('.mp4', '.avi', '.gif')):
                 found_video = True
                 # if self._type is video or zip we have to create a new folder where we save the frames
                 if self._type == 'video' or self._type == 'zip':
@@ -341,10 +358,20 @@ class ImageFolderDataset(Dataset):
 
     def __getitem__(self, idx):
         image = self._load_raw_image(self._raw_idx[idx])
+        print(f"Original image shape: {image.shape}")  # 调试信息
         assert isinstance(image, np.ndarray)
+        # 如果是灰度图，将其转换为RGB
+        if image.shape[0] == 1:
+            image = np.repeat(image, 3, axis=0)
+            print("Converted grayscale to RGB")
+        if image.shape[0] == 4:
+            image = image[:3, :, :]
+            print("Converted RGBA to RGB")
         image_shape = (3, self.width, self.height) if self.height is not None and self.width is not None else self.image_shape
+        print(f"Target image shape: {image_shape}")  # 调试信息
         if list(image.shape) != image_shape:
             image = cv2.resize(image.transpose(1,2,0), dsize=image_shape[-2:], interpolation=cv2.INTER_CUBIC).transpose(2,0,1)
+            print(f"Resized image shape: {image.shape}")  # 调试信息
         assert list(image.shape) == self.image_shape
         assert image.dtype == np.uint8
         if self._xflip[idx]:
@@ -355,6 +382,7 @@ class ImageFolderDataset(Dataset):
     def save_resized(self, path):
         for idx in np.arange(self.__len__()):
             img, label = self.__getitem__(idx)
+            print(f"Saving resized image {idx}: shape {img.shape}")  # 添加调试信息
             img = PIL.Image.fromarray(img.astype(np.uint8).transpose(1,2,0), 'RGB')
             if not os.path.exists(path+str('/resized_images')):
                 os.mkdir(path+str('/resized_images'))
