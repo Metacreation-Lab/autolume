@@ -18,6 +18,7 @@ ada_pipes = ['blit', 'geom', 'color', 'filter', 'noise', 'cutout', 'bg', 'bgc', 
 diffaug_pipes = ['color,translation,cutout', 'color,translation', 'color,cutout', 'color',
                  'translation', 'cutout,translation', 'cutout']
 configs = ['auto', 'stylegan2', 'paper256', 'paper512', 'paper1024', 'cifar']
+resize_mode = ['stretch','center crop']
 
 class TrainingModule:
     def __init__(self, menu):
@@ -35,6 +36,7 @@ class TrainingModule:
         self.browse_cache = []
         self.aug = 0
         self.ada_pipe = 7
+        self.resize_mode = 0
         self.diffaug_pipe = 0
         self.img_factor = 1
         self.height_factor = 1
@@ -153,6 +155,7 @@ class TrainingModule:
         #     self.start_res = start_res
         #     self.img_size = start_res[0] * (2 ** self.img_factor)
         #     self.height = start_res[1] * (2 ** self.height_factor)
+        _, self.resize_mode = imgui.combo("Resize Mode", self.resize_mode, resize_mode)
 
         imgui.input_text("Width", str(self.img_size), 512,flags=imgui.INPUT_TEXT_READ_ONLY)
         imgui.same_line()
@@ -226,6 +229,7 @@ class TrainingModule:
                 cond=False,
                 mirror=self.mirror,
                 resolution=(int(self.img_size), int(self.height)),
+                resize_mode = resize_mode[self.resize_mode],
                 aug="ada" if augs[self.aug] == "ADA" else "noaug",
                 augpipe=ada_pipes[self.ada_pipe],
                 resume=self.resume_pkl if self.resume_pkl != "" else None,

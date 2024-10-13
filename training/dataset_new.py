@@ -70,6 +70,7 @@ class Dataset(torch.utils.data.Dataset):
         self._use_labels = use_labels
         self._raw_labels = None
         self._label_shape = None
+        
 
         # Apply max_size.
         self._raw_idx = np.arange(self._raw_shape[0], dtype=np.int64)
@@ -242,7 +243,6 @@ class ImageFolderDataset(Dataset):
         self._zipfile = None
         self.height = height
         self.width = width
-
         if os.path.isdir(self._path):
             self._type = 'dir'
             self._all_fnames = {os.path.relpath(os.path.join(root, fname), start=self._path) for root, _dirs, files in os.walk(self._path) for fname in files}
