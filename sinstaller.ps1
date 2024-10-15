@@ -114,7 +114,7 @@ Write-Host "=> Step: Extract ffprobe"
     $ffprobeExePath = Join-Path -Path $installLocation -ChildPath "ffprobe.exe"
 
     if (Test-Path $ffprobeZipPath) {
-        Expand-Archive -Path $ffprobeZipPath -DestinationPath $ffmpegExtractPath
+        Expand-Archive -Path $ffprobeZipPath -DestinationPath $ffprobeExtractPath 
         Copy-Item -Path (Join-Path -Path $ffprobeExtractPath -ChildPath "ffprobe.exe") -Destination $ffmpegExePath -Force
     }
 
