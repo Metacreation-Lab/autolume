@@ -9,6 +9,8 @@
 """Streaming images and labels from datasets created with dataset_tool.py."""
 
 import os
+import shutil
+
 
 import cv2
 import numpy as np
@@ -229,6 +231,8 @@ class ImageFolderDataset(Dataset):
         self.height = height
         self.width = width
         self.resize_mode = resize_mode
+        # self.has_frames_folder = False
+        self.frame_path = set()
 
         if os.path.isdir(self._path):
             self._type = 'dir'
@@ -265,16 +269,19 @@ class ImageFolderDataset(Dataset):
                     os.makedirs(save_path)
                     self._path = save_path
                     video_path = os.path.join(fname)
+                    # self.frame_path.add(save_path)
                 else:
                     # make dir with the name of the video + _frames
                     video_name = os.path.splitext(fname)[0]
                     save_name = video_name + '_frames'
                     save_path = os.path.join(self._path, save_name)
+                    # self.has_frames_folder = True
                     if not os.path.exists(save_path):
                         os.makedirs(save_path)
                     # extract frames from video using ffmpeg
                     video_path = os.path.join(self._path, fname)
                 cmd = 'ffmpeg -i {} -vf fps={} {}/%04d.jpg'.format(video_path, fps, save_path)
+                self.frame_path.add(save_path)
                 os.system(cmd)
 
         # if any of the files were videos we need to update the all_fnames list
@@ -327,6 +334,8 @@ class ImageFolderDataset(Dataset):
                 self._zipfile.close()
         finally:
             self._zipfile = None
+    
+
 
     def __getstate__(self):
         return dict(super().__getstate__(), _zipfile=None)
@@ -403,6 +412,27 @@ class ImageFolderDataset(Dataset):
             if not os.path.exists(path+str('/resized_images')):
                 os.mkdir(path+str('/resized_images'))
             img.save(path+str('/resized_images/')+str(idx)+'.png', 'PNG')
+    
+
+    # def move_frames_folders(self, output_dir):
+    #     for frame_path in self.frame_path:  # 遍历所有帧文件夹路径
+    #         if os.path.exists(frame_path):
+    #             new_path = os.path.join(output_dir, os.path.basename(frame_path))
+    #             os.rename(frame_path, new_path)  # 移动文件夹
+    #             print(f"Moved frames folder to: {new_path}")
+
+    def copy_frames_folders(self, output_dir):
+        for frame_path in self.frame_path:  # 遍历所有帧文件夹路径
+            if os.path.exists(frame_path):
+                new_path = os.path.join(output_dir, os.path.basename(frame_path))
+                print(f"Copying folder: {frame_path} to {new_path}")
+                try:
+                    shutil.copytree(frame_path, new_path, dirs_exist_ok=True)  # 复制文件夹，允许目标目录已存在
+                    print(f"Copied frames folder to: {new_path}")
+                except Exception as e:
+                    print(f"Failed to copy {frame_path} to {new_path}: {e}")
+            else:
+                print(f"Frame folder does not exist: {frame_path}")
 
     @property
     def resolution(self):

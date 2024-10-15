@@ -63,6 +63,9 @@ class Visualizer:
         self.server = BlockingOSCUDPServer((self.in_ip, self.in_port), self.osc_dispatcher)
         self.server_thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.server_thread.start()
+        self.osc_dispatcher.map("/*", self.osc_message_handler)  # 修正函数名
+
+
 
         # NDI parameters
         self.ndi_name = 'Autolume Live'
@@ -151,6 +154,10 @@ class Visualizer:
             cv2.imwrite(file_path, image_data)
         else:
             print("No render result available to capture.")
+
+    def osc_message_handler(self, address, *args):
+        # 这是处理 OSC 消息的回调函数
+        print(f"[DEBUG] OSC message received at {address} with arguments: {args}")
 
 
 

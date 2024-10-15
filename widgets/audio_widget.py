@@ -52,6 +52,7 @@ class AudioWidget:
         draw_list.channels_split(2)
         draw_list.channels_set_current(1)
         _, self.use_osc[key] = imgui.checkbox(f"Use OSC##_{key}", self.use_osc[key])
+
         if self.use_osc[key]:
             draw_list.channels_set_current(0)
             p_min = imgui.get_item_rect_min()
@@ -73,6 +74,7 @@ class AudioWidget:
                                                                    imgui.INPUT_TEXT_READ_ONLY * (
                                                                not self.use_osc[key])))
 
+
         # self.signal_queue.put((signal, self.mappings[key], self.osc_addresses[key], self.use_osc[key]))
         if self.use_osc[key]:
             try:
@@ -80,7 +82,7 @@ class AudioWidget:
                 viz.osc_client.send_message(f"/{self.osc_addresses[key]}", [f(signal).tolist()])
                 #print(f"/{self.osc_addresses[key]}", f(signal).tolist())
             except Exception as e:
-                print(e)
+                print(f"Error sending OSC for {key}: {e}")
     @staticmethod
     def osc_process(signal_queue):
         ip, port = "127.0.0.1", 1337
