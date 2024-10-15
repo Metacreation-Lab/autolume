@@ -306,37 +306,54 @@ class SuperResModule:
                     path = os.path.join(self.args.result_path, 
                                         tail[:-4] + f'_result_{self.args.model_type}_{int(input_width * self.args.outscale)}x{int(input_height * self.args.outscale)}_Sharpness{self.args.sharpen_scale}.jpg')
                     cv2.imwrite(path, output)
-                self.file_idx += 1  # 递增file_idx
 
-            # 检查文件是否为视频
-            elif file.lower().endswith(('mp4', 'avi', 'mov')):
-                audio = get_audio(file)
-                self.video = cv2.VideoCapture(file)
-                self.fps = self.video.get(cv2.CAP_PROP_FPS)
-                self.total_frames = int(self.video.get(cv2.CAP_PROP_FRAME_COUNT))
-                self.video_width = int(self.video.get(cv2.CAP_PROP_FRAME_WIDTH))
-                self.video_height = int(self.video.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
-                # 设置 video_save_path
-                if self.args.scale_mode:
-                    self.video_save_path = os.path.join(self.args.result_path, 
-                                                        tail[:-4] + f'_result_{self.args.model_type}_{int(self.video_width * self.args.outscale)}x{int(self.video_height * self.args.outscale)}_Sharpness{self.args.sharpen_scale}.mp4')
-                else:
-                    self.video_save_path = os.path.join(self.args.result_path,
-                                                        tail[:-4] + f'_result_{self.args.model_type}_{int(self.args.out_width)}x{int(self.args.out_height)}_Sharpness{self.args.sharpen_scale}.mp4')
-
-                print(f"Saving video to {self.video_save_path}")
-
-                # 初始化 Writer 和 Reader
-                self.writer = Writer(self.args, audio, self.video_height, self.video_width, 
-                                    video_save_path=self.video_save_path, fps=self.fps)
-                self.reader = Reader(self.video_width, self.video_height, file)
+                # 在图像处理后，递增 file_idx 和 super_res_idx
+                self.file_idx += 1
                 self.super_res_idx = 0
 
-        # 处理视频的每一帧
-        if self.super_res_idx < self.total_frames:
-            print(f"Processing frame {self.super_res_idx}/{self.total_frames}")
-            img = self.reader.get_frame()
+            elif file.lower().endswith(('mp4', 'avi', 'mov')):
+                # 视频处理逻辑...
+                self.process_video(file)  # 调用视频处理方法
+                self.file_idx += 1
+
+        # 清理内存
+        torch.cuda.empty_cache()
+        gc.collect()
+
+        # 当所有文件处理完后停止运行
+        if self.file_idx >= len(self.files):
+            self.running = False
+    
+    def process_video(self, file):
+        """处理视频文件的逻辑"""
+        audio = get_audio(file)  # 获取音频信息
+        video = cv2.VideoCapture(file)
+        fps = video.get(cv2.CAP_PROP_FPS)
+        total_frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
+        video_width = int(video.get(cv2.CAP_PROP_FRAME_WIDTH))
+        video_height = int(video.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        head, tail = os.path.split(file)
+
+        # 设置视频保存路径
+        if self.args.scale_mode:
+            video_save_path = os.path.join(self.args.result_path, 
+                                        tail[:-4] + f'_result_{self.args.model_type}_{int(video_width * self.args.outscale)}x{int(video_height * self.args.outscale)}_Sharpness{self.args.sharpen_scale}.mp4')
+        else:
+            video_save_path = os.path.join(self.args.result_path, 
+                                        tail[:-4] + f'_result_{self.args.model_type}_{int(self.args.out_width)}x{int(self.args.out_height)}_Sharpness{self.args.sharpen_scale}.mp4')
+
+        print(f"Saving video to {video_save_path}")
+
+        # 初始化 Writer 和 Reader
+        writer = Writer(self.args, audio, video_height, video_width, 
+                        video_save_path=video_save_path, fps=fps)
+        reader = Reader(video_width, video_height, file)
+        super_res_idx = 0  # 初始化帧计数
+
+        # 处理每一帧
+        while super_res_idx < total_frames:
+            print(f"Processing frame {super_res_idx}/{total_frames}")
+            img = reader.get_frame()
             if img is not None:
                 with torch.inference_mode():
                     sr_input = torch.tensor(img).permute(2, 0, 1).unsqueeze(0).float().to('cuda') / 255
@@ -346,34 +363,26 @@ class SuperResModule:
 
                     # 根据 scale_mode 进行缩放
                     if self.args.scale_mode:
-                        sr_output = cv2.resize(
-                            sr_output, (
-                                int(self.video_width * self.args.outscale),
-                                int(self.video_height * self.args.outscale)
-                            ), interpolation=cv2.INTER_LINEAR)
+                        sr_output = cv2.resize(sr_output, 
+                                            (int(video_width * self.args.outscale), 
+                                                int(video_height * self.args.outscale)), 
+                                            interpolation=cv2.INTER_LINEAR)
                     else:
-                        sr_output = cv2.resize(
-                            sr_output, (
-                                int(self.args.out_width),
-                                int(self.args.out_height)
-                            ), interpolation=cv2.INTER_LINEAR)
+                        sr_output = cv2.resize(sr_output, 
+                                            (int(self.args.out_width), 
+                                                int(self.args.out_height)), 
+                                            interpolation=cv2.INTER_LINEAR)
 
-                    print(f"Saving frame {self.super_res_idx} to {self.video_save_path}")
-                    self.writer.write_frame(sr_output)
-                    self.super_res_idx += 1
-                    self.eta = (time.time() - self.start_time) * (self.total_frames - self.super_res_idx)
-        else:
-            if self.writer is not None:
-                self.writer.close()
-            self.super_res_idx = 0
-            self.file_idx += 1
+                    print(f"Saving frame {super_res_idx} to {video_save_path}")
+                    writer.write_frame(sr_output)
+                    super_res_idx += 1  # 处理下一帧
+
+        # 完成后关闭 writer
+        writer.close()
 
         # 清理内存
         torch.cuda.empty_cache()
         gc.collect()
 
-        # 当所有文件处理完后停止运行
-        if self.file_idx >= len(self.files):
-            self.running = False
 
     
