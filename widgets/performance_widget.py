@@ -97,7 +97,10 @@ class PerformanceWidget:
                 self.viz.server.shutdown()
                 self.viz.server.server_close()
                 self.viz.server_thread.join()
-                self.viz.server = BlockingOSCUDPServer((self.viz.in_ip, self.viz.in_port), self.viz.osc_dispatcher)
+                try:
+                    self.viz.server = BlockingOSCUDPServer((self.viz.in_ip, self.viz.in_port), self.viz.osc_dispatcher)
+                except:
+                    print("Please input a valid ip address")
                 print("new server", self.viz.in_ip, self.viz.in_port)
                 self.viz.server_thread = threading.Thread(target=self.viz.server.serve_forever, daemon=True)
                 self.viz.server_thread.start()

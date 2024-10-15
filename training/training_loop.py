@@ -155,6 +155,7 @@ def training_loop(
             reply.put(['Num images: ' + str(len(training_set)) + '\n Image shape: ' + str(training_set.image_shape) + '\n Label shape: ' + str(training_set.label_shape), False])
             print('Saving Resized Images')
             training_set.save_resized(run_dir)
+            training_set.copy_frames_folders(run_dir)
             print()
     except Exception as e:
         print(f"Caught an exception of type: {type(e).__name__}")
@@ -468,19 +469,19 @@ def training_loop(
             if projected and (key == 'D'):
                 D = D.train().requires_grad_(False).to(device)
 
-        # Evaluate metrics.
-        print('Evaluating metrics.')
-        if (snapshot_data is not None) and (len(metrics) > 0):
-            if rank == 0:
-                print('Evaluating metrics...')
-            for metric in metrics:
-                result_dict = metric_main.calc_metric(metric=metric, G=snapshot_data['G_ema'],
-                                                      dataset_kwargs=training_set_kwargs, num_gpus=num_gpus, rank=rank, device=device)
-                if rank == 0:
-                    metric_main.report_metric(result_dict, run_dir=run_dir, snapshot_pkl=snapshot_pkl)
-                stats_metrics.update(result_dict.results)
-                metric_line = json.dumps(dict(result_dict, snapshot_pkl=snapshot_pkl, timestamp=time.time()))
-                reply.put([metric_line, False])
+        # # Evaluate metrics.
+        # print('Evaluating metrics.')
+        # if (snapshot_data is not None) and (len(metrics) > 0):
+        #     if rank == 0:
+        #         print('Evaluating metrics...')
+        #     for metric in metrics:
+        #         result_dict = metric_main.calc_metric(metric=metric, G=snapshot_data['G_ema'],
+        #                                               dataset_kwargs=training_set_kwargs, num_gpus=num_gpus, rank=rank, device=device)
+        #         if rank == 0:
+        #             metric_main.report_metric(result_dict, run_dir=run_dir, snapshot_pkl=snapshot_pkl)
+        #         stats_metrics.update(result_dict.results)
+        #         metric_line = json.dumps(dict(result_dict, snapshot_pkl=snapshot_pkl, timestamp=time.time()))
+        #         reply.put([metric_line, False])
         del snapshot_data # conserve memory
 
         # Collect statistics.
