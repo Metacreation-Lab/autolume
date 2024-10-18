@@ -31,6 +31,24 @@ class PerformanceWidget:
         self.scale_factor = 0
         self.device = "cuda" if torch.cuda.is_available() else 'cpu'
         self.custom_kernel_available = False
+    
+
+    def start_osc_server(self):
+        try:
+            # 如果服务器已经在运行，先关闭它
+            if hasattr(self.viz, 'server') and self.viz.server:
+                self.viz.server.shutdown()
+                self.viz.server.server_close()
+                if hasattr(self.viz, 'server_thread') and self.viz.server_thread:
+                    self.viz.server_thread.join()
+
+            self.viz.server = BlockingOSCUDPServer((self.viz.in_ip, self.viz.in_port), self.viz.osc_dispatcher)
+            self.viz.server_thread = threading.Thread(target=self.viz.server.serve_forever, daemon=True)
+            self.viz.server_thread.start()
+            self.viz.osc_client = SimpleUDPClient(self.viz.in_ip, self.viz.in_port)
+            print(f"OSC server started on {self.viz.in_ip}:{self.viz.in_port}")
+        except Exception as e:
+            print(f"Failed to start OSC server: {e}")
 
 
     @imgui_utils.scoped_by_object_id
@@ -87,6 +105,10 @@ class PerformanceWidget:
                 imgui.same_line()
                 changed_port, self.viz.in_port = imgui.input_int(f"OSC port", self.viz.in_port,
                                                                  flags=imgui.INPUT_TEXT_ENTER_RETURNS_TRUE)
+                
+                imgui.same_line()
+                if imgui.button("Activate Server"):
+                    self.start_osc_server()
 
                 imgui.same_line()
                 # NDI parameters
