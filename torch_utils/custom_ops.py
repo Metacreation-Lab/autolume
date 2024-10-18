@@ -13,10 +13,11 @@ import os
 import re
 import shutil
 import uuid
-
+import traceback
 import torch
 import torch.utils.cpp_extension
 from torch.utils.file_baton import FileBaton
+import subprocess
 
 #----------------------------------------------------------------------------
 # Global options.
@@ -26,18 +27,63 @@ verbosity = 'brief' # Verbosity level: 'none', 'brief', 'full'
 #----------------------------------------------------------------------------
 # Internal helper funcs.
 
+# def _find_compiler_bindir():
+#     patterns = [
+#         'C:/Program Files*/Microsoft Visual Studio/*/Professional/VC/Tools/MSVC/*/bin/Hostx64/x64',
+#         'C:/Program Files*/Microsoft Visual Studio/*/BuildTools/VC/Tools/MSVC/*/bin/Hostx64/x64',
+#         'C:/Program Files*/Microsoft Visual Studio/*/Community/VC/Tools/MSVC/*/bin/Hostx64/x64',
+#         'C:/Program Files*/Microsoft Visual Studio */vc/bin',
+#         'C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.41.34120/bin/Hostx64/x64'
+#     ]
+#     for pattern in patterns:
+#         matches = sorted(glob.glob(pattern))
+#         if len(matches):
+#             return matches[-1]
+#     return None
+
+
 def _find_compiler_bindir():
+    # 尝试通过 vswhere 找到 Visual Studio 编译器
+    compiler_bindir = find_vs_compiler()
+    if compiler_bindir:
+        return compiler_bindir
+
+    # 如果 vswhere 失败，则使用硬编码路径模式
     patterns = [
         'C:/Program Files*/Microsoft Visual Studio/*/Professional/VC/Tools/MSVC/*/bin/Hostx64/x64',
         'C:/Program Files*/Microsoft Visual Studio/*/BuildTools/VC/Tools/MSVC/*/bin/Hostx64/x64',
         'C:/Program Files*/Microsoft Visual Studio/*/Community/VC/Tools/MSVC/*/bin/Hostx64/x64',
         'C:/Program Files*/Microsoft Visual Studio */vc/bin',
+        # 'C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.41.34120/bin/Hostx64/x64'
     ]
+    
     for pattern in patterns:
         matches = sorted(glob.glob(pattern))
-        if len(matches):
+        if matches:
             return matches[-1]
+    
     return None
+
+def find_vs_compiler():
+    try:
+        result = subprocess.run(
+            ['C:/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe',
+             '-latest',
+             '-products', '*',
+             '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64',
+             '-find', 'VC/Tools/MSVC/*/bin/Hostx64/x64/cl.exe'],
+            capture_output=True, text=True, check=True
+        )
+        compiler_path = result.stdout.strip()
+        if compiler_path:
+            return os.path.dirname(compiler_path)
+        else:
+            return None
+    except Exception as e:
+        print(f"Failed to find compiler using vswhere: {str(e)}")
+        return None
+
+
 
 #----------------------------------------------------------------------------
 
@@ -67,6 +113,13 @@ def get_plugin(module_name, sources, headers=None, source_dir=None, **build_kwar
     # Already cached?
     if module_name in _cached_plugins:
         return _cached_plugins[module_name]
+    
+    # 添加调试信息
+    print(f"Attempting to load plugin {module_name}")
+    print(f"Sources: {sources}")
+    print(f"Headers: {headers}")
+    print(f"Source directory: {source_dir}")
+    print(f"Build kwargs: {build_kwargs}")
 
     # Print status.
     if verbosity == 'full':
@@ -142,9 +195,12 @@ def get_plugin(module_name, sources, headers=None, source_dir=None, **build_kwar
         # Load.
         module = importlib.import_module(module_name)
 
-    except:
+    except Exception as e:
         if verbosity == 'brief':
             print('Failed!')
+        print('Failed!')
+        print(f"Error details: {str(e)}")
+        print(f"Traceback: {traceback.format_exc()}")
         return None
 
     # Print status and add to cache dict.
