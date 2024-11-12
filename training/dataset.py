@@ -21,6 +21,7 @@ import json
 import torch
 import dnnlib
 import ffmpeg
+import traceback
 
 try:
     import pyspng
@@ -217,6 +218,100 @@ class Dataset(torch.utils.data.Dataset):
 #----------------------------------------------------------------------------
 
 class ImageFolderDataset(Dataset):
+    # def __init__(self,
+    #     path,                   # Path to directory or zip.
+    #     resolution      = None, # Ensure specific resolution, None = highest available.
+    #     height = None,
+    #     width   = None, # Override resolution.
+    #     resize_mode = "stretch",
+    #     fps = 10,
+    #     **super_kwargs,         # Additional arguments for the Dataset base class.
+    # ):
+    #     self._path = path
+    #     self._zipfile = None
+    #     self.height = height
+    #     self.width = width
+    #     self.resize_mode = resize_mode
+    #     # self.has_frames_folder = False
+    #     self.frame_path = set()
+
+    #     if os.path.isdir(self._path):
+    #         self._type = 'dir'
+    #         self._all_fnames = {os.path.relpath(os.path.join(root, fname), start=self._path) for root, _dirs, files in os.walk(self._path) for fname in files}
+    #     elif self._file_ext(self._path) == '.zip':
+    #         self._type = 'zip'
+    #         self._all_fnames = set(self._get_zipfile().namelist())
+    #     # elif self._file_ext(self._path) == '.mp4' or self._file_ext(self._path) == '.avi':
+    #     elif self._file_ext(self._path) in ['.mp4', '.avi', '.gif']:
+    #         self._type = 'video'
+    #         self._all_fnames = [self._path]
+    #     else:
+    #         raise IOError('Path must point to a directory or zip')
+
+    #     found_video = False
+    #     # if any file in self__all_fnames is a video create a new subfolder where we save the frames based on fps using ffmpeg
+    #     for fname in self._all_fnames:
+    #         # if fname.endswith('.mp4') or fname.endswith('.avi'):
+    #         if fname.endswith(('.mp4', '.avi', '.gif')):
+    #             found_video = True
+    #             # if self._type is video or zip we have to create a new folder where we save the frames
+    #             if self._type == 'video' or self._type == 'zip':
+    #                 # extract the name of the video
+    #                 video_name = os.path.splitext(fname)[0]
+    #                 save_name = video_name + '_frames'
+    #                 # update self._path to be the new folder which we create based on cwd
+    #                 save_path = os.path.join(os.getcwd(), save_name)
+    #                 # if file exists we add a number to the end of the folder name
+    #                 i = 1
+    #                 while os.path.exists(save_path):
+    #                     save_path = os.path.join(os.getcwd(), save_name + str(i))
+    #                     i += 1
+    #                 # create the folder
+    #                 os.makedirs(save_path)
+    #                 self._path = save_path
+    #                 video_path = os.path.join(fname)
+    #                 # self.frame_path.add(save_path)
+    #             else:
+    #                 # make dir with the name of the video + _frames
+    #                 video_name = os.path.splitext(fname)[0]
+    #                 save_name = video_name + '_frames'
+    #                 save_path = os.path.join(self._path, save_name)
+    #                 # self.has_frames_folder = True
+    #                 if not os.path.exists(save_path):
+    #                     os.makedirs(save_path)
+    #                 # extract frames from video using ffmpeg
+    #                 video_path = os.path.join(self._path, fname)
+    #             cmd = 'ffmpeg -i {} -vf fps={} {}/%04d.jpg'.format(video_path, fps, save_path)
+    #             self.frame_path.add(save_path)
+    #             os.system(cmd)
+
+    #     # if any of the files were videos we need to update the all_fnames list
+    #     if found_video:
+    #         if os.path.isdir(self._path):
+    #             self._type = 'dir'
+    #             self._all_fnames = {os.path.relpath(os.path.join(root, fname), start=self._path) for root, _dirs, files
+    #                                 in os.walk(self._path) for fname in files}
+    #         elif self._file_ext(self._path) == '.zip':
+    #             self._type = 'zip'
+    #             self._all_fnames = set(self._get_zipfile().namelist())
+    #         else:
+    #             raise IOError('Path must point to a directory or zip')
+
+
+
+
+
+    #     PIL.Image.init()
+    #     self._image_fnames = sorted(fname for fname in self._all_fnames if self._file_ext(fname) in PIL.Image.EXTENSION)
+
+    #     if len(self._image_fnames) == 0:
+    #         raise IOError('No image files found in the specified path')
+
+    #     name = os.path.splitext(os.path.basename(self._path))[0]
+    #     img_shape = [3, self.height,self.width]  if self.width is not None and self.height is not None else list(self._load_raw_image(0).shape)
+    #     raw_shape = [len(self._image_fnames)] + img_shape
+    #     super().__init__(name=name, raw_shape=raw_shape, **super_kwargs)
+
     def __init__(self,
         path,                   # Path to directory or zip.
         resolution      = None, # Ensure specific resolution, None = highest available.
@@ -226,89 +321,118 @@ class ImageFolderDataset(Dataset):
         fps = 10,
         **super_kwargs,         # Additional arguments for the Dataset base class.
     ):
-        self._path = path
+        self._path = os.path.abspath(path)
         self._zipfile = None
         self.height = height
         self.width = width
         self.resize_mode = resize_mode
-        # self.has_frames_folder = False
         self.frame_path = set()
-
+        
+        # 检查路径是否存在
+        if not os.path.exists(self._path):
+            raise IOError(f'Path does not exist: {self._path}')
+            
+        # 初始化文件类型
         if os.path.isdir(self._path):
             self._type = 'dir'
-            self._all_fnames = {os.path.relpath(os.path.join(root, fname), start=self._path) for root, _dirs, files in os.walk(self._path) for fname in files}
         elif self._file_ext(self._path) == '.zip':
             self._type = 'zip'
-            self._all_fnames = set(self._get_zipfile().namelist())
-        # elif self._file_ext(self._path) == '.mp4' or self._file_ext(self._path) == '.avi':
-        elif self._file_ext(self._path) in ['.mp4', '.avi', '.gif']:
-            self._type = 'video'
-            self._all_fnames = [self._path]
+            self._zipfile = zipfile.ZipFile(self._path)
         else:
             raise IOError('Path must point to a directory or zip')
 
-        found_video = False
-        # if any file in self__all_fnames is a video create a new subfolder where we save the frames based on fps using ffmpeg
-        for fname in self._all_fnames:
-            # if fname.endswith('.mp4') or fname.endswith('.avi'):
-            if fname.endswith(('.mp4', '.avi', '.gif')):
-                found_video = True
-                # if self._type is video or zip we have to create a new folder where we save the frames
-                if self._type == 'video' or self._type == 'zip':
-                    # extract the name of the video
-                    video_name = os.path.splitext(fname)[0]
-                    save_name = video_name + '_frames'
-                    # update self._path to be the new folder which we create based on cwd
-                    save_path = os.path.join(os.getcwd(), save_name)
-                    # if file exists we add a number to the end of the folder name
-                    i = 1
-                    while os.path.exists(save_path):
-                        save_path = os.path.join(os.getcwd(), save_name + str(i))
-                        i += 1
-                    # create the folder
-                    os.makedirs(save_path)
-                    self._path = save_path
-                    video_path = os.path.join(fname)
-                    # self.frame_path.add(save_path)
-                else:
-                    # make dir with the name of the video + _frames
-                    video_name = os.path.splitext(fname)[0]
-                    save_name = video_name + '_frames'
-                    save_path = os.path.join(self._path, save_name)
-                    # self.has_frames_folder = True
+        # 首先扫描并处理视频文件
+        video_files = []
+        if self._type == 'dir':
+            for root, _, files in os.walk(self._path):
+                for fname in files:
+                    if fname.endswith(('.mp4', '.avi', '.gif')):
+                        video_files.append(os.path.join(root, fname))
+        elif self._type == 'zip':
+            for fname in self._zipfile.namelist():
+                if fname.endswith(('.mp4', '.avi', '.gif')):
+                    video_files.append(fname)
+
+        # 处理视频文件
+        frames_extracted = False
+        if video_files:
+            print(f"Found {len(video_files)} video file(s), extracting frames...")
+            for video_path in video_files:
+                try:
+                    if self._type == 'zip':
+                        # 对于zip文件中的视频，先解压到临时目录
+                        temp_dir = tempfile.mkdtemp()
+                        video_data = self._zipfile.read(video_path)
+                        temp_video_path = os.path.join(temp_dir, os.path.basename(video_path))
+                        with open(temp_video_path, 'wb') as f:
+                            f.write(video_data)
+                        video_path = temp_video_path
+
+                    video_name = os.path.splitext(os.path.basename(video_path))[0]
+                    save_path = os.path.join(self._path, f"{video_name}_frames")
+                    
                     if not os.path.exists(save_path):
                         os.makedirs(save_path)
-                    # extract frames from video using ffmpeg
-                    video_path = os.path.join(self._path, fname)
-                cmd = 'ffmpeg -i {} -vf fps={} {}/%04d.jpg'.format(video_path, fps, save_path)
-                self.frame_path.add(save_path)
-                os.system(cmd)
+                    
+                    # 使用ffmpeg提取帧
+                    cmd = f'ffmpeg -i "{video_path}" -vf fps={fps} "{save_path}/%04d.jpg"'
+                    print(f"Executing command: {cmd}")
+                    result = os.system(cmd)
+                    
+                    if result == 0:
+                        print(f"Successfully extracted frames from {video_path}")
+                        self.frame_path.add(save_path)
+                        frames_extracted = True
+                        
+                        # 验证提取的帧
+                        extracted_frames = [f for f in os.listdir(save_path) if f.endswith(('.jpg', '.png'))]
+                        if not extracted_frames:
+                            print(f"Warning: No frames were extracted from {video_path}")
+                        else:
+                            print(f"Extracted {len(extracted_frames)} frames from {video_path}")
+                    else:
+                        print(f"Failed to extract frames from {video_path}, ffmpeg returned {result}")
+                        
+                except Exception as e:
+                    print(f"Error processing video {video_path}: {str(e)}")
+                    traceback.print_exc()
+                finally:
+                    # 清理临时文件
+                    if self._type == 'zip' and 'temp_dir' in locals():
+                        import shutil
+                        shutil.rmtree(temp_dir)
 
-        # if any of the files were videos we need to update the all_fnames list
-        if found_video:
-            if os.path.isdir(self._path):
-                self._type = 'dir'
-                self._all_fnames = {os.path.relpath(os.path.join(root, fname), start=self._path) for root, _dirs, files
-                                    in os.walk(self._path) for fname in files}
-            elif self._file_ext(self._path) == '.zip':
-                self._type = 'zip'
-                self._all_fnames = set(self._get_zipfile().namelist())
-            else:
-                raise IOError('Path must point to a directory or zip')
+        # 重新扫描目录获取所有文件（包括提取的帧）
+        if self._type == 'dir':
+            self._all_fnames = {os.path.relpath(os.path.join(root, fname), start=self._path) 
+                               for root, _dirs, files in os.walk(self._path) 
+                               for fname in files}
+        else:  # zip
+            self._all_fnames = set(self._zipfile.namelist())
 
-
-
-
-
+        # 初始化图片文件列表
         PIL.Image.init()
-        self._image_fnames = sorted(fname for fname in self._all_fnames if self._file_ext(fname) in PIL.Image.EXTENSION)
-
+        self._image_fnames = sorted(fname for fname in self._all_fnames 
+                                  if self._file_ext(fname) in PIL.Image.EXTENSION)
+        
+        # 检查是否有可用的图片文件
         if len(self._image_fnames) == 0:
-            raise IOError('No image files found in the specified path')
+            if video_files:
+                if frames_extracted:
+                    raise IOError('Failed to find any extracted frames after processing videos')
+                else:
+                    raise IOError('Failed to extract frames from any of the videos')
+            else:
+                raise IOError('No image files found in the specified path')
 
+        print(f"Found {len(self._image_fnames)} image files")
+        
+        # 初始化数据集参数
         name = os.path.splitext(os.path.basename(self._path))[0]
-        img_shape = [3, self.height,self.width]  if self.width is not None and self.height is not None else list(self._load_raw_image(0).shape)
+        img_shape = [3, self.height, self.width] if self.width is not None and self.height is not None else list(self._load_raw_image(0).shape)
         raw_shape = [len(self._image_fnames)] + img_shape
+        
+        # 调用父类初始化
         super().__init__(name=name, raw_shape=raw_shape, **super_kwargs)
 
     @staticmethod
