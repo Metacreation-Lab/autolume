@@ -36,6 +36,10 @@ from pythonosc.dispatcher import Dispatcher
 from pythonosc.udp_client import SimpleUDPClient
 import NDIlib as ndi
 
+import glfw
+from OpenGL import GL as gl
+import ctypes
+
 #----------------------------------------------------------------------------
 
 class Visualizer:
@@ -63,7 +67,7 @@ class Visualizer:
         self.server = BlockingOSCUDPServer((self.in_ip, self.in_port), self.osc_dispatcher)
         self.server_thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.server_thread.start()
-        self.osc_dispatcher.map("/*", self.osc_message_handler)  # 修正函数名
+        self.osc_dispatcher.map("/*", self.osc_message_handler)  # 修改数名
 
 
 
@@ -116,6 +120,212 @@ class Visualizer:
         self.frame_queue = queue.Queue()
         self.recording_thread = None
         self.recording_file_path = None
+
+    #Fullscreen
+        self.is_fullscreen_display = False
+        self.fullscreen_window = None
+        self.main_window_context = None
+        self.fullscreen_shader = None
+        self.fullscreen_vao = None
+        self.fullscreen_vbo = None
+        self.window_created = False
+
+    def create_shader_program(self):
+        try:
+            vertex_shader = """
+            #version 330 core
+            layout (location = 0) in vec2 aPos;
+            layout (location = 1) in vec2 aTexCoord;
+            uniform vec2 uScale;
+            uniform vec2 uOffset;
+            out vec2 TexCoord;
+            void main() {
+                vec2 pos = aPos * uScale + uOffset;
+                gl_Position = vec4(pos, 0.0, 1.0);
+                TexCoord = aTexCoord;
+            }
+            """
+
+            fragment_shader = """
+            #version 330 core
+            in vec2 TexCoord;
+            out vec4 FragColor;
+            uniform sampler2D ourTexture;
+            void main() {
+                FragColor = texture(ourTexture, TexCoord);
+            }
+            """
+
+            # 编译顶点着色器
+            vs = gl.glCreateShader(gl.GL_VERTEX_SHADER)
+            gl.glShaderSource(vs, vertex_shader)
+            gl.glCompileShader(vs)
+            
+            # 检查编译错误
+            if not gl.glGetShaderiv(vs, gl.GL_COMPILE_STATUS):
+                return None
+
+            # 编译片段着色器
+            fs = gl.glCreateShader(gl.GL_FRAGMENT_SHADER)
+            gl.glShaderSource(fs, fragment_shader)
+            gl.glCompileShader(fs)
+            
+            # 检查编译错误
+            if not gl.glGetShaderiv(fs, gl.GL_COMPILE_STATUS):
+                return None
+
+            # 创建并链接程序
+            program = gl.glCreateProgram()
+            gl.glAttachShader(program, vs)
+            gl.glAttachShader(program, fs)
+            gl.glLinkProgram(program)
+            
+            # 检查链接错误
+            if not gl.glGetProgramiv(program, gl.GL_LINK_STATUS):
+                return None
+
+            # 清理
+            gl.glDeleteShader(vs)
+            gl.glDeleteShader(fs)
+            
+            return program
+            
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return None
+
+    def create_fullscreen_window(self):
+        try:
+            self.main_window_context = glfw.get_current_context()
+            
+            # 获取主显示器
+            monitor = glfw.get_primary_monitor()
+            mode = glfw.get_video_mode(monitor)
+            
+            # 修改窗口提示
+            glfw.window_hint(glfw.DECORATED, True)           # 改为有边框
+            glfw.window_hint(glfw.FLOATING, True)           # 浮动窗口
+            glfw.window_hint(glfw.MAXIMIZED, False)         # 不最大化
+            glfw.window_hint(glfw.FOCUSED, True)            # 获得焦点
+            glfw.window_hint(glfw.AUTO_ICONIFY, False)      # 不自动最小化
+            glfw.window_hint(glfw.RESIZABLE, True)          # 可调整大小
+            glfw.window_hint(glfw.VISIBLE, True)            # 可见
+            glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
+            glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 3)
+            glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
+            
+            # 创建一个稍小的窗口，而不是全屏大小
+            window_width = int(mode.size.width * 0.8)  # 屏幕宽度的80%
+            window_height = int(mode.size.height * 0.8)  # 屏幕高度的80%
+            
+            window = glfw.create_window(window_width, window_height, 
+                                      "Full Screen Mode (Press ESC to exit)", None, self.main_window_context)
+            
+            if window:
+                # 将窗口居中显示
+                x_pos = (mode.size.width - window_width) // 2
+                y_pos = (mode.size.height - window_height) // 2
+                glfw.set_window_pos(window, x_pos, y_pos)
+                
+                # 设置ESC键回调
+                def key_callback(window, key, scancode, action, mods):
+                    if key == glfw.KEY_ESCAPE and action == glfw.PRESS:
+                        self.is_fullscreen_display = False
+                        self.window_created = False
+                
+                glfw.set_key_callback(window, key_callback)
+                
+                # 初始化OpenGL上下文
+                glfw.make_context_current(window)
+                self.init_gl_resources()
+                glfw.make_context_current(self.main_window_context)
+                
+                return window
+                
+            return None
+            
+        except Exception as e:
+            print(f"创建窗口时出错: {e}")
+            return None
+
+    def init_gl_resources(self):
+        # 创建着色器程序
+        self.fullscreen_shader = self.create_shader_program()
+        
+        # 创建顶点数据
+        vertices = np.array([
+            # 位置          # 纹理坐标
+             0.0,  0.0,    0.0, 1.0,
+             2.0,  0.0,    1.0, 1.0,
+             2.0,  2.0,    1.0, 0.0,
+             0.0,  2.0,    0.0, 0.0
+        ], dtype=np.float32)
+        
+        # 创建和设置VAO/VBO
+        self.fullscreen_vao = gl.glGenVertexArrays(1)
+        self.fullscreen_vbo = gl.glGenBuffers(1)
+        
+        gl.glBindVertexArray(self.fullscreen_vao)
+        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self.fullscreen_vbo)
+        gl.glBufferData(gl.GL_ARRAY_BUFFER, vertices.nbytes, vertices, gl.GL_STATIC_DRAW)
+        
+        gl.glVertexAttribPointer(0, 2, gl.GL_FLOAT, gl.GL_FALSE, 16, None)
+        gl.glEnableVertexAttribArray(0)
+        gl.glVertexAttribPointer(1, 2, gl.GL_FLOAT, gl.GL_FALSE, 16, ctypes.c_void_p(8))
+        gl.glEnableVertexAttribArray(1)
+
+    def render_fullscreen(self):
+        if not self.fullscreen_window or not self._tex_obj:
+            return
+
+        try:
+            glfw.make_context_current(self.fullscreen_window)
+            
+            window_w, window_h = glfw.get_window_size(self.fullscreen_window)
+            gl.glViewport(0, 0, window_w, window_h)
+            
+            gl.glClearColor(0, 0, 0, 1)
+            gl.glClear(gl.GL_COLOR_BUFFER_BIT)
+            
+            # 计算保持原比例的缩放和位置
+            tex_aspect = self._tex_obj.width / self._tex_obj.height
+            window_aspect = window_w / window_h
+            
+            if window_aspect > tex_aspect:
+                # 窗口更宽，以高度为基准
+                scale_h = 1.0
+                scale_w = (tex_aspect / window_aspect)
+                offset_x = (1.0 - scale_w) / 2.0
+                offset_y = 0.0
+            else:
+                # 窗口更高，以宽度为基准
+                scale_w = 1.0
+                scale_h = (window_aspect / tex_aspect)
+                offset_x = 0.0
+                offset_y = (1.0 - scale_h) / 2.0
+            
+            # 使用着色器程序
+            gl.glUseProgram(self.fullscreen_shader)
+            
+            # 设置uniform变量
+            gl.glUniform2f(gl.glGetUniformLocation(self.fullscreen_shader, "uScale"), scale_w, scale_h)
+            gl.glUniform2f(gl.glGetUniformLocation(self.fullscreen_shader, "uOffset"), offset_x * 2.0 - 1.0, offset_y * 2.0 - 1.0)
+            
+            # 绑定纹理
+            gl.glActiveTexture(gl.GL_TEXTURE0)
+            gl.glBindTexture(gl.GL_TEXTURE_2D, self._tex_obj.gl_id)
+            gl.glUniform1i(gl.glGetUniformLocation(self.fullscreen_shader, "ourTexture"), 0)
+            
+            # 绘制四边形
+            gl.glBindVertexArray(self.fullscreen_vao)
+            gl.glDrawArrays(gl.GL_TRIANGLE_FAN, 0, 4)
+            
+            glfw.swap_buffers(self.fullscreen_window)
+            glfw.make_context_current(self.main_window_context)
+            
+        except Exception as e:
+            print(f"渲染时出错: {e}")
 
     def start_recording(self, file_path):
         self.is_recording = True
@@ -222,18 +432,28 @@ class Visualizer:
 
         # Position the button in the middle
         imgui.same_line(self.app.spacing * 25)
+        
+        # Add fullscreen toggle button
+        if imgui.button("Full Screen Display" if not self.is_fullscreen_display else "退出全屏"):
+            if self.is_fullscreen_display:
+                # 果当前是全屏，则关闭窗口
+                self.is_fullscreen_display = False
+                if self.fullscreen_window:
+                    glfw.destroy_window(self.fullscreen_window)
+                    self.fullscreen_window = None
+                    self.window_created = False
+            else:
+                # 如果当前不是全屏，则准备创建窗口
+                self.is_fullscreen_display = True
+                self.window_created = False
 
+        imgui.same_line(self.app.spacing * 40)  # 增加间距
         if imgui.button('Screen Capture'):
             now = datetime.datetime.now()
             current_time_str = now.strftime("%Y-%m-%d %H-%M-%S")
             self.capture_screenshot(f'screenshots/{current_time_str}.png')
 
-        # Capture frame if recording
-        if self.is_recording and 'image' in self.result:
-            frame = cv2.cvtColor(self.result.image, cv2.COLOR_RGB2BGR)
-            self.frame_queue.put(frame)
-        
-        imgui.same_line()
+        imgui.same_line(self.app.spacing * 55)  # 增加间距
         if imgui.button('Start Recording' if not self.is_recording else 'Stop Recording'):
             if not self.is_recording:
                 now = datetime.datetime.now()
@@ -321,6 +541,44 @@ class Visualizer:
 
         # End frame.
         imgui.end()
+
+
+        
+        # 处理全屏显示
+        if self.is_fullscreen_display:
+            if not self.window_created:
+                self.fullscreen_window = self.create_fullscreen_window()
+                if self.fullscreen_window:
+                    self.window_created = True
+                else:
+                    self.is_fullscreen_display = False
+            
+            if self.fullscreen_window and self.window_created:
+                # 检查窗口状态
+                if glfw.window_should_close(self.fullscreen_window):
+                    self.is_fullscreen_display = False
+                    self.window_created = False
+                else:
+                    self.render_fullscreen()
+                    glfw.poll_events()
+        else:
+            # 清理全屏窗口
+            if self.fullscreen_window:
+                glfw.destroy_window(self.fullscreen_window)
+                self.fullscreen_window = None
+                self.window_created = False
+
+    def __del__(self):
+        if hasattr(self, 'fullscreen_window') and self.fullscreen_window:
+            glfw.make_context_current(self.fullscreen_window)
+            if hasattr(self, 'fullscreen_shader'):
+                gl.glDeleteProgram(self.fullscreen_shader)
+            if hasattr(self, 'fullscreen_vao'):
+                gl.glDeleteVertexArrays(1, [self.fullscreen_vao])
+            if hasattr(self, 'fullscreen_vbo'):
+                gl.glDeleteBuffers(1, [self.fullscreen_vbo])
+            glfw.destroy_window(self.fullscreen_window)
+
 
 #----------------------------------------------------------------------------
 
