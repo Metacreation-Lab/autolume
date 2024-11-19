@@ -467,19 +467,15 @@ class SynthesisNetwork(torch.nn.Module):
 
         # Execute layers.
         x = self.input(ws[0])
-        print(f"After input layer: {x.shape}")  # 确保 input 层输出具有 batch_size
 
-        print(f"After input layer: {x.shape}")
         for name, w in zip(self.layer_names, ws[1:]):
             x = getattr(self, name)(x, w, **layer_kwargs)
-            print(f"After {name}: {x.shape}")
         if self.output_scale != 1:
             x = x * self.output_scale
 
         # Ensure correct shape and dtype.
         misc.assert_shape(x, [None, self.img_channels, self.img_resolution, self.img_resolution])
         x = x.to(torch.float32)
-        print(f"Final output shape: {x.shape}")  # 最终输出形状
         return x
 
     def extra_repr(self):
@@ -516,9 +512,7 @@ class Generator(torch.nn.Module):
 
     def forward(self, z, c, truncation_psi=1, truncation_cutoff=None, update_emas=False, **synthesis_kwargs):
         ws = self.mapping(z, c, truncation_psi=truncation_psi, truncation_cutoff=truncation_cutoff, update_emas=update_emas)
-        print(f"ws shape: {ws.shape}")
         img = self.synthesis(ws, update_emas=update_emas, **synthesis_kwargs)
-        print(f"img shape: {img.shape}")
         return img
     
     def update_epochs(self, epoch):
