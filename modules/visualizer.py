@@ -434,7 +434,7 @@ class Visualizer:
         imgui.same_line(self.app.spacing * 25)
         
         # Add fullscreen toggle button
-        if imgui.button("Full Screen Display" if not self.is_fullscreen_display else "退出全屏"):
+        if imgui.button("Full Screen Display" if not self.is_fullscreen_display else "Exit Full Screen"):
             if self.is_fullscreen_display:
                 # 果当前是全屏，则关闭窗口
                 self.is_fullscreen_display = False
@@ -447,13 +447,13 @@ class Visualizer:
                 self.is_fullscreen_display = True
                 self.window_created = False
 
-        imgui.same_line(self.app.spacing * 40)  # 增加间距
+        imgui.same_line(self.app.spacing * 45)  # 增加间距
         if imgui.button('Screen Capture'):
             now = datetime.datetime.now()
             current_time_str = now.strftime("%Y-%m-%d %H-%M-%S")
             self.capture_screenshot(f'screenshots/{current_time_str}.png')
 
-        imgui.same_line(self.app.spacing * 55)  # 增加间距
+        imgui.same_line(self.app.spacing * 60)  # 增加间距
         if imgui.button('Start Recording' if not self.is_recording else 'Stop Recording'):
             if not self.is_recording:
                 now = datetime.datetime.now()
