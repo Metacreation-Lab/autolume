@@ -360,12 +360,9 @@ class ToRGBLayer(torch.nn.Module):
 
     def forward(self, x, w, fused_modconv=True):
         styles = self.affine(w) * self.weight_gain
-        print(f"Before modulated_conv2d, x shape: {x.shape}")  # 打印 x 的维度
 
         x = modulated_conv2d(x=x, weight=self.weight, styles=styles, demodulate=False, fused_modconv=fused_modconv)
-        print(f"After modulated_conv2d, x shape: {x.shape}")  # 打印 x 的维度
         x = bias_act.bias_act(x, self.bias.to(x.dtype), clamp=self.conv_clamp)
-        print(f"After bias_act, x shape: {x.shape}")  # 打印 x 的维度
         return x
 
     def extra_repr(self):
@@ -451,22 +448,17 @@ class SynthesisBlock(torch.nn.Module):
         if self.in_channels == 0:
             x = self.const.to(dtype=dtype, memory_format=memory_format)
             x = x.unsqueeze(0).repeat([ws.shape[0], 1, 1, 1])
-            print(f"Initial const x shape: {x.shape}")  # 打印初始化后的 x 维度
         else:
             # assets.assert_shape(x, [None, self.in_channels, self.resolution // 2, self.resolution // 2])
             x = x.to(dtype=dtype, memory_format=memory_format)
-            print(f"Initial x shape: {x.shape}")  # 打印 x 的维度
 
         # Main layers.
         if self.in_channels == 0:
             x = self.conv1(x, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs)
-            print(f"After conv1, x shape: {x.shape}")  # 打印 conv1 操作后的 x 维度
         elif self.architecture == 'resnet':
             y = self.skip(x, gain=np.sqrt(0.5))
             x = self.conv0(x, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs)
-            print(f"After conv0, x shape: {x.shape}")  # 打印 conv0 操作后的 x 维度
             x = self.conv1(x, next(w_iter), fused_modconv=fused_modconv, gain=np.sqrt(0.5), **layer_kwargs)
-            print(f"After conv1, x shape: {x.shape}")  # 打印 conv1 操作后的 x 维度
 
             x = y.add_(x)
         else:
@@ -477,19 +469,15 @@ class SynthesisBlock(torch.nn.Module):
             # assets.assert_shape(img, [None, self.img_channels, self.resolution // 2, self.resolution // 2])
             if img.ndim == 3:
                 img = img.unsqueeze(0)
-                print(f"Added batch dimension to img: {img.shape}")
             img = upfirdn2d.upsample2d(img, self.resample_filter)
         if self.is_last or self.architecture == 'skip':
             y = self.torgb(x, next(w_iter), fused_modconv=fused_modconv)
             y = y.to(dtype=torch.float32, memory_format=torch.contiguous_format)
-            print(f"ToRGBLayer output y shape: {y.shape}")  # 打印 ToRGB 输出的 y 维度
             if img is not None:
                 if y.shape[-2:] != img.shape[-2:]:
                     img = kornia.geometry.transform.resize(img, y.shape[-2:])
-                    print(f"Resized img shape: {img.shape}")  # 打印 img 调整大小后的维度
 
             img = img.add_(y) if img is not None else y
-            print(f"Final img shape: {img.shape}")  # 打印最终 img 的维度
 
         assert x.dtype == dtype
         assert img is None or img.dtype == torch.float32
@@ -557,7 +545,6 @@ class SynthesisNetwork(torch.nn.Module):
         for res, cur_ws in zip(self.block_resolutions, block_ws):
             block = getattr(self, f'b{res}')
             x, img = block(x, img, cur_ws, **block_kwargs)
-            print(f"After block {res}, img shape: {img.shape}")
             if img is not None and img.ndim == 3:
                 img = img.unsqueeze(0)  # 确保有 batch 维度
 

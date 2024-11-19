@@ -113,10 +113,8 @@ class StyleGAN2Loss(Loss):
         return kd_l1_loss, kd_lpips_loss
 
     def run_G(self, z, c, update_emas=False, get_rgb_list=False):
-        print(f"run_G: z shape: {z.shape}, c shape: {c.shape}")
 
         ws = self.G.mapping(z, c, update_emas=update_emas)
-        print(f"run_G: ws (W space) shape: {ws.shape}")
 
         if self.style_mixing_prob > 0:
             with torch.autograd.profiler.record_function('style_mixing'):
@@ -135,7 +133,6 @@ class StyleGAN2Loss(Loss):
     def run_D(self, img, c, blur_sigma=0, update_emas=False):
         if img.ndim == 3:
             img = img.unsqueeze(0)  # 将 img 的维度从 [C, H, W] 变为 [N, C, H, W]
-        print(f"run_D: img shape before blur: {img.shape}")
         
 
         blur_size = np.floor(blur_sigma * 3)
@@ -143,20 +140,14 @@ class StyleGAN2Loss(Loss):
             with torch.autograd.profiler.record_function('blur'):
                 f = torch.arange(-blur_size, blur_size + 1, device=img.device).div(blur_sigma).square().neg().exp2()
                 img = upfirdn2d.filter2d(img, f / f.sum())
-        print(f"run_D: img shape after blur: {img.shape}")
 
         if self.augment_pipe is not None:
-            print(f"Shape of img before augment_pipe: {img.shape}")
 
             img = self.augment_pipe(img)
-            print(f"run_D: img shape after augment_pipe: {img.shape}")
         if self.diffaugment:
-            print(f"run_D: img shape before DiffAugment: {img.shape}")
 
             img = DiffAugment(img, policy=self.diffaugment)
-            print(f"run_D: img shape after DiffAugment: {img.shape}")
         logits = self.D(img, c, update_emas=update_emas)
-        print(f"run_D: logits shape: {logits.shape}")
         return logits
 
     def accumulate_gradients(self, phase, real_img, real_c, gen_z, gen_c, gain, cur_nimg):
