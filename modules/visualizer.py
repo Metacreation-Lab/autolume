@@ -130,6 +130,8 @@ class Visualizer:
         self.fullscreen_vbo = None
         self.window_created = False
 
+        self.fit_screen = False  # 控制是否填充屏幕
+
     def create_shader_program(self):
         try:
             vertex_shader = """
@@ -156,35 +158,28 @@ class Visualizer:
             }
             """
 
-            # 编译顶点着色器
             vs = gl.glCreateShader(gl.GL_VERTEX_SHADER)
             gl.glShaderSource(vs, vertex_shader)
             gl.glCompileShader(vs)
             
-            # 检查编译错误
             if not gl.glGetShaderiv(vs, gl.GL_COMPILE_STATUS):
                 return None
 
-            # 编译片段着色器
             fs = gl.glCreateShader(gl.GL_FRAGMENT_SHADER)
             gl.glShaderSource(fs, fragment_shader)
             gl.glCompileShader(fs)
             
-            # 检查编译错误
             if not gl.glGetShaderiv(fs, gl.GL_COMPILE_STATUS):
                 return None
 
-            # 创建并链接程序
             program = gl.glCreateProgram()
             gl.glAttachShader(program, vs)
             gl.glAttachShader(program, fs)
             gl.glLinkProgram(program)
             
-            # 检查链接错误
             if not gl.glGetProgramiv(program, gl.GL_LINK_STATUS):
                 return None
 
-            # 清理
             gl.glDeleteShader(vs)
             gl.glDeleteShader(fs)
             
@@ -199,13 +194,11 @@ class Visualizer:
         try:
             self.main_window_context = glfw.get_current_context()
             
-            # 获取主显示器
             monitor = glfw.get_primary_monitor()
             mode = glfw.get_video_mode(monitor)
             
-            # 修改窗口提示
-            glfw.window_hint(glfw.DECORATED, True)           # 改为有边框
-            glfw.window_hint(glfw.FLOATING, True)           # 浮动窗口
+            glfw.window_hint(glfw.DECORATED, False)          # 无边框
+            glfw.window_hint(glfw.FLOATING, False)           # 浮动窗口
             glfw.window_hint(glfw.MAXIMIZED, False)         # 不最大化
             glfw.window_hint(glfw.FOCUSED, True)            # 获得焦点
             glfw.window_hint(glfw.AUTO_ICONIFY, False)      # 不自动最小化
@@ -215,28 +208,119 @@ class Visualizer:
             glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 3)
             glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
             
-            # 创建一个稍小的窗口，而不是全屏大小
-            window_width = int(mode.size.width * 0.8)  # 屏幕宽度的80%
-            window_height = int(mode.size.height * 0.8)  # 屏幕高度的80%
+            window_width = int(mode.size.width * 0.8)
+            window_height = int(mode.size.height * 0.8)
             
             window = glfw.create_window(window_width, window_height, 
-                                      "Full Screen Mode (Press ESC to exit)", None, self.main_window_context)
+                                      "Preview Window (Press ESC to exit)", None, self.main_window_context)
             
             if window:
-                # 将窗口居中显示
                 x_pos = (mode.size.width - window_width) // 2
                 y_pos = (mode.size.height - window_height) // 2
                 glfw.set_window_pos(window, x_pos, y_pos)
                 
-                # 设置ESC键回调
+                self.resize_edge = None
+                self.resize_start_pos = None
+                self.resize_start_size = None
+                self.resize_start_window_pos = None
+                
+                def mouse_button_callback(window, button, action, mods):
+                    if button == glfw.MOUSE_BUTTON_LEFT:
+                        if action == glfw.PRESS:
+                            x, y = glfw.get_cursor_pos(window)
+                            win_w, win_h = glfw.get_window_size(window)
+                            win_x, win_y = glfw.get_window_pos(window)
+                            border = 8
+                            
+                            if x < border:
+                                self.resize_edge = 'left'
+                            elif x > win_w - border:
+                                self.resize_edge = 'right'
+                            elif y < border:
+                                self.resize_edge = 'top'
+                            elif y > win_h - border:
+                                self.resize_edge = 'bottom'
+                            else:
+                                self.resize_edge = None
+                                
+                            if self.resize_edge:
+                                self.resize_start_pos = (x, y)
+                                self.resize_start_size = (win_w, win_h)
+                                self.resize_start_window_pos = (win_x, win_y)
+                        else:
+                            self.resize_edge = None
+                
+                def cursor_pos_callback(window, x, y):
+                    if self.resize_edge:
+                        dx = x - self.resize_start_pos[0]
+                        dy = y - self.resize_start_pos[1]
+                        win_w, win_h = self.resize_start_size
+                        win_x, win_y = self.resize_start_window_pos
+                        
+                        new_w = win_w
+                        new_h = win_h
+                        new_x = win_x
+                        new_y = win_y
+                        
+                        if self.resize_edge == 'left':
+                            new_w = win_w - dx
+                            new_x = win_x + dx
+                        elif self.resize_edge == 'right':
+                            new_w = win_w + dx
+                        elif self.resize_edge == 'top':
+                            new_h = win_h - dy
+                            new_y = win_y + dy
+                        elif self.resize_edge == 'bottom':
+                            new_h = win_h + dy
+                        elif self.resize_edge == 'topleft':
+                            new_w = win_w - dx
+                            new_h = win_h - dy
+                            new_x = win_x + dx
+                            new_y = win_y + dy
+                        elif self.resize_edge == 'topright':
+                            new_w = win_w + dx
+                            new_h = win_h - dy
+                            new_y = win_y + dy
+                        elif self.resize_edge == 'bottomleft':
+                            new_w = win_w - dx
+                            new_h = win_h + dy
+                            new_x = win_x + dx
+                        elif self.resize_edge == 'bottomright':
+                            new_w = win_w + dx
+                            new_h = win_h + dy
+                        
+                        min_size = 200
+                        if new_w >= min_size and new_h >= min_size:
+                            glfw.set_window_pos(window, int(new_x), int(new_y))
+                            glfw.set_window_size(window, int(new_w), int(new_h))
+                    else:
+                        win_w, win_h = glfw.get_window_size(window)
+                        border = 8
+                        
+                        if x < border and y < border:
+                            glfw.set_cursor(window, glfw.create_standard_cursor(glfw.ARROW_CURSOR))
+                        elif x > win_w - border and y < border:
+                            glfw.set_cursor(window, glfw.create_standard_cursor(glfw.ARROW_CURSOR))
+                        elif x < border and y > win_h - border:
+                            glfw.set_cursor(window, glfw.create_standard_cursor(glfw.ARROW_CURSOR))
+                        elif x > win_w - border and y > win_h - border:
+                            glfw.set_cursor(window, glfw.create_standard_cursor(glfw.ARROW_CURSOR))
+                        elif x < border or x > win_w - border:
+                            glfw.set_cursor(window, glfw.create_standard_cursor(glfw.HRESIZE_CURSOR))
+                        elif y < border or y > win_h - border:
+                            glfw.set_cursor(window, glfw.create_standard_cursor(glfw.VRESIZE_CURSOR))
+                        else:
+                            glfw.set_cursor(window, glfw.create_standard_cursor(glfw.ARROW_CURSOR))
+                
                 def key_callback(window, key, scancode, action, mods):
                     if key == glfw.KEY_ESCAPE and action == glfw.PRESS:
                         self.is_fullscreen_display = False
                         self.window_created = False
                 
                 glfw.set_key_callback(window, key_callback)
+                glfw.set_mouse_button_callback(window, mouse_button_callback)
+                glfw.set_cursor_pos_callback(window, cursor_pos_callback)
                 
-                # 初始化OpenGL上下文
                 glfw.make_context_current(window)
                 self.init_gl_resources()
                 glfw.make_context_current(self.main_window_context)
@@ -246,14 +330,11 @@ class Visualizer:
             return None
             
         except Exception as e:
-            print(f"创建窗口时出错: {e}")
             return None
 
     def init_gl_resources(self):
-        # 创建着色器程序
         self.fullscreen_shader = self.create_shader_program()
         
-        # 创建顶点数据
         vertices = np.array([
             # 位置          # 纹理坐标
              0.0,  0.0,    0.0, 1.0,
@@ -262,7 +343,6 @@ class Visualizer:
              0.0,  2.0,    0.0, 0.0
         ], dtype=np.float32)
         
-        # 创建和设置VAO/VBO
         self.fullscreen_vao = gl.glGenVertexArrays(1)
         self.fullscreen_vbo = gl.glGenBuffers(1)
         
@@ -288,36 +368,29 @@ class Visualizer:
             gl.glClearColor(0, 0, 0, 1)
             gl.glClear(gl.GL_COLOR_BUFFER_BIT)
             
-            # 计算保持原比例的缩放和位置
             tex_aspect = self._tex_obj.width / self._tex_obj.height
             window_aspect = window_w / window_h
             
             if window_aspect > tex_aspect:
-                # 窗口更宽，以高度为基准
                 scale_h = 1.0
                 scale_w = (tex_aspect / window_aspect)
                 offset_x = (1.0 - scale_w) / 2.0
                 offset_y = 0.0
             else:
-                # 窗口更高，以宽度为基准
                 scale_w = 1.0
                 scale_h = (window_aspect / tex_aspect)
                 offset_x = 0.0
                 offset_y = (1.0 - scale_h) / 2.0
             
-            # 使用着色器程序
             gl.glUseProgram(self.fullscreen_shader)
             
-            # 设置uniform变量
             gl.glUniform2f(gl.glGetUniformLocation(self.fullscreen_shader, "uScale"), scale_w, scale_h)
             gl.glUniform2f(gl.glGetUniformLocation(self.fullscreen_shader, "uOffset"), offset_x * 2.0 - 1.0, offset_y * 2.0 - 1.0)
             
-            # 绑定纹理
             gl.glActiveTexture(gl.GL_TEXTURE0)
             gl.glBindTexture(gl.GL_TEXTURE_2D, self._tex_obj.gl_id)
             gl.glUniform1i(gl.glGetUniformLocation(self.fullscreen_shader, "ourTexture"), 0)
             
-            # 绘制四边形
             gl.glBindVertexArray(self.fullscreen_vao)
             gl.glDrawArrays(gl.GL_TRIANGLE_FAN, 0, 4)
             
@@ -366,7 +439,6 @@ class Visualizer:
             print("No render result available to capture.")
 
     def osc_message_handler(self, address, *args):
-        # 这是处理 OSC 消息的回调函数
         print(f"[DEBUG] OSC message received at {address} with arguments: {args}")
 
 
@@ -431,29 +503,31 @@ class Visualizer:
         imgui.image(self.logo_texture.gl_id, 18 * logo_ratio, 18, tint_color=(1, 1, 1, 0.5))
 
         # Position the button in the middle
-        imgui.same_line(self.app.spacing * 25)
+        imgui.same_line(self.app.spacing * 27)
         
         # Add fullscreen toggle button
         if imgui.button("Full Screen Display" if not self.is_fullscreen_display else "Exit Full Screen"):
             if self.is_fullscreen_display:
-                # 果当前是全屏，则关闭窗口
                 self.is_fullscreen_display = False
                 if self.fullscreen_window:
                     glfw.destroy_window(self.fullscreen_window)
                     self.fullscreen_window = None
                     self.window_created = False
             else:
-                # 如果当前不是全屏，则准备创建窗口
                 self.is_fullscreen_display = True
                 self.window_created = False
 
-        imgui.same_line(self.app.spacing * 45)  # 增加间距
+        imgui.same_line(self.app.spacing * 45)
+        if imgui.button("Fit Screen" if not self.fit_screen else "Original Size"):
+            self.fit_screen = not self.fit_screen
+
+        imgui.same_line(self.app.spacing * 57)  # 增加间距
         if imgui.button('Screen Capture'):
             now = datetime.datetime.now()
             current_time_str = now.strftime("%Y-%m-%d %H-%M-%S")
             self.capture_screenshot(f'screenshots/{current_time_str}.png')
 
-        imgui.same_line(self.app.spacing * 60)  # 增加间距
+        imgui.same_line(self.app.spacing * 72)  # 增加间距
         if imgui.button('Start Recording' if not self.is_recording else 'Stop Recording'):
             if not self.is_recording:
                 now = datetime.datetime.now()
@@ -528,8 +602,15 @@ class Visualizer:
                     self._tex_obj = gl_utils.Texture(image=self._tex_img, bilinear=False, mipmap=False)
                 else:
                     self._tex_obj.update(self._tex_img)
-            zoom = min(max_w / self._tex_obj.width, max_h / self._tex_obj.height)
-            zoom = np.floor(zoom) if zoom >= 1 else zoom
+            
+            if self.fit_screen:
+                zoom_w = max_w / self._tex_obj.width
+                zoom_h = max_h / self._tex_obj.height
+                zoom = min(zoom_w, zoom_h)  # 使用较小的缩放比例以确保完整显示
+            else:
+                zoom = min(max_w / self._tex_obj.width, max_h / self._tex_obj.height)
+                zoom = np.floor(zoom) if zoom >= 1 else zoom
+            
             self._tex_obj.draw(pos=pos, zoom=zoom, align=0.5, rint=True)
         if 'error' in self.result:
             self.print_error(self.result.error)
@@ -544,7 +625,6 @@ class Visualizer:
 
 
         
-        # 处理全屏显示
         if self.is_fullscreen_display:
             if not self.window_created:
                 self.fullscreen_window = self.create_fullscreen_window()
@@ -554,7 +634,6 @@ class Visualizer:
                     self.is_fullscreen_display = False
             
             if self.fullscreen_window and self.window_created:
-                # 检查窗口状态
                 if glfw.window_should_close(self.fullscreen_window):
                     self.is_fullscreen_display = False
                     self.window_created = False
@@ -562,7 +641,6 @@ class Visualizer:
                     self.render_fullscreen()
                     glfw.poll_events()
         else:
-            # 清理全屏窗口
             if self.fullscreen_window:
                 glfw.destroy_window(self.fullscreen_window)
                 self.fullscreen_window = None

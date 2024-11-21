@@ -208,7 +208,7 @@ class TrainingModule:
             _, self.gamma = imgui.input_int("Gamma", self.gamma)
             _, self.snap = imgui.input_int("Number of ticks between snapshots", self.snap)
             _, self.mirror = imgui.checkbox('Mirror', self.mirror)
-            if imgui_utils.button("Done", enabled=1):
+            if imgui_utils.button("Stop Training", enabled=1):
                 imgui.close_current_popup()
             imgui.end_popup()
 
@@ -290,7 +290,7 @@ class TrainingModule:
             if self.image_path != '':
                 imgui.text("Current sample of fake imagery")
                 imgui.image(self.grid_texture.gl_id, self.menu.app.content_width // 1.7, (self.menu.app.content_height // 1.7))
-            if imgui_utils.button("Done", enabled=1):
+            if imgui_utils.button("Stop Training", enabled=1):
                 self.queue.put('done')
                 self.done_button = True
             if self.done:
