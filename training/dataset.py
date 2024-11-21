@@ -123,24 +123,17 @@ class Dataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         image = self._load_raw_image(self._raw_idx[idx])
-        print(f"Original image shape: {image.shape}")  # 调试信息
         assert isinstance(image, np.ndarray)
 
-        # 如果是灰度图，将其转换为RGB
         if image.shape[0] == 1:
             image = np.repeat(image, 3, axis=0)
-            print("Converted grayscale to RGB")
 
-        # 如果图像有4个通道（RGBA），转换为3通道（RGB）
         if image.shape[0] == 4:
             image = image[:3, :, :]
-            print("Converted RGBA to RGB")
         image_shape = (3, self.width, self.height) if self.height is not None and self.width is not None else self.image_shape
         
-        print(f"Target image shape: {image_shape}")  # 调试信息
         if list(image.shape) != self.image_shape:
             image = cv2.resize(image.transpose(1,2,0), dsize=self.image_shape[-2:], interpolation=cv2.INTER_CUBIC).transpose(2,0,1)
-            print(f"Resized image shape: {image.shape}")  # 调试信息
         assert list(image.shape) == self.image_shape
         assert image.dtype == np.uint8
         if self._xflip[idx]:
@@ -328,11 +321,9 @@ class ImageFolderDataset(Dataset):
         self.resize_mode = resize_mode
         self.frame_path = set()
         
-        # 检查路径是否存在
         if not os.path.exists(self._path):
             raise IOError(f'Path does not exist: {self._path}')
             
-        # 初始化文件类型
         if os.path.isdir(self._path):
             self._type = 'dir'
         elif self._file_ext(self._path) == '.zip':
@@ -341,19 +332,17 @@ class ImageFolderDataset(Dataset):
         else:
             raise IOError('Path must point to a directory or zip')
 
-        # 首先扫描并处理视频文件
         video_files = []
         if self._type == 'dir':
             for root, _, files in os.walk(self._path):
                 for fname in files:
-                    if fname.endswith(('.mp4', '.avi', '.gif')):
+                    if fname.endswith(('.mp4', '.avi', '.gif','.MOV','.mov','.mkv')):
                         video_files.append(os.path.join(root, fname))
         elif self._type == 'zip':
             for fname in self._zipfile.namelist():
-                if fname.endswith(('.mp4', '.avi', '.gif')):
+                if fname.endswith(('.mp4', '.avi', '.gif','.MOV','.mov','.mkv')):
                     video_files.append(fname)
 
-        # 处理视频文件
         frames_extracted = False
         if video_files:
             print(f"Found {len(video_files)} video file(s), extracting frames...")
@@ -374,7 +363,6 @@ class ImageFolderDataset(Dataset):
                     if not os.path.exists(save_path):
                         os.makedirs(save_path)
                     
-                    # 使用ffmpeg提取帧
                     cmd = f'ffmpeg -i "{video_path}" -vf fps={fps} "{save_path}/%04d.jpg"'
                     print(f"Executing command: {cmd}")
                     result = os.system(cmd)
@@ -384,7 +372,6 @@ class ImageFolderDataset(Dataset):
                         self.frame_path.add(save_path)
                         frames_extracted = True
                         
-                        # 验证提取的帧
                         extracted_frames = [f for f in os.listdir(save_path) if f.endswith(('.jpg', '.png'))]
                         if not extracted_frames:
                             print(f"Warning: No frames were extracted from {video_path}")
@@ -397,12 +384,10 @@ class ImageFolderDataset(Dataset):
                     print(f"Error processing video {video_path}: {str(e)}")
                     traceback.print_exc()
                 finally:
-                    # 清理临时文件
                     if self._type == 'zip' and 'temp_dir' in locals():
                         import shutil
                         shutil.rmtree(temp_dir)
 
-        # 重新扫描目录获取所有文件（包括提取的帧）
         if self._type == 'dir':
             self._all_fnames = {os.path.relpath(os.path.join(root, fname), start=self._path) 
                                for root, _dirs, files in os.walk(self._path) 
@@ -410,12 +395,10 @@ class ImageFolderDataset(Dataset):
         else:  # zip
             self._all_fnames = set(self._zipfile.namelist())
 
-        # 初始化图片文件列表
         PIL.Image.init()
         self._image_fnames = sorted(fname for fname in self._all_fnames 
                                   if self._file_ext(fname) in PIL.Image.EXTENSION)
         
-        # 检查是否有可用的图片文件
         if len(self._image_fnames) == 0:
             if video_files:
                 if frames_extracted:
@@ -427,12 +410,10 @@ class ImageFolderDataset(Dataset):
 
         print(f"Found {len(self._image_fnames)} image files")
         
-        # 初始化数据集参数
         name = os.path.splitext(os.path.basename(self._path))[0]
         img_shape = [3, self.height, self.width] if self.width is not None and self.height is not None else list(self._load_raw_image(0).shape)
         raw_shape = [len(self._image_fnames)] + img_shape
         
-        # 调用父类初始化
         super().__init__(name=name, raw_shape=raw_shape, **super_kwargs)
 
     @staticmethod
@@ -496,21 +477,15 @@ class ImageFolderDataset(Dataset):
 
     def __getitem__(self, idx):
         image = self._load_raw_image(self._raw_idx[idx])
-        print(f"Original image shape: {image.shape}")  # 调试信息
         assert isinstance(image, np.ndarray)
-        # 如果是灰度图，将其转换为RGB
         if image.shape[0] == 1:
             image = np.repeat(image, 3, axis=0)
-            print("Converted grayscale to RGB")
         if image.shape[0] == 4:
             image = image[:3, :, :]
-            print("Converted RGBA to RGB")
         image_shape = (3, self.width, self.height) if self.height is not None and self.width is not None else self.image_shape
-        print(f"Target image shape: {image_shape}")  # 调试信息
         if list(image.shape) != image_shape:
             if self.resize_mode == "stretch":
                 image = cv2.resize(image.transpose(1,2,0), dsize=image_shape[-2:], interpolation=cv2.INTER_CUBIC).transpose(2,0,1)
-                print(f"Resized image shape: {image.shape}")  # 调试信息
             else:
                 image = image.transpose(1, 2, 0)
                 pil_image = PIL.Image.fromarray(image.astype(np.uint8))  # Convert NumPy array to PIL Image
@@ -519,7 +494,6 @@ class ImageFolderDataset(Dataset):
                 crop_transform  = torchvision.transforms.CenterCrop((self.height, self.width))  # Target size
                 cropped_image = crop_transform(resized_image )  # Perform the center crop
                 image = np.array(cropped_image)  # Convert back to NumPy array
-                print(f"Resized image shape (center crop): {image.shape}")
                 image = image.transpose(2,0,1)
         assert list(image.shape) == self.image_shape
         assert image.dtype == np.uint8
@@ -531,7 +505,6 @@ class ImageFolderDataset(Dataset):
     def save_resized(self, path):
         for idx in np.arange(self.__len__()):
             img, label = self.__getitem__(idx)
-            print(f"Saving resized image {idx}: shape {img.shape}")  # 添加调试信息
             img = PIL.Image.fromarray(img.astype(np.uint8).transpose(1,2,0), 'RGB')
             if not os.path.exists(path+str('/resized_images')):
                 os.mkdir(path+str('/resized_images'))

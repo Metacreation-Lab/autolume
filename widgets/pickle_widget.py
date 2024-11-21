@@ -154,7 +154,8 @@ class PickleWidget:
 
         if imgui.begin_popup('browse_pkls_popup'):
             for pkl in self.browse_cache:
-                clicked, _state = imgui.menu_item(pkl)
+                pkl_name = os.path.basename(pkl)
+                clicked, _state = imgui.menu_item(pkl_name)
                 if clicked:
                     self.load_pkl(pkl, ignore_errors=True)
 
