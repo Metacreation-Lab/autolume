@@ -130,7 +130,7 @@ class Visualizer:
         self.fullscreen_vbo = None
         self.window_created = False
 
-        self.fit_screen = False  # 控制是否填充屏幕
+        self.fit_screen = False  
 
     def create_shader_program(self):
         try:
@@ -197,19 +197,19 @@ class Visualizer:
             monitor = glfw.get_primary_monitor()
             mode = glfw.get_video_mode(monitor)
             
-            glfw.window_hint(glfw.DECORATED, False)          # 无边框
-            glfw.window_hint(glfw.FLOATING, False)           # 浮动窗口
-            glfw.window_hint(glfw.MAXIMIZED, False)         # 不最大化
-            glfw.window_hint(glfw.FOCUSED, True)            # 获得焦点
-            glfw.window_hint(glfw.AUTO_ICONIFY, False)      # 不自动最小化
-            glfw.window_hint(glfw.RESIZABLE, True)          # 可调整大小
-            glfw.window_hint(glfw.VISIBLE, True)            # 可见
+            glfw.window_hint(glfw.DECORATED, True)           
+            glfw.window_hint(glfw.FLOATING, False)           
+            glfw.window_hint(glfw.MAXIMIZED, False)          
+            glfw.window_hint(glfw.FOCUSED, True)             
+            glfw.window_hint(glfw.AUTO_ICONIFY, False)       
+            glfw.window_hint(glfw.RESIZABLE, True)           
+            glfw.window_hint(glfw.VISIBLE, True)             
             glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
             glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 3)
             glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
             
-            window_width = int(mode.size.width * 0.8)
-            window_height = int(mode.size.height * 0.8)
+            window_width = int(mode.size.width * 1.0)
+            window_height = int(mode.size.height * 0.95)
             
             window = glfw.create_window(window_width, window_height, 
                                       "Preview Window (Press ESC to exit)", None, self.main_window_context)
@@ -330,6 +330,9 @@ class Visualizer:
             return None
             
         except Exception as e:
+            print(f"Error creating window: {e}")
+            if 'window' in locals() and window:
+                glfw.destroy_window(window)
             return None
 
     def init_gl_resources(self):
@@ -503,7 +506,7 @@ class Visualizer:
         imgui.image(self.logo_texture.gl_id, 18 * logo_ratio, 18, tint_color=(1, 1, 1, 0.5))
 
         # Position the button in the middle
-        imgui.same_line(self.app.spacing * 27)
+        imgui.same_line(self.app.spacing * 54)
         
         # Add fullscreen toggle button
         if imgui.button("Full Screen Display" if not self.is_fullscreen_display else "Exit Full Screen"):
@@ -517,17 +520,17 @@ class Visualizer:
                 self.is_fullscreen_display = True
                 self.window_created = False
 
-        imgui.same_line(self.app.spacing * 45)
-        if imgui.button("Fit Screen" if not self.fit_screen else "Original Size"):
+        imgui.same_line(self.app.spacing * 72)
+        if imgui.button("Fit Screen" if not self.fit_screen else "Raw Scale"):
             self.fit_screen = not self.fit_screen
 
-        imgui.same_line(self.app.spacing * 57)  # 增加间距
+        imgui.same_line(self.app.spacing * 82)  # 增加间距
         if imgui.button('Screen Capture'):
             now = datetime.datetime.now()
             current_time_str = now.strftime("%Y-%m-%d %H-%M-%S")
             self.capture_screenshot(f'screenshots/{current_time_str}.png')
 
-        imgui.same_line(self.app.spacing * 72)  # 增加间距
+        imgui.same_line(self.app.spacing * 97)  # 增加间距
         if imgui.button('Start Recording' if not self.is_recording else 'Stop Recording'):
             if not self.is_recording:
                 now = datetime.datetime.now()
@@ -536,13 +539,13 @@ class Visualizer:
             else:
                 self.stop_recording()
 
-        # calculate metacreation shape ratio
-        metacreation_ratio = self.metacreation.shape[1] / self.metacreation.shape[0]
-        # metacreation with height of 30px centered in y axis
-        imgui.same_line(self.pane_w - ((18 * metacreation_ratio) + (self.app.spacing * 6)))
-        imgui.set_cursor_pos_y(18 - (18 / 2))
-        imgui.image(self.metacreation_texture.gl_id, 18 * metacreation_ratio, 18, tint_color=(1, 1, 1, 0.5))
-        imgui.set_cursor_pos_y(36 + self.app.spacing)
+        # # calculate metacreation shape ratio
+        # metacreation_ratio = self.metacreation.shape[1] / self.metacreation.shape[0]
+        # # metacreation with height of 30px centered in y axis
+        # imgui.same_line(self.pane_w - ((18 * metacreation_ratio) + (self.app.spacing * 6)))
+        # imgui.set_cursor_pos_y(18 - (18 / 2))
+        # imgui.image(self.metacreation_texture.gl_id, 18 * metacreation_ratio, 18, tint_color=(1, 1, 1, 0.5))
+        # imgui.set_cursor_pos_y(36 + self.app.spacing)
         # Widgets.
         expanded, _visible = imgui_utils.collapsing_header('Network & latent', default=True)
         self.pickle_widget(expanded)
