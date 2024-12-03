@@ -527,6 +527,10 @@ class Visualizer:
             current_time_str = now.strftime("%Y-%m-%d %H-%M-%S")
             self.capture_screenshot(f'screenshots/{current_time_str}.png')
 
+        if self.is_recording and 'image' in self.result:
+            frame = cv2.cvtColor(self.result.image, cv2.COLOR_RGB2BGR)
+            self.frame_queue.put(frame)
+
         imgui.same_line(self.app.spacing * 72)  # 增加间距
         if imgui.button('Start Recording' if not self.is_recording else 'Stop Recording'):
             if not self.is_recording:
