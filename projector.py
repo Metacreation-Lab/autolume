@@ -85,24 +85,31 @@ def main(
         not skip_kmeans
     ))
 
-    # Run the projection
+    # Run the projection in a separate process
+    process = mp.Process(target=run_projection, args=(queue, reply_queue))
+    process.start()
+
     try:
-        run_projection(queue, reply_queue)
         while True:
-            message, image, done, video_done = reply_queue.get()
-            if message:
-                click.echo(message)
-            if done or video_done:
-                break
+            if not reply_queue.empty():
+                message, image, done, video_done = reply_queue.get()
+                if message:
+                    click.echo(message)
+                if (not save_video and done) or video_done:
+                    break
             
     except KeyboardInterrupt:
         click.echo("\nInterrupted by user. Stopping projection...")
-        queue.put(True)  # Signal to stop the projection
+        queue.put(True)
         
     finally:
-        # Cleanup
+        process.join(timeout=3)
+        if process.is_alive():
+            process.terminate()
         queue.close()
         reply_queue.close()
+        queue.join_thread()
+        reply_queue.join_thread()
 
 if __name__ == "__main__":
     main()
