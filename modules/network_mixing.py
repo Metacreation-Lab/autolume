@@ -12,6 +12,7 @@ import pickle
 import glob
 import os
 import re
+import pandas as pd
 
 
 def _locate_results(pattern):
@@ -28,6 +29,32 @@ def extract_mapping_names(model):
     return model_names
 
 
+def load_help_texts():
+    default_texts = {
+        "model1_network_mixing": "First model to mix from",
+        "model2_network_mixing": "Second model to mix from",
+        "output_name_network_mixing": "Name for the combined model",
+        "resolution_layers_network_mixing": "Layer groups by resolution",
+        "model_selection_network_mixing": "Select which model's weights to use for each layer",
+        "recover_network_mixing": "Restore previous layer settings",
+        "disable_network_mixing": "Disable layers from this point"
+    }
+
+    try:
+        excel_path = os.path.join(os.path.dirname(os.path.dirname(__file__)),"assets", "help_contents.xlsx")
+        if os.path.exists(excel_path):
+            df = pd.read_excel(excel_path, engine='openpyxl')
+            for _, row in df.iterrows():
+                if pd.notna(row['key']) and pd.notna(row['text']):
+                    key = str(row['key']).strip()
+                    default_texts[key] = str(row['text'])
+            print(f"Successfully loaded network mixing help texts from: {excel_path}")
+    except Exception as e:
+        print(f"Warning: Using default network mixing help texts. Error: {e}")
+    
+    return default_texts
+
+
 class MixingModule:
 
     def __init__(self, menu):
@@ -42,13 +69,14 @@ class MixingModule:
         self.model2 = ""
         self.pkl2 = None
         self.data2 = None
-
+        # self.show_help = False
+        
         self.browse_refocus = False
-
         self.models = []
         self.combined_layers = []
         self.collapsed = []
         self.cached_layers = []
+        self.help_texts = load_help_texts()
 
         for pkl in os.listdir("./models"):
             if pkl.endswith(".pkl"):
@@ -188,9 +216,34 @@ class MixingModule:
 
     @imgui_utils.scoped_by_object_id
     def __call__(self):
+        help_width = imgui.calc_text_size("(?)").x + 10
+        button_width = self.app.button_w
+        spacing = self.app.spacing
+        input_width = -(button_width + spacing + help_width + 30)
+
+        # imgui.begin_group()
+        # imgui.text("Combine two models into one")
+        # imgui.same_line()
+        # remaining_width = imgui.get_content_region_available_width()
+        # imgui.dummy(remaining_width - 60, 0)  
+        # imgui.same_line()
+        # if imgui_utils.button("Help", width=50):
+        #     self.show_help = not self.show_help
+        # imgui.end_group()
+
+        imgui.begin_group()
+        imgui.text("Mix two models together")
+        imgui.end_group()
+
         self.model_selection_gui("Model 1", 1)
+        if self.menu.show_help and imgui.is_item_hovered():
+            imgui.set_tooltip(self.help_texts.get("model1_network_mixing", "Select first model"))
+        
         imgui.same_line()
         self.model_selection_gui("Model 2", 2)
+        if self.menu.show_help and imgui.is_item_hovered():
+            imgui.set_tooltip(self.help_texts.get("model2_network_mixing", "Select second model"))
+
         if imgui_utils.button("Combine", enabled=self.pkl1 and self.pkl2,
                               width=imgui.get_content_region_available_width()):
             imgui.set_next_window_size(800, 800)
@@ -221,9 +274,14 @@ class MixingModule:
 
             imgui.separator()
 
-            _, self.output_name = imgui_utils.input_text("##network_mixing_pkl", self.output_name, 1024,
-                                                         help_text="Name of the output model",
-                                                         flags=(imgui.INPUT_TEXT_AUTO_SELECT_ALL))
+            _, self.output_name = imgui_utils.input_text("##network_mixing_pkl", 
+                                                        self.output_name, 
+                                                        1024,
+                                                        help_text="Name of the output model",
+                                                        width=input_width,
+                                                        flags=(imgui.INPUT_TEXT_AUTO_SELECT_ALL))
+            if self.menu.show_help and imgui.is_item_hovered():
+                imgui.set_tooltip(self.help_texts.get("output_name_network_mixing", "Enter output model name"))
             imgui.same_line()
             imgui.text(".pkl")
             imgui.same_line()
@@ -236,13 +294,23 @@ class MixingModule:
             imgui.end_popup()
 
     def display_layers(self, layer1, layer2):
-        imgui.begin_group()
-        imgui.set_cursor_pos((imgui.get_content_region_available_width() // 3, imgui.get_cursor_pos()[1]))
-        imgui.text(os.path.basename(self.model1))
-        imgui.same_line(imgui.get_content_region_available_width() // 3 * 2)
-        imgui.text(os.path.basename(self.model2))
-        imgui.separator()
         res_exp = 2
+        help_width = imgui.calc_text_size("(?)").x + 10
+        button_width = self.app.button_w
+        
+        imgui.begin_group()
+        imgui.set_cursor_pos((imgui.get_content_region_available_width() // 3 - help_width, imgui.get_cursor_pos()[1]))
+        imgui.text(os.path.basename(self.model1))
+        if self.menu.show_help and imgui.is_item_hovered():
+            imgui.set_tooltip(self.help_texts.get("model_selection_network_mixing", "Select layers from first model"))
+        
+        imgui.same_line(imgui.get_content_region_available_width() // 3 * 2 - help_width)
+        imgui.text(os.path.basename(self.model2))
+        if self.menu.show_help and imgui.is_item_hovered():
+            imgui.set_tooltip(self.help_texts.get("model_selection_network_mixing", "Select layers from second model"))
+        
+        imgui.separator()
+        # 在分辨率组标题中添加帮助标记
         for i, (l1, l2) in enumerate(zip(layer1, layer2)):
             resolution = 2 ** res_exp
             l1_res = 0
@@ -253,17 +321,26 @@ class MixingModule:
                 l2_res = int(re.search(r'\d+', l2).group())
 
             if l1_res == resolution or l2_res == resolution:
-                imgui.begin_child(f"##{resolution}_global", 0, 14 * 16 if self.collapsed[i] == "v" else 14 * 2.3,
-                                  border=True,
-                                  flags=imgui.WINDOW_NO_SCROLLBAR if self.collapsed[i] == ">" else 0)
+                imgui.begin_child(f"##{resolution}_global", 
+                                0, 
+                                14 * 16 if self.collapsed[i] == "v" else 14 * 2.3,
+                                border=True,
+                                flags=imgui.WINDOW_NO_SCROLLBAR if self.collapsed[i] == ">" else 0)
+                
                 imgui.text(self.collapsed[i])
                 if imgui.is_item_clicked():
                     self.collapsed[i] = ">" if self.collapsed[i] == "v" else "v"
+
                 imgui.same_line()
                 imgui.text(f"Resolution {resolution} x {resolution}")
                 if imgui.is_item_clicked():
                     self.collapsed[i] = ">" if self.collapsed[i] == "v" else "v"
+
+                if self.menu.show_help and imgui.is_item_hovered():
+                    imgui.set_tooltip(self.help_texts.get("resolution_layers_network_mixing", f"Layers at {resolution}x{resolution} resolution"))
+
                 if self.collapsed[i] == ">":
+                    imgui.same_line(imgui.get_content_region_available_width() // 3 - help_width)
 
                     # Check if all the layers with the res in the name are already set to Model A or Model B and display if so otherwise display mixed
                     layer1_matches, layer2_matches = [], []
@@ -326,11 +403,15 @@ class MixingModule:
                                 # deal with the last resolution
                                 if j == len(layer1) - 1:
                                     self.combined_layers = copy.deepcopy(self.cached_layers)
+                        if self.menu.show_help and imgui.is_item_hovered():
+                            imgui.set_tooltip(self.help_texts.get("recover_network_mixing", "Restore previous settings"))
                     else:
                         if imgui.button(f"X##{i}"):
                             self.cached_layers[:i] = copy.deepcopy(self.combined_layers[:i])
                             self.combined_layers[i] = "X"
                             self.combined_layers[i + 1:] = ["X"] * (len(self.combined_layers) - i - 1)
+                        if self.menu.show_help and imgui.is_item_hovered():
+                            imgui.set_tooltip(self.help_texts.get("disable_network_mixing", "Disable from this point"))
                 else:
                     imgui.same_line(imgui.get_window_width() - self.app.button_w)
                     if self.combined_layers[i] == "X":

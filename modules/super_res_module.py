@@ -17,15 +17,43 @@ import multiprocessing as mp
 import gc
 
 from widgets.browse_widget import BrowseWidget
+import pandas as pd
 
 args = EasyDict(result_path="", input_path=[""], model_type="Balance",
                 outscale=3, width=4096, height=4096, sharpen_scale=1, scale_mode=0)
 scale_factor = ['1', '2', '3', '4', '5', '6', '7', '8']
 
 
+def load_help_texts():
+    default_texts = {
+        "input_path_super_res": "Input image or video files to enhance",
+        "result_path_super_res": "Directory to save enhanced results",
+        "model_type_super_res": "Model type: Quality (best quality, slowest), Balance (balanced), Fast (fastest)",
+        "scale_mode_super_res": "Choose between custom resolution or scale factor",
+        "scale_factor_super_res": "Scale factor for output resolution",
+        "width_super_res": "Custom output width in pixels",
+        "height_super_res": "Custom output height in pixels",
+        "sharpening_super_res": "Additional sharpening strength (1 = normal, higher = sharper)"
+    }
+
+    try:
+        excel_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets","help_contents.xlsx")
+        if os.path.exists(excel_path):
+            df = pd.read_excel(excel_path, engine='openpyxl')
+            for _, row in df.iterrows():
+                if pd.notna(row['key']) and pd.notna(row['text']):
+                    key = str(row['key']).strip()
+                    default_texts[key] = str(row['text'])
+            print(f"Successfully loaded super resolution help texts from: {excel_path}")
+    except Exception as e:
+        print(f"Warning: Using default super resolution help texts. Error: {e}")
+    
+    return default_texts
+
+
 class SuperResModule:
     def __init__(self, menu):
-        self.result_path=args.result_path
+        self.result_path = args.result_path
         self.input_path = args.input_path
         self.models = ['Quality','Balance','Fast']
         self.model_selected = 0
@@ -36,6 +64,7 @@ class SuperResModule:
         self.sharpen = args.sharpen_scale
         self.menu = menu
         self.app = menu.app
+        # self.show_help = False  
         self.file_dialog = BrowseWidget(self, "Browse", os.path.abspath(os.getcwd()), ["*", ".mp4", ".avi", ".jpg", ".png", ".jpeg", ".bmp"], traverse_folders=True, width=self.app.button_w)
         self.save_path_dialog = BrowseWidget(self, "Save Path", os.path.abspath(os.getcwd()), [""], multiple=False, traverse_folders=False, add_folder_button=True,  width=self.app.button_w)
         self.scale_mode = 0
@@ -51,6 +80,7 @@ class SuperResModule:
         self.eta = -1
         self.video_width = 0
         self.video_height = 0
+        self.help_texts = load_help_texts()
 
 
     def display_progress(self):
@@ -72,20 +102,58 @@ class SuperResModule:
 
     @imgui_utils.scoped_by_object_id
     def __call__(self):
+        help_width = imgui.calc_text_size("(?)").x + 10
+        button_width = self.app.button_w
+        spacing = self.app.spacing
+        input_width = -(button_width + spacing + help_width + 30)
+
+        # imgui.begin_group()
+        # imgui.text("Use AI to upscale your images and videos")
+        # imgui.same_line()
+        # remaining_width = imgui.get_content_region_available_width()
+        # imgui.dummy(remaining_width - 60, 0)  
+        # imgui.same_line()
+        # if imgui_utils.button("Help", width=50):
+        #     self.show_help = not self.show_help
+        # imgui.end_group()
+
+        imgui.begin_group()
+        imgui.text("Use AI to upscale your images and videos")
+        imgui.end_group()
+
         if self.running:
             self.display_progress()
 
+        # Input path
         joined = '\n'.join(self.input_path)
-        imgui_utils.input_text("##SRINPUT", joined, 1024, flags=imgui.INPUT_TEXT_READ_ONLY, width=-(self.app.button_w + self.app.spacing), help_text="Input Files")
+        imgui_utils.input_text("##SRINPUT", joined, 1024, 
+                              flags=imgui.INPUT_TEXT_READ_ONLY, 
+                              width=input_width, 
+                              help_text="Input Files")
+        if self.menu.show_help and imgui.is_item_hovered():
+            imgui.set_tooltip(self.help_texts.get("input_path_super_res", "Select input files"))
+        
         imgui.same_line()
-        _clicked, input = self.file_dialog(self.app.button_w)
+        _clicked, input = self.file_dialog(button_width)
         if _clicked:
             self.input_path = input
             print(self.input_path)
 
-        imgui_utils.input_text("##SRRESULT", self.result_path, 1024, flags=imgui.INPUT_TEXT_READ_ONLY, width=-(self.app.button_w + self.app.spacing), help_text="Result Path")
+        if self.menu.show_help and imgui.is_item_hovered():
+            imgui.set_tooltip(self.help_texts.get("input_path_super_res", "Select input files"))
+
+        # Result path
+        imgui_utils.input_text("##SRRESULT", self.result_path, 1024, 
+                              flags=imgui.INPUT_TEXT_READ_ONLY, 
+                              width=input_width, 
+                              help_text="Result Path")
+        if self.menu.show_help and imgui.is_item_hovered():
+            imgui.set_tooltip(self.help_texts.get("result_path_super_res", "Select output directory"))
+        
         imgui.same_line()
-        _clicked, save_path = self.save_path_dialog(self.app.button_w)
+        _clicked, save_path = self.save_path_dialog(button_width)
+        if self.menu.show_help and imgui.is_item_hovered():
+            imgui.set_tooltip(self.help_texts.get("result_path_super_res", "Select output directory"))
         if _clicked:
             if len(save_path) > 0:
                 self.result_path = save_path[0]
@@ -95,29 +163,49 @@ class SuperResModule:
                 print("No path selected")
         self.models = ['Quality','Balance','Fast']
         if len(self.models) > 0:
-            with imgui_utils.item_width(-(self.app.button_w + self.app.spacing)):
+
+            # Model selection
+            with imgui_utils.item_width(input_width):
                 _, self.model_selected = imgui.combo("Model", self.model_selected, self.models)
-            self.model_type = self.models[self.model_selected]
-        with imgui_utils.item_width(-(self.app.button_w + self.app.spacing)):
+                if self.menu.show_help and imgui.is_item_hovered():
+                    imgui.set_tooltip(self.help_texts.get("model_type_super_res", "Select model type"))
+                self.model_type = self.models[self.model_selected]
+
+        # Scale mode
+        with imgui_utils.item_width(input_width):
             clicked, self.scale_mode = imgui.combo("Scale Mode", self.scale_mode, ["Custom", "Scale"])
+            if self.menu.show_help and imgui.is_item_hovered():
+                imgui.set_tooltip(self.help_texts.get("scale_mode_super_res", "Choose scaling method"))
         if clicked:
             print(self.scale_mode)
+
+        # Scale factor or custom resolution
         if self.scale_mode:
-
-            with imgui_utils.item_width(-(self.app.button_w + self.app.spacing)):
+            with imgui_utils.item_width(input_width):
                 _, self.out_scale = imgui.combo("Scale Factor", self.out_scale, scale_factor)
+                if self.menu.show_help and imgui.is_item_hovered():
+                    imgui.set_tooltip(self.help_texts.get("scale_factor_super_res", "Select output scale"))
         else:
-
-            with imgui_utils.item_width(-(self.app.button_w + self.app.spacing)):
+            with imgui_utils.item_width(input_width):
                 _, self.height = imgui.input_int("Height", self.height)
+                if self.menu.show_help and imgui.is_item_hovered():
+                    imgui.set_tooltip(self.help_texts.get("height_super_res", "Set output height"))
+                
                 _, self.width = imgui.input_int("Width", self.width)
+                if self.menu.show_help and imgui.is_item_hovered():
+                    imgui.set_tooltip(self.help_texts.get("width_super_res", "Set output width"))
 
-        with imgui_utils.item_width(-(self.app.button_w + self.app.spacing)):
+        # Sharpening
+        with imgui_utils.item_width(input_width):
             _, self.sharpen = imgui.input_int("Sharpening", self.sharpen)
-        if self.sharpen<1:
-            self.sharpen=1
-        if imgui.is_item_hovered():
+            if self.menu.show_help and imgui.is_item_hovered():
+                imgui.set_tooltip(self.help_texts.get("sharpening_super_res", "Set sharpening strength"))
+        if self.sharpen < 1:
+            self.sharpen = 1
+        if self.menu.show_help and imgui.is_item_hovered():
             imgui.set_tooltip("Additional sharpening performed after super resolution")
+
+
         try:
             if imgui.button("Super Resolution", width=imgui.get_content_region_available_width()) and not self.running:
                 self.running = True
@@ -136,6 +224,9 @@ class SuperResModule:
 
         except Exception as e:
             print("SRR ERROR", e)
+
+
+
 
     def start_super_res(self):
         self.start_time = time.time()
@@ -271,7 +362,7 @@ class SuperResModule:
     def perform_super_res(self):
         self.start_time = time.time()
 
-        # 确保只有当super_res_idx为0时，才开始处理新的文件
+        # 确保只有当super_res_idx为0时，才开始处理新的文��
         if self.super_res_idx == 0:
             file = self.files[self.file_idx]
             self.start_time = time.time()
