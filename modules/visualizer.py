@@ -39,12 +39,41 @@ import NDIlib as ndi
 import glfw
 from OpenGL import GL as gl
 import ctypes
+import pandas as pd
+import os
 
 #----------------------------------------------------------------------------
+def load_help_texts():
+    default_texts = {
+        "network_latent": "Network & latent settings for controlling the model and latent space",
+        "diversity_noise": "Controls for diversity and noise generation",
+        "looping": "Settings for creating animation loops",
+        "performance_osc": "Performance settings and OSC communication options",
+        "adjust_input": "Tools for adjusting input parameters",
+        "layer_transform": "Controls for layer-wise transformations",
+        "model_mixing": "Settings for mixing multiple models",
+        "presets": "Save and load parameter presets",
+        "audio": "Audio input and visualization settings"
+    }
+
+    try:
+        excel_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets","help_contents.xlsx")
+        if os.path.exists(excel_path):
+            df = pd.read_excel(excel_path, engine='openpyxl')
+            for _, row in df.iterrows():
+                if pd.notna(row['key']) and pd.notna(row['text']):
+                    key = str(row['key']).strip()
+                    default_texts[key] = str(row['text'])
+            print(f"Successfully loaded visualizer help texts from: {excel_path}")
+    except Exception as e:
+        print(f"Warning: Using default visualizer help texts. Error: {e}")
+    
+    return default_texts
 
 class Visualizer:
     def __init__(self, app, renderer):
         self.app = app
+        self.help_texts = load_help_texts()
 
         #COMMUNICATIONS
         self.has_microphone = False
@@ -131,7 +160,8 @@ class Visualizer:
         self.window_created = False
 
         self.fit_screen = False  
-
+        self.show_help = False  # 添加显示帮助的状态标志
+    
     def create_shader_program(self):
         try:
             vertex_shader = """
@@ -339,7 +369,7 @@ class Visualizer:
         self.fullscreen_shader = self.create_shader_program()
         
         vertices = np.array([
-            # 位置          # 纹理坐标
+            # 位置          # ��理坐标
              0.0,  0.0,    0.0, 1.0,
              2.0,  0.0,    1.0, 1.0,
              2.0,  2.0,    1.0, 0.0,
@@ -506,6 +536,11 @@ class Visualizer:
         imgui.image(self.logo_texture.gl_id, 18 * logo_ratio, 18, tint_color=(1, 1, 1, 0.5))
 
         # Position the button in the middle
+        imgui.same_line(self.app.spacing * 44)  
+        if imgui_utils.button("Help On" if not self.show_help else "Help Off", width=80):
+            self.show_help = not self.show_help
+
+
         imgui.same_line(self.app.spacing * 54)
         
         # Add fullscreen toggle button
@@ -547,26 +582,75 @@ class Visualizer:
         # imgui.image(self.metacreation_texture.gl_id, 18 * metacreation_ratio, 18, tint_color=(1, 1, 1, 0.5))
         # imgui.set_cursor_pos_y(36 + self.app.spacing)
         # Widgets.
-        expanded, _visible = imgui_utils.collapsing_header('Network & latent', default=True)
+        # expanded, _visible = imgui_utils.collapsing_header('Network & latent', default=True)
+        # self.pickle_widget(expanded)
+        # self.latent_widget(expanded)
+        # expanded, _visible = imgui_utils.collapsing_header('Diversity & Noise', default=True)
+        # self.trunc_noise_widget(expanded)
+        # expanded, _visible = imgui_utils.collapsing_header('Looping', default=True)
+        # self.looping_widget(expanded)
+        # expanded, _visible = imgui_utils.collapsing_header('Performance & OSC', default=True)
+        # self.perf_widget(expanded)
+        # expanded, _visible = imgui_utils.collapsing_header('Adjust Input', default=True)
+        # self.adjuster_widget(expanded)
+        # expanded, _visible = imgui_utils.collapsing_header('Layer Transformations', default=True)
+        # self.collapsed_widget(expanded)
+        # expanded, _visible = imgui_utils.collapsing_header('Model Mixing', default=True)
+        # self.mixing_widget(expanded)
+        # expanded, _visible = imgui_utils.collapsing_header('Presets', default=True)
+        # self.preset_widget(expanded)
+
+        # expanded, _visible = imgui_utils.collapsing_header('Audio Module', default=True)
+        # if self.has_microphone:
+        #     self.audio_widget(expanded)
+        # else:
+        #     if expanded:
+        #         imgui.text('No microphone detected')
+        expanded, _visible = imgui_utils.collapsing_header('Network & Latent', default=True)
+        if self.show_help and imgui.is_item_hovered():
+            imgui.set_tooltip(self.help_texts.get("network_latent", "Network & latent settings"))
         self.pickle_widget(expanded)
         self.latent_widget(expanded)
+
         expanded, _visible = imgui_utils.collapsing_header('Diversity & Noise', default=True)
+        if self.show_help and imgui.is_item_hovered():
+            imgui.set_tooltip(self.help_texts.get("diversity_noise", "Diversity and noise controls"))
         self.trunc_noise_widget(expanded)
+
         expanded, _visible = imgui_utils.collapsing_header('Looping', default=True)
+        if self.show_help and imgui.is_item_hovered():
+            imgui.set_tooltip(self.help_texts.get("looping", "Animation loop settings"))
         self.looping_widget(expanded)
+
         expanded, _visible = imgui_utils.collapsing_header('Performance & OSC', default=True)
+        if self.show_help and imgui.is_item_hovered():
+            imgui.set_tooltip(self.help_texts.get("performance_osc", "Performance and OSC settings"))
         self.perf_widget(expanded)
+
         expanded, _visible = imgui_utils.collapsing_header('Adjust Input', default=True)
+        if self.show_help and imgui.is_item_hovered():
+            imgui.set_tooltip(self.help_texts.get("adjust_input", "Input adjustment tools"))
         self.adjuster_widget(expanded)
+
         expanded, _visible = imgui_utils.collapsing_header('Layer Transformations', default=True)
+        if self.show_help and imgui.is_item_hovered():
+            imgui.set_tooltip(self.help_texts.get("layer_transform", "Layer transformation controls"))
         self.collapsed_widget(expanded)
+
         expanded, _visible = imgui_utils.collapsing_header('Model Mixing', default=True)
+        if self.show_help and imgui.is_item_hovered():
+            imgui.set_tooltip(self.help_texts.get("model_mixing", "Model mixing settings"))
         self.mixing_widget(expanded)
+
         expanded, _visible = imgui_utils.collapsing_header('Presets', default=True)
+        if self.show_help and imgui.is_item_hovered():
+            imgui.set_tooltip(self.help_texts.get("presets", "Preset management"))
         self.preset_widget(expanded)
 
         expanded, _visible = imgui_utils.collapsing_header('Audio Module', default=True)
         if self.has_microphone:
+            if self.show_help and imgui.is_item_hovered():
+                imgui.set_tooltip(self.help_texts.get("audio", "Audio settings"))
             self.audio_widget(expanded)
         else:
             if expanded:
@@ -598,6 +682,18 @@ class Visualizer:
             if self._tex_img is not self.result.image:
                 self._tex_img = self.result.image
                 img = cv2.cvtColor(self._tex_img, cv2.COLOR_RGB2BGRA)
+                
+                # Recording 逻辑保持不变
+                if self.is_recording:
+                    try:
+                        frame_to_record = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+                        self.frame_queue.put(frame_to_record)
+                        self.frames_captured += 1
+                        if self.frames_captured % 30 == 0:  
+                            print(f"Captured {self.frames_captured} frames")
+                    except Exception:
+                        pass
+                
                 self.video_frame.data = img
                 self.video_frame.FourCC = ndi.FOURCC_VIDEO_TYPE_BGRX
                 ndi.send_send_video_v2(self.ndi_send, self.video_frame)
@@ -607,11 +703,17 @@ class Visualizer:
                     self._tex_obj.update(self._tex_img)
             
             if self.fit_screen:
-                zoom_w = max_w / self._tex_obj.width
+                zoom_w = max_w / self._tex_obj.width  
                 zoom_h = max_h / self._tex_obj.height
-                zoom = min(zoom_w, zoom_h)  # 使用较小的缩放比例以确保完整显示
+                zoom = min(zoom_w, zoom_h)
             else:
-                zoom = min(max_w / self._tex_obj.width, max_h / self._tex_obj.height)
+                base_zoom = min(max_w / self._tex_obj.width, max_h / self._tex_obj.height)
+                
+                if self._tex_obj.width >= 1024 or self._tex_obj.height >= 1024:
+                    zoom = base_zoom  
+                else:
+                    zoom = min(1.0, base_zoom)
+                
                 zoom = np.floor(zoom) if zoom >= 1 else zoom
             
             self._tex_obj.draw(pos=pos, zoom=zoom, align=0.5, rint=True)

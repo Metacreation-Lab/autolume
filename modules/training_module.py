@@ -12,6 +12,7 @@ from utils import dataset_tool
 from widgets.browse_widget import BrowseWidget
 import cv2
 from utils.gui_utils import gl_utils
+import pandas as pd
 
 augs = ["ADA", "DiffAUG"]
 ada_pipes = ['blit', 'geom', 'color', 'filter', 'noise', 'cutout', 'bg', 'bgc', 'bgcf', 'bgcfn', 'bgcfnc']
@@ -20,11 +21,42 @@ diffaug_pipes = ['color,translation,cutout', 'color,translation', 'color,cutout'
 configs = ['auto', 'stylegan2', 'paper256', 'paper512', 'paper1024', 'cifar']
 resize_mode = ['stretch','center crop']
 
+# Add constants for help texts
+DEFAULT_HELP_TEXTS = {
+    "save_path_training": "Path to save training results\nModel checkpoints and generated images will be saved here during training",
+    "data_path_training": "Path to the training dataset\nSupported formats:\n- Image folder\n- ZIP archive\n- Video file (.mp4/.avi)",
+    "resume_pkl_training": "Model checkpoint file (.pkl) to resume training\nLeave empty to start from scratch",
+    "augmentation_training": "Data augmentation method:\nADA - Adaptive Discriminator Augmentation\nDiffAUG - Differential Augmentation",
+    "aug_pipeline_training": "Specific configuration of the data augmentation pipeline\nDifferent augmentation methods have different options",
+    "resize_mode_training": "Method to resize images:\nstretch - Stretch to target size\ncenter crop - Center crop",
+    "batch_size_training": "Number of images per training batch\nLarger batches require more VRAM",
+    "config_training": "Preset training configurations:\nauto - Automatic configuration\nstylegan2 - Standard StyleGAN2\npaper256/512/1024 - Paper configurations\ncifar - CIFAR dataset configuration",
+    "advanced_training": "Advanced training options:\nGenerator LR - Generator learning rate\nDiscriminator LR - Discriminator learning rate\nGamma - Training stability parameter\nSnapshot - Checkpoint saving interval\nMirror - Horizontal flip of dataset",
+    "generator_lr_training": "Learning rate for the generator network",
+    "discriminator_lr_training": "Learning rate for the discriminator network",
+    "gamma_training": "Training stability parameter",
+    "snapshot_training": "Checkpoints saving interval",
+    "mirror_training": "Horizontal flip of dataset",
+}
+# 尝试从Excel加载帮助文本
+HELP_TEXTS = DEFAULT_HELP_TEXTS.copy()
+try:
+    excel_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets","help_contents.xlsx")
+    if os.path.exists(excel_path):
+        df = pd.read_excel(excel_path, engine='openpyxl')
+        for _, row in df.iterrows():
+            if pd.notna(row['key']) and pd.notna(row['text']):
+                HELP_TEXTS[str(row['key'])] = str(row['text'])
+        print(f"Successfully loaded help texts from: {excel_path}")
+except Exception as e:
+    print(f"Warning: Using default help texts. Error: {e}")
+
 class TrainingModule:
     def __init__(self, menu):
         cwd = os.getcwd()
         self.save_path = os.path.join(cwd, "training-runs")
         self.data_path = os.path.join(cwd, "data")
+        # self.show_help = False 
         # create data folder if not exists
         if not os.path.exists(os.path.abspath(os.path.join(os.getcwd(),"data"))):
             os.makedirs(os.path.abspath(os.path.join(os.getcwd(),"data")))
@@ -44,7 +76,7 @@ class TrainingModule:
         self.square = True
         self.height = self.start_res[1] * (2 ** self.height_factor)
         self.batch_size = 8
-        self.save_path_dialog = BrowseWidget(self, "Save Path", os.path.abspath(os.getcwd()), [""], multiple=False,
+        self.save_path_dialog = BrowseWidget(self, "Save Path", os.path.abspath(os.path.join(os.getcwd())), [""], multiple=False,
                                              traverse_folders=False, add_folder_button=True, width=menu.app.button_w)
 
         for pkl in os.listdir("./models"):
@@ -70,6 +102,11 @@ class TrainingModule:
         self.done_button = False
         self.image_path = ''
 
+        # Initialize non-square cropping attributes
+        self.crop_width_ratio = 16  # Default 16:9 ratio
+        self.crop_height_ratio = 9
+        self.padding_color = 0  # 0=black padding, 1=white padding
+
     @staticmethod
     def _file_ext(fname):
         return os.path.splitext(fname)[1].lower()
@@ -90,9 +127,24 @@ class TrainingModule:
 
             print(self.message, self.done)
 
+        # imgui.begin_group()
+        # imgui.text("Train a model on your own data")
+        # imgui.same_line()
+        # remaining_width = imgui.get_content_region_available_width()
+        # imgui.dummy(remaining_width - 60, 0)  
+        # imgui.same_line()
+        # if imgui_utils.button("Help", width=50):
+        #     self.show_help = not self.show_help
+        # imgui.end_group()
+
+        imgui.begin_group()
         imgui.text("Train a model on your own data")
+        imgui.end_group()
 
         _, self.save_path = imgui.input_text("Save Path", self.save_path, 1024)
+        if self.menu.show_help and imgui.is_item_hovered():
+            imgui.set_tooltip(HELP_TEXTS["save_path_training"])
+        
         imgui.same_line()
         _clicked, save_path = self.save_path_dialog(self.menu.app.button_w)
         if _clicked:
@@ -102,7 +154,13 @@ class TrainingModule:
             else:
                 self.save_path = ""
                 print("No path selected")
+        if self.menu.show_help and imgui.is_item_hovered():
+            imgui.set_tooltip(HELP_TEXTS["save_path_training"])
+
         _, self.data_path = imgui.input_text("Data Path", self.data_path, 1024)
+        if self.menu.show_help and imgui.is_item_hovered():
+            imgui.set_tooltip(HELP_TEXTS["data_path_training"])
+        
         imgui.same_line()
         _clicked, data_path = self.file_dialog(self.menu.app.button_w)
         if _clicked:
@@ -120,7 +178,6 @@ class TrainingModule:
                 self._all_fnames = {self.data_path}
             else:
                 raise IOError('Path must point to a directory or zip')
-
             self.found_video = False
             # if any file in self__all_fnames is a video create a new subfolder where we save the frames based on fps using ffmpeg
             for fname in self._all_fnames:
@@ -128,10 +185,17 @@ class TrainingModule:
                 if fname.endswith('.mp4') or fname.endswith('.avi'):
                     self.found_video = True
                     break
+        if self.menu.show_help and imgui.is_item_hovered():
+            imgui.set_tooltip(HELP_TEXTS["data_path_training"])
         _, self.resume_pkl = imgui.input_text("Resume Pkl", self.resume_pkl, 1024)
+        if self.menu.show_help and imgui.is_item_hovered():
+            imgui.set_tooltip(HELP_TEXTS["resume_pkl_training"])
+        
         imgui.same_line()
         if imgui_utils.button('Browse...', enabled=len(self.browse_cache) > 0, width=-1):
             imgui.open_popup('browse_pkls_popup_training')
+        if self.menu.show_help and imgui.is_item_hovered():
+            imgui.set_tooltip(HELP_TEXTS["resume_pkl_training"])
 
         if imgui.begin_popup('browse_pkls_popup_training'):
             for pkl in self.browse_cache:
@@ -141,10 +205,14 @@ class TrainingModule:
             imgui.end_popup()
 
         _, self.aug = imgui.combo("Augmentation", self.aug, augs)
+        if self.menu.show_help and imgui.is_item_hovered():
+            imgui.set_tooltip(HELP_TEXTS["augmentation_training"])
         if self.aug == 0:
             _, self.ada_pipe = imgui.combo("Augmentation Pipeline", self.ada_pipe, ada_pipes)
         else:
             _, self.diffaug_pipe = imgui.combo("Augmentation Pipeline", self.diffaug_pipe, diffaug_pipes)
+        if self.menu.show_help and imgui.is_item_hovered():
+            imgui.set_tooltip(HELP_TEXTS["aug_pipeline_training"])
 
         # _changed, start_res = imgui.input_int2("Start Resolution", *self.start_res)
         # if _changed:
@@ -156,34 +224,42 @@ class TrainingModule:
         #     self.img_size = start_res[0] * (2 ** self.img_factor)
         #     self.height = start_res[1] * (2 ** self.height_factor)
         _, self.resize_mode = imgui.combo("Resize Mode", self.resize_mode, resize_mode)
+        if self.menu.show_help and imgui.is_item_hovered():
+            imgui.set_tooltip(HELP_TEXTS["resize_mode_training"])
 
         imgui.input_text("Width", str(self.img_size), 512,flags=imgui.INPUT_TEXT_READ_ONLY)
+
+
         imgui.same_line()
         if imgui.button("-##img_size", width=self.menu.app.font_size):
             self.img_factor = max(self.img_factor - 1, 1)   
             self.img_size = self.start_res[0] * (2 ** self.img_factor)
-            self.height = self.img_size #同步
+            self.height = self.img_size
+
+
         imgui.same_line()
         if imgui.button("+##img_size", width=self.menu.app.font_size):
             self.img_factor = self.img_factor + 1
             self.img_size = self.start_res[0] * (2 ** self.img_factor)
-            self.height = self.img_size #同步
+            self.height = self.img_size
+
 
         imgui.input_text("Height", str(self.height), 512, flags=imgui.INPUT_TEXT_READ_ONLY)
+
+
         imgui.same_line()
         if imgui.button("-##height", width=self.menu.app.font_size):
-            # self.height_factor = max(self.height_factor - 1, 1)
             self.img_factor = max(self.img_factor - 1, 1)   
-
             self.height = self.start_res[0] * (2 ** self.img_factor)
-            self.img_size = self.height #同步
+            self.img_size = self.height
+
+
         imgui.same_line()
         if imgui.button("+##height", width=self.menu.app.font_size):
-            # self.height_factor = self.height_factor + 1
             self.img_factor = self.img_factor + 1
-
             self.height = self.start_res[0] * (2 ** self.img_factor)
-            self.img_size = self.height #同步
+            self.img_size = self.height
+
 
         if self.found_video:
             _, self.fps = imgui.input_int("FPS for frame extraction", self.fps)
@@ -191,31 +267,145 @@ class TrainingModule:
                 self.fps = 1
 
         _, self.batch_size = imgui.input_int("Batch Size", self.batch_size)
+        if self.menu.show_help and imgui.is_item_hovered():
+            imgui.set_tooltip(HELP_TEXTS["batch_size_training"])
         if self.batch_size < 1:
             self.batch_size = 1
         
         _, self.config = imgui.combo("Configuration", self.config, configs)
+        if self.menu.show_help and imgui.is_item_hovered():
+            imgui.set_tooltip(HELP_TEXTS["config_training"])
+        
+        clicked, non_square = imgui.checkbox("non-square settings", not self.square)
+        if clicked:
+            self.square = not non_square  # 当checkbox被点击时更新状态
+            if not self.square:  # 如果启用了non-square设置
+                if not hasattr(self, 'crop_width_ratio'):
+                    self.crop_width_ratio = 16  # 默认宽高比
+                if not hasattr(self, 'crop_height_ratio'):
+                    self.crop_height_ratio = 9   # 默认宽高比
+                if not hasattr(self, 'padding_color'):
+                    self.padding_color = 0  # 默认黑色填充
+
+        if not self.square:  # 当选中 checkbox 时显示 non-square 选项
+            imgui.indent(20)
+            imgui.text("aspect ratio:")
+            changed_width, new_width_ratio = imgui.input_int("Width Ratio", self.crop_width_ratio)
+            if changed_width and new_width_ratio >= 1:  
+                self.crop_width_ratio = new_width_ratio
+
+
+            changed_height, new_height_ratio = imgui.input_int("Height Ratio", self.crop_height_ratio)
+            if changed_height and new_height_ratio >= 1:  
+                self.crop_height_ratio = new_height_ratio
+
+            
+            base_size = self.img_size 
+            ratio = self.crop_height_ratio / self.crop_width_ratio
+
+            if ratio <= 1:  
+                actual_width = base_size
+                actual_height = int(base_size * ratio)
+            else:  
+                actual_height = base_size
+                actual_width = int(base_size / ratio)
+                
+            imgui.text(f"Actual resolution: {actual_width}x{actual_height}")
+            changed_color, new_padding_color = imgui.combo("Padding Options", self.padding_color, ["Black", "White", "Bleeding"])
+            if changed_color:
+                self.padding_color = new_padding_color
+
+            imgui.unindent(20)
 
         imgui.set_next_window_size( self.menu.app.content_width // 4, (self.menu.app.content_height // 4), imgui.ONCE)
 
         if imgui.button("Advanced...", width=-1):
             imgui.open_popup("Advanced...")
+        if self.menu.show_help and imgui.is_item_hovered():
+            imgui.set_tooltip(HELP_TEXTS["advanced_training"])
 
         if imgui.begin_popup_modal("Advanced...")[0]:
             imgui.text("Advanced Training Options")
             _, self.glr = imgui.input_float("Generator Learning Rate", self.glr)
+            if self.menu.show_help and imgui.is_item_hovered():
+                imgui.set_tooltip(HELP_TEXTS["generator_lr_training"])
+
             _, self.dlr = imgui.input_float("Discriminator Learning Rate", self.dlr)
+            if self.menu.show_help and imgui.is_item_hovered():
+                imgui.set_tooltip(HELP_TEXTS["discriminator_lr_training"])
+
             _, self.gamma = imgui.input_int("Gamma", self.gamma)
+            if self.menu.show_help and imgui.is_item_hovered():
+                imgui.set_tooltip(HELP_TEXTS["gamma_training"])
+
             _, self.snap = imgui.input_int("Number of ticks between snapshots", self.snap)
+            if self.menu.show_help and imgui.is_item_hovered():
+                imgui.set_tooltip(HELP_TEXTS["snapshot_training"])
+
             _, self.mirror = imgui.checkbox('Mirror', self.mirror)
-            if imgui_utils.button("Stop Training", enabled=1):
+            if self.menu.show_help and imgui.is_item_hovered():
+                imgui.set_tooltip(HELP_TEXTS["mirror_training"])
+
+            if imgui_utils.button("Close", enabled=1):
                 imgui.close_current_popup()
+
+
             imgui.end_popup()
 
+        # # Add non-square options before resolution settings
+        # imgui.separator()
+        # imgui.push_style_color(imgui.COLOR_TEXT, 1.0, 1.0, 0.0)
+        # imgui.text("Resolution Settings")
+        # imgui.pop_style_color()
+        
+        # Add non-square option
+        # _, non_square = imgui.checkbox("non-framing settings", not self.square)  # 注意这里用 not self.square
+        # self.square = not non_square  # 反转逻辑
+
+        # if not self.square:  # Only show these options in non-square mode
+        #     imgui.indent(20)
+        #     imgui.text("Crop Ratio Settings:")
+        #     changed_width, new_width_ratio = imgui.input_int("Width Ratio", self.crop_width_ratio)
+
+
+        #     changed_height, new_height_ratio = imgui.input_int("Height Ratio", self.crop_height_ratio)
+
+            
+        #     imgui.text(f"Current aspect ratio: {self.crop_width_ratio}:{self.crop_height_ratio}")
+            
+        #     changed_color, new_padding_color = imgui.combo("Padding Options", self.padding_color, ["Black", "White"])
+
+        #     imgui.unindent(20)
 
         if imgui.button("Train", width=-1):
             imgui.open_popup("Training")
             print("training")
+            
+            # Process dataset only in non-square mode
+            original_data_path = self.data_path  # Save original path
+            
+            if not self.square:
+                print(f"Starting non-square processing...")
+                print(f"Crop ratio: {self.crop_width_ratio}:{self.crop_height_ratio}")
+                print(f"Padding color: {'white' if self.padding_color == 1 else 'black'}")
+                
+                from training.dataset import process_non_square_dataset
+                
+                processed_path = os.path.join(os.path.dirname(self.data_path), 'non_square_cache')
+                try:
+                    self.data_path = process_non_square_dataset(
+                        input_path=original_data_path,
+                        output_path=processed_path,
+                        crop_ratio=(int(self.crop_width_ratio), int(self.crop_height_ratio)),
+                        padding_color=int(self.padding_color),
+                        resize_mode=resize_mode[self.resize_mode].lower()
+                    )
+                    print(f"Non-square processing completed.")
+                except Exception as e:
+                    print(f"Error during non-square processing: {str(e)}")
+                    self.data_path = original_data_path  # Restore original path
+                    return
+
             kwargs = dnnlib.EasyDict(
                 outdir=self.save_path,
                 data=self.data_path,
