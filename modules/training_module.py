@@ -381,8 +381,7 @@ class TrainingModule:
             imgui.open_popup("Training")
             print("training")
             
-            # Process dataset only in non-square mode
-            original_data_path = self.data_path  # Save original path
+            target_data_path = self.data_path
             
             if not self.square:
                 print(f"Starting non-square processing...")
@@ -391,11 +390,11 @@ class TrainingModule:
                 
                 from training.dataset import process_non_square_dataset
                 
-                processed_path = os.path.join(os.path.dirname(self.data_path), 'non_square_cache')
+                target_data_path = os.path.join(os.path.dirname(target_data_path), 'non_square_cache')
                 try:
-                    self.data_path = process_non_square_dataset(
-                        input_path=original_data_path,
-                        output_path=processed_path,
+                    process_non_square_dataset(
+                        input_path=self.data_path,
+                        output_path=target_data_path,
                         crop_ratio=(int(self.crop_width_ratio), int(self.crop_height_ratio)),
                         padding_color=int(self.padding_color),
                         resize_mode=resize_mode[self.resize_mode].lower()
@@ -403,12 +402,11 @@ class TrainingModule:
                     print(f"Non-square processing completed.")
                 except Exception as e:
                     print(f"Error during non-square processing: {str(e)}")
-                    self.data_path = original_data_path  # Restore original path
                     return
 
             kwargs = dnnlib.EasyDict(
                 outdir=self.save_path,
-                data=self.data_path,
+                data=target_data_path,
                 cfg=configs[self.config],
                 batch=self.batch_size,
                 topk=None,

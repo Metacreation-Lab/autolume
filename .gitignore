@@ -182,12 +182,6 @@ environment.yml
 ffmpeg.exe
 ffprobe.exe
 ninja.exe
-test.py
-screenshots/2024-11-19 00-15-32.png
-dist_v3.zip
-autolume_2.11.zip
-autolume_2.11 (2).zip
-autolume_2.13.zip
-recordings/2024-10-08 17-12-15.mp4
-recordings/2024-10-08 17-12-15.mp4
-assets/help_contents.xlsx
+
+data/
+non_square_cache/
