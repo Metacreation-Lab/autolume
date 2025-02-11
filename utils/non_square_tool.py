@@ -1,10 +1,10 @@
-
 import os
 import shutil
 import cv2
 import numpy as np
 import PIL.Image
 import ffmpeg
+from pathlib import Path
 
 def process_non_square_dataset(
     input_path,          # Path to input dataset
@@ -14,6 +14,9 @@ def process_non_square_dataset(
     resize_mode="stretch",
 ):
     """Preprocess dataset to specified aspect ratio with padding to square"""
+    input_path = Path(input_path)
+    output_path = Path(output_path)
+    
     print(f'\n=== Starting non-square dataset processing ===')
     print(f'Input path: {input_path}')
     print(f'Output path: {output_path}')
@@ -27,20 +30,18 @@ def process_non_square_dataset(
         print(f'Padding color: {"white" if padding_color == 1 else "black"}')
     
     # Create output directory
-    os.makedirs(output_path, exist_ok=True)
+    output_path.mkdir(parents=True, exist_ok=True)
     
-    # 支持的文件格式
-    image_extensions = ['.png', '.jpg', '.jpeg']
-    video_extensions = ['.mp4', '.avi', '.mov', '.mkv', '.MOV', '.MP4', '.AVI', '.MKV']
+    # Supported file extensions
+    image_extensions = {'.png', '.jpg', '.jpeg'}
+    video_extensions = {'.mp4', '.avi', '.mov', '.mkv'}
     
     # Collect all files
     files_to_process = []
-    if os.path.isdir(input_path):
-        for root, _dirs, files in os.walk(input_path):
-            for fname in files:
-                ext = os.path.splitext(fname)[1].lower()
-                if ext in image_extensions + video_extensions + ['.gif']:
-                    files_to_process.append(os.path.join(root, fname))
+    if input_path.is_dir():
+        for file_path in input_path.rglob('*'):
+            if file_path.suffix.lower() in image_extensions | video_extensions | {'.gif'}:
+                files_to_process.append(file_path)
     else:
         raise IOError('Input path must be a directory')
     
@@ -57,13 +58,23 @@ def process_non_square_dataset(
     
     frame_count = 0
     for file_idx, fname in enumerate(files_to_process):
-        ext = os.path.splitext(fname)[1].lower()
+        ext = fname.suffix.lower()
         print(f'\nProcessing file {file_idx+1}/{len(files_to_process)}: {fname}')
         
         if ext in image_extensions:
             # Process single image
-            frame_count = process_image(fname, output_path, frame_count, target_ratio, padding_color,resize_mode)
+            print(f'Loading image...')
+            image = PIL.Image.open(fname)
+            if image.mode != 'RGB':
+                print(f'Converting image from {image.mode} to RGB')
+                image = image.convert('RGB')
+            image = np.array(image)
+            print(f'Original image shape: {image.shape}')
             
+            processed_frame = process_frame(image, target_ratio, padding_color, resize_mode)
+            save_frame(processed_frame, output_path, frame_count)
+            frame_count += 1
+
         elif ext == '.gif':
             # Process GIF
             try:
@@ -139,20 +150,6 @@ def process_non_square_dataset(
     print(f'\nDataset preprocessing completed. Total frames processed: {frame_count}')
     return output_path
 
-def process_image(fname, output_path, frame_count, target_ratio, padding_color,resize_mode):
-    """Process a single image file"""
-    print(f'Loading image...')
-    image = PIL.Image.open(fname)
-    if image.mode != 'RGB':
-        print(f'Converting image from {image.mode} to RGB')
-        image = image.convert('RGB')
-    image = np.array(image)
-    print(f'Original image shape: {image.shape}')
-    
-    processed_frame = process_frame(image, target_ratio, padding_color, resize_mode)
-    save_frame(processed_frame, output_path, frame_count)
-    return frame_count + 1
-
 def process_frame_crop(frame, target_ratio, padding_color):
     """Process a single frame"""
     current_ratio = frame.shape[1] / frame.shape[0]
@@ -214,15 +211,6 @@ def process_frame(frame, target_ratio, padding_color, resize_mode="stretch"):
         resized_content = cv2.resize(frame, dsize=(frame_width, frame_height), 
                                    interpolation=cv2.INTER_CUBIC)
     else:
-        # if current_ratio > target_ratio:
-        #     new_width = int(frame.shape[0] * target_ratio)
-        #     start_x = (frame.shape[1] - new_width) // 2
-        #     frame = frame[:, start_x:start_x+new_width]
-        # else:
-        #     new_height = int(frame.shape[1] / target_ratio)
-        #     start_y = (frame.shape[0] - new_height) // 2
-        #     frame = frame[start_y:start_y+new_height, :]
-        # resized_content = frame
         return process_frame_crop(frame, target_ratio, padding_color)
     
     canvas_size = max(frame_width, frame_height)
