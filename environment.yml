@@ -1,6 +1,8 @@
-name: autolume_gitlab
+name: autolume
 channels:
   - conda-forge
+  - pytorch
+  - nvidia
   - defaults
 dependencies:
   - aom=3.9.1=he0c23c2_0
@@ -37,6 +39,10 @@ dependencies:
   - pip=24.2=py310haa95532_0
   - pixman=0.43.4=h63175ca_0
   - python=3.10.15=hfaddaf0_1_cpython
+  - pytorch==2.5.0
+  - torchvision==0.20.0
+  - torchaudio==2.5.0
+  - pytorch-cuda=12.4
   - sqlite=3.45.3=h2bbff1b_0
   - svt-av1=2.2.1=he0c23c2_0
   - tk=8.6.13=h5226925_1
@@ -56,7 +62,7 @@ dependencies:
       - cffi==1.16.0
       - charset-normalizer==2.1.1
       - click==8.1.7
-      - clip==0.2.0
+      - openai-clip==1.0.1
       - colorama==0.4.6
       - contourpy==1.1.1
       - cycler==0.12.1
@@ -131,9 +137,6 @@ dependencies:
       - threadpoolctl==3.2.0
       - tifffile==2023.9.26
       - timm==0.5.4
-      - torch==2.5.0+cu124
-      - torchaudio==2.5.0+cu124
-      - torchvision==0.20.0+cu124
       - tqdm==4.66.1
       - typing-extensions==4.9.0
       - tzdata==2023.3
@@ -142,4 +145,3 @@ dependencies:
       - wcwidth==0.2.8
       - wordcloud==1.9.2
       - zope-interface==7.0.3
-prefix: E:\develop_tool\anaconda\envs\autolume_gitlab
