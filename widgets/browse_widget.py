@@ -56,7 +56,6 @@ class BrowseWidget():
 
     def open_window(self):
         # Opens new window with file browser shows only files with given extensions in current directory and displays other directories by double clicking on a directory we enter said directory, single click selects files and if a directory is selected we recursively select all files in it
-        print(dir(self.parent))
         imgui.set_next_window_size((self.parent.app.content_width *3)//4, self.parent.app.content_height//2)
         window_out = imgui.begin(self.title, True, flags=imgui.WINDOW_NO_COLLAPSE)
         self.open = window_out[1]
