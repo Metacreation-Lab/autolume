@@ -5,6 +5,9 @@ import numpy as np
 import PIL.Image
 import ffmpeg
 from pathlib import Path
+import multiprocessing as mp
+from functools import partial
+from tqdm import tqdm
 
 def process_non_square_dataset(
     input_path,          # Path to input dataset
@@ -12,10 +15,14 @@ def process_non_square_dataset(
     crop_ratio,          # (width, height) e.g. (16, 9)
     padding_color=0,     # 0=black padding, 1=white padding, 2=bleeding
     resize_mode="stretch",
+    num_workers=None,    # Number of worker processes (defaults to CPU count)
 ):
     """Preprocess dataset to specified aspect ratio with padding to square"""
     input_path = Path(input_path)
     output_path = Path(output_path)
+    
+    if num_workers is None:
+        num_workers = mp.cpu_count()
     
     print(f'\n=== Starting non-square dataset processing ===')
     print(f'Input path: {input_path}')
@@ -23,6 +30,7 @@ def process_non_square_dataset(
     print(f'Target ratio: {crop_ratio[0]}:{crop_ratio[1]}')
     print(f'Padding color value: {padding_color} (type: {type(padding_color)})')
     print(f'Resize mode: {resize_mode}')
+    print(f'Number of workers: {num_workers}')
 
     if padding_color == 2:
         print(f'Padding mode: bleeding')
@@ -50,102 +58,74 @@ def process_non_square_dataset(
     
     print(f'Found {len(files_to_process)} files to process')
     
-    # Process each file
+    # Process each file type
     target_ratio = float(crop_ratio[0]) / float(crop_ratio[1])
     if padding_color != 2:
         padding_value = 255 if padding_color == 1 else 0
         print(f'Using padding value: {padding_value}')
     
     frame_count = 0
-    for file_idx, fname in enumerate(files_to_process):
-        ext = fname.suffix.lower()
-        print(f'\nProcessing file {file_idx+1}/{len(files_to_process)}: {fname}')
+    
+    # Group files by type for batch processing
+    image_files = [f for f in files_to_process if f.suffix.lower() in image_extensions]
+    gif_files = [f for f in files_to_process if f.suffix.lower() == '.gif']
+    video_files = [f for f in files_to_process if f.suffix.lower() in video_extensions]
+    
+    # Process images in batches
+    if image_files:
+        print(f'\nProcessing {len(image_files)} images in parallel...')
+        batch_size = max(1, len(image_files) // (num_workers * 4))
+        image_batches = []
+        total_processed = 0
         
-        if ext in image_extensions:
-            # Process single image
-            print(f'Loading image...')
-            image = PIL.Image.open(fname)
-            if image.mode != 'RGB':
-                print(f'Converting image from {image.mode} to RGB')
-                image = image.convert('RGB')
-            image = np.array(image)
-            print(f'Original image shape: {image.shape}')
-            
-            processed_frame = process_frame(image, target_ratio, padding_color, resize_mode)
-            save_frame(processed_frame, output_path, frame_count)
-            frame_count += 1
-
-        elif ext == '.gif':
-            # Process GIF
-            try:
-                gif = PIL.Image.open(fname)
-                print(f'Processing GIF with {gif.n_frames} frames')
-                
-                for frame_idx in range(gif.n_frames):
-                    gif.seek(frame_idx)
-                    frame = gif.convert('RGB')
-                    frame_array = np.array(frame)
-                    processed_frame = process_frame(frame_array, target_ratio, padding_color)
-                    save_frame(processed_frame, output_path, frame_count)
-                    frame_count += 1
-                    if frame_idx % 10 == 0:
-                        print(f'Processed {frame_idx+1}/{gif.n_frames} frames')
-                        
-            except Exception as e:
-                print(f'Error processing GIF {fname}: {e}')
-                
-        elif ext in video_extensions:
-            # Process video
-            try:
-                # Get video info using ffmpeg
-                probe = ffmpeg.probe(fname)
-                video_info = next(s for s in probe['streams'] if s['codec_type'] == 'video')
-                
-                # Get original fps
-                if 'avg_frame_rate' in video_info:
-                    fps_num, fps_den = map(int, video_info['avg_frame_rate'].split('/'))
-                    fps = fps_num / fps_den if fps_den != 0 else 0
-                else:
-                    fps = eval(video_info['r_frame_rate'])
-                
-                print(f'Video FPS: {fps}')
-                duration = float(video_info['duration'])
-                total_frames = int(duration * fps)
-                print(f'Total frames to extract: {total_frames}')
-                
-                # Create temporary directory for frames
-                temp_dir = os.path.join(output_path, 'temp_frames')
-                os.makedirs(temp_dir, exist_ok=True)
-                
-                try:
-                    # Extract frames using ffmpeg
-                    stream = ffmpeg.input(fname)
-                    stream = ffmpeg.output(stream, os.path.join(temp_dir, 'frame%d.png'),
-                                        r=fps, loglevel='error')
-                    ffmpeg.run(stream, overwrite_output=True)
-                    
-                    # Process each frame
-                    frame_files = sorted(os.listdir(temp_dir))
-                    for i, frame_file in enumerate(frame_files):
-                        frame_path = os.path.join(temp_dir, frame_file)
-                        frame = np.array(PIL.Image.open(frame_path))
-                        processed_frame = process_frame(frame, target_ratio, padding_color)
-                        save_frame(processed_frame, output_path, frame_count)
-                        frame_count += 1
-                        os.remove(frame_path)  # Remove temporary frame
-                        
-                        if i % 10 == 0:
-                            print(f'Processed {i+1}/{len(frame_files)} frames')
-                            
-                finally:
-                    # Clean up temporary directory
-                    if os.path.exists(temp_dir):
-                        shutil.rmtree(temp_dir)
-                        
-            except Exception as e:
-                print(f'Error processing video {fname}: {e}')
-                if os.path.exists(temp_dir):
-                    shutil.rmtree(temp_dir)
+        for i in range(0, len(image_files), batch_size):
+            batch = image_files[i:i + batch_size]
+            image_batches.append((
+                batch,
+                output_path,
+                frame_count + i,
+                target_ratio,
+                padding_color,
+                resize_mode
+            ))
+        
+        progress_bar = tqdm(
+            total=len(image_files),
+            desc="Processing images",
+            unit="images",
+            dynamic_ncols=True
+        )
+        
+        with mp.Pool(num_workers) as pool:
+            for count in pool.imap(process_images_batch, image_batches):
+                total_processed += count
+                progress_bar.update(count)
+        
+        progress_bar.close()
+        frame_count += total_processed
+    
+    # Process GIFs
+    for gif_idx, fname in enumerate(gif_files):
+        print(f'\nProcessing GIF {gif_idx+1}/{len(gif_files)}: {fname}')
+        try:
+            frame_count += process_gif_parallel(
+                fname, output_path, target_ratio, padding_color, resize_mode, 
+                num_workers, frame_count
+            )
+        except Exception as e:
+            print(f'Error processing GIF {fname}: {e}')
+            continue
+    
+    # Process videos
+    for video_idx, fname in enumerate(video_files):
+        print(f'\nProcessing video {video_idx+1}/{len(video_files)}: {fname}')
+        try:
+            frame_count += process_video_parallel(
+                fname, output_path, target_ratio, padding_color, resize_mode, num_workers
+            )
+        except Exception as e:
+            print(f'Error processing video {fname}: {e}')
+            continue
     
     print(f'\nDataset preprocessing completed. Total frames processed: {frame_count}')
     return output_path
@@ -244,4 +224,154 @@ def save_frame(frame, output_path, index):
     """Save a processed frame"""
     out_fname = os.path.join(output_path, f"{index:08d}.png")
     PIL.Image.fromarray(frame).save(out_fname)
+
+def process_images_batch(args):
+    """Process a batch of images in parallel"""
+    image_paths, output_path, start_idx, target_ratio, padding_color, resize_mode = args
+    count = 0
+    for i, image_path in enumerate(image_paths):
+        try:
+            image = PIL.Image.open(image_path)
+            if image.mode != 'RGB':
+                image = image.convert('RGB')
+            image = np.array(image)
+            processed_frame = process_frame(image, target_ratio, padding_color, resize_mode)
+            save_frame(processed_frame, output_path, start_idx + i)
+            count += 1
+        except Exception as e:
+            print(f'Error processing image {image_path}: {e}')
+    return count
+
+def process_video_parallel(video_path, output_path, target_ratio, padding_color, resize_mode, num_workers):
+    """Process video frames in parallel"""
+    # Get video info
+    probe = ffmpeg.probe(video_path)
+    video_info = next(s for s in probe['streams'] if s['codec_type'] == 'video')
+    
+    fps_num, fps_den = map(int, video_info['avg_frame_rate'].split('/'))
+    fps = fps_num / fps_den if fps_den != 0 else 0
+    duration = float(video_info['duration'])
+    total_frames = int(duration * fps)
+    
+    print(f'Video info: {total_frames} frames @ {fps} fps')
+    
+    # Create temporary directory for frames
+    temp_dir = os.path.join(output_path, 'temp_frames')
+    os.makedirs(temp_dir, exist_ok=True)
+    
+    try:
+        # Extract frames using ffmpeg
+        stream = ffmpeg.input(video_path)
+        stream = ffmpeg.output(stream, os.path.join(temp_dir, 'frame%d.png'),
+                            r=fps, loglevel='error')
+        ffmpeg.run(stream, overwrite_output=True)
+        
+        # Prepare batches for parallel processing
+        frame_files = sorted(os.listdir(temp_dir))
+        batch_size = max(1, len(frame_files) // (num_workers * 4))  # Divide work into smaller batches
+        batches = []
+        total_processed = 0
+        
+        for i in range(0, len(frame_files), batch_size):
+            batch_frames = []
+            batch_files = frame_files[i:i + batch_size]
+            for frame_file in batch_files:
+                frame_path = os.path.join(temp_dir, frame_file)
+                frame = np.array(PIL.Image.open(frame_path))
+                batch_frames.append(frame)
+                os.remove(frame_path)  # Remove temporary frame
+            
+            batches.append((
+                batch_frames,
+                output_path,
+                i,
+                target_ratio,
+                padding_color,
+                resize_mode
+            ))
+        
+        # Process batches in parallel with frame-level progress
+        progress_bar = tqdm(
+            total=len(frame_files),
+            desc="Processing video frames",
+            unit="frames",
+            dynamic_ncols=True
+        )
+        
+        with mp.Pool(num_workers) as pool:
+            for count in pool.imap(process_frames_batch, batches):
+                total_processed += count
+                progress_bar.update(count)
+        
+        progress_bar.close()
+        return total_processed
+    
+    finally:
+        # Clean up temporary directory
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
+
+def process_gif_parallel(gif_path, output_path, target_ratio, padding_color, resize_mode, num_workers, start_idx=0):
+    """Process GIF frames in parallel"""
+    gif = PIL.Image.open(gif_path)
+    total_frames = gif.n_frames
+    print(f'GIF info: {total_frames} frames')
+    
+    # Prepare batches
+    batch_size = max(1, total_frames // (num_workers * 4))
+    batches = []
+    current_frames = []
+    total_processed = 0
+    
+    for frame_idx in range(total_frames):
+        gif.seek(frame_idx)
+        frame = gif.convert('RGB')
+        current_frames.append(np.array(frame))
+        
+        if len(current_frames) >= batch_size:
+            batches.append((
+                current_frames,
+                output_path,
+                start_idx + len(batches) * batch_size,
+                target_ratio,
+                padding_color,
+                resize_mode
+            ))
+            current_frames = []
+    
+    if current_frames:
+        batches.append((
+            current_frames,
+            output_path,
+            start_idx + len(batches) * batch_size,
+            target_ratio,
+            padding_color,
+            resize_mode
+        ))
+    
+    # Process batches in parallel with frame-level progress
+    progress_bar = tqdm(
+        total=total_frames,
+        desc="Processing GIF frames",
+        unit="frames",
+        dynamic_ncols=True
+    )
+    
+    with mp.Pool(num_workers) as pool:
+        for count in pool.imap(process_frames_batch, batches):
+            total_processed += count
+            progress_bar.update(count)
+    
+    progress_bar.close()
+    return total_processed
+
+def process_frames_batch(args):
+    """Process a batch of frames in parallel"""
+    frames, output_path, start_idx, target_ratio, padding_color, resize_mode = args
+    results = []
+    for i, frame in enumerate(frames):
+        processed = process_frame(frame, target_ratio, padding_color, resize_mode)
+        out_fname = os.path.join(output_path, f"{start_idx + i:08d}.png")
+        PIL.Image.fromarray(processed).save(out_fname)
+    return len(frames)
 
