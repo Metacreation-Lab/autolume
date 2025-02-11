@@ -9,6 +9,7 @@ import dnnlib
 from utils.gui_utils import imgui_utils
 from train import main as train_main
 from utils import dataset_tool
+from utils.non_square_tool import process_non_square_dataset
 from widgets.browse_widget import BrowseWidget
 import cv2
 from utils.gui_utils import gl_utils
@@ -387,8 +388,6 @@ class TrainingModule:
                 print(f"Starting non-square processing...")
                 print(f"Crop ratio: {self.crop_width_ratio}:{self.crop_height_ratio}")
                 print(f"Padding color: {'white' if self.padding_color == 1 else 'black'}")
-                
-                from training.dataset import process_non_square_dataset
                 
                 target_data_path = os.path.join(os.path.dirname(target_data_path), 'non_square_cache')
                 try:
