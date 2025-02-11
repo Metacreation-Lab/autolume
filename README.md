@@ -77,6 +77,25 @@ To successfully run this program, your system must have a 64-bit Windows (Window
 Place your StyleGAN2 checkpoints (https://github.com/NVlabs/stylegan2-ada-pytorch) in the `models` folder.
 Click the AutolumeLiveColab desktop shortcut and get going!
 
+## Development Instructions
+
+Install Miniconda from [here](https://docs.conda.io/en/latest/miniconda.html).
+
+Create the conda environment
+```bash
+conda env create -f environment.yml
+```
+
+Activate the environment
+```bash
+conda activate autolume
+```
+
+Start the program
+```bash
+python main.py
+```
+
 ## Examples
 
 Showcase of current state: https://www.dropbox.com/s/e8yfdtdw3x3s7h0/autolume.mp4?dl=0 \
