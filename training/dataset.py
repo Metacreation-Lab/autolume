@@ -511,7 +511,10 @@ class ImageFolderDataset(Dataset):
             if pyspng is not None and self._file_ext(fname) == '.png':
                 image = pyspng.load(f.read())
             else:
-                image = np.array(PIL.Image.open(f))
+                pil_image = PIL.Image.open(f)
+                if pil_image.mode == 'P':
+                    pil_image = pil_image.convert('RGB')  # Convert limited palette images to RGB
+                image = np.array(pil_image)
         if image.ndim == 2:
             image = image[:, :, np.newaxis] # HW => HWC
         image = image.transpose(2, 0, 1) # HWC => CHW
