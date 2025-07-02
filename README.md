@@ -79,12 +79,18 @@ Click the AutolumeLiveColab desktop shortcut and get going!
 
 ## Development Instructions
 
+### One time setup
+
 Install Miniconda from [here](https://docs.conda.io/en/latest/miniconda.html).
 
-Create the conda environment
+Create python environment and install dependencies
 ```bash
 conda env create -f environment.yml
+conda activate autolume
+pip install -r requirements.txt
 ```
+
+### Running the program
 
 Activate the environment
 ```bash
