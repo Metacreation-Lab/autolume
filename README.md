@@ -29,7 +29,7 @@ Create python environment and install dependencies
 ```bash
 conda env create -f environment.yml
 conda activate autolume
-pip install -r requirements.txt
+pip install -U -r nightly-requirements.txt
 ```
 
 ### Running the program
