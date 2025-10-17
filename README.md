@@ -28,8 +28,6 @@ Install Miniconda from [here](https://docs.conda.io/en/latest/miniconda.html).
 Create python environment and install dependencies
 ```bash
 conda env create -f environment.yml
-conda activate autolume
-pip install -U -r nightly-requirements.txt
 ```
 
 ### Running the program

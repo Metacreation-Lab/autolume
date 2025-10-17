@@ -1,9 +1,0 @@
-# we use a nightly build of PyTorch for CUDA 12.8
-# this is necessary to support newer hardware (RTX 50xx series)
-# this will change in the future when stable builds are available
---pre
---index-url https://download.pytorch.org/whl/nightly/cu128
-
-torch
-torchaudio
-torchvision
