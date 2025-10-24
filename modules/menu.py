@@ -170,7 +170,7 @@ class Menu:
         
         imgui.set_next_window_position(0, main_window_y)
         imgui.set_next_window_size(self.app.content_width//4, main_window_height)
-        imgui.begin('Train##Menu', closable=False, flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS))
+        imgui.begin('Data Preparation & Training##Menu', closable=False, flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS))
         self.training()
         imgui.separator()
         imgui.end()

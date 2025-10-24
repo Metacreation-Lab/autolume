@@ -1,8 +1,9 @@
-import gc
 import os
 
 import cv2
 import imgui
+import time
+import gc
 
 from utils.gui_utils import imgui_window, gl_utils
 from enum import IntEnum
@@ -13,6 +14,7 @@ class States(IntEnum):
     MENU = 1
     RENDER = 2
     SPLASH = 3
+    PREPROCESSING = 4
 
 
 
@@ -28,6 +30,7 @@ class Autolume(imgui_window.ImguiWindow):
         self.render_loop = None
         self.pkls = []
         self.splash_delay = 0
+        self.data_preprocessing = None
 
         self.splash = cv2.imread("assets/splashscreen.jpg", cv2.IMREAD_UNCHANGED)
         self.splash = cv2.cvtColor(self.splash, cv2.COLOR_BGRA2RGBA)
@@ -48,6 +51,15 @@ class Autolume(imgui_window.ImguiWindow):
             self.skip_frame() # Layout changed.
 
     def close(self):
+        if self.data_preprocessing is not None:
+            print("Cleaning up data preprocessing...")
+            self.data_preprocessing.cleanup()
+            self.data_preprocessing = None
+        
+        if self.menu is not None and hasattr(self.menu, 'training'):
+            print("Cleaning up training module...")
+            self.menu.training.cleanup_dataset_process()
+        
         super().close()
 
 
@@ -83,8 +95,27 @@ class Autolume(imgui_window.ImguiWindow):
         if self.render_loop is not None:
             self.render_loop.close()
             self.render_loop = None
+        if self.data_preprocessing is not None:
+            self.data_preprocessing.cleanup() 
+            self.data_preprocessing = None
         gc.collect()
+        
+        # Small delay to ensure OpenGL resources are properly released
+        time.sleep(0.05)
+        
         self.menu = Menu(self)
+
+    # Preprocessing window
+    def start_preprocessing(self):
+        from modules.preprocessing_module import DataPreprocessing
+        self.data_preprocessing = DataPreprocessing(self)
+        self.data_preprocessing()
+        print("starting preprocessing window")
+        self.state = States.PREPROCESSING
+
+    def return_to_menu(self):
+        print("returning to menu from preprocessing")
+        self.state = States.MENU
 
     def draw_frame(self):
 
@@ -137,8 +168,12 @@ class Autolume(imgui_window.ImguiWindow):
             else:
                 self.viz()
 
-        if self.state == States.CLOSE or self.state == States.ERROR:
-            self.stop()
+        # Preprocessing window
+        if self.state == States.PREPROCESSING:
+            if self.data_preprocessing is None:
+                self.state = States.ERROR
+            else:
+                self.data_preprocessing()
 
         self._adjust_font_size()
         self.end_frame()

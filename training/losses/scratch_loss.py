@@ -141,12 +141,12 @@ class StyleGAN2Loss(Loss):
                 f = torch.arange(-blur_size, blur_size + 1, device=img.device).div(blur_sigma).square().neg().exp2()
                 img = upfirdn2d.filter2d(img, f / f.sum())
 
-        if self.augment_pipe is not None:
-
+        if self.augment_pipe is not None: #ADA
             img = self.augment_pipe(img)
-        if self.diffaugment:
 
+        if self.diffaugment: #DiffAUG
             img = DiffAugment(img, policy=self.diffaugment)
+        
         logits = self.D(img, c, update_emas=update_emas)
         return logits
 
