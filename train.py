@@ -113,10 +113,23 @@ def launch_training(c, desc, outdir, dry_run, queue, reply):
 
 #----------------------------------------------------------------------------
 
-def init_dataset_kwargs(data, resolution=None, height = None, width = None, fps=10, resize_mode='stretch'):
+def init_dataset_kwargs(data, resolution=None, height = None, width = None, fps=10, resize_mode='stretch', skip_preprocessing=True):
     try:
         print("RESOLUTION: ", resolution, height, width)
-        dataset_kwargs = dnnlib.EasyDict(class_name='training.dataset.ImageFolderDataset', path=data, use_labels=True, max_size=None, xflip=False, resolution=resolution, height=height, width=width, fps=fps, resize_mode=resize_mode)
+        print("SKIP_PREPROCESSING: ", skip_preprocessing)
+        dataset_kwargs = dnnlib.EasyDict(
+            class_name='training.dataset.ImageFolderDataset', 
+            path=data, 
+            use_labels=True, 
+            max_size=None, 
+            xflip=False, 
+            resolution=resolution, 
+            height=height, 
+            width=width, 
+            fps=fps, 
+            resize_mode=resize_mode,
+            skip_preprocessing=skip_preprocessing 
+        )
         dataset_obj = dnnlib.util.construct_class_by_name(**dataset_kwargs) # Subclass of training.dataset.Dataset.
         dataset_kwargs.resolution = dataset_obj.resolution # Be explicit about resolution.
         dataset_kwargs.use_labels = dataset_obj.has_labels # Be explicit about labels.
@@ -240,7 +253,16 @@ def main(queue, reply):
         c.data_loader_kwargs = dnnlib.EasyDict(pin_memory=True, prefetch_factor=2)
 
         # Training set.
-        c.training_set_kwargs, dataset_name, init_res = init_dataset_kwargs(data=opts.data, resolution=opts.resolution, height=opts.resolution[1], width=opts.resolution[0], fps=opts.fps, resize_mode=opts.resize_mode)
+        skip_preprocessing = opts.get('skip_preprocessing', True) 
+        c.training_set_kwargs, dataset_name, init_res = init_dataset_kwargs(
+            data=opts.data, 
+            resolution=opts.resolution, 
+            height=opts.resolution[1], 
+            width=opts.resolution[0], 
+            fps=opts.fps, 
+            resize_mode=opts.resize_mode,
+            skip_preprocessing=skip_preprocessing
+        )
         if opts.cond and not c.training_set_kwargs.use_labels:
             raise click.ClickException('--cond=True requires labels specified in dataset.json')
         c.training_set_kwargs.use_labels = opts.cond
