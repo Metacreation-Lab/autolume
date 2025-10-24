@@ -397,6 +397,7 @@ def run_projection(
     counter = 0
     og_save_path = save_path
     while os.path.exists(save_path):
+        counter += 1
         save_path = og_save_path + f'_{counter}'
 
     os.makedirs(save_path, exist_ok=True)
