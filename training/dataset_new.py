@@ -246,7 +246,7 @@ class ImageFolderDataset(Dataset):
             self._type = 'zip'
             self._all_fnames = set(self._get_zipfile().namelist())
         # elif self._file_ext(self._path) == '.mp4' or self._file_ext(self._path) == '.avi'or self._file_ext(self._path) == '.gif': # 添加对 GIF 的支持
-        elif self._file_ext(self._path) in ['.mp4', '.avi', '.gif','.mov','mkv']: #add gif support
+        elif self._file_ext(self._path) in ['.mp4', '.avi', '.gif','.mov','mkv']: # add support to more video format
             self._type = 'video'
             self._all_fnames = [self._path]
         else:
@@ -256,7 +256,7 @@ class ImageFolderDataset(Dataset):
         # if any file in self__all_fnames is a video create a new subfolder where we save the frames based on fps using ffmpeg
         for fname in self._all_fnames:
             # if fname.endswith('.mp4') or fname.endswith('.avi') or fname.endswith('.gif'): # 添加对 GIF 的支持
-            if fname.endswith(('.mp4', '.avi', '.gif','.mov','mkv')):    
+            if fname.endswith(('.mp4', '.avi', '.gif', '.mov', '.mkv')):    
                 found_video = True
                 # if self._type is video or zip we have to create a new folder where we save the frames
                 if self._type == 'video' or self._type == 'zip' :
