@@ -779,7 +779,9 @@ class TrainingModule:
             # End of Quick Settings Creating Dataset Popup Modal
 
         # Training Popup Modal
-        imgui.set_next_window_size( self.menu.app.content_width // 2, (self.menu.app.content_height // 2), imgui.ONCE)
+        training_popup_width = self.menu.app.content_width // 1.5
+        training_popup_height = self.menu.app.content_height // 1.5
+        imgui.set_next_window_size(training_popup_width, training_popup_height, imgui.ONCE)
 
         if imgui.begin_popup_modal("Training")[0]:
             imgui.text("Training...")
@@ -793,7 +795,9 @@ class TrainingModule:
                 imgui.text(self.message)
             if self.image_path != '':
                 imgui.text("Current sample of fake imagery")
-                imgui.image(self.grid_texture.gl_id, self.menu.app.content_width // 1.7, (self.menu.app.content_height // 1.7))
+                fake_display_height = training_popup_height - 200
+                fake_display_width = int((self.grid.shape[1] / self.grid.shape[0]) * fake_display_height)
+                imgui.image(self.grid_texture.gl_id, fake_display_width, fake_display_height)
             if imgui_utils.button("Stop Training", enabled=1):
                 self.queue.put('done')
                 self.done_button = True
@@ -975,4 +979,4 @@ class TrainingModule:
         # Clear temporary storage
         self.temp_image_files = []
         self.extracted_frame_directories = []
-                
+
