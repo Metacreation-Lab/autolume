@@ -6,6 +6,7 @@ import time
 import gc
 
 from utils.gui_utils import imgui_window, gl_utils
+from utils.version import get_version
 from enum import IntEnum
 class States(IntEnum):
     ERROR = -2
@@ -21,7 +22,7 @@ class States(IntEnum):
 class Autolume(imgui_window.ImguiWindow):
     # State handler that greets user, shows menu (allowing for training, compression, ganspace), and renders
     def __init__(self):
-        super().__init__(title='Autolume-Live', window_width=3840, window_height=2160)
+        super().__init__(title=f'Autolume-Live v{get_version()}', window_width=3840, window_height=2160)
 
         self.state = 0
         self.running = True
