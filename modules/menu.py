@@ -40,90 +40,7 @@ class Menu:
         self.metacreation = cv2.imread("assets/metalogo.png", cv2.IMREAD_UNCHANGED)
         self.metacreation_texture = gl_utils.Texture(image=self.metacreation, width=self.metacreation.shape[1], height=self.metacreation.shape[0], channels=self.metacreation.shape[2])
         
-        self.menu_height = int(app.content_height * 0.05)  # 5%的窗口高度
-
-    # def __call__(self):
-    #     imgui.push_style_color(imgui.COLOR_TITLE_BACKGROUND,*OPAQUEGREEN)
-    #     imgui.push_style_color(imgui.COLOR_TITLE_BACKGROUND_ACTIVE, *OPAQUEGREEN)
-    #     imgui.push_style_color(imgui.COLOR_TITLE_BACKGROUND_COLLAPSED, *OPAQUEGREEN)
-
-        
-    #     imgui.set_next_window_position(0, 0)
-    #     imgui.set_next_window_size(self.app.content_width, 50)
-    #     imgui.begin('##Menu', closable=False, flags=(
-    #             imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS | imgui.WINDOW_NO_TITLE_BAR))
-    #     # set red background
-    #     imgui.get_window_draw_list().add_rect_filled(0, 0, self.app.content_width + (self.app.spacing*2), 50,
-    #                                                  imgui.get_color_u32_rgba(*RED))
-
-    #     #calculate logo shape ratio
-    #     logo_ratio = self.logo.shape[1] / self.logo.shape[0]
-    #     # logo with height of 30px centered in y axis
-    #     imgui.set_cursor_pos_y(25 - (30/2))
-    #     imgui.set_cursor_pos_x(20)
-    #     imgui.image(self.logo_texture.gl_id, 30 * logo_ratio, 30)
-        
-    #     metacreation_ratio = self.metacreation.shape[1] / self.metacreation.shape[0]
-    #     imgui.same_line(self.app.content_width - ((30 * metacreation_ratio) + 130))
-    #     if imgui_utils.button("Help On" if not self.show_help else "Help Off", width=80):
-    #         self.show_help = not self.show_help
-
-    #     #calculate metacreation shape ratio
-    #     metacreation_ratio = self.metacreation.shape[1] / self.metacreation.shape[0]
-    #     # metacreation with height of 30px centered in y axis
-    #     imgui.same_line(self.app.content_width - ((30 * metacreation_ratio) + 20))
-    #     imgui.set_cursor_pos_y(25 - (30/2))
-    #     imgui.image(self.metacreation_texture.gl_id, 30 * metacreation_ratio, 30, tint_color=(1, 1, 1, 1))
-    #     imgui.end()
-        
-
-    #     # Begin control pane.
-    #     imgui.set_next_window_position(0, 50)
-    #     imgui.set_next_window_size(self.app.content_width//4, (self.app.content_height * 4) //5 - 50)
-    #     imgui.begin('Train##Menu', closable=False, flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS))
-
-    #     self.training()
-    #     imgui.separator()
-    #     #self.compress()
-    #     imgui.end()
-
-    #     imgui.set_next_window_position(self.app.content_width // 4, 50)
-    #     imgui.set_next_window_size(self.app.content_width // 4, (self.app.content_height * 4) // 5 - 50)
-    #     imgui.begin('Projection##Menu', closable=False, flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS))
-
-    #     self.projection()
-    #     imgui.end()
-
-    #     imgui.set_next_window_position((2 * self.app.content_width)// 4, 50)
-    #     imgui.set_next_window_size(self.app.content_width // 4, (self.app.content_height * 4) // 5 - 50)
-    #     imgui.begin('Feature Extractor##Menu', closable=False, flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS))
-    #     # imgui.text("Extract Meaningful Directions from a Model")
-    #     self.pca()
-    #     imgui.end()
-
-    #     imgui.set_next_window_position((3 * self.app.content_width)// 4, 50)
-    #     imgui.set_next_window_size(self.app.content_width // 4, (self.app.content_height * 4) // 5 - 50)
-    #     imgui.begin('Super Resolution##Menu', closable=False, flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS))
-    #     # imgui.text("Use AI to upscale your images and videos")
-    #     self.super_res()
-    #     imgui.end()
-
-    #     imgui.set_next_window_position(0, (self.app.content_height * 3) // 4 + 50)
-    #     imgui.set_next_window_size(self.app.content_width // 2, (self.app.content_height * 3) // 4 - 50)
-    #     imgui.begin('Model Mixing##Menu', closable=False, flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE| imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS))
-    #     # imgui.text("Combine two models into one")
-    #     self.mixing_module()
-    #     imgui.end()
-
-    #     imgui.set_next_window_position(self.app.content_width//2,(self.app.content_height * 3) // 4 + 50)
-    #     imgui.set_next_window_size(self.app.content_width//2, (self.app.content_height * 3) // 4 - 50)
-    #     imgui.begin('Render##Menu', closable=False, flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE| imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS))
-    #     imgui.text("Jump into Autolume-Live")
-    #     if imgui_utils.button("START", width=self.app.button_w):
-    #         self.app.start_renderer()
-    #     imgui.end()
-
-    #     imgui.pop_style_color(3)
+        self.menu_height = 50
 
     def __call__(self):
         imgui.push_style_color(imgui.COLOR_TITLE_BACKGROUND,*OPAQUEGREEN)
@@ -133,10 +50,9 @@ class Menu:
         imgui.set_next_window_position(0, 0)
         imgui.set_next_window_size(self.app.content_width, self.menu_height)
         imgui.begin('##Menu', closable=False, flags=(
-                imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS | imgui.WINDOW_NO_TITLE_BAR))
-        
-        imgui.get_window_draw_list().add_rect_filled(0, 0, self.app.content_width + (self.app.spacing*2), self.menu_height,
-                                                     imgui.get_color_u32_rgba(*RED))
+                imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS | imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_SCROLLBAR))
+
+        imgui.get_window_draw_list().add_rect_filled(0, 0, self.app.content_width, self.menu_height, imgui.get_color_u32_rgba(*RED))
 
         logo_height = int(self.menu_height * 0.6)
         logo_width = int(logo_height * (self.logo.shape[1] / self.logo.shape[0]))
@@ -147,14 +63,14 @@ class Menu:
         metacreation_height = logo_height
         metacreation_width = int(metacreation_height * (self.metacreation.shape[1] / self.metacreation.shape[0]))
         
-        help_button_width = int(self.app.content_width * 0.06)  
+        help_button_width = 150
         help_button_height = int(self.menu_height * 0.6)  
         help_button_y = (self.menu_height - help_button_height) / 2  
         
         imgui.same_line(self.app.content_width - (metacreation_width + help_button_width + 40))
         imgui.set_cursor_pos_y(help_button_y)
         
-        imgui.push_style_var(imgui.STYLE_FRAME_PADDING, (0, help_button_height * 0.25))
+        imgui.push_style_var(imgui.STYLE_FRAME_PADDING, (0, help_button_height * 0.2))
         if imgui_utils.button("Help On" if not self.show_help else "Help Off", 
                             width=help_button_width):
             self.show_help = not self.show_help
