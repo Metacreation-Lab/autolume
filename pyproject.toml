@@ -1,7 +1,0 @@
-[project]
-name = "autolume"
-version = "2.15.0"
-description = "Autolume is a no-coding generative AI system allowing artists to train, craft, and explore their own models."
-readme = "README.md"
-requires-python = ">=3.10"
-dependencies = []
