@@ -8,8 +8,10 @@ For detailed documentation and demos look at the [Metacreation Lab Website](http
 
 ## Getting started
 
-Current version of Autolume only offers a Windows release:
-- [Release 2.15 for Windows](https://drive.google.com/file/d/1SjStN2K2_GZB3ACbz4BQLJ91GWeMYbzm/view?usp=sharing)
+Latest release:
+- [Autolume 2.16.0 for Windows](https://drive.google.com/file/d/1wMETgV4i_K7T5DZlKpQsgSDMhJ_AZImW/view?usp=drive_link)
+
+## Development instructions
 
 ### Dependencies
 
@@ -18,8 +20,6 @@ For optimal performance, user must install the following dependencies:
   - Minimum components: Desktop development with C++
 - CUDA 12.8 ([download link](https://developer.nvidia.com/cuda-12-8-0-download-archive))
   - Minimum components: CUDA Development + CUDA Runtime
-
-## Development instructions
 
 ### One time setup
 
