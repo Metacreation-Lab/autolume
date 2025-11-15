@@ -9,7 +9,7 @@ For detailed documentation and demos look at the [Metacreation Lab Website](http
 ## Downloads
 
 Latest release:
-- [Autolume 2.16.0 for Windows](https://drive.google.com/file/d/1wMETgV4i_K7T5DZlKpQsgSDMhJ_AZImW/view?usp=drive_link)
+- [Autolume 2.16.1 for Windows](https://drive.google.com/file/d/1yJHQtIYcVgY9wkj8QG8tIbOxB1btmCtB/view?usp=drive_link)
 
 ## Examples
 
