@@ -1,10 +1,17 @@
 from utils.utils import Deque
 
 import pyaudio
-import sys
 import numpy as np
 import time
 from functools import partial
+
+
+class AudioStreamError(Exception):
+    """Base exception for audio stream failures."""
+
+
+class NoMicrophoneError(AudioStreamError):
+    """Raised when no valid microphone input device is available."""
 
 
 class AudioStream(object):
@@ -64,12 +71,12 @@ class AudioStream(object):
 
         self.data_buffer = Deque(self.buffer_size, self.update_window_n_frames)
 
-        print("\n--🎙  -- Starting live audio stream...\n")
+        print("Starting live audio stream...")
         self.stream.start_stream()
         self.stream_start_time = time.time()
 
     def terminate(self):
-        print("👋  Sending stream termination command...")
+        print("Sending stream termination command...")
         self.stream.stop_stream()
         self.stream.close()
 
@@ -124,7 +131,7 @@ class AudioStream(object):
 
         if len(mics) == 0:
             print("No working microphone devices found!")
-            sys.exit()
+            raise NoMicrophoneError("No working microphone devices found")
 
         print("Found %d working microphone device(s): " % len(mics))
         for mic in mics:

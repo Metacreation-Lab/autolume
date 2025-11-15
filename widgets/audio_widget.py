@@ -138,7 +138,8 @@ class AudioWidget:
             if changed:
                 if self.n_fft < 3:
                     self.n_fft = 3
-                self.audio_stream.callback = self.callback
+                if self.audio_stream is not None:
+                    self.audio_stream.callback = self.callback
 
             if self.decompose:
                 self.send_osc("H", np.median(H, axis=1))
@@ -146,3 +147,12 @@ class AudioWidget:
             else:
                 self.send_osc("fft", plot_values)
             imgui.end_group()
+
+    def close(self):
+        if self.audio_stream is not None:
+            try:
+                self.audio_stream.terminate()
+            except Exception as exc:
+                print(f"Error terminating audio stream: {exc}")
+            finally:
+                self.audio_stream = None
