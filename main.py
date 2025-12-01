@@ -1,19 +1,33 @@
 import glob
-import shutil
 import multiprocessing
-from modules.autolume_live import Autolume
-from torch_utils.ops import params
+import os
+import shutil
+import sys
+
 import torch
 
+from modules.autolume_live import Autolume
+
+
+def get_runtime_bin_dir():
+    # PyInstaller frozen app
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return sys._MEIPASS
+
+    # Development mode
+    base = os.path.dirname(os.path.abspath(__file__))
+    bin_root = os.path.join(base, "bin")
+    for root, dirs, files in os.walk(bin_root):
+        if "ffmpeg.exe" in files:
+            return root
+    return bin_root
+
+BIN_DIR = get_runtime_bin_dir()
+os.environ["PATH"] = BIN_DIR + os.pathsep + os.environ.get("PATH", "")
 
 
 def main():
-    """Interactive model visualizer.
-
-    Optional PATH argument can be used specify which .pkl file to load.
-    """
     torch_extension_pattern = 'C:/Users/*/AppData/Local/torch_extensions'
-    
     matches = sorted(glob.glob(torch_extension_pattern))
     if len(matches):
         print("Found torch extension at", matches)
@@ -22,10 +36,10 @@ def main():
 
     app = Autolume()
 
-    # Run.
     while not app.should_close():
         app.draw_frame()
     app.close()
+
 
 if __name__ == "__main__":
     multiprocessing.freeze_support()
