@@ -29,6 +29,7 @@ from widgets import looping_widget
 from widgets import preset_widget
 from widgets import mixing_widget
 from widgets import collapsable_layer
+from widgets.help_icon_widget import HelpIconWidget
 from audio.audio_stream import NoMicrophoneError
 
 from pythonosc.osc_server import BlockingOSCUDPServer
@@ -44,36 +45,33 @@ import os
 
 #----------------------------------------------------------------------------
 def load_help_texts():
-    default_texts = {
-        "network_latent": "Network & latent settings for controlling the model and latent space",
-        "diversity_noise": "Controls for diversity and noise generation",
-        "looping": "Settings for creating animation loops",
-        "performance_osc": "Performance settings and OSC communication options",
-        "adjust_input": "Tools for adjusting input parameters",
-        "layer_transform": "Controls for layer-wise transformations",
-        "model_mixing": "Settings for mixing multiple models",
-        "presets": "Save and load parameter presets",
-        "audio": "Audio input and visualization settings"
-    }
-
-    try:
-        excel_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets","help_contents.xlsx")
-        if os.path.exists(excel_path):
-            df = pd.read_excel(excel_path, engine='openpyxl')
-            for _, row in df.iterrows():
-                if pd.notna(row['key']) and pd.notna(row['text']):
-                    key = str(row['key']).strip()
-                    default_texts[key] = str(row['text'])
-            print(f"Successfully loaded visualizer help texts from: {excel_path}")
-    except Exception as e:
-        print(f"Warning: Using default visualizer help texts. Error: {e}")
+    help_texts = {}
+    help_urls = {}
     
-    return default_texts
+    try:
+        csv_path = os.path.join(os.path.dirname(__file__), "help_texts.csv")
+        if os.path.exists(csv_path):
+            df = pd.read_csv(csv_path)
+            if 'module' in df.columns:
+                df = df[df['module'] == 'visualizer']
+            for _, row in df.iterrows():
+                if row.get('key') and row.get('text'):
+                    key = str(row['key']).strip()
+                    text = str(row['text'])
+                    text = text.replace('\\n', '\n')
+                    help_texts[key] = text
+                    if pd.notna(row.get('url')) and str(row['url']).strip():
+                        help_urls[key] = str(row['url']).strip()
+    except Exception as e:
+        print(f"Error loading visualizer help texts from CSV. Error: {e}")
+    
+    return help_texts, help_urls
 
 class Visualizer:
     def __init__(self, app, renderer):
         self.app = app
-        self.help_texts = load_help_texts()
+        self.help_texts, self.help_urls = load_help_texts()
+        self.help_icon = HelpIconWidget()
 
         #COMMUNICATIONS
         self.has_microphone = False
@@ -642,52 +640,102 @@ class Visualizer:
         # else:
         #     if expanded:
         #         imgui.text('No microphone detected')
-        expanded, _visible = imgui_utils.collapsing_header('Network & Latent', default=True)
-        if self.show_help and imgui.is_item_hovered():
-            imgui.set_tooltip(self.help_texts.get("network_latent", "Network & latent settings"))
-        self.pickle_widget(expanded)
-        self.latent_widget(expanded)
+        # Get pane width for spacing calculations
+        help_icon_size = imgui.get_font_size()
+        style = imgui.get_style()
+        
+        # Network & Latent
+        header_opened = imgui_utils.collapsing_header('Network & Latent', default=True)[0]
+        imgui.same_line()
+        header_text_width = imgui.calc_text_size('Network & Latent').x
+        spacing = self.pane_w - (style.window_padding[0] * 2) - header_text_width - help_icon_size - style.item_spacing[0] - 65
+        imgui.dummy(spacing, 0)
+        url = self.help_urls.get("network_latent")
+        self.help_icon.render_with_url(self.help_texts.get("network_latent"), url, "Read More")
 
-        expanded, _visible = imgui_utils.collapsing_header('Diversity & Noise', default=True)
-        if self.show_help and imgui.is_item_hovered():
-            imgui.set_tooltip(self.help_texts.get("diversity_noise", "Diversity and noise controls"))
-        self.trunc_noise_widget(expanded)
+        self.pickle_widget(header_opened)
+        self.latent_widget(header_opened)
 
-        expanded, _visible = imgui_utils.collapsing_header('Looping', default=True)
-        if self.show_help and imgui.is_item_hovered():
-            imgui.set_tooltip(self.help_texts.get("looping", "Animation loop settings"))
-        self.looping_widget(expanded)
+        # Diversity & Noise
+        header_opened = imgui_utils.collapsing_header('Diversity & Noise', default=True)[0]
+        imgui.same_line()
+        header_text_width = imgui.calc_text_size('Diversity & Noise').x
+        spacing = self.pane_w - (style.window_padding[0] * 2) - header_text_width - help_icon_size - style.item_spacing[0] - 65
+        imgui.dummy(spacing, 0)
+        url = self.help_urls.get("diversity_noise")
+        self.help_icon.render_with_url(self.help_texts.get("diversity_noise"), url, "Read More")
+        self.trunc_noise_widget(header_opened)
 
-        expanded, _visible = imgui_utils.collapsing_header('Performance & OSC', default=True)
-        if self.show_help and imgui.is_item_hovered():
-            imgui.set_tooltip(self.help_texts.get("performance_osc", "Performance and OSC settings"))
-        self.perf_widget(expanded)
+        # Looping
+        header_opened = imgui_utils.collapsing_header('Looping', default=True)[0]
+        imgui.same_line()
+        header_text_width = imgui.calc_text_size('Looping').x
+        spacing = self.pane_w - (style.window_padding[0] * 2) - header_text_width - help_icon_size - style.item_spacing[0] - 65
+        imgui.dummy(spacing, 0)
+        url = self.help_urls.get("looping")
+        self.help_icon.render_with_url(self.help_texts.get("looping"), url, "Read More")
+        self.looping_widget(header_opened)
 
-        expanded, _visible = imgui_utils.collapsing_header('Adjust Input', default=True)
-        if self.show_help and imgui.is_item_hovered():
-            imgui.set_tooltip(self.help_texts.get("adjust_input", "Input adjustment tools"))
-        self.adjuster_widget(expanded)
+        # Performance & OSC
+        header_opened = imgui_utils.collapsing_header('Performance & OSC', default=True)[0]
+        imgui.same_line()
+        header_text_width = imgui.calc_text_size('Performance & OSC').x
+        spacing = self.pane_w - (style.window_padding[0] * 2) - header_text_width - help_icon_size - style.item_spacing[0] - 65
+        imgui.dummy(spacing, 0)
+        url = self.help_urls.get("performance_osc")
+        self.help_icon.render_with_url(self.help_texts.get("performance_osc"), url, "Read More")
+        self.perf_widget(header_opened)
 
-        expanded, _visible = imgui_utils.collapsing_header('Layer Transformations', default=True)
-        if self.show_help and imgui.is_item_hovered():
-            imgui.set_tooltip(self.help_texts.get("layer_transform", "Layer transformation controls"))
-        self.collapsed_widget(expanded)
+        # Adjust Input
+        header_opened = imgui_utils.collapsing_header('Adjust Input', default=True)[0]
+        imgui.same_line()
+        header_text_width = imgui.calc_text_size('Adjust Input').x
+        spacing = self.pane_w - (style.window_padding[0] * 2) - header_text_width - help_icon_size - style.item_spacing[0] - 65
+        imgui.dummy(spacing, 0)
+        url = self.help_urls.get("adjust_input")
+        self.help_icon.render_with_url(self.help_texts.get("adjust_input"), url, "Read More")
+        self.adjuster_widget(header_opened)
 
-        expanded, _visible = imgui_utils.collapsing_header('Model Mixing', default=True)
-        if self.show_help and imgui.is_item_hovered():
-            imgui.set_tooltip(self.help_texts.get("model_mixing", "Model mixing settings"))
-        self.mixing_widget(expanded)
+        # Layer Transformations
+        header_opened = imgui_utils.collapsing_header('Layer Transformations', default=True)[0]
+        imgui.same_line()
+        header_text_width = imgui.calc_text_size('Layer Transformations').x
+        spacing = self.pane_w - (style.window_padding[0] * 2) - header_text_width - help_icon_size - style.item_spacing[0] - 65
+        imgui.dummy(spacing, 0)
+        url = self.help_urls.get("layer_transform")
+        self.help_icon.render_with_url(self.help_texts.get("layer_transform"), url, "Read More")
+        self.collapsed_widget(header_opened)
 
-        expanded, _visible = imgui_utils.collapsing_header('Presets', default=True)
-        if self.show_help and imgui.is_item_hovered():
-            imgui.set_tooltip(self.help_texts.get("presets", "Preset management"))
-        self.preset_widget(expanded)
+        # Model Mixing
+        header_opened = imgui_utils.collapsing_header('Model Mixing', default=True)[0]
+        imgui.same_line()
+        header_text_width = imgui.calc_text_size('Model Mixing').x
+        spacing = self.pane_w - (style.window_padding[0] * 2) - header_text_width - help_icon_size - style.item_spacing[0] - 65
+        imgui.dummy(spacing, 0)
+        url = self.help_urls.get("model_mixing")
+        self.help_icon.render_with_url(self.help_texts.get("model_mixing"), url, "Read More")
+        self.mixing_widget(header_opened)
 
-        expanded, _visible = imgui_utils.collapsing_header('Audio Module', default=True)
-        if self.show_help and imgui.is_item_hovered():
-            imgui.set_tooltip(self.help_texts.get("audio", "Audio settings"))
+        # Presets
+        header_opened = imgui_utils.collapsing_header('Presets', default=True)[0]
+        imgui.same_line()
+        header_text_width = imgui.calc_text_size('Presets').x
+        spacing = self.pane_w - (style.window_padding[0] * 2) - header_text_width - help_icon_size - style.item_spacing[0] - 65
+        imgui.dummy(spacing, 0)
+        url = self.help_urls.get("presets")
+        self.help_icon.render_with_url(self.help_texts.get("presets"), url, "Read More")
+        self.preset_widget(header_opened)
 
-        if expanded:
+        # Audio Module
+        header_opened = imgui_utils.collapsing_header('Audio Module', default=True)[0]
+        imgui.same_line()
+        header_text_width = imgui.calc_text_size('Audio Module').x
+        spacing = self.pane_w - (style.window_padding[0] * 2) - header_text_width - help_icon_size - style.item_spacing[0] - 65
+        imgui.dummy(spacing, 0)
+        url = self.help_urls.get("audio")
+        self.help_icon.render_with_url(self.help_texts.get("audio"), url, "Read More")
+
+        if header_opened:
             button_label = "Enable" if not self.audio_widget_enabled else "Disable"
             if imgui.button(button_label):
                 if self.audio_widget_enabled:
@@ -701,7 +749,7 @@ class Visualizer:
                 imgui.text('No microphone found')
 
         if self.audio_widget_enabled and self.audio_widget is not None:
-            self.audio_widget(expanded)
+            self.audio_widget(header_opened)
 
 
         # go back to menu
