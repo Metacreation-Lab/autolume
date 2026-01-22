@@ -13,30 +13,33 @@ from torch_utils import legacy
 from utils.gui_utils import imgui_utils
 from ganspace.extract_pca import fit
 from widgets.browse_widget import BrowseWidget
+from widgets.native_browser_widget import NativeBrowserWidget
+from widgets.help_icon_widget import HelpIconWidget
 
 
 def load_help_texts():
-    default_texts = {
-        "pkl_path_pca": "Path to the trained StyleGAN2 model (.pkl file)",
-        "pca_mode_pca": "PCA estimation method to use (pca/ipca/fbpca/ica/spca)",
-        "num_features_pca": "Number of principal components to extract",
-        "alpha_pca": "Sparsity parameter for sparse PCA",
-        "save_path_pca": "Directory to save extracted features"
-    }
-
-    try:
-        excel_path = os.path.join(os.path.dirname(os.path.dirname(__file__)),"assets", "help_contents.xlsx")
-        if os.path.exists(excel_path):
-            df = pd.read_excel(excel_path, engine='openpyxl')
-            for _, row in df.iterrows():
-                if pd.notna(row['key']) and pd.notna(row['text']):
-                    key = str(row['key']).strip()
-                    default_texts[key] = str(row['text'])
-            print(f"Successfully loaded PCA help texts from: {excel_path}")
-    except Exception as e:
-        print(f"Warning: Using default PCA help texts. Error: {e}")
+    help_texts = {}
+    help_urls = {}
     
-    return default_texts
+    try:
+        csv_path = os.path.join(os.path.dirname(__file__), "help_texts.csv")
+        if os.path.exists(csv_path):
+            df = pd.read_csv(csv_path)
+            if 'module' in df.columns:
+                df = df[df['module'] == 'pca']
+            for _, row in df.iterrows():
+                if row.get('key') and row.get('text'):
+                    key = str(row['key']).strip()
+                    text = str(row['text'])
+                    text = text.replace('\\n', '\n')
+                    help_texts[key] = text
+                    if pd.notna(row.get('url')) and str(row['url']).strip():
+                        help_urls[key] = str(row['url']).strip()
+    except Exception as e:
+        print(f"Error loading PCA help texts from CSV. Error: {e}")
+    
+    return help_texts, help_urls
+
 
 def _locate_results(pattern):
     return pattern
@@ -47,10 +50,10 @@ pca_modes = ['pca', 'ipca', 'fbpca', "ica", 'spca']
 
 class PCA_Module:
     def __init__(self, menu):
-        self.help_texts = load_help_texts()
-        # self.show_help = False
+        self.help_texts, self.help_urls = load_help_texts()
+        self.help_icon = HelpIconWidget()
         cwd = os.getcwd()
-        self.save_path = os.path.join(cwd,"ganspace_features")
+        self.save_path = os.path.join(cwd,"ganspace_features").replace('\\', '/')
 
         self.menu = menu
         self.app = menu.app
@@ -67,8 +70,7 @@ class PCA_Module:
         self.pca_process = mp.Process(target=fit, args=(self.queue, self.reply),
                                       daemon=True)
 
-        self.save_path_dialog = BrowseWidget(self, "Save Path", os.path.abspath(os.getcwd()), [""], multiple=False,
-                                             traverse_folders=False, add_folder_button=True, width=self.menu.app.button_w)
+        self.save_path_browser = NativeBrowserWidget()
         self.X_comp, self.Z_comp = None, None
         self.done = False
         for pkl in os.listdir("./models"):
@@ -84,19 +86,21 @@ class PCA_Module:
         
         input_width = -(button_width + spacing + help_width + 30)
 
-        # imgui.begin_group()
-        # imgui.text("Extract Meaningful Directions from a Model")
-        # imgui.same_line()
-        # remaining_width = imgui.get_content_region_available_width()
-        # imgui.dummy(remaining_width - 60, 0)  
-        # imgui.same_line()
-        # if imgui_utils.button("Help", width=50):
-        #     self.show_help = not self.show_help
-        # imgui.end_group()
+        text = "Extract Meaningful Directions from a Model"
+        text_width = imgui.calc_text_size(text).x
+        window_width = imgui.get_window_width()
+        help_icon_size = imgui.get_font_size()
+        style = imgui.get_style()
 
-        imgui.begin_group()
-        imgui.text("Extract Meaningful Directions from a Model")
-        imgui.end_group()
+        imgui.text(text)
+        
+        spacing = window_width - (style.window_padding[0] * 2) - text_width - help_icon_size - style.item_spacing[0] - 10
+        
+        imgui.same_line()
+        imgui.dummy(spacing, 0)
+        self.help_icon.render_with_url(self.help_texts.get("pca_module"), self.help_urls.get("pca_module"), "Read More")
+
+        imgui.separator()
 
         if self.reply.qsize() > 0:
             self.message, (self.X_comp, self.Z_comp), self.done = self.reply.get()
@@ -117,15 +121,10 @@ class PCA_Module:
         if changed:
             self.load(self.user_pkl)
 
-        if self.menu.show_help and imgui.is_item_hovered():
-            imgui.set_tooltip(self.help_texts.get("pkl_path_pca", "Select model file"))
-
         imgui.same_line()
         if imgui_utils.button('Models', enabled=len(self.browse_cache) > 0, width=button_width):
             imgui.open_popup('browse_pkls_popup')
             self.browse_refocus = True
-        if self.menu.show_help and imgui.is_item_hovered():
-            imgui.set_tooltip(self.help_texts.get("pkl_path_pca", "Select model file"))
 
         if imgui.begin_popup('browse_pkls_popup'):
             for pkl in self.browse_cache:
@@ -140,52 +139,44 @@ class PCA_Module:
                 self.browse_refocus = False
             imgui.end_popup()
 
+        help_width = imgui.calc_text_size("(?)").x + 10
+        input_width = -(self.app.button_w + self.app.spacing + help_width)
+
+        imgui.text("PCA Estimator")
+        imgui.same_line()
         with imgui_utils.item_width(input_width):
-            _, self.pca_mode = imgui.combo(
-                "PCA Estimator", self.pca_mode, pca_modes
-            )
-            if self.menu.show_help and imgui.is_item_hovered():
-                imgui.set_tooltip(self.help_texts.get("pca_mode_pca", "Select PCA estimation method"))
+            _, self.pca_mode = imgui.combo("##pca_mode", self.pca_mode, pca_modes)
 
         max_features = 0 if self.G is None else self.G.w_dim
+        imgui.text("Features")
+        imgui.same_line()
         with imgui_utils.item_width(input_width):
-            _, self.num_features = imgui.input_int(
-                f"Features", self.num_features
-            )
-            if self.menu.show_help and imgui.is_item_hovered():
-                imgui.set_tooltip(self.help_texts.get("num_features_pca", "Set number of components"))
+            _, self.num_features = imgui.input_int("##num_features", self.num_features)
 
         if self.num_features > max_features:
             self.num_features = max_features
         if self.num_features < 0:
             self.num_features = 0
 
+        imgui.text("Sparsity")
+        imgui.same_line()
         with imgui_utils.item_width(input_width):
             _, self.alpha = imgui.slider_float(
-                "Sparsity", self.alpha,
+                "##alpha", self.alpha,
                 min_value=0.0, max_value=1.0,
                 format='%.3f', power=3)
-            if self.menu.show_help and imgui.is_item_hovered():
-                imgui.set_tooltip(self.help_texts.get("alpha_pca", "Set sparsity parameter"))
 
-        changed, self.save_path = imgui_utils.input_text('##save_path', self.save_path, 1024,
-                                                        flags=(imgui.INPUT_TEXT_AUTO_SELECT_ALL |
-                                                               imgui.INPUT_TEXT_ENTER_RETURNS_TRUE),
-                                                        width=input_width,
-                                                        help_text='Dir to Folder to save GANSPACE')
-        if self.menu.show_help and imgui.is_item_hovered():
-            imgui.set_tooltip(self.help_texts.get("save_path_pca", "Select save directory"))
-
+        imgui.text("Save Path")
+        _, self.save_path = imgui_utils.input_text("##save_path", self.save_path, 1024, 0,
+                                                    width=imgui.get_window_width() - self.menu.app.button_w - imgui.calc_text_size("Browse")[0])
+        
         imgui.same_line()
-        _clicked, save_path = self.save_path_dialog(button_width)
-        if _clicked:
-            if len(save_path) > 0:
-                self.save_path = save_path[0]
-                self.result_path = save_path[0]
-                print(self.result_path)
+        if imgui.button("Browse##pca_save_path", width=button_width):
+            directory_path = self.save_path_browser.select_directory("Select Save Directory")
+            if directory_path:
+                self.save_path = directory_path.replace('\\', '/')
             else:
-                self.result_path = ""
-                print("No path selected")
+                print("No save path selected")
 
         if imgui_utils.button("Get Salient Features", width=imgui.get_content_region_available_width(), enabled=self.G is not None):
             imgui.open_popup("PCA-popup")

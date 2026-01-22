@@ -27,12 +27,13 @@ class NativeBrowserWidget:
         
         # Image extensions 
         self.image_extensions = [
-            ('Image files', '*.png *.jpg *.jpeg *.bmp *.tiff *.tif *.webp *.heic'),
+            ('Image files', '*.png *.jpg *.jpeg *.bmp *.tiff *.tif *.webp *.gif'),
             ('PNG files', '*.png'),
             ('JPEG files', '*.jpg *.jpeg'),
             ('BMP files', '*.bmp'),
             ('TIFF files', '*.tiff *.tif'),
             ('WebP files', '*.webp'),
+            ('GIF files', '*.gif'),
             ('All files', '*.*')
         ]
         
@@ -44,13 +45,14 @@ class NativeBrowserWidget:
             ('MOV files', '*.mov'),
             ('MKV files', '*.mkv'),
             ('WebM files', '*.webm'),
-            ('GIF files', '*.gif')
+            ('GIF files', '*.gif'),
+            ('All files', '*.*')
         ]
         
         self.all_media_extensions = [
-            ('Media files', '*.png *.jpg *.jpeg *.bmp *.tiff *.tif *.gif *.webp *.mp4 *.avi *.mov *.mkv *.wmv *.flv *.webm *.m4v *.3gp'),
-            ('Image files', '*.png *.jpg *.jpeg *.bmp *.tiff *.tif *.gif *.webp'),
-            ('Video files', '*.mp4 *.avi *.mov *.mkv *.wmv *.flv *.webm *.m4v *.3gp'),
+            ('Media files', '*.png *.jpg *.jpeg *.bmp *.tiff *.tif *.webp *.gif *.mp4 *.avi *.mov *.mkv *.webm'),
+            ('Image files', '*.png *.jpg *.jpeg *.bmp *.tiff *.tif *.webp *.gif'),
+            ('Video files', '*.mp4 *.avi *.mov *.mkv *.webm *.gif'),
             ('All files', '*.*')
         ]
         

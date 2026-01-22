@@ -25,14 +25,11 @@ class ThumbnailWidget:
     def create_placeholder_thumbnail(self, file_path):
         """Create a grey placeholder thumbnail with image name"""
         try:
-            # Create grey background
             size = self.thumbnail_size
-            canvas = np.full((size, size, 3), [128, 128, 128], dtype=np.uint8)  # Grey background
+            canvas = np.full((size, size, 3), [128, 128, 128], dtype=np.uint8)  
             
-            # Get filename without extension for display
             filename = os.path.splitext(os.path.basename(file_path))[0]
             
-            # Add text to the canvas
             canvas = self._add_text_to_canvas(canvas, filename, size)
             
             # Create texture
@@ -55,19 +52,15 @@ class ThumbnailWidget:
             font_thickness = 1
             font = cv2.FONT_HERSHEY_SIMPLEX
             
-            # Get text size
             (text_width, text_height), baseline = cv2.getTextSize(text, font, font_scale, font_thickness)
             
-            # If text is too long, truncate it
-            max_width = int(size * 0.9)  # Leave 10% margin
+            max_width = int(size * 0.9)  
             if text_width > max_width:
-                # Calculate how many characters we can fit
                 char_width = text_width / len(text)
-                max_chars = int(max_width / char_width) - 3  # Leave room for "..."
+                max_chars = int(max_width / char_width) - 3 
                 text = text[:max_chars] + "..."
                 (text_width, text_height), baseline = cv2.getTextSize(text, font, font_scale, font_thickness)
             
-            # Calculate position to center the text
             x = (size - text_width) // 2
             y = (size + text_height) // 2
             
@@ -82,56 +75,46 @@ class ThumbnailWidget:
     def get_thumbnail(self, file_path):
         """Get thumbnail based on generate_thumbnails setting"""
         if self.generate_thumbnails:
-            # Return actual thumbnail if available, otherwise placeholder
             if file_path in self.thumbnails:
                 return self.thumbnails[file_path]
             else:
-                # Return placeholder until background process creates the real thumbnail
                 if file_path not in self.placeholder_textures:
                     self.placeholder_textures[file_path] = self.create_placeholder_thumbnail(file_path)
                 return self.placeholder_textures[file_path]
         else:
-            # Generate placeholders
             if file_path not in self.placeholder_textures:
                 self.placeholder_textures[file_path] = self.create_placeholder_thumbnail(file_path)
             return self.placeholder_textures[file_path]
     
-    def set_thumbnail_mode(self, generate_thumbnails):
+    def set_thumbnail_mode(self, generate_thumbnails, prev_thumbnail_mode=None):
         """Set thumbnail generation mode (placeholder or actual rendered thumbnails) and clear appropriate cache"""
-        if self.generate_thumbnails != generate_thumbnails:
+        prev_mode = prev_thumbnail_mode if prev_thumbnail_mode is not None else self.generate_thumbnails
+        if prev_mode != generate_thumbnails:
             current_time = time.time()
             
             # Debounce rapid toggling (prevent switches faster than 100ms)
             if current_time - self.last_mode_switch_time < 0.1:
-                print("Debouncing rapid thumbnail mode toggle")
                 return
             
             self.last_mode_switch_time = current_time
-            print(f"Switching thumbnail mode: {self.generate_thumbnails} -> {generate_thumbnails}")
             
-            # Set the mode first to prevent race conditions
             self.generate_thumbnails = generate_thumbnails
             
-            # Clear ALL textures to prevent OpenGL conflicts
             self.clear_all_thumbnails()
             
-            # Regenerate appropriate thumbnails (no blocking delay)
             if not generate_thumbnails and self.selected_files:
-                # Switching to placeholders, regenerate placeholders
                 self.update_thumbnails(self.selected_files)
     
     def update_thumbnails(self, file_paths):
         """Update thumbnails for all provided files"""
         self.selected_files = file_paths
         for file_path in file_paths:
-            # Use get_thumbnail which handles both modes
             self.get_thumbnail(file_path)
     
     def clear_thumbnails(self):
         """Clear all thumbnails and free memory"""
-        # Batch delete textures for better performance
         textures_to_delete = list(self.thumbnails.values())
-        self.thumbnails.clear()  # Clear the dict first to prevent new references
+        self.thumbnails.clear() 
         
         for texture in textures_to_delete:
             if texture is not None:
@@ -142,9 +125,8 @@ class ThumbnailWidget:
     
     def clear_placeholder_thumbnails(self):
         """Clear all placeholder thumbnails and free memory"""
-        # Batch delete textures for better performance
         textures_to_delete = list(self.placeholder_textures.values())
-        self.placeholder_textures.clear()  # Clear the dict first to prevent new references
+        self.placeholder_textures.clear()  
         
         for texture in textures_to_delete:
             if texture is not None:
@@ -160,16 +142,13 @@ class ThumbnailWidget:
     
     def render_thumbnails(self, available_width, available_height):
         if not self.selected_files:
-            # Calculate text size
             message = "No images imported"
             text_width = imgui.calc_text_size(message)[0]
             text_height = imgui.get_text_line_height()
 
-            # Calculate centered position
             center_x = (available_width - text_width) / 2
             center_y = (available_height - text_height) / 2
 
-            # Set cursor position
             imgui.set_cursor_pos_x(center_x)
             imgui.set_cursor_pos_y(center_y)
 
@@ -182,40 +161,34 @@ class ThumbnailWidget:
         spacing_y = 32  # vertical space between rows
         n = len(self.selected_files)
 
-        # Try to fit as many as possible, but not smaller than min_thumb_size
         thumbnails_per_row = max(1, int((available_width + spacing_x) // (min_thumb_size + spacing_x)))
         thumb_size = min(
             max_thumb_size,
             max(min_thumb_size, int((available_width - (thumbnails_per_row - 1) * spacing_x) // thumbnails_per_row))
         )
 
-        # Center the row if there is extra space
         total_row_width = thumbnails_per_row * thumb_size + (thumbnails_per_row - 1) * spacing_x
         left_margin = max(0, (available_width - total_row_width) // 2)
 
-        # Track selection
         if not hasattr(self, 'last_selected_idx'):
             self.last_selected_idx = None
         if not hasattr(self, 'selected_indices'):
             self.selected_indices = []
 
         for idx, file_path in enumerate(self.selected_files):
-            # Get thumbnail (either actual or placeholder based on mode)
             texture = self.get_thumbnail(file_path)
             if texture is not None and hasattr(texture, 'gl_id') and texture.gl_id is not None:
                 col = idx % thumbnails_per_row
-                row = idx // thumbnails_per_row
 
                 if col == 0:
                     imgui.dummy(left_margin, 0)
                 elif col > 0:
                     imgui.same_line(spacing=spacing_x)
 
-                # Draw thumbnail with clickable/hover effect
                 imgui.begin_group()
                 imgui.push_id(str(idx))
                 is_hovered = False
-                # Multi-selection support
+
                 if self.selected_indices:
                     is_selected = (idx in self.selected_indices)
                 else:
@@ -342,10 +315,8 @@ class ThumbnailWidget:
                     file_paths = request['file_paths']
                     thumbnail_size = request['thumbnail_size']
                     
-                    # Process each thumbnail
                     for file_path in file_paths:
                         try:
-                            # Create thumbnail data inline
                             thumbnail_data = None
                             
                             video_extensions = ['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm']
@@ -358,43 +329,35 @@ class ThumbnailWidget:
                                     cap.release()
                                     
                                     if ret:
-                                        # Convert BGR to RGB
                                         if len(frame.shape) == 3 and frame.shape[2] == 3:
                                             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                                         elif len(frame.shape) == 3 and frame.shape[2] == 4:
                                             frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2RGBA)
                                         
-                                        # Create square canvas
                                         height, width = frame.shape[:2]
                                         max_dim = max(height, width)
                                         canvas = np.zeros((max_dim, max_dim, frame.shape[2] if len(frame.shape) > 2 else 1), dtype=frame.dtype)
                                         
-                                        # Center the image
                                         y_offset = (max_dim - height) // 2
                                         x_offset = (max_dim - width) // 2
                                         canvas[y_offset:y_offset+height, x_offset:x_offset+width] = frame
                                         
-                                        # Resize to thumbnail size
                                         thumbnail_data = cv2.resize(canvas, (thumbnail_size, thumbnail_size), interpolation=cv2.INTER_AREA)
                             else:
                                 utils = DatasetPreprocessingUtils()
                                 img = utils.load_images(file_path)
-                                
-                                # Create square canvas
+
                                 height, width = img.shape[:2]
                                 max_dim = max(height, width)
-                                padding_colour = 26  # Match thumbnail background color #1A1A1A
+                                padding_colour = 26  
                                 canvas = np.full((max_dim, max_dim, img.shape[2] if len(img.shape) > 2 else 1), padding_colour, dtype=img.dtype)
-                                
-                                # Center the image
+
                                 y_offset = (max_dim - height) // 2
                                 x_offset = (max_dim - width) // 2
                                 canvas[y_offset:y_offset+height, x_offset:x_offset+width] = img
                                 
-                                # Resize to thumbnail size
                                 thumbnail_data = cv2.resize(canvas, (thumbnail_size, thumbnail_size), interpolation=cv2.INTER_AREA)
                             
-                            # Send thumbnail result
                             reply.put({
                                 'type': 'thumbnail',
                                 'file_path': file_path,
@@ -417,10 +380,8 @@ class ThumbnailWidget:
     def cleanup(self):
         """Clean up OpenGL textures and resources"""
         try:
-            # Stop any background processing first
             self.generate_thumbnails = False
             
-            # Clear all thumbnail textures
             for texture in self.thumbnails.values():
                 if texture is not None and hasattr(texture, 'delete') and callable(texture.delete):
                     try:
@@ -430,7 +391,6 @@ class ThumbnailWidget:
                         print(f"Error deleting thumbnail texture: {e}")
             self.thumbnails.clear()
             
-            # Clear placeholder textures
             for texture in self.placeholder_textures.values():
                 if texture is not None and hasattr(texture, 'delete') and callable(texture.delete):
                     try:
@@ -440,12 +400,10 @@ class ThumbnailWidget:
                         print(f"Error deleting placeholder texture: {e}")
             self.placeholder_textures.clear()
             
-            # Clear file lists and reset state
             self.selected_files = []
             self.selected_indices = []
             self.last_selected_idx = None
             
-            # Force garbage collection to ensure cleanup
             gc.collect()
             
         except Exception as e:
