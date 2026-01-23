@@ -36,9 +36,11 @@ conda activate autolume
 pip install -r requirements.txt
 ```
 
-Download pre-trained model from [face-parsing.PyTorch](https://github.com/zllrunning/face-parsing.PyTorch)
+Download pre-trained model from [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) and [face-parsing.PyTorch](https://github.com/zllrunning/face-parsing.PyTorch)
 
 ```bash
+curl -L 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth' -o 'sr_models/Quality.pth'
+curl -L 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-general-x4v3.pth' -o 'sr_models/Balance.pth'
 mkdir training/distillation/Util/face_parsing/pretrained_model
 curl -L 'https://drive.google.com/uc?export=download&id=154JgKpzCPW82qINcVieuPH3fZ2e0P812' -o 'training/distillation/Util/face_parsing/pretrained_model/79999_iter.pth'
 ```
