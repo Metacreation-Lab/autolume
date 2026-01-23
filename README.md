@@ -36,6 +36,13 @@ conda activate autolume
 pip install -r requirements.txt
 ```
 
+Download pre-trained model from [face-parsing.PyTorch](https://github.com/zllrunning/face-parsing.PyTorch)
+
+```bash
+mkdir training/distillation/Util/face_parsing/pretrained_model
+curl -L 'https://drive.google.com/uc?export=download&id=154JgKpzCPW82qINcVieuPH3fZ2e0P812' -o 'training/distillation/Util/face_parsing/pretrained_model/79999_iter.pth'
+```
+
 Download FFmpeg binaries
 
 ```bash

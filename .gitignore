@@ -19,3 +19,5 @@ models/
 recordings/
 training-runs/
 data/
+*.pt
+*.pth
