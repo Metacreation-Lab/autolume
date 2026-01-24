@@ -56,6 +56,7 @@ tar -xf bin\ffmpeg-7.1.1-full_build.zip -C bin
 Download default FFHQ model
 
 ```bash
+mkdir models
 curl -L 'https://api.ngc.nvidia.com/v2/models/org/nvidia/team/research/stylegan2/1/files?redirect=true&path=stylegan2-ffhq-512x512.pkl' -o 'models/stylegan2-ffhq-512x512.pkl'
 ```
 
