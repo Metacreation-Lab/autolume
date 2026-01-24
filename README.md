@@ -85,6 +85,7 @@ The release will be output to `dist/Autolume`
 - Philippe Pasquier: Director of Metacreation Lab for Creative AI, Principal Investigator 
 - Arshia Sobhan: Project management
 - Lionel Ringenbach: Software development
+- Michael Tjokrowardojo: Software development
 - Jonas Kraasch: Project first-phase development
 - Arthur Deleu: Project development
 - Mahshid Jabari: DevOps
