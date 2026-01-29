@@ -6,6 +6,9 @@ dist/
 build/
 *.spec
 
+# MkDocs
+site/
+
 # IDE
 .vscode/
 .idea/
