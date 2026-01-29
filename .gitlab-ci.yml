@@ -1,0 +1,14 @@
+pages:
+  stage: deploy
+  image: python:latest
+  script:
+    - pip install mkdocs-material
+    - mkdocs build --site-dir public
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}
+    paths:
+      - ~/.cache/ 
+  pages:
+    publish: public
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
