@@ -81,6 +81,22 @@ release.bat
 
 The release will be output to `dist/Autolume`
 
+### Building documentation
+
+```bash
+mkdocs build
+```
+
+The documentation will be output to `site`.
+
+To serve the documentation locally:
+
+```bash
+mkdocs serve
+```
+
+The documentation will be served at `http://127.0.0.1:8000/`.
+
 ## Credits
 
 - Philippe Pasquier: Director of Metacreation Lab for Creative AI, Principal Investigator 

@@ -1,0 +1,11 @@
+site_name: Autolume - Documentation
+theme:
+  name: material
+  favicon: assets/logo.webp
+  logo: assets/logo.webp
+  palette:
+    primary: custom
+    accent: custom
+
+extra_css:
+  - assets/extra.css
