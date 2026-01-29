@@ -1,0 +1,12 @@
+site_name: Autolume - Documentation
+repo_name: jkraasch/autolumelive_colab
+repo_url: https://gitlab.com/jkraasch/autolumelive_colab
+theme:
+  name: material
+  favicon: assets/logo.webp
+  logo: assets/logo.webp
+  palette:
+    primary: custom
+    accent: custom
+extra_css:
+  - assets/extra.css
