@@ -5,6 +5,8 @@ theme:
   name: material
   favicon: assets/logo.webp
   logo: assets/logo.webp
+  features:
+    - navigation.footer
   palette:
     primary: custom
     accent: custom
