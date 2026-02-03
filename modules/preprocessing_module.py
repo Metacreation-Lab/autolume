@@ -1,4 +1,4 @@
-import os
+from pathlib import Path
 import pandas as pd
 import imgui
 from utils.gui_utils import imgui_utils
@@ -20,8 +20,8 @@ def load_help_texts():
     help_urls = {}
     
     try:
-        csv_path = os.path.join(os.path.dirname(__file__), "help_texts.csv")
-        if os.path.exists(csv_path):
+        csv_path = Path("modules/help_texts.csv")
+        if csv_path.exists():
             df = pd.read_csv(csv_path)
             if 'module' in df.columns:
                 df = df[df['module'] == 'preprocessing']
@@ -289,7 +289,8 @@ class DataPreprocessing:
                             frames_paths = progress_data.get('results', [])
                             
                             for frames_dir in frames_paths:
-                                frame_files = [os.path.join(frames_dir, f) for f in os.listdir(frames_dir)]
+                                frame_path = Path(frames_dir)
+                                frame_files = [str(f) for f in frame_path.iterdir()]
                                 self.imported_files.extend(frame_files)
 
                             self.thumbnail_widget.update_thumbnails(self.imported_files)
@@ -533,7 +534,7 @@ class DataPreprocessing:
                 proposed_output_path = self._construct_output_path()
                 self.settings.output_path = proposed_output_path
                 
-                if os.path.exists(proposed_output_path):
+                if Path(proposed_output_path).exists():
                     self.folder_exists_warning = True
                 else:
                     self.folder_exists_warning = False
@@ -1092,7 +1093,7 @@ class DataPreprocessing:
         """Construct output path from parent directory + folder name + resolution"""
         resolution_suffix = f"_{self.settings.size}x{self.settings.size}"
         folder_name_with_resolution = self.settings.folder_name + resolution_suffix
-        return os.path.join(self.save_path, folder_name_with_resolution).replace('\\', '/')
+        return (Path(self.save_path) / folder_name_with_resolution).as_posix()
     
     def process_dataset(self):
         """Start the dataset processing in a separate process"""

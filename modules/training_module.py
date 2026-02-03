@@ -1,4 +1,4 @@
-import os
+from pathlib import Path
 import zipfile
 
 import imgui
@@ -27,8 +27,8 @@ def load_help_texts():
     help_urls = {}
     
     try:
-        csv_path = os.path.join(os.path.dirname(__file__), "help_texts.csv")
-        if os.path.exists(csv_path):
+        csv_path = Path("modules/help_texts.csv")
+        if csv_path.exists():
             df = pd.read_csv(csv_path)
             if 'module' in df.columns:
                 df = df[df['module'] == 'training']
@@ -47,12 +47,13 @@ def load_help_texts():
 
 class TrainingModule:
     def __init__(self, menu):
-        cwd = os.getcwd()
-        self.save_path = os.path.join(cwd, "training-runs").replace('\\', '/')
-        self.data_path = os.path.join(cwd, "data").replace('\\', '/')
+        cwd = Path.cwd()
+        self.save_path = (cwd / "training-runs").as_posix()
+        self.data_path = (cwd / "data").as_posix()
         # create data folder if not exists
-        if not os.path.exists(os.path.abspath(os.path.join(os.getcwd(),"data")).replace('\\', '/')):
-            os.makedirs(os.path.abspath(os.path.join(os.getcwd(),"data")).replace('\\', '/'))
+        data_dir = (cwd / "data").resolve()
+        if not data_dir.exists():
+            data_dir.mkdir(parents=True, exist_ok=True)
         self.app = menu.app
         self.config = 1
         self.resume_pkl = ""
@@ -66,10 +67,12 @@ class TrainingModule:
         self.data_path_browser = NativeBrowserWidget()
         self.save_path_browser = NativeBrowserWidget()
 
-        for pkl in os.listdir("./models"):
-            if pkl.endswith(".pkl"):
-                print(pkl, os.path.join(os.getcwd(),"models",pkl))
-                self.browse_cache.append(os.path.join(os.getcwd(),"models",pkl))
+        models_dir = Path.cwd() / "models"
+        for pkl in models_dir.iterdir() if models_dir.exists() else []:
+            if pkl.suffix == ".pkl":
+                pkl_path = str(pkl)
+                print(pkl.name, pkl_path)
+                self.browse_cache.append(pkl_path)
 
         self.menu = menu
 
@@ -104,7 +107,7 @@ class TrainingModule:
         self.preprocessing_save_browser = NativeBrowserWidget()
         self.preprocessing_save_path = self.preprocessing_settings_obj.output_path  
         self.preprocessing_folder_name = self.preprocessing_settings_obj.folder_name  
-        self.preprocessing_data_path = os.path.join(os.path.expanduser("~"), "Desktop").replace('\\', '/') 
+        self.preprocessing_data_path = (Path.home() / "Desktop").as_posix()
         self.data_path_has_videos = False  
         self.video_files_list = [] 
         
@@ -143,7 +146,7 @@ class TrainingModule:
 
     @staticmethod
     def _file_ext(fname):
-        return os.path.splitext(fname)[1].lower()
+        return Path(fname).suffix.lower()
 
     def _get_zipfile(self):
         assert self._type == 'zip'
@@ -210,13 +213,13 @@ class TrainingModule:
                 _, new_data_path = imgui_utils.input_text("##preprocessing_data_path", self.preprocessing_data_path, 1024, 0, 
                 width=imgui.get_window_width() - self.menu.app.button_w - imgui.calc_text_size("Browse")[0])
                 if new_data_path != self.preprocessing_data_path:
-                    self.preprocessing_data_path = new_data_path.replace('\\', '/')
+                    self.preprocessing_data_path = new_data_path
                 
                 imgui.same_line()
                 if imgui.button("Browse##preprocessing_data", width=self.menu.app.button_w):
                     directory_path, has_videos, video_files = self.preprocessing_data_browser.select_directory_with_video_check("Select Data Directory")
                     if directory_path:
-                        self.preprocessing_data_path = directory_path.replace('\\', '/')
+                        self.preprocessing_data_path = directory_path
                         self.data_path_has_videos = has_videos  
                         self.video_files_list = video_files  
                         print(f"Data path selected: {self.preprocessing_data_path}")
@@ -288,13 +291,13 @@ class TrainingModule:
                 _, new_save_path = imgui_utils.input_text("##preprocessing_save", self.preprocessing_save_path, 1024, 0, 
                 width=imgui.get_window_width() - self.menu.app.button_w - imgui.calc_text_size("Browse")[0])
                 if new_save_path != self.preprocessing_save_path:
-                    self.preprocessing_save_path = new_save_path.replace('\\', '/')
+                    self.preprocessing_save_path = new_save_path
                 
                 imgui.same_line()
                 if imgui.button("Browse##preprocessing_save", width=self.menu.app.button_w):
                     directory_path = self.preprocessing_save_browser.select_directory("Select Save Path")
                     if directory_path:
-                        self.preprocessing_save_path = directory_path.replace('\\', '/')
+                        self.preprocessing_save_path = directory_path
                     else:
                         print("No save path selected")
 
@@ -344,7 +347,7 @@ class TrainingModule:
             if imgui.button("Browse##main_save", width=self.menu.app.button_w):
                 directory_path = self.save_path_browser.select_directory("Select Training Results Save Path")
                 if directory_path:
-                    self.save_path = directory_path.replace('\\', '/')
+                    self.save_path = directory_path
                 else:
                     print("No save path selected")
 
@@ -358,16 +361,16 @@ class TrainingModule:
             if imgui.button("Browse##main_data", width=self.menu.app.button_w):
                 directory_path = self.data_path_browser.select_directory("Select Training Dataset Directory")
                 if directory_path:
-                    self.data_path = directory_path.replace('\\', '/')
-                    print(f"Data path selected: {self.data_path}")
-                    
+                    self.data_path = directory_path
+
                     # Check for PKL files in the directory
                     pkl_files = []
-                    for root, dirs, files in os.walk(self.data_path):
-                        for file in files:
-                            if file.endswith('.pkl'):
-                                pkl_path = os.path.join(root, file)
-                                pkl_files.append(pkl_path)
+                    data_path = Path(self.data_path)
+                    if data_path.is_dir():
+                        for pkl_path in data_path.rglob("*.pkl"):
+                            if pkl_path.is_file():
+                                pkl_path_str = str(pkl_path)
+                                pkl_files.append(pkl_path_str)
                                 if pkl_path not in self.browse_cache:
                                     self.browse_cache.append(pkl_path)
                     
@@ -456,11 +459,12 @@ class TrainingModule:
                 # Manipulate resolution training parameter based on dataset resolution (for now)
                 # Read resolution from first image in dataset
                 detected_resolution = None
-                if os.path.isdir(target_data_path):
-                    image_files = [f for f in os.listdir(target_data_path) 
-                                if f.lower().endswith('.png')]
+                target_path = Path(target_data_path)
+                if target_path.is_dir():
+                    image_files = [f for f in target_path.iterdir() 
+                                if f.is_file() and f.suffix.lower() == '.png']
                     if image_files:
-                        first_image_path = os.path.join(target_data_path, image_files[0])
+                        first_image_path = str(image_files[0])
                         img = cv2.imread(first_image_path)
                         if img is not None:
                             height, width = img.shape[:2]
@@ -739,7 +743,7 @@ class TrainingModule:
 
         if imgui.begin_popup_modal("Training")[0]:
             imgui.text("Training...")
-            if os.path.exists(self.message) and self.image_path != self.message:
+            if Path(self.message).exists() and self.image_path != self.message:
                 self.image_path = self.message
                 self.grid = cv2.imread(self.image_path, cv2.IMREAD_UNCHANGED)
                 self.grid = cv2.cvtColor(self.grid, cv2.COLOR_BGRA2RGBA)
@@ -772,17 +776,18 @@ class TrainingModule:
         image_extensions = {'.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif', '.webp'}
         image_files = []
         
-        for root, dirs, files in os.walk(directory_path):
-            for file in files:
-                if os.path.splitext(file)[1].lower() in image_extensions:
-                    image_files.append(os.path.join(root, file))
+        dir_path = Path(directory_path)
+        if dir_path.is_dir():
+            for path in dir_path.rglob("*"):
+                if path.is_file() and path.suffix.lower() in image_extensions:
+                    image_files.append(str(path))
         
         return image_files
     
     def create_preprocessing_dataset(self):
         """Start the preprocessing dataset creation process"""
         # Validate paths
-        if not os.path.exists(self.preprocessing_data_path):
+        if not Path(self.preprocessing_data_path).exists():
             print(f"Error: Data path does not exist: {self.preprocessing_data_path}")
             self.dataset_message = f"Data path does not exist:\n{self.preprocessing_data_path}"
             return
@@ -800,12 +805,12 @@ class TrainingModule:
         # Add resolution suffix to folder name and construct full path
         resolution_suffix = f"_{self.img_size}x{self.img_size}"
         folder_name_with_resolution = self.preprocessing_folder_name + resolution_suffix
-        self.dataset_output_path = os.path.join(self.preprocessing_save_path, folder_name_with_resolution).replace('\\', '/')
+        self.dataset_output_path = (Path(self.preprocessing_save_path) / folder_name_with_resolution)
         
         self.temp_image_files = list(image_files)
         self.extracted_frame_directories = []
         
-        if os.path.exists(self.dataset_output_path):
+        if Path(self.dataset_output_path).exists():
             self.folder_exists_warning = True
         else:
             self.folder_exists_warning = False
@@ -853,11 +858,12 @@ class TrainingModule:
         
         # Add extracted frames
         for frame_dir in self.extracted_frame_directories:
-            if os.path.exists(frame_dir):
-                frames = [os.path.join(frame_dir, f) for f in os.listdir(frame_dir) 
-                         if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
+            frame_path = Path(frame_dir)
+            if frame_path.exists():
+                frames = [str(f) for f in frame_path.iterdir() 
+                         if f.is_file() and f.suffix.lower() in ('.jpg', '.jpeg', '.png')]
                 all_images.extend(frames)
-                print(f"Added {len(frames)} frames from {os.path.basename(frame_dir)}")
+                print(f"Added {len(frames)} frames from {frame_path.name}")
         
         # Prepare settings with all collected images
         settings = DatasetPreprocessingUtils()
