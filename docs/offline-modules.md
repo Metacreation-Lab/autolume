@@ -71,7 +71,7 @@ While both methods serve the same purpose, they differ in how they apply these t
 
 If training performance remains poor even after experimenting with augmentation methods and pipelines, consider increasing the size and diversity of your dataset. Additional data can significantly improve model stability and output quality. You may also use the Data Preparation Module’s augmentation features to expand your dataset before training.
 
-For a detailed guide on choosing the right augmentation method and pipeline, refer to this document: [How to Select Augmentation Method and Pipeline](https://www.google.com/url?q=https://docs.google.com/document/d/1ykzB4DqXD8KslFwp8PH5FDtJOBDN3DMxbPHzY_94ogM/edit?tab%3Dt.0&sa=D&source=editors&ust=1769724592275384&usg=AOvVaw0OiA92KMP8ssMLljyikm70) 
+For a detailed guide on choosing the right augmentation method and pipeline, refer to this document: [How to Select Augmentation Method and Pipeline](training-aug.md) 
 
 For more technical details, please refer to:  
 ADA: [https://github.com/NVlabs/stylegan2-ada-pytorch](https://www.google.com/url?q=https://github.com/NVlabs/stylegan2-ada-pytorch&sa=D&source=editors&ust=1769724592275861&usg=AOvVaw19KrbXZXtytksKuFDBKJa5)  
@@ -85,7 +85,7 @@ To train a model, provide the following:
 - Dataset: Select the dataset on which the model will be trained. (See [Dataset](#dataset))
 - Resume Pkl: Resume training from a previous training run or a pre-trained model by selecting a .pkl file. Skip this field if you are training the model from scratch.
 - Training Augmentation: Select the style of augmentation to be applied during training. Experiment with different styles to find the one that works best for your data. (See [Training Augmentation](#training-augmentation))
-- Augmentation Pipeline: Choose the types of augmentation to be performed. (See [Choosing Augmentation Pipeline](https://www.google.com/url?q=https://docs.google.com/document/d/1ykzB4DqXD8KslFwp8PH5FDtJOBDN3DMxbPHzY_94ogM/edit?tab%3Dt.0&sa=D&source=editors&ust=1769724592278501&usg=AOvVaw01AN1OK6RhTG-98BDFJD10))
+- Augmentation Pipeline: Choose the types of augmentation to be performed. (See [Choosing Augmentation Pipeline](training-aug.md))
 - Batch Size: Determine the number of images processed at once. This value is limited by the GPU memory available. A batch size of 8 is recommended for NVIDIA RTX 2070 GPU and above. Reduce to lower values (minimum 2) if memory issues arise.
 - Configuration: Selects from a set of preset training configurations that serve as reliable starting points for different model resolutions. For example, the paper256 configuration is recommended when training models at 256×256 resolution. Refer to the Training New Networks section of [this link](https://www.google.com/url?q=https://github.com/NVlabs/stylegan2-ada-pytorch&sa=D&source=editors&ust=1769724592279946&usg=AOvVaw2lzyqjjDrZbdBs8gHhrKX4) for more details on the available configurations.
 

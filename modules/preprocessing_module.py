@@ -1,4 +1,4 @@
-import os
+from pathlib import Path
 import pandas as pd
 import imgui
 from utils.gui_utils import imgui_utils
@@ -13,30 +13,6 @@ from utils.dataset_preprocessing_utils import DatasetPreprocessingUtils
 
 resize_mode = ['stretch','center crop']
 padding_color = ['black', 'white', 'bleeding']
-
-
-def load_help_texts():
-    help_texts = {}
-    help_urls = {}
-    
-    try:
-        csv_path = os.path.join(os.path.dirname(__file__), "help_texts.csv")
-        if os.path.exists(csv_path):
-            df = pd.read_csv(csv_path)
-            if 'module' in df.columns:
-                df = df[df['module'] == 'preprocessing']
-            for _, row in df.iterrows():
-                if row.get('key') and row.get('text'):
-                    key = str(row['key']).strip()
-                    text = str(row['text'])
-                    text = text.replace('\\n', '\n')
-                    help_texts[key] = text
-                    if pd.notna(row.get('url')) and str(row['url']).strip():
-                        help_urls[key] = str(row['url']).strip()
-    except Exception as e:
-        print(f"Error loading preprocessing help texts from CSV. Error: {e}")
-    
-    return help_texts, help_urls
 
 class DataPreprocessing:
     """Data Preprocessing UI"""
@@ -105,9 +81,9 @@ class DataPreprocessing:
         self.processing_completed = False
         
         self.save_path = self.settings.output_path 
-        
-        self.help_texts, self.help_urls = load_help_texts()
+
         self.help_icon = HelpIconWidget()
+        self.help_texts, self.help_urls = self.help_icon.load_help_texts("preprocessing")
 
     def __call__(self):
         """Preprocessing content"""
@@ -289,7 +265,8 @@ class DataPreprocessing:
                             frames_paths = progress_data.get('results', [])
                             
                             for frames_dir in frames_paths:
-                                frame_files = [os.path.join(frames_dir, f) for f in os.listdir(frames_dir)]
+                                frame_path = Path(frames_dir)
+                                frame_files = [str(f) for f in frame_path.iterdir()]
                                 self.imported_files.extend(frame_files)
 
                             self.thumbnail_widget.update_thumbnails(self.imported_files)
@@ -533,7 +510,7 @@ class DataPreprocessing:
                 proposed_output_path = self._construct_output_path()
                 self.settings.output_path = proposed_output_path
                 
-                if os.path.exists(proposed_output_path):
+                if Path(proposed_output_path).exists():
                     self.folder_exists_warning = True
                 else:
                     self.folder_exists_warning = False
@@ -1092,7 +1069,7 @@ class DataPreprocessing:
         """Construct output path from parent directory + folder name + resolution"""
         resolution_suffix = f"_{self.settings.size}x{self.settings.size}"
         folder_name_with_resolution = self.settings.folder_name + resolution_suffix
-        return os.path.join(self.save_path, folder_name_with_resolution).replace('\\', '/')
+        return (Path(self.save_path) / folder_name_with_resolution).as_posix()
     
     def process_dataset(self):
         """Start the dataset processing in a separate process"""
