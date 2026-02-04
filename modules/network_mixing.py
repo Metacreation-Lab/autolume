@@ -29,30 +29,6 @@ def extract_mapping_names(model):
     return model_names
 
 
-def load_help_texts():
-    help_texts = {}
-    help_urls = {}
-    
-    try:
-        csv_path = os.path.join(os.path.dirname(__file__), "help_texts.csv")
-        if os.path.exists(csv_path):
-            df = pd.read_csv(csv_path)
-            if 'module' in df.columns:
-                df = df[df['module'] == 'network_mixing']
-            for _, row in df.iterrows():
-                if row.get('key') and row.get('text'):
-                    key = str(row['key']).strip()
-                    text = str(row['text'])
-                    text = text.replace('\\n', '\n')
-                    help_texts[key] = text
-                    if pd.notna(row.get('url')) and str(row['url']).strip():
-                        help_urls[key] = str(row['url']).strip()
-    except Exception as e:
-        print(f"Error loading network mixing help texts from CSV. Error: {e}")
-    
-    return help_texts, help_urls
-
-
 class MixingModule:
 
     def __init__(self, menu):
@@ -74,8 +50,8 @@ class MixingModule:
         self.combined_layers = []
         self.collapsed = []
         self.cached_layers = []
-        self.help_texts, self.help_urls = load_help_texts()
         self.help_icon = HelpIconWidget()
+        self.help_texts, self.help_urls = self.help_icon.load_help_texts("network_mixing")
 
         for pkl in os.listdir("./models"):
             if pkl.endswith(".pkl"):

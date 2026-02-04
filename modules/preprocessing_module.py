@@ -14,30 +14,6 @@ from utils.dataset_preprocessing_utils import DatasetPreprocessingUtils
 resize_mode = ['stretch','center crop']
 padding_color = ['black', 'white', 'bleeding']
 
-
-def load_help_texts():
-    help_texts = {}
-    help_urls = {}
-    
-    try:
-        csv_path = Path("modules/help_texts.csv")
-        if csv_path.exists():
-            df = pd.read_csv(csv_path)
-            if 'module' in df.columns:
-                df = df[df['module'] == 'preprocessing']
-            for _, row in df.iterrows():
-                if row.get('key') and row.get('text'):
-                    key = str(row['key']).strip()
-                    text = str(row['text'])
-                    text = text.replace('\\n', '\n')
-                    help_texts[key] = text
-                    if pd.notna(row.get('url')) and str(row['url']).strip():
-                        help_urls[key] = str(row['url']).strip()
-    except Exception as e:
-        print(f"Error loading preprocessing help texts from CSV. Error: {e}")
-    
-    return help_texts, help_urls
-
 class DataPreprocessing:
     """Data Preprocessing UI"""
     def __init__(self, app):
@@ -105,9 +81,9 @@ class DataPreprocessing:
         self.processing_completed = False
         
         self.save_path = self.settings.output_path 
-        
-        self.help_texts, self.help_urls = load_help_texts()
+
         self.help_icon = HelpIconWidget()
+        self.help_texts, self.help_urls = self.help_icon.load_help_texts("preprocessing")
 
     def __call__(self):
         """Preprocessing content"""

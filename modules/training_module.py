@@ -22,29 +22,6 @@ diffaug_pipes = ['color,translation,cutout', 'color,translation', 'color,cutout'
 configs = ['auto', 'stylegan2', 'paper256', 'paper512', 'paper1024', 'cifar']
 resize_mode = ['stretch','center crop']
 
-def load_help_texts():
-    help_texts = {}
-    help_urls = {}
-    
-    try:
-        csv_path = Path("modules/help_texts.csv")
-        if csv_path.exists():
-            df = pd.read_csv(csv_path)
-            if 'module' in df.columns:
-                df = df[df['module'] == 'training']
-            for _, row in df.iterrows():
-                if row.get('key') and row.get('text'):
-                    key = str(row['key']).strip()
-                    text = str(row['text'])
-                    text = text.replace('\\n', '\n')
-                    help_texts[key] = text
-                    if pd.notna(row.get('url')) and str(row['url']).strip():
-                        help_urls[key] = str(row['url']).strip()
-    except Exception as e:
-        print(f"Error loading training help texts from CSV. Error: {e}")
-    
-    return help_texts, help_urls
-
 class TrainingModule:
     def __init__(self, menu):
         cwd = Path.cwd()
@@ -75,9 +52,9 @@ class TrainingModule:
                 self.browse_cache.append(pkl_path)
 
         self.menu = menu
-
-        self.help_texts, self.help_urls = load_help_texts()
+        
         self.help_icon = HelpIconWidget()
+        self.help_texts, self.help_urls = self.help_icon.load_help_texts("training")
 
         self.queue = mp.Queue()
         self.reply = mp.Queue()

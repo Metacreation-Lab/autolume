@@ -1,5 +1,5 @@
 key,module,text,url
-import_data,preprocessing,"Import images and videos from a directory. Imported files are added to the thumbnail list.", https://jkraasch.gitlab.io/autolumelive_colab/offline-modules/#data-preparation
+import_data,preprocessing,"Import images and videos from a directory. Imported files are added to the thumbnail list.", https://jkraasch.gitlab.io/autolumelive_colab/offline-modules/#supported-file-formats
 image_options,preprocessing,"Image options for preprocessing.\nResize Mode: Method to resize images to target resolution.\nResolution: Target resolution for processed images.\nNon-square Framing: Enable non-square aspect ratios for processed images.\nAspect Ratio: The ratio between width and height dimensions.\nPadding Options: Padding method for non-square images.", https://jkraasch.gitlab.io/autolumelive_colab/offline-modules/#data-preparation
 fps_video_extraction,preprocessing,"Frame rate for extracting frames from video files.\nHigher FPS will extract more frames but take longer."
 resize_mode,preprocessing,"Method to resize images to target resolution.\nstretch - Stretches image to fit\ncenter crop - Crops from center to fit"
