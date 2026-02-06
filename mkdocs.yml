@@ -1,6 +1,6 @@
 site_name: Autolume - Documentation
-repo_name: jkraasch/autolumelive_colab
-repo_url: https://gitlab.com/jkraasch/autolumelive_colab
+repo_name: Metacreation-Lab/autolume
+repo_url: https://github.com/Metacreation-Lab/autolume
 theme:
   name: material
   favicon: assets/logo.webp
