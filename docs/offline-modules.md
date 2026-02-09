@@ -10,7 +10,7 @@ This module provides options for dataset preparation prior to model training. Th
 
 The Data Preparation Module offers extended functionality and finer control over dataset creation. It includes options such as non-square framing to preserve image aspect ratios, image augmentations to expand dataset size and diversity, and integrated tools for managing and organizing data directly within the application. This module enables data to be imported, refined, and compiled entirely in-app. A built-in preview panel displays preprocessing results in real time, allowing visual verification of all applied changes before preprocessing and saving.
 
-![](assets/offline-modules-data-preparation-module-01.png)
+![](assets/offline-modules-data-preparation-02.png)
 
 ### Data Preparation Quick Settings
 
