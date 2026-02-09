@@ -305,8 +305,9 @@ class TrainingModule:
             training_url = self.help_urls.get("training_module")
             if training_url:
                 training_hyperlinks.append((training_url, "Read More"))
-            second_url = "https://docs.google.com/document/d/1ykzB4DqXD8KslFwp8PH5FDtJOBDN3DMxbPHzY_94ogM/edit?tab=t.0"
-            training_hyperlinks.append((second_url, "How to choose training augmentation"))
+            augmentation_guide_url = self.help_urls.get("training_augmentation_guide")
+            if augmentation_guide_url:
+                training_hyperlinks.append((augmentation_guide_url, "How to choose training augmentation"))
             
             if training_hyperlinks:
                 self.help_icon.render_with_urls(self.help_texts.get("training_module"), training_hyperlinks)

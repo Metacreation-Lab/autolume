@@ -5,6 +5,8 @@ import imgui
 import webbrowser
 from utils.gui_utils import gl_utils
 
+DOCS_BASE_URL = "https://metacreation-lab.github.io/autolume"
+
 class HelpIconWidget:
     """Reusable widget for displaying a help icon next to labels"""
     
@@ -31,11 +33,23 @@ class HelpIconWidget:
                         text = text.replace('\\n', '\n')
                         help_texts[key] = text
                         if pd.notna(row.get('url')) and str(row['url']).strip():
-                            help_urls[key] = str(row['url']).strip()
+                            raw_url = str(row['url']).strip()
+                            help_urls[key] = self._resolve_docs_url(raw_url)
         except Exception as e:
             print(f"Error loading help texts: {e}")
 
         return help_texts, help_urls
+
+    @staticmethod
+    def _resolve_docs_url(url_or_path):
+        """Append DOCS_BASE_URL to the url_or_path"""
+        if not url_or_path:
+            return url_or_path
+        if url_or_path.startswith("http://") or url_or_path.startswith("https://"):
+            return url_or_path
+        base = DOCS_BASE_URL
+        path = url_or_path if url_or_path.startswith("/") else "/" + url_or_path
+        return base + path
 
     def _load_icon(self):
         """Load the help icon image as a texture"""
