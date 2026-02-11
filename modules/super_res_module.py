@@ -26,30 +26,6 @@ args = EasyDict(result_path="", input_path=[""], model_type="Balance",
 scale_factor = ['1', '2', '3', '4', '5', '6', '7', '8']
 
 
-def load_help_texts():
-    help_texts = {}
-    help_urls = {}
-    
-    try:
-        csv_path = os.path.join(os.path.dirname(__file__), "help_texts.csv")
-        if os.path.exists(csv_path):
-            df = pd.read_csv(csv_path)
-            if 'module' in df.columns:
-                df = df[df['module'] == 'super_res']
-            for _, row in df.iterrows():
-                if row.get('key') and row.get('text'):
-                    key = str(row['key']).strip()
-                    text = str(row['text'])
-                    text = text.replace('\\n', '\n')
-                    help_texts[key] = text
-                    if pd.notna(row.get('url')) and str(row['url']).strip():
-                        help_urls[key] = str(row['url']).strip()
-    except Exception as e:
-        print(f"Error loading super resolution help texts from CSV. Error: {e}")
-    
-    return help_texts, help_urls
-
-
 class SuperResModule:
     def __init__(self, menu):
         self.result_path = args.result_path
@@ -79,8 +55,8 @@ class SuperResModule:
         self.eta = -1
         self.video_width = 0
         self.video_height = 0
-        self.help_texts, self.help_urls = load_help_texts()
         self.help_icon = HelpIconWidget()
+        self.help_texts, self.help_urls = self.help_icon.load_help_texts("super_res")
 
 
     def display_progress(self):

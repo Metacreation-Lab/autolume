@@ -23,6 +23,8 @@ from modules.projection_module import ProjectionModule
 from modules.network_mixing import MixingModule
 
 from modules.super_res_module import SuperResModule
+
+from widgets.help_icon_widget import DOCS_BASE_URL
 #----------------------------------------------------------------------------
 class Menu:
     def __init__(self, app):
@@ -73,7 +75,7 @@ class Menu:
         imgui.push_style_var(imgui.STYLE_FRAME_PADDING, (0, doc_button_height * 0.2))
         if imgui_utils.button("Documentation", 
                             width=doc_button_width):
-            webbrowser.open("https://docs.google.com/document/d/1KJ3z55UNcuMitlDw6fhRDsd1YHVWqGeT0Fe0Ndy866I/edit?tab=t.0#heading=h.n1zhagy37lt")
+            webbrowser.open(DOCS_BASE_URL)
         imgui.pop_style_var()
 
         imgui.same_line(self.app.content_width - (metacreation_width + 20))
