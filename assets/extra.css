@@ -1,0 +1,6 @@
+:root>* {
+    /* Colors from the official website
+    https://www.metacreation.net/autolume */
+    --md-primary-fg-color: #ED1C3B;
+    --md-accent-fg-color: #279699;
+}
