@@ -19,33 +19,68 @@ For examples of artworks created with Autolume see: https://www.metacreation.net
 
 ### Dependencies
 
-For optimal performance, developers and users must install the following dependencies:
-- Microsoft C++ Build Tools ([download link](https://download.visualstudio.microsoft.com/download/pr/13907dbe-8bb3-4cfe-b0ae-147e70f8b2f3/a3193e6e6135ef7f598d6a9e429b010d77260dba33dddbee343a47494b5335a3/vs_BuildTools.exe))
-  - Minimum components: Desktop development with C++
 - CUDA 12.8 ([download link](https://developer.nvidia.com/cuda-12-8-0-download-archive))
   - Minimum components: CUDA Development + CUDA Runtime
+- [Miniconda](https://docs.conda.io/en/latest/miniconda.html) or [Anaconda](https://www.anaconda.com/download)
+
+#### Windows only
+
+- Microsoft C++ Build Tools ([download link](https://download.visualstudio.microsoft.com/download/pr/13907dbe-8bb3-4cfe-b0ae-147e70f8b2f3/a3193e6e6135ef7f598d6a9e429b010d77260dba33dddbee343a47494b5335a3/vs_BuildTools.exe))
+  - Minimum components: Desktop development with C++
+
+#### Linux only (Ubuntu 24.04)
+
+```bash
+sudo apt install portaudio19-dev ffmpeg avahi-daemon
+sudo systemctl enable --now avahi-daemon
+```
+
+Install the [NDI SDK for Linux](https://ndi.video/tools/ndi-sdk/):
+
+```bash
+curl -L https://downloads.ndi.tv/SDK/NDI_SDK_Linux/Install_NDI_SDK_v6_Linux.tar.gz -o /tmp/ndi_sdk.tar.gz
+tar -xzf /tmp/ndi_sdk.tar.gz -C /tmp
+cd /tmp && sh Install_NDI_SDK_v6_Linux.sh
+```
+
+The installer creates a directory with spaces in its name. Create a symlink for easier use:
+
+```bash
+ln -s "/tmp/NDI SDK for Linux" /tmp/ndi-sdk
+```
 
 ### Initial setup
 
-Install Miniconda from [here](https://docs.conda.io/en/latest/miniconda.html).
+Create the Python environment:
 
-Create python environment and install dependencies
 ```bash
 conda create -n autolume python=3.10
 conda activate autolume
 pip install -r requirements.txt
 ```
 
-Download pre-trained model from [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) and [face-parsing.PyTorch](https://github.com/zllrunning/face-parsing.PyTorch)
+#### Linux: install ndi-python from source
+
+The `ndi-python` pip package does not ship pre-built Linux wheels. Build it from the git repo using the NDI SDK symlink:
+
+```bash
+git clone --recursive https://github.com/buresu/ndi-python.git /tmp/ndi-python
+export CMAKE_ARGS="-DNDI_SDK_DIR=/tmp/ndi-sdk"
+pip install /tmp/ndi-python -v
+```
+
+#### Download pre-trained models
+
+Download pre-trained models from [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) and [face-parsing.PyTorch](https://github.com/zllrunning/face-parsing.PyTorch):
 
 ```bash
 curl -L 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth' -o 'sr_models/Quality.pth'
 curl -L 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-general-x4v3.pth' -o 'sr_models/Balance.pth'
-mkdir training/distillation/Util/face_parsing/pretrained_model
+mkdir -p training/distillation/Util/face_parsing/pretrained_model
 curl -L 'https://drive.google.com/uc?export=download&id=154JgKpzCPW82qINcVieuPH3fZ2e0P812' -o 'training/distillation/Util/face_parsing/pretrained_model/79999_iter.pth'
 ```
 
-Download FFmpeg binaries
+#### Download FFmpeg binaries (Windows only)
 
 ```bash
 mkdir bin
@@ -53,10 +88,12 @@ ffdl download 7.1.1@full -d bin -y
 tar -xf bin\ffmpeg-7.1.1-full_build.zip -C bin
 ```
 
-Download default FFHQ model
+On Linux, FFmpeg is installed via `apt` (see [Linux dependencies](#linux-only-ubuntu-2404) above).
+
+#### Download default FFHQ model
 
 ```bash
-mkdir models
+mkdir -p models
 curl -L 'https://api.ngc.nvidia.com/v2/models/org/nvidia/team/research/stylegan2/1/files?redirect=true&path=stylegan2-ffhq-512x512.pkl' -o 'models/stylegan2-ffhq-512x512.pkl'
 ```
 
