@@ -1,4 +1,4 @@
-# Autolume Training Augmentation
+# Training Augmentation
 
 ## DiffAug and ADA
 
