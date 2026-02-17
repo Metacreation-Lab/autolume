@@ -1,8 +1,10 @@
 from pathlib import Path
 import zipfile
+import io
 
 import imgui
 import multiprocessing as mp
+import PIL.Image
 
 import dnnlib
 from utils.gui_utils import imgui_utils
@@ -84,7 +86,7 @@ class TrainingModule:
         self.preprocessing_save_browser = NativeBrowserWidget()
         self.preprocessing_save_path = self.preprocessing_settings_obj.output_path  
         self.preprocessing_folder_name = self.preprocessing_settings_obj.folder_name  
-        self.preprocessing_data_path = (Path.home() / "Desktop")
+        self.preprocessing_data_path = Path.home() / "Desktop"
         self.data_path_has_videos = False  
         self.video_files_list = [] 
         
@@ -443,70 +445,71 @@ class TrainingModule:
                                 if f.is_file() and f.suffix.lower() == '.png']
                     if image_files:
                         first_image_path = str(image_files[0])
-                        img = cv2.imread(first_image_path)
-                        if img is not None:
-                            height, width = img.shape[:2]
-                            detected_resolution = (width, height)
-                            print(f"Detected image resolution from dataset: {detected_resolution}")
+                        img = PIL.Image.open(first_image_path)
+                        width, height = img.size
+                        detected_resolution = (width, height)
 
-                kwargs = dnnlib.EasyDict(
-                    outdir=self.save_path,
-                    data=target_data_path,
-                    cfg=configs[self.config],
-                    batch=self.batch_size,
-                    topk=None,
-                    gpus=1,
-                    gamma=self.gamma,
-                    z_dim=512,
-                    w_dim=512,
-                    cond=False,
-                    mirror=self.mirror,
-                    resolution=detected_resolution,
-                    resize_mode = resize_mode[self.resize_mode],
-                    aug="ada" if augs[self.aug] == "ADA" else "noaug",
-                    augpipe=ada_pipes[self.ada_pipe],
-                    resume=self.resume_pkl if self.resume_pkl != "" else None,
-                    freezed=0,
-                    p=0.2,
-                    target=0.6,
-                    batch_gpu=self.batch_size//1, #gpus param?
-                    cbase=32768,
-                    cmax=512,
-                    glr=self.glr,
-                    dlr=self.dlr,
-                    map_depth=8,
-                    mbstd_group=2,
-                    initstrength=None,
-                    projected=False,
-                    diffaugment= diffaug_pipes[self.diffaug_pipe] if self.aug == 1 else None,
-                    desc="",
-                    metrics=[],
-                    kimg=25000,
-                    nkimg=0,
-                    tick=4,
-                    snap=self.snap,
-                    seed=0,
-                    nobench=False,
-                    dry_run=False,
-                    fp32=False,
-                    workers=4,
-                    kd_l1_lambda=0.0,
-                    kd_lpips_lambda=0.0,
-                    kd_mode="Output_Only",
-                    content_aware_kd=False,
-                    teacher = None,
-                    custom=True,
-                    lpips_image_size=256,
-                    fps=self.fps if self.found_video else 10,
-                )
+                if not self.validate_dataset_specs(target_data_path, detected_resolution):
+                    print("Dataset validation failed")
+                else:
+                    kwargs = dnnlib.EasyDict(
+                        outdir=self.save_path,
+                        data=target_data_path,
+                        cfg=configs[self.config],
+                        batch=self.batch_size,
+                        topk=None,
+                        gpus=1,
+                        gamma=self.gamma,
+                        z_dim=512,
+                        w_dim=512,
+                        cond=False,
+                        mirror=self.mirror,
+                        resolution=detected_resolution,
+                        resize_mode = resize_mode[self.resize_mode],
+                        aug="ada" if augs[self.aug] == "ADA" else "noaug",
+                        augpipe=ada_pipes[self.ada_pipe],
+                        resume=self.resume_pkl if self.resume_pkl != "" else None,
+                        freezed=0,
+                        p=0.2,
+                        target=0.6,
+                        batch_gpu=self.batch_size//1, #gpus param?
+                        cbase=32768,
+                        cmax=512,
+                        glr=self.glr,
+                        dlr=self.dlr,
+                        map_depth=8,
+                        mbstd_group=2,
+                        initstrength=None,
+                        projected=False,
+                        diffaugment= diffaug_pipes[self.diffaug_pipe] if self.aug == 1 else None,
+                        desc="",
+                        metrics=[],
+                        kimg=25000,
+                        nkimg=0,
+                        tick=4,
+                        snap=self.snap,
+                        seed=0,
+                        nobench=False,
+                        dry_run=False,
+                        fp32=False,
+                        workers=4,
+                        kd_l1_lambda=0.0,
+                        kd_lpips_lambda=0.0,
+                        kd_mode="Output_Only",
+                        content_aware_kd=False,
+                        teacher = None,
+                        custom=True,
+                        lpips_image_size=256,
+                        fps=self.fps if self.found_video else 10,
+                    )
 
-                if self.done == True:
-                    self.queue = mp.Queue()
-                    self.reply = mp.Queue()
-                    self.training_process = mp.Process(target=train_main, args=(self.queue, self.reply), name='TrainingProcess')
-                    self.done = False
-                self.queue.put(kwargs)
-                self.training_process.start()
+                    if self.done == True:
+                        self.queue = mp.Queue()
+                        self.reply = mp.Queue()
+                        self.training_process = mp.Process(target=train_main, args=(self.queue, self.reply), name='TrainingProcess')
+                        self.done = False
+                    self.queue.put(kwargs)
+                    self.training_process.start()
         imgui.end_child()
 
         #------------------------------------------------------------------------------------------------
@@ -873,6 +876,30 @@ class TrainingModule:
         )
         self.dataset_process.start()
         self.video_extraction_in_progress = False
+
+    def validate_dataset_specs(self, data_path, detected_resolution):
+        """Validate dataset specifications (square, uniform resolution, and PNG-only)."""
+        if detected_resolution is None:
+            return False
+        target_path = Path(data_path)
+        if not target_path.is_dir():
+            return False
+        # Only PNG files allowed; any other file (video, jpg, etc.) makes the dataset invalid
+        all_files = [f for f in target_path.iterdir() if f.is_file()]
+        for f in all_files:
+            if f.suffix.lower() != '.png':
+                return False
+        image_files = [f for f in all_files if f.suffix.lower() == '.png']
+        if not image_files:
+            return False
+        for image_file in image_files:
+            img = PIL.Image.open(image_file)
+            width, height = img.size
+            if width != height:
+                return False
+            if width != detected_resolution[0] or height != detected_resolution[1]:
+                return False
+        return True
     
     def cleanup_dataset_process(self):
         """Clean up dataset creation process"""
