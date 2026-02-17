@@ -431,30 +431,27 @@ class TrainingModule:
 
 
             if imgui.button("Train", width=-1):
-                self._open_training_popup = True
-                print("training")
-                
-                target_data_path = self.data_path
-
-                # Manipulate resolution training parameter based on dataset resolution (for now)
-                # Read resolution from first image in dataset
+                # Manipulate required resolution training parameter based on dataset resolution
                 detected_resolution = None
-                target_path = Path(target_data_path)
-                if target_path.is_dir():
-                    image_files = [f for f in target_path.iterdir() 
+                target_dataset_path = Path(self.data_path)
+                if target_dataset_path.is_dir():
+                    image_files = [f for f in target_dataset_path.iterdir() 
                                 if f.is_file() and f.suffix.lower() == '.png']
                     if image_files:
                         first_image_path = str(image_files[0])
                         img = PIL.Image.open(first_image_path)
                         width, height = img.size
                         detected_resolution = (width, height)
-
-                if not self.validate_dataset_specs(target_data_path, detected_resolution):
+                
+                if not self.validate_dataset_specs(target_dataset_path, detected_resolution):
                     print("Dataset validation failed")
                 else:
+                    self._open_training_popup = True
+                    print("training")
+
                     kwargs = dnnlib.EasyDict(
-                        outdir=self.save_path,
-                        data=target_data_path,
+                        outdir=str(self.save_path),
+                        data=str(target_dataset_path),
                         cfg=configs[self.config],
                         batch=self.batch_size,
                         topk=None,
@@ -877,14 +874,15 @@ class TrainingModule:
         self.dataset_process.start()
         self.video_extraction_in_progress = False
 
-    def validate_dataset_specs(self, data_path, detected_resolution):
+    def validate_dataset_specs(self, dataset_path, detected_resolution):
         """Validate dataset specifications (square, uniform resolution, and PNG-only)."""
         if detected_resolution is None:
             return False
-        target_path = Path(data_path)
+        if detected_resolution[0] != detected_resolution[1]:
+            return False
+        target_path = Path(dataset_path)
         if not target_path.is_dir():
             return False
-        # Only PNG files allowed; any other file (video, jpg, etc.) makes the dataset invalid
         all_files = [f for f in target_path.iterdir() if f.is_file()]
         for f in all_files:
             if f.suffix.lower() != '.png':
