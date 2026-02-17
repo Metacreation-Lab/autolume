@@ -55,7 +55,7 @@ class HelpIconWidget:
         """Load the help icon image as a texture"""
         try:
             if Path(self.icon_path).exists():
-                help_img = cv2.imread(Path(self.icon_path).as_posix(), cv2.IMREAD_UNCHANGED)
+                help_img = cv2.imread(Path(self.icon_path), cv2.IMREAD_UNCHANGED)
                 if help_img is not None:
                     self.help_icon_texture = gl_utils.Texture(
                         image=help_img,

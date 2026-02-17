@@ -1069,7 +1069,7 @@ class DataPreprocessing:
         """Construct output path from parent directory + folder name + resolution"""
         resolution_suffix = f"_{self.settings.size}x{self.settings.size}"
         folder_name_with_resolution = self.settings.folder_name + resolution_suffix
-        return (Path(self.save_path) / folder_name_with_resolution).as_posix()
+        return Path(self.save_path) / folder_name_with_resolution
     
     def process_dataset(self):
         """Start the dataset processing in a separate process"""

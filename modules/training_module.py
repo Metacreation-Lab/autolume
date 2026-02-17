@@ -25,8 +25,8 @@ resize_mode = ['stretch','center crop']
 class TrainingModule:
     def __init__(self, menu):
         cwd = Path.cwd()
-        self.save_path = (cwd / "training-runs").as_posix()
-        self.data_path = (cwd / "data").as_posix()
+        self.save_path = (cwd / "training-runs")
+        self.data_path = (cwd / "data")
         # create data folder if not exists
         data_dir = (cwd / "data").resolve()
         if not data_dir.exists():
@@ -84,7 +84,7 @@ class TrainingModule:
         self.preprocessing_save_browser = NativeBrowserWidget()
         self.preprocessing_save_path = self.preprocessing_settings_obj.output_path  
         self.preprocessing_folder_name = self.preprocessing_settings_obj.folder_name  
-        self.preprocessing_data_path = (Path.home() / "Desktop").as_posix()
+        self.preprocessing_data_path = (Path.home() / "Desktop")
         self.data_path_has_videos = False  
         self.video_files_list = [] 
         
@@ -187,7 +187,7 @@ class TrainingModule:
                 imgui.text("Data Path")
                 current_y = imgui.get_cursor_pos_y()
                 imgui.set_cursor_pos_y(current_y - 3)  
-                _, new_data_path = imgui_utils.input_text("##preprocessing_data_path", self.preprocessing_data_path, 1024, 0, 
+                _, new_data_path = imgui_utils.input_text("##preprocessing_data_path", str(self.preprocessing_data_path), 1024, 0, 
                 width=imgui.get_window_width() - self.menu.app.button_w - imgui.calc_text_size("Browse")[0])
                 if new_data_path != self.preprocessing_data_path:
                     self.preprocessing_data_path = new_data_path
@@ -265,7 +265,7 @@ class TrainingModule:
                 imgui.text("Save Path")
                 current_y = imgui.get_cursor_pos_y()
                 imgui.set_cursor_pos_y(current_y - 3)  
-                _, new_save_path = imgui_utils.input_text("##preprocessing_save", self.preprocessing_save_path, 1024, 0, 
+                _, new_save_path = imgui_utils.input_text("##preprocessing_save", str(self.preprocessing_save_path), 1024, 0, 
                 width=imgui.get_window_width() - self.menu.app.button_w - imgui.calc_text_size("Browse")[0])
                 if new_save_path != self.preprocessing_save_path:
                     self.preprocessing_save_path = new_save_path
@@ -318,7 +318,7 @@ class TrainingModule:
             imgui.text("Save Path")
             current_y = imgui.get_cursor_pos_y()
             imgui.set_cursor_pos_y(current_y - 3)  
-            _, self.save_path = imgui_utils.input_text("##Save Path", self.save_path, 1024, 0, 
+            _, self.save_path = imgui_utils.input_text("##Save Path", str(self.save_path), 1024, 0, 
             width=imgui.get_window_width() - imgui.calc_text_size("Browse##main_save")[0])
             
             imgui.same_line()
@@ -327,12 +327,12 @@ class TrainingModule:
                 if directory_path:
                     self.save_path = directory_path
                 else:
-                    print("No save path selected")
+                    self.save_path = self.save_path
 
             imgui.text("Dataset Path")
             current_y = imgui.get_cursor_pos_y()
             imgui.set_cursor_pos_y(current_y - 3)  
-            _, self.data_path = imgui_utils.input_text("##Dataset Path", self.data_path, 1024, 0, 
+            _, self.data_path = imgui_utils.input_text("##Dataset Path", str(self.data_path), 1024, 0, 
             width=imgui.get_window_width() - imgui.calc_text_size("Browse##main_data")[0])
             
             imgui.same_line()
