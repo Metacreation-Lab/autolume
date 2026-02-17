@@ -116,6 +116,7 @@ class TrainingModule:
         # Popup control flags
         self._open_dataset_popup = False
         self._open_training_popup = False
+        self._training_dataset_invalid = False
         self.folder_exists_warning = False 
         
     # preprocessing window
@@ -445,8 +446,11 @@ class TrainingModule:
                 
                 if not self.validate_dataset_specs(target_dataset_path, detected_resolution):
                     print("Dataset validation failed")
+                    self._open_training_popup = True
+                    self._training_dataset_invalid = True
                 else:
                     self._open_training_popup = True
+                    self._training_dataset_invalid = False
                     print("training")
 
                     kwargs = dnnlib.EasyDict(
@@ -720,31 +724,40 @@ class TrainingModule:
         imgui.set_next_window_size(training_popup_width, training_popup_height, imgui.ONCE)
 
         if imgui.begin_popup_modal("Training")[0]:
-            imgui.text("Training...")
-            if Path(self.message).exists() and self.image_path != self.message:
-                self.image_path = self.message
-                self.grid = cv2.imread(self.image_path, cv2.IMREAD_UNCHANGED)
-                self.grid = cv2.cvtColor(self.grid, cv2.COLOR_BGRA2RGBA)
-                self.grid_texture = gl_utils.Texture(image=self.grid, width=self.grid.shape[1],
-                                               height=self.grid.shape[0], channels=self.grid.shape[2])
-            elif self.message != "":
-                imgui.text(self.message)
-            if self.image_path != '':
-                imgui.text("Current sample of fake imagery")
-                fake_display_height = training_popup_height - 200
-                fake_display_width = int((self.grid.shape[1] / self.grid.shape[0]) * fake_display_height)
-                imgui.image(self.grid_texture.gl_id, fake_display_width, fake_display_height)
-            if imgui_utils.button("Stop Training", enabled=1):
-                self.queue.put('done')
-                self.done_button = True
-            if self.done:
-                self.training_process.terminate()
-                self.training_process.join()
-                if self.done_button == True:
+            if self._training_dataset_invalid:
+                imgui.text_colored("Dataset is not preprocessed correctly.", 1.0, 0.4, 0.0, 1.0)
+                imgui.spacing()
+                imgui.text_wrapped("Ensure all images are square and have uniform resolution (e.g. 512x512) before training.")
+                imgui.spacing()
+                if imgui.button("Close"):
                     imgui.close_current_popup()
-                    self.message = ''
-                    self.done_button = False
-                    self.image_path = ''
+                    self._training_dataset_invalid = False
+            else:
+                imgui.text("Training...")
+                if Path(self.message).exists() and self.image_path != self.message:
+                    self.image_path = self.message
+                    self.grid = cv2.imread(self.image_path, cv2.IMREAD_UNCHANGED)
+                    self.grid = cv2.cvtColor(self.grid, cv2.COLOR_BGRA2RGBA)
+                    self.grid_texture = gl_utils.Texture(image=self.grid, width=self.grid.shape[1],
+                                                   height=self.grid.shape[0], channels=self.grid.shape[2])
+                elif self.message != "":
+                    imgui.text(self.message)
+                if self.image_path != '':
+                    imgui.text("Current sample of fake imagery")
+                    fake_display_height = training_popup_height - 200
+                    fake_display_width = int((self.grid.shape[1] / self.grid.shape[0]) * fake_display_height)
+                    imgui.image(self.grid_texture.gl_id, fake_display_width, fake_display_height)
+                if imgui_utils.button("Stop Training", enabled=1):
+                    self.queue.put('done')
+                    self.done_button = True
+                if self.done:
+                    self.training_process.terminate()
+                    self.training_process.join()
+                    if self.done_button == True:
+                        imgui.close_current_popup()
+                        self.message = ''
+                        self.done_button = False
+                        self.image_path = ''
             imgui.end_popup()
             # End of Training Popup Modal
 
