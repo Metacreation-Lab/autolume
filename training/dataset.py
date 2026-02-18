@@ -571,8 +571,24 @@ class ImageFolderDataset(Dataset):
                     image = np.array(cropped_image)  # Convert back to NumPy array
                     image = image.transpose(2,0,1)
         
-        assert list(image.shape) == self.image_shape
-        assert image.dtype == np.uint8
+        height, width = image.shape[1], image.shape[2]
+        if height != width:
+            raise ValueError(
+                "Dataset is not preprocessed correctly: "
+                f"image at index {idx} is not square ({width}x{height}). "
+                "GAN training only accepts square images."
+            )
+        if list(image.shape) != self.image_shape:
+            raise ValueError(
+                "Dataset is not preprocessed correctly: "
+                f"image at index {idx} has shape {list(image.shape)}, expected {self.image_shape}. "
+                "Ensure all images are square and have uniform resolution (e.g. 512x512)."
+            )
+        if image.dtype != np.uint8:
+            raise ValueError(
+                "Dataset is not preprocessed correctly: "
+                f"image at index {idx} has dtype {image.dtype}, expected uint8."
+            )
         if self._xflip[idx]:
             assert image.ndim == 3 # CHW
             image = image[:, :, ::-1]

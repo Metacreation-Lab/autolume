@@ -116,7 +116,6 @@ class TrainingModule:
         # Popup control flags
         self._open_dataset_popup = False
         self._open_training_popup = False
-        self._training_dataset_invalid = False
         self.folder_exists_warning = False 
         
     # preprocessing window
@@ -141,7 +140,6 @@ class TrainingModule:
             self.message, self.done = self.reply.get()
             while self.reply.qsize() > 0:
                 self.message, self.done = self.reply.get()
-
             print(self.message, self.done)
 
         # Create fixed regions to seperate training and preprocessing regions.
@@ -409,7 +407,6 @@ class TrainingModule:
             if imgui.button("Advanced...", width=-1):
                 imgui.open_popup("Advanced...")
 
-
             if imgui.begin_popup_modal("Advanced...")[0]:
                 imgui.text("Advanced Training Options")
                 imgui.text("Generator Learning Rate")
@@ -432,28 +429,21 @@ class TrainingModule:
 
 
             if imgui.button("Train", width=-1):
-                # Manipulate required resolution training parameter based on dataset resolution
                 detected_resolution = None
                 target_dataset_path = Path(self.data_path)
                 if target_dataset_path.is_dir():
-                    image_files = [f for f in target_dataset_path.iterdir() 
-                                if f.is_file() and f.suffix.lower() == '.png']
+                    image_files = [f for f in target_dataset_path.iterdir()
+                                if f.is_file()]
                     if image_files:
                         first_image_path = str(image_files[0])
                         img = PIL.Image.open(first_image_path)
                         width, height = img.size
                         detected_resolution = (width, height)
-                
-                if not self.validate_dataset_specs(target_dataset_path, detected_resolution):
-                    print("Dataset validation failed")
-                    self._open_training_popup = True
-                    self._training_dataset_invalid = True
-                else:
-                    self._open_training_popup = True
-                    self._training_dataset_invalid = False
-                    print("training")
 
-                    kwargs = dnnlib.EasyDict(
+                self._open_training_popup = True
+                print("training")
+
+                kwargs = dnnlib.EasyDict(
                         outdir=str(self.save_path),
                         data=str(target_dataset_path),
                         cfg=configs[self.config],
@@ -502,15 +492,14 @@ class TrainingModule:
                         custom=True,
                         lpips_image_size=256,
                         fps=self.fps if self.found_video else 10,
-                    )
-
-                    if self.done == True:
-                        self.queue = mp.Queue()
-                        self.reply = mp.Queue()
-                        self.training_process = mp.Process(target=train_main, args=(self.queue, self.reply), name='TrainingProcess')
-                        self.done = False
-                    self.queue.put(kwargs)
-                    self.training_process.start()
+                )
+                if self.done == True:
+                    self.queue = mp.Queue()
+                    self.reply = mp.Queue()
+                    self.training_process = mp.Process(target=train_main, args=(self.queue, self.reply), name='TrainingProcess')
+                    self.done = False
+                self.queue.put(kwargs)
+                self.training_process.start()
         imgui.end_child()
 
         #------------------------------------------------------------------------------------------------
@@ -724,40 +713,35 @@ class TrainingModule:
         imgui.set_next_window_size(training_popup_width, training_popup_height, imgui.ONCE)
 
         if imgui.begin_popup_modal("Training")[0]:
-            if self._training_dataset_invalid:
-                imgui.text_colored("Dataset is not preprocessed correctly.", 1.0, 0.4, 0.0, 1.0)
-                imgui.spacing()
-                imgui.text_wrapped("Ensure all images are square and have uniform resolution (e.g. 512x512) before training.")
-                imgui.spacing()
-                if imgui.button("Close"):
-                    imgui.close_current_popup()
-                    self._training_dataset_invalid = False
-            else:
-                imgui.text("Training...")
-                if Path(self.message).exists() and self.image_path != self.message:
-                    self.image_path = self.message
-                    self.grid = cv2.imread(self.image_path, cv2.IMREAD_UNCHANGED)
-                    self.grid = cv2.cvtColor(self.grid, cv2.COLOR_BGRA2RGBA)
-                    self.grid_texture = gl_utils.Texture(image=self.grid, width=self.grid.shape[1],
-                                                   height=self.grid.shape[0], channels=self.grid.shape[2])
-                elif self.message != "":
-                    imgui.text(self.message)
-                if self.image_path != '':
-                    imgui.text("Current sample of fake imagery")
-                    fake_display_height = training_popup_height - 200
-                    fake_display_width = int((self.grid.shape[1] / self.grid.shape[0]) * fake_display_height)
-                    imgui.image(self.grid_texture.gl_id, fake_display_width, fake_display_height)
-                if imgui_utils.button("Stop Training", enabled=1):
-                    self.queue.put('done')
-                    self.done_button = True
+            imgui.text("Training...")
+            if Path(self.message).exists() and self.image_path != self.message:
+                self.image_path = self.message
+                self.grid = cv2.imread(self.image_path, cv2.IMREAD_UNCHANGED)
+                self.grid = cv2.cvtColor(self.grid, cv2.COLOR_BGRA2RGBA)
+                self.grid_texture = gl_utils.Texture(image=self.grid, width=self.grid.shape[1],
+                                               height=self.grid.shape[0], channels=self.grid.shape[2])
+            elif self.message != "":
                 if self.done:
-                    self.training_process.terminate()
-                    self.training_process.join()
-                    if self.done_button == True:
-                        imgui.close_current_popup()
-                        self.message = ''
-                        self.done_button = False
-                        self.image_path = ''
+                    imgui.text_colored("Error:", 1.0, 0.3, 0.3, 1.0)
+                    imgui.text_wrapped(self.message)
+                else:
+                    imgui.text(self.message)
+            if self.image_path != '':
+                imgui.text("Current sample of fake imagery")
+                fake_display_height = training_popup_height - 200
+                fake_display_width = int((self.grid.shape[1] / self.grid.shape[0]) * fake_display_height)
+                imgui.image(self.grid_texture.gl_id, fake_display_width, fake_display_height)
+            if imgui_utils.button("Stop Training", enabled=1):
+                self.queue.put('done')
+                self.done_button = True
+            if self.done:
+                self.training_process.terminate()
+                self.training_process.join()
+                if self.done_button == True:
+                    imgui.close_current_popup()
+                    self.message = ''
+                    self.done_button = False
+                    self.image_path = ''
             imgui.end_popup()
             # End of Training Popup Modal
 
@@ -886,31 +870,6 @@ class TrainingModule:
         )
         self.dataset_process.start()
         self.video_extraction_in_progress = False
-
-    def validate_dataset_specs(self, dataset_path, detected_resolution):
-        """Validate dataset specifications (square, uniform resolution, and PNG-only)."""
-        if detected_resolution is None:
-            return False
-        if detected_resolution[0] != detected_resolution[1]:
-            return False
-        target_path = Path(dataset_path)
-        if not target_path.is_dir():
-            return False
-        all_files = [f for f in target_path.iterdir() if f.is_file()]
-        for f in all_files:
-            if f.suffix.lower() != '.png':
-                return False
-        image_files = [f for f in all_files if f.suffix.lower() == '.png']
-        if not image_files:
-            return False
-        for image_file in image_files:
-            img = PIL.Image.open(image_file)
-            width, height = img.size
-            if width != height:
-                return False
-            if width != detected_resolution[0] or height != detected_resolution[1]:
-                return False
-        return True
     
     def cleanup_dataset_process(self):
         """Clean up dataset creation process"""

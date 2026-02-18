@@ -298,7 +298,7 @@ def training_loop(
         print(f"Exception message: {str(e)}")
         print("Traceback4:")
         traceback.print_exc()
-        reply.put(['Exception occured during Exporting of Sample Images..', True])
+        reply.put([str(e), True])
 
     # Initialize logs.
     if rank == 0:
