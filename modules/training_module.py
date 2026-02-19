@@ -1,5 +1,6 @@
-from pathlib import Path
+import os
 import zipfile
+import queue
 
 import imgui
 import multiprocessing as mp
@@ -7,9 +8,9 @@ import multiprocessing as mp
 import dnnlib
 from utils.gui_utils import imgui_utils
 from train import main as train_main
+from utils import dataset_tool
 from widgets.native_browser_widget import NativeBrowserWidget
 from utils.dataset_preprocessing_utils import DatasetPreprocessingUtils
-from widgets.help_icon_widget import HelpIconWidget
 
 import cv2
 from utils.gui_utils import gl_utils
@@ -22,15 +23,47 @@ diffaug_pipes = ['color,translation,cutout', 'color,translation', 'color,cutout'
 configs = ['auto', 'stylegan2', 'paper256', 'paper512', 'paper1024', 'cifar']
 resize_mode = ['stretch','center crop']
 
+# Add constants for help texts
+DEFAULT_HELP_TEXTS = {
+    "save_path_training": "Path to save training results\nModel checkpoints and generated images will be saved here during training",
+    "data_path_training": "Path to the training dataset\nSupported formats:\n- Image folder\n- ZIP archive\n- Video file (.mp4/.avi)",
+    "resume_pkl_training": "Model checkpoint file (.pkl) to resume training\nLeave empty to start from scratch",
+    "augmentation_training": "Data augmentation method:\nADA - Adaptive Discriminator Augmentation\nDiffAUG - Differential Augmentation",
+    "aug_pipeline_training": "Specific configuration of the data augmentation pipeline\nDifferent augmentation methods have different options",
+    "resize_mode_training": "Method to resize images:\nstretch - Stretch to target size\ncenter crop - Center crop",
+    "batch_size_training": "Number of images per training batch\nLarger batches require more VRAM",
+    "config_training": "Preset training configurations:\nauto - Automatic configuration\nstylegan2 - Standard StyleGAN2\npaper256/512/1024 - Paper configurations\ncifar - CIFAR dataset configuration",
+    "advanced_training": "Advanced training options:\nGenerator LR - Generator learning rate\nDiscriminator LR - Discriminator learning rate\nGamma - Training stability parameter\nSnapshot - Checkpoint saving interval\nMirror - Horizontal flip of dataset",
+    "generator_lr_training": "Learning rate for the generator network",
+    "discriminator_lr_training": "Learning rate for the discriminator network",
+    "gamma_training": "Training stability parameter",
+    "snapshot_training": "Checkpoints saving interval",
+    "data_preprocessing": "Preprocessing module", 
+    "quick_data_path": "Quick settings data path\nPath to the training dataset for quick settings\nSupported formats:\n- Image folder\n- ZIP archive\n- Video file (.mp4/.avi)",
+    "quick_save_path": "Quick settings save path\nPath to save training results for quick settings\nGenerated images will be saved here during training",
+}
+# 尝试从Excel加载帮助文本
+HELP_TEXTS = DEFAULT_HELP_TEXTS.copy()
+try:
+    excel_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets","help_contents.xlsx")
+    if os.path.exists(excel_path):
+        df = pd.read_excel(excel_path, engine='openpyxl')
+        for _, row in df.iterrows():
+            if pd.notna(row['key']) and pd.notna(row['text']):
+                HELP_TEXTS[str(row['key'])] = str(row['text'])
+        print(f"Successfully loaded help texts from: {excel_path}")
+except Exception as e:
+    print(f"Warning: Using default help texts. Error: {e}")
+
 class TrainingModule:
     def __init__(self, menu):
-        cwd = Path.cwd()
-        self.save_path = (cwd / "training-runs").as_posix()
-        self.data_path = (cwd / "data").as_posix()
+        cwd = os.getcwd()
+        self.save_path = os.path.join(cwd, "training-runs").replace('\\', '/')
+        self.data_path = os.path.join(cwd, "data").replace('\\', '/')
+        # self.show_help = False 
         # create data folder if not exists
-        data_dir = (cwd / "data").resolve()
-        if not data_dir.exists():
-            data_dir.mkdir(parents=True, exist_ok=True)
+        if not os.path.exists(os.path.abspath(os.path.join(os.getcwd(),"data")).replace('\\', '/')):
+            os.makedirs(os.path.abspath(os.path.join(os.getcwd(),"data")).replace('\\', '/'))
         self.app = menu.app
         self.config = 1
         self.resume_pkl = ""
@@ -44,17 +77,12 @@ class TrainingModule:
         self.data_path_browser = NativeBrowserWidget()
         self.save_path_browser = NativeBrowserWidget()
 
-        models_dir = Path.cwd() / "models"
-        for pkl in models_dir.iterdir() if models_dir.exists() else []:
-            if pkl.suffix == ".pkl":
-                pkl_path = str(pkl)
-                print(pkl.name, pkl_path)
-                self.browse_cache.append(pkl_path)
+        for pkl in os.listdir("./models"):
+            if pkl.endswith(".pkl"):
+                print(pkl, os.path.join(os.getcwd(),"models",pkl))
+                self.browse_cache.append(os.path.join(os.getcwd(),"models",pkl))
 
         self.menu = menu
-        
-        self.help_icon = HelpIconWidget()
-        self.help_texts, self.help_urls = self.help_icon.load_help_texts("training")
 
         self.queue = mp.Queue()
         self.reply = mp.Queue()
@@ -71,20 +99,22 @@ class TrainingModule:
         self.done_button = False
         self.image_path = ''
 
-        # Preprocessing settings toggle
-        self.preprocessing_settings  = False
-        self.preprocessing_settings_obj = DatasetPreprocessingUtils()
-        self.resize_mode = self.preprocessing_settings_obj.resizeMode
-        self.start_res = self.preprocessing_settings_obj.size
+        # Quick preprocessingsettings toggle
+        self.quick_settings  = False
+        # Quick dataset preprocessing attributes
+        self.quick_preprocessing_settings = DatasetPreprocessingUtils()
+        self.resize_mode = self.quick_preprocessing_settings.resizeMode
+        self.start_res = self.quick_preprocessing_settings.size
         self.res_factor = 0
         self.img_size = self.start_res * (2 ** self.res_factor)  # current image resolution (square)
-        self.fps = self.preprocessing_settings_obj.fps
+        self.fps = self.quick_preprocessing_settings.fps
                 
-        self.preprocessing_data_browser = NativeBrowserWidget()
-        self.preprocessing_save_browser = NativeBrowserWidget()
-        self.preprocessing_save_path = self.preprocessing_settings_obj.output_path  
-        self.preprocessing_folder_name = self.preprocessing_settings_obj.folder_name  
-        self.preprocessing_data_path = (Path.home() / "Desktop").as_posix()
+        # Native browser widgets for quick settings
+        self.quick_data_browser = NativeBrowserWidget()
+        self.quick_save_browser = NativeBrowserWidget()
+        self.quick_save_path = self.quick_preprocessing_settings.output_path  
+        self.quick_folder_name = self.quick_preprocessing_settings.folder_name  
+        self.quick_data_path = os.path.join(os.path.expanduser("~"), "Desktop").replace('\\', '/') 
         self.data_path_has_videos = False  
         self.video_files_list = [] 
         
@@ -123,7 +153,7 @@ class TrainingModule:
 
     @staticmethod
     def _file_ext(fname):
-        return Path(fname).suffix.lower()
+        return os.path.splitext(fname)[1].lower()
 
     def _get_zipfile(self):
         assert self._type == 'zip'
@@ -134,12 +164,28 @@ class TrainingModule:
     @imgui_utils.scoped_by_object_id
     def __call__(self):
 
-        if self.reply.qsize() > 0:
-            self.message, self.done = self.reply.get()
-            while self.reply.qsize() > 0:
-                self.message, self.done = self.reply.get()
-
+        # Use get_nowait() instead of qsize() for macOS compatibility
+        try:
+            self.message, self.done = self.reply.get_nowait()
+            # Continue getting messages until queue is empty
+            while True:
+                try:
+                    self.message, self.done = self.reply.get_nowait()
+                except queue.Empty:
+                    break
             print(self.message, self.done)
+        except queue.Empty:
+            pass
+
+        # imgui.begin_group()
+        # imgui.text("Train a model on your own data")
+        # imgui.same_line()
+        # remaining_width = imgui.get_content_region_available_width()
+        # imgui.dummy(remaining_width - 60, 0)  
+        # imgui.same_line()
+        # if imgui_utils.button("Help", width=50):
+        #     self.show_help = not self.show_help
+        # imgui.end_group()
 
         # Create fixed regions to seperate training and preprocessing regions.
         # Max 94% height, or scroll bar would show up
@@ -149,57 +195,43 @@ class TrainingModule:
         
         # Data Preprocessing Section (Top Region)
         if imgui.begin_child("DataPrepRegion", 0, preprocessing_height, True):
-
-            text = "Prepare your data for training"
-            text_width = imgui.calc_text_size(text).x
-            window_width = imgui.get_window_width()
-            help_icon_size = imgui.get_font_size()
-            style = imgui.get_style()
-
-            imgui.text(text)
-            
-            spacing = window_width - (style.window_padding[0] * 2) - text_width - help_icon_size - style.item_spacing[0] - 10
-            
-            imgui.same_line()
-            imgui.dummy(spacing, 0)
-            data_preprocessing_hyperlinks = []
-            data_preprocessing_url = self.help_urls.get("data_preprocessing")
-            if data_preprocessing_url:
-                data_preprocessing_hyperlinks.append((data_preprocessing_url, "Read More"))
-            tutorial_video_url = "https://www.youtube.com/watch?v=7Pc5-ULeXkM&feature=youtu.be"
-            data_preprocessing_hyperlinks.append((tutorial_video_url, "Tutorial Video"))
-            
-            if data_preprocessing_hyperlinks:
-                self.help_icon.render_with_urls(self.help_texts.get("data_preprocessing"), data_preprocessing_hyperlinks)
-            else:
-                self.help_icon.render(self.help_texts.get("data_preprocessing"))
+            imgui.text("Prepare your data for training")
 
             imgui.separator()
 
-            if imgui.button("Open Data Preparation Module", width=-1):
+            if imgui.button("Open Data Preprocessing Module", width=-1):
                 self.launch_preprocessing_window()
+            if self.menu.show_help and imgui.is_item_hovered(): 
+                imgui.set_tooltip(HELP_TEXTS["data_preprocessing"])
 
-            clicked, preprocessing_settings = imgui.checkbox("Quick Data Preparation", self.preprocessing_settings)
+            clicked, quick_settings = imgui.checkbox("Quick Settings", self.quick_settings)
             if clicked:
-                self.preprocessing_settings = preprocessing_settings
+                self.quick_settings = quick_settings
 
-            if self.preprocessing_settings: 
+            if self.quick_settings:  # Show image options when quick settings is checked
+                # Quick settings data path
                 imgui.text("Data Path")
+                # Reduce spacing by setting cursor position closer to the label
                 current_y = imgui.get_cursor_pos_y()
                 imgui.set_cursor_pos_y(current_y - 3)  
-                _, new_data_path = imgui_utils.input_text("##preprocessing_data_path", self.preprocessing_data_path, 1024, 0, 
-                width=imgui.get_window_width() - self.menu.app.button_w - imgui.calc_text_size("Browse")[0])
-                if new_data_path != self.preprocessing_data_path:
-                    self.preprocessing_data_path = new_data_path
+                _, new_data_path = imgui_utils.input_text("##quick_data", self.quick_data_path, 1024, 0, 
+                width=imgui.get_window_width() - imgui.calc_text_size("Browse##quick_data")[0])
+                if new_data_path != self.quick_data_path:
+                    # Normalize to forward slashes
+                    self.quick_data_path = new_data_path.replace('\\', '/')
+                if self.menu.show_help and imgui.is_item_hovered():
+                    imgui.set_tooltip(HELP_TEXTS["quick_data_path"])
                 
                 imgui.same_line()
-                if imgui.button("Browse##preprocessing_data", width=self.menu.app.button_w):
-                    directory_path, has_videos, video_files = self.preprocessing_data_browser.select_directory_with_video_check("Select Data Directory")
+                if imgui.button("Browse##quick_data", width=self.menu.app.button_w):
+                    # Use directory selection with video check for data path
+                    directory_path, has_videos, video_files = self.quick_data_browser.select_directory_with_video_check("Select Data Directory")
                     if directory_path:
-                        self.preprocessing_data_path = directory_path
-                        self.data_path_has_videos = has_videos  
-                        self.video_files_list = video_files  
-                        print(f"Data path selected: {self.preprocessing_data_path}")
+                        # Normalize to forward slashes
+                        self.quick_data_path = directory_path.replace('\\', '/')
+                        self.data_path_has_videos = has_videos  # Store video detection result
+                        self.video_files_list = video_files  # Store video files list
+                        print(f"Data path selected: {self.quick_data_path}")
                         if has_videos:
                             print(f"Found {len(video_files)} video files in directory")
                             for video in video_files:
@@ -208,16 +240,26 @@ class TrainingModule:
                             print("No video files found in directory")
                     else:
                         print("No data path selected")
+                if self.menu.show_help and imgui.is_item_hovered():
+                    imgui.set_tooltip(HELP_TEXTS["quick_data_path"])
 
                 imgui.spacing()
                 
+                # Resize Mode
                 imgui.text("Resize Mode")
-                imgui.same_line()   
+                imgui.same_line()
+                # current_y = imgui.get_cursor_pos_y()
+                # imgui.set_cursor_pos_y(current_y - 3)  
                 _, self.resize_mode = imgui.combo("##Resize Mode", self.resize_mode, resize_mode)
+                if self.menu.show_help and imgui.is_item_hovered():
+                    imgui.set_tooltip(HELP_TEXTS["resize_mode_training"])
+
 
                 imgui.text("Resolution")
                 imgui.same_line()
-                input_width = int(self.menu.app.font_size * 6)  
+                # current_y = imgui.get_cursor_pos_y()
+                # imgui.set_cursor_pos_y(current_y - 3)  
+                input_width = int(self.menu.app.font_size * 6)  # Make input fields wider
                 button_width = self.menu.app.font_size * 1.2
                 
                 with imgui_utils.item_width(input_width):
@@ -244,75 +286,69 @@ class TrainingModule:
                 if hasattr(self, 'data_path_has_videos') and self.data_path_has_videos:
                     imgui.text("FPS for Video Extraction")
                     imgui.same_line()
-                    with imgui_utils.item_width(imgui.get_window_width() - self.menu.app.button_w - imgui.calc_text_size("FPS for Video Extraction")[0]):
+                    with imgui_utils.item_width(imgui.get_window_width() - imgui.calc_text_size("FPS for Video Extraction")[0] - 150):
                         _, self.fps = imgui.input_int("##fps", self.fps)
                     if self.fps < 1:
                         self.fps = 1
+                    if self.menu.show_help and imgui.is_item_hovered():
+                        imgui.set_tooltip("Frames per second to extract from video files")
 
+                # Folder Name for processed dataset
                 imgui.text("Folder Name")
                 current_y = imgui.get_cursor_pos_y()
                 imgui.set_cursor_pos_y(current_y - 3)  
                 total_width = imgui.get_window_width() - 50
                 folder_name_width = total_width * 0.75  
+                suffix_width = total_width * 0.25 
                 
                 with imgui_utils.item_width(folder_name_width):
-                    changed, new_folder_name = imgui.input_text("##preprocessing_folder_name", self.preprocessing_folder_name, 1024)
+                    changed, new_folder_name = imgui.input_text("##quick_folder_name", self.quick_folder_name, 1024)
                     if changed:
-                        self.preprocessing_folder_name = new_folder_name
+                        self.quick_folder_name = new_folder_name
                 imgui.same_line()
                 imgui.text(f"_{self.img_size}x{self.img_size}")
+                if self.menu.show_help and imgui.is_item_hovered():
+                    imgui.set_tooltip("Name of the folder where the processed dataset will be saved")
 
-                imgui.text("Save Path")
+                # Parent Directory Path (quick_save_path)
+                imgui.text("Directory Path")
                 current_y = imgui.get_cursor_pos_y()
                 imgui.set_cursor_pos_y(current_y - 3)  
-                _, new_save_path = imgui_utils.input_text("##preprocessing_save", self.preprocessing_save_path, 1024, 0, 
-                width=imgui.get_window_width() - self.menu.app.button_w - imgui.calc_text_size("Browse")[0])
-                if new_save_path != self.preprocessing_save_path:
-                    self.preprocessing_save_path = new_save_path
+                _, new_save_path = imgui_utils.input_text("##quick_save", self.quick_save_path, 1024, 0, 
+                width=imgui.get_window_width() - imgui.calc_text_size("Browse##quick_save")[0])
+                if new_save_path != self.quick_save_path:
+                    self.quick_save_path = new_save_path.replace('\\', '/')
+                if self.menu.show_help and imgui.is_item_hovered():
+                    imgui.set_tooltip("Parent directory where the dataset folder will be created")
                 
                 imgui.same_line()
-                if imgui.button("Browse##preprocessing_save", width=self.menu.app.button_w):
-                    directory_path = self.preprocessing_save_browser.select_directory("Select Save Path")
+                if imgui.button("Browse##quick_save", width=self.menu.app.button_w):
+                    directory_path = self.quick_save_browser.select_directory("Select Parent Directory")
                     if directory_path:
-                        self.preprocessing_save_path = directory_path
+                        self.quick_save_path = directory_path.replace('\\', '/')
                     else:
                         print("No save path selected")
+                if self.menu.show_help and imgui.is_item_hovered():
+                    imgui.set_tooltip("Browse to select parent directory where the dataset folder will be created")
 
                 imgui.spacing()
 
+                # Preprocess data button
                 if imgui.button("Process & Save Data", width=-3):
-                    if not self.preprocessing_save_path or not self.preprocessing_folder_name:
+                    if not self.quick_save_path or not self.quick_folder_name:
                         print("Please specify both parent directory and folder name")
                     else:
-                        self.create_preprocessing_dataset()
+                        self.create_quick_dataset()
+                
+                if self.menu.show_help and imgui.is_item_hovered():
+                    imgui.set_tooltip("Create a new dataset using the specified paths and settings")
         imgui.end_child()
         
         # Training Section (Bottom Region)
         if imgui.begin_child("TrainingRegion", 0, training_height, True):
-            text = "Train a model with your dataset"
-            text_width = imgui.calc_text_size(text).x
-            window_width = imgui.get_window_width()
-            help_icon_size = imgui.get_font_size()
-            style = imgui.get_style()
+            # Training options
+            imgui.text("Train a model on your prepared dataset")
 
-            imgui.text(text)
-            
-            spacing = window_width - (style.window_padding[0] * 2) - text_width - help_icon_size - style.item_spacing[0] - 10
-            
-            imgui.same_line()
-            imgui.dummy(spacing, 0)
-            training_hyperlinks = []
-            training_url = self.help_urls.get("training_module")
-            if training_url:
-                training_hyperlinks.append((training_url, "Read More"))
-            augmentation_guide_url = self.help_urls.get("training_augmentation_guide")
-            if augmentation_guide_url:
-                training_hyperlinks.append((augmentation_guide_url, "How to choose training augmentation"))
-            
-            if training_hyperlinks:
-                self.help_icon.render_with_urls(self.help_texts.get("training_module"), training_hyperlinks)
-            else:
-                self.help_icon.render(self.help_texts.get("training_module"))
             imgui.separator()
 
             imgui.text("Save Path")
@@ -320,35 +356,41 @@ class TrainingModule:
             imgui.set_cursor_pos_y(current_y - 3)  
             _, self.save_path = imgui_utils.input_text("##Save Path", self.save_path, 1024, 0, 
             width=imgui.get_window_width() - imgui.calc_text_size("Browse##main_save")[0])
+            if self.menu.show_help and imgui.is_item_hovered():
+                imgui.set_tooltip(HELP_TEXTS["save_path_training"])
             
             imgui.same_line()
             if imgui.button("Browse##main_save", width=self.menu.app.button_w):
                 directory_path = self.save_path_browser.select_directory("Select Training Results Save Path")
                 if directory_path:
-                    self.save_path = directory_path
+                    self.save_path = directory_path.replace('\\', '/')
                 else:
                     print("No save path selected")
+            if self.menu.show_help and imgui.is_item_hovered():
+                imgui.set_tooltip(HELP_TEXTS["save_path_training"])
 
             imgui.text("Dataset Path")
             current_y = imgui.get_cursor_pos_y()
             imgui.set_cursor_pos_y(current_y - 3)  
-            _, self.data_path = imgui_utils.input_text("##Dataset Path", self.data_path, 1024, 0, 
+            _, self.data_path = imgui_utils.input_text("##Data Path", self.data_path, 1024, 0, 
             width=imgui.get_window_width() - imgui.calc_text_size("Browse##main_data")[0])
+            if self.menu.show_help and imgui.is_item_hovered():
+                imgui.set_tooltip(HELP_TEXTS["data_path_training"])
             
             imgui.same_line()
             if imgui.button("Browse##main_data", width=self.menu.app.button_w):
                 directory_path = self.data_path_browser.select_directory("Select Training Dataset Directory")
                 if directory_path:
-                    self.data_path = directory_path
-
+                    self.data_path = directory_path.replace('\\', '/')
+                    print(f"Data path selected: {self.data_path}")
+                    
                     # Check for PKL files in the directory
                     pkl_files = []
-                    data_path = Path(self.data_path)
-                    if data_path.is_dir():
-                        for pkl_path in data_path.rglob("*.pkl"):
-                            if pkl_path.is_file():
-                                pkl_path_str = str(pkl_path)
-                                pkl_files.append(pkl_path_str)
+                    for root, dirs, files in os.walk(self.data_path):
+                        for file in files:
+                            if file.endswith('.pkl'):
+                                pkl_path = os.path.join(root, file)
+                                pkl_files.append(pkl_path)
                                 if pkl_path not in self.browse_cache:
                                     self.browse_cache.append(pkl_path)
                     
@@ -360,16 +402,22 @@ class TrainingModule:
                         print("No PKL files found in directory")
                 else:
                     print("No data path selected")
+            if self.menu.show_help and imgui.is_item_hovered():
+                imgui.set_tooltip(HELP_TEXTS["data_path_training"])
                 
             imgui.text("Resume Pkl")
             current_y = imgui.get_cursor_pos_y()
             imgui.set_cursor_pos_y(current_y - 3)  
             _, self.resume_pkl = imgui_utils.input_text("##Resume Pkl", self.resume_pkl, 1024, 0, 
             width=imgui.get_window_width() - imgui.calc_text_size("Browse##Resume Pkl")[0])
+            if self.menu.show_help and imgui.is_item_hovered():
+                imgui.set_tooltip(HELP_TEXTS["resume_pkl_training"])
             
             imgui.same_line()
             if imgui_utils.button('Browse##Resume Pkl', enabled=len(self.browse_cache) > 0, width=self.menu.app.button_w):
                 imgui.open_popup('browse_pkls_popup_training')
+            if self.menu.show_help and imgui.is_item_hovered():
+                imgui.set_tooltip(HELP_TEXTS["resume_pkl_training"])
 
             if imgui.begin_popup('browse_pkls_popup_training'):
                 for pkl in self.browse_cache:
@@ -381,6 +429,8 @@ class TrainingModule:
             imgui.text("Training Augmentation")
             imgui.same_line()
             _, self.aug = imgui.combo("##Training Augmentation", self.aug, augs)
+            if self.menu.show_help and imgui.is_item_hovered():
+                imgui.set_tooltip(HELP_TEXTS["augmentation_training"])
             if self.aug == 0:
                 imgui.text("Augmentation Pipeline")
                 imgui.same_line()
@@ -389,37 +439,48 @@ class TrainingModule:
                 imgui.text("Augmentation Pipeline")
                 imgui.same_line()
                 _, self.diffaug_pipe = imgui.combo("##Augmentation Pipeline", self.diffaug_pipe, diffaug_pipes)
+            if self.menu.show_help and imgui.is_item_hovered():
+                imgui.set_tooltip(HELP_TEXTS["aug_pipeline_training"])
 
             imgui.text("Batch Size")
             imgui.same_line()
             _, self.batch_size = imgui.input_int("##Batch Size", self.batch_size)
+            if self.menu.show_help and imgui.is_item_hovered():
+                imgui.set_tooltip(HELP_TEXTS["batch_size_training"])
             if self.batch_size < 1:
                 self.batch_size = 1
             
             imgui.text("Configuration")
             imgui.same_line()
             _, self.config = imgui.combo("##Configuration", self.config, configs)
+            if self.menu.show_help and imgui.is_item_hovered():
+                imgui.set_tooltip(HELP_TEXTS["config_training"])
             
 
             imgui.set_next_window_size( self.menu.app.content_width // 4, (self.menu.app.content_height // 4), imgui.ONCE)
 
             if imgui.button("Advanced...", width=-1):
                 imgui.open_popup("Advanced...")
-
+            if self.menu.show_help and imgui.is_item_hovered():
+                imgui.set_tooltip(HELP_TEXTS["advanced_training"])
 
             if imgui.begin_popup_modal("Advanced...")[0]:
                 imgui.text("Advanced Training Options")
-                imgui.text("Generator Learning Rate")
-                _, self.glr = imgui.input_float("##Generator Learning Rate", self.glr)
+                _, self.glr = imgui.input_float("Generator Learning Rate", self.glr)
+                if self.menu.show_help and imgui.is_item_hovered():
+                    imgui.set_tooltip(HELP_TEXTS["generator_lr_training"])
 
-                imgui.text("Discriminator Learning Rate")
-                _, self.dlr = imgui.input_float("##Discriminator Learning Rate", self.dlr)
+                _, self.dlr = imgui.input_float("Discriminator Learning Rate", self.dlr)
+                if self.menu.show_help and imgui.is_item_hovered():
+                    imgui.set_tooltip(HELP_TEXTS["discriminator_lr_training"])
 
-                imgui.text("Gamma")
-                _, self.gamma = imgui.input_int("##Gamma", self.gamma)
+                _, self.gamma = imgui.input_int("Gamma", self.gamma)
+                if self.menu.show_help and imgui.is_item_hovered():
+                    imgui.set_tooltip(HELP_TEXTS["gamma_training"])
 
-                imgui.text("Number of ticks between snapshots")
-                _, self.snap = imgui.input_int("##Number of ticks between snapshots", self.snap)
+                _, self.snap = imgui.input_int("Number of ticks between snapshots", self.snap)
+                if self.menu.show_help and imgui.is_item_hovered():
+                    imgui.set_tooltip(HELP_TEXTS["snapshot_training"])
 
                 if imgui_utils.button("Close", enabled=1):
                     imgui.close_current_popup()
@@ -437,12 +498,12 @@ class TrainingModule:
                 # Manipulate resolution training parameter based on dataset resolution (for now)
                 # Read resolution from first image in dataset
                 detected_resolution = None
-                target_path = Path(target_data_path)
-                if target_path.is_dir():
-                    image_files = [f for f in target_path.iterdir() 
-                                if f.is_file() and f.suffix.lower() == '.png']
+                if os.path.isdir(target_data_path):
+                    # Get list of PNG image files
+                    image_files = [f for f in os.listdir(target_data_path) 
+                                if f.lower().endswith('.png')]
                     if image_files:
-                        first_image_path = str(image_files[0])
+                        first_image_path = os.path.join(target_data_path, image_files[0])
                         img = cv2.imread(first_image_path)
                         if img is not None:
                             height, width = img.shape[:2]
@@ -520,7 +581,7 @@ class TrainingModule:
             imgui.open_popup("Training")
             self._open_training_popup = False
         
-        # Quick Dataset Creation Popup Modal
+        # Quick Settings Dataset Creation Popup Modal
         imgui.set_next_window_size(self.menu.app.content_width // 2.5, self.menu.app.content_height // 2.5, imgui.ONCE)
         if imgui.begin_popup_modal("Processing Data")[0]:
             
@@ -575,49 +636,58 @@ class TrainingModule:
                 imgui.spacing()
                 imgui.separator()
                 imgui.spacing()
-
-                latest_progress = None
-                completion_data = None
-                while not self.dataset_reply.empty():
+                
+                # Check for progress updates
+                if not self.dataset_reply.empty():
                     try:
-                        data = self.dataset_reply.get_nowait()
-                        if data.get('type') == 'completed':
-                            completion_data = data
-                        elif data.get('type') == 'progress':
-                            latest_progress = data
+                        progress_data = self.dataset_reply.get_nowait()
+                        
+                        if progress_data.get('type') == 'completed':
+                            # Check if this is video extraction completion or image processing completion
+                            if self.video_extraction_in_progress:
+                                # Video extraction completed
+                                frame_directories = progress_data.get('results', [])
+                                self.extracted_frame_directories = frame_directories
+
+                                # Terminate video process
+                                if hasattr(self, 'dataset_process') and self.dataset_process and self.dataset_process.is_alive():
+                                    self.dataset_process.terminate()
+                                    self.dataset_process.join(timeout=2)
+                                
+                                # Start image processing
+                                self.start_image_processing()
+                            else:
+                                # Image processing completed
+                                self.dataset_done = True
+                                self.is_creating_dataset = False
+                                self.dataset_processed_count = progress_data.get('processed_count', 0)
+                                print(f"Dataset created! Processed {self.dataset_processed_count} images")
+                                
+                                # Automatically populate the main training data path with the completed dataset path
+                                if hasattr(self, 'dataset_output_path'):
+                                    self.data_path = self.dataset_output_path
+                                                                    
+                                if hasattr(self, 'dataset_process') and self.dataset_process and self.dataset_process.is_alive():
+                                    self.dataset_process.terminate()
+                                    self.dataset_process.join(timeout=2)
+                        elif progress_data.get('type') == 'progress':
+                            # Check if this is video extraction or image processing progress
+                            if self.video_extraction_in_progress:
+                                # Video extraction progress
+                                self.video_extraction_current = progress_data.get('current', 0)
+                                self.video_extraction_file = progress_data.get('current_file', '')
+                            else:
+                                # Image processing progress
+                                self.dataset_progress_current = progress_data.get('current', 0)
+                                self.dataset_progress_total = progress_data.get('total', 0)
+                                self.dataset_progress_percentage = progress_data.get('percentage', 0)
+                                self.dataset_progress_file = progress_data.get('current_file', '')
                     except:
                         pass
                 
-                if completion_data:
-                    if self.video_extraction_in_progress:
-                        self.extracted_frame_directories = completion_data.get('results', [])
-                        if hasattr(self, 'dataset_process') and self.dataset_process and self.dataset_process.is_alive():
-                            self.dataset_process.terminate()
-                            self.dataset_process.join(timeout=2)
-                        self.start_image_processing()
-                    else:
-                        self.dataset_done = True
-                        self.is_creating_dataset = False
-                        self.dataset_processed_count = completion_data.get('processed_count', 0)
-                        print(f"Dataset created! Processed {self.dataset_processed_count} images")
-                        if hasattr(self, 'dataset_output_path'):
-                            self.data_path = self.dataset_output_path
-                        if hasattr(self, 'dataset_process') and self.dataset_process and self.dataset_process.is_alive():
-                            self.dataset_process.terminate()
-                            self.dataset_process.join(timeout=2)
-                
-                if latest_progress:
-                    if self.video_extraction_in_progress:
-                        self.video_extraction_current = latest_progress.get('current', 0)
-                        self.video_extraction_file = latest_progress.get('current_file', '')
-                    else:
-                        self.dataset_progress_current = latest_progress.get('current', 0)
-                        self.dataset_progress_total = latest_progress.get('total', 0)
-                        self.dataset_progress_percentage = latest_progress.get('percentage', 0)
-                        self.dataset_progress_file = latest_progress.get('current_file', '')
-                
                 progress_width = self.menu.app.content_width // 2.5 - 40
                 
+                # Video extraction progress bar (shown first if videos are being extracted)
                 if self.video_extraction_in_progress:
                     imgui.text_colored("Extracting Video Frames:", 1.0, 0.8, 0.0, 1.0)
                     imgui.text(f"Processing: {self.video_extraction_current + 1}/{self.video_extraction_total} videos")
@@ -636,6 +706,7 @@ class TrainingModule:
                     imgui.separator()
                     imgui.spacing()
                 
+                # Image processing progress bar (shown after video extraction or immediately if no videos)
                 if not self.video_extraction_in_progress and self.dataset_progress_total > 0:
                     imgui.text_colored("Processing Images:", 1.0, 0.8, 0.0, 1.0)
                     imgui.text(f"Processing: {self.dataset_progress_current}/{self.dataset_progress_total} images")
@@ -712,7 +783,7 @@ class TrainingModule:
             
             imgui.end_popup()
 
-            # End of Quick Dataset Creation Popup Modal
+            # End of Quick Settings Creating Dataset Popup Modal
 
         # Training Popup Modal
         training_popup_width = self.menu.app.content_width // 1.5
@@ -721,7 +792,7 @@ class TrainingModule:
 
         if imgui.begin_popup_modal("Training")[0]:
             imgui.text("Training...")
-            if Path(self.message).exists() and self.image_path != self.message:
+            if os.path.exists(self.message) and self.image_path != self.message:
                 self.image_path = self.message
                 self.grid = cv2.imread(self.image_path, cv2.IMREAD_UNCHANGED)
                 self.grid = cv2.cvtColor(self.grid, cv2.COLOR_BGRA2RGBA)
@@ -750,28 +821,27 @@ class TrainingModule:
 
     # collect image files from directory to later be appened with extracted frames from videos
     def collect_image_files(self, directory_path):
-        """Collect all image files from selected directory path (quick dataset creation)"""
+        """Collect all image files from selected directory path (quick settings)"""
         image_extensions = {'.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif', '.webp'}
         image_files = []
         
-        dir_path = Path(directory_path)
-        if dir_path.is_dir():
-            for path in dir_path.rglob("*"):
-                if path.is_file() and path.suffix.lower() in image_extensions:
-                    image_files.append(str(path))
+        for root, dirs, files in os.walk(directory_path):
+            for file in files:
+                if os.path.splitext(file)[1].lower() in image_extensions:
+                    image_files.append(os.path.join(root, file))
         
         return image_files
     
-    def create_preprocessing_dataset(self):
-        """Start the preprocessing dataset creation process"""
+    def create_quick_dataset(self):
+        """Start the quick dataset creation process"""
         # Validate paths
-        if not Path(self.preprocessing_data_path).exists():
-            print(f"Error: Data path does not exist: {self.preprocessing_data_path}")
-            self.dataset_message = f"Data path does not exist:\n{self.preprocessing_data_path}"
+        if not os.path.exists(self.quick_data_path):
+            print(f"Error: Data path does not exist: {self.quick_data_path}")
+            self.dataset_message = f"Data path does not exist:\n{self.quick_data_path}"
             return
         
         # Collect image files from directory
-        image_files = self.collect_image_files(self.preprocessing_data_path)
+        image_files = self.collect_image_files(self.quick_data_path)
         
         if not image_files and not self.video_files_list:
             print("Error: No images or videos found in directory")
@@ -782,13 +852,13 @@ class TrainingModule:
         
         # Add resolution suffix to folder name and construct full path
         resolution_suffix = f"_{self.img_size}x{self.img_size}"
-        folder_name_with_resolution = self.preprocessing_folder_name + resolution_suffix
-        self.dataset_output_path = (Path(self.preprocessing_save_path) / folder_name_with_resolution)
+        folder_name_with_resolution = self.quick_folder_name + resolution_suffix
+        self.dataset_output_path = os.path.join(self.quick_save_path, folder_name_with_resolution).replace('\\', '/')
         
         self.temp_image_files = list(image_files)
         self.extracted_frame_directories = []
         
-        if Path(self.dataset_output_path).exists():
+        if os.path.exists(self.dataset_output_path):
             self.folder_exists_warning = True
         else:
             self.folder_exists_warning = False
@@ -836,12 +906,11 @@ class TrainingModule:
         
         # Add extracted frames
         for frame_dir in self.extracted_frame_directories:
-            frame_path = Path(frame_dir)
-            if frame_path.exists():
-                frames = [str(f) for f in frame_path.iterdir() 
-                         if f.is_file() and f.suffix.lower() in ('.jpg', '.jpeg', '.png')]
+            if os.path.exists(frame_dir):
+                frames = [os.path.join(frame_dir, f) for f in os.listdir(frame_dir) 
+                         if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
                 all_images.extend(frames)
-                print(f"Added {len(frames)} frames from {frame_path.name}")
+                print(f"Added {len(frames)} frames from {os.path.basename(frame_dir)}")
         
         # Prepare settings with all collected images
         settings = DatasetPreprocessingUtils()

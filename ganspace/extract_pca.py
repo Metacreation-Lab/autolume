@@ -35,8 +35,12 @@ def get_max_batch_size(model, device):
 
 def fit(queue, reply):
     name, num_features, model, device, project, alpha = queue.get()
-    while queue.qsize() > 0:
-        name, num_features, model, device, project, alpha = queue.get()
+    # Drain queue to get latest parameters (qsize not available on macOS)
+    while True:
+        try:
+            name, num_features, model, device, project, alpha = queue.get_nowait()
+        except:
+            break
 
 
     sample_shape = model.w_dim

@@ -29,13 +29,18 @@ from widgets import looping_widget
 from widgets import preset_widget
 from widgets import mixing_widget
 from widgets import collapsable_layer
-from widgets.help_icon_widget import HelpIconWidget
 from audio.audio_stream import NoMicrophoneError
 
 from pythonosc.osc_server import BlockingOSCUDPServer
 from pythonosc.dispatcher import Dispatcher
 from pythonosc.udp_client import SimpleUDPClient
-import NDIlib as ndi
+
+try:
+    import NDIlib as ndi
+    NDI_AVAILABLE = True
+except ImportError:
+    NDI_AVAILABLE = False
+    ndi = None
 
 import glfw
 from OpenGL import GL as gl
@@ -44,11 +49,37 @@ import pandas as pd
 import os
 
 #----------------------------------------------------------------------------
+def load_help_texts():
+    default_texts = {
+        "network_latent": "Network & latent settings for controlling the model and latent space",
+        "diversity_noise": "Controls for diversity and noise generation",
+        "looping": "Settings for creating animation loops",
+        "performance_osc": "Performance settings and OSC communication options",
+        "adjust_input": "Tools for adjusting input parameters",
+        "layer_transform": "Controls for layer-wise transformations",
+        "model_mixing": "Settings for mixing multiple models",
+        "presets": "Save and load parameter presets",
+        "audio": "Audio input and visualization settings"
+    }
+
+    try:
+        excel_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets","help_contents.xlsx")
+        if os.path.exists(excel_path):
+            df = pd.read_excel(excel_path, engine='openpyxl')
+            for _, row in df.iterrows():
+                if pd.notna(row['key']) and pd.notna(row['text']):
+                    key = str(row['key']).strip()
+                    default_texts[key] = str(row['text'])
+            print(f"Successfully loaded visualizer help texts from: {excel_path}")
+    except Exception as e:
+        print(f"Warning: Using default visualizer help texts. Error: {e}")
+    
+    return default_texts
+
 class Visualizer:
     def __init__(self, app, renderer):
         self.app = app
-        self.help_icon = HelpIconWidget()
-        self.help_texts, self.help_urls = self.help_icon.load_help_texts("visualizer")
+        self.help_texts = load_help_texts()
 
         #COMMUNICATIONS
         self.has_microphone = False
@@ -77,10 +108,14 @@ class Visualizer:
 
         # NDI parameters
         self.ndi_name = 'Autolume Live'
-        send_settings = ndi.SendCreate()
-        send_settings.ndi_name = self.ndi_name
-        self.ndi_send = ndi.send_create(send_settings)
-        self.video_frame = ndi.VideoFrameV2()
+        if NDI_AVAILABLE:
+            send_settings = ndi.SendCreate()
+            send_settings.ndi_name = self.ndi_name
+            self.ndi_send = ndi.send_create(send_settings)
+            self.video_frame = ndi.VideoFrameV2()
+        else:
+            self.ndi_send = None
+            self.video_frame = None
 
         # Internals.
 
@@ -496,7 +531,7 @@ class Visualizer:
             self.server.shutdown()
             self.server = None
 
-        if self.ndi_send is not None:
+        if self.ndi_send is not None and NDI_AVAILABLE:
             ndi.send_destroy(self.ndi_send)
             self.ndi_send = None
 
@@ -519,17 +554,6 @@ class Visualizer:
     def clear_result(self):
         self._async_renderer.clear_result()
 
-    def _header_help_icon(self, header_label, help_key, hyperlink_text="Read More"):
-        """Position and render the help icon to the right of a collapsing header."""
-        imgui.same_line()
-        style = imgui.get_style()
-        header_text_width = imgui.calc_text_size(header_label).x
-        help_icon_size = imgui.get_font_size()
-        extra = 65  
-        spacing = self.pane_w - (style.window_padding[0] * 2) - header_text_width - help_icon_size - style.item_spacing[0] - extra
-        imgui.dummy(spacing, 0)
-        url = self.help_urls.get(help_key)
-        self.help_icon.render_with_url(self.help_texts.get(help_key), url, hyperlink_text)
 
     @imgui_utils.scoped_by_object_id
     def __call__(self):
@@ -565,6 +589,7 @@ class Visualizer:
 
         imgui.same_line(self.app.spacing * 54)
         
+        # Add fullscreen toggle button
         if imgui.button("Full Screen Display" if not self.is_fullscreen_display else "Exit Full Screen"):
             if self.is_fullscreen_display:
                 self.is_fullscreen_display = False
@@ -580,13 +605,13 @@ class Visualizer:
         if imgui.button("Fit Screen" if not self.fit_screen else "Raw Scale"):
             self.fit_screen = not self.fit_screen
 
-        imgui.same_line(self.app.spacing * 82)
+        imgui.same_line(self.app.spacing * 82)  # 增加间距
         if imgui.button('Screen Capture'):
             now = datetime.datetime.now()
             current_time_str = now.strftime("%Y-%m-%d %H-%M-%S")
             self.capture_screenshot(f'screenshots/{current_time_str}.png')
 
-        imgui.same_line(self.app.spacing * 97) 
+        imgui.same_line(self.app.spacing * 97)  # 增加间距
         if imgui.button('Start Recording' if not self.is_recording else 'Stop Recording'):
             if not self.is_recording:
                 now = datetime.datetime.now()
@@ -627,53 +652,52 @@ class Visualizer:
         # else:
         #     if expanded:
         #         imgui.text('No microphone detected')
-        # Network & Latent
-        header_opened = imgui_utils.collapsing_header('Network & Latent', default=True)[0]
-        self._header_help_icon('Network & Latent', 'network_latent')
+        expanded, _visible = imgui_utils.collapsing_header('Network & Latent', default=True)
+        if self.show_help and imgui.is_item_hovered():
+            imgui.set_tooltip(self.help_texts.get("network_latent", "Network & latent settings"))
+        self.pickle_widget(expanded)
+        self.latent_widget(expanded)
 
-        self.pickle_widget(header_opened)
-        self.latent_widget(header_opened)
+        expanded, _visible = imgui_utils.collapsing_header('Diversity & Noise', default=True)
+        if self.show_help and imgui.is_item_hovered():
+            imgui.set_tooltip(self.help_texts.get("diversity_noise", "Diversity and noise controls"))
+        self.trunc_noise_widget(expanded)
 
-        # Diversity & Noise
-        header_opened = imgui_utils.collapsing_header('Diversity & Noise', default=True)[0]
-        self._header_help_icon('Diversity & Noise', 'diversity_noise')
-        self.trunc_noise_widget(header_opened)
+        expanded, _visible = imgui_utils.collapsing_header('Looping', default=True)
+        if self.show_help and imgui.is_item_hovered():
+            imgui.set_tooltip(self.help_texts.get("looping", "Animation loop settings"))
+        self.looping_widget(expanded)
 
-        # Looping
-        header_opened = imgui_utils.collapsing_header('Looping', default=True)[0]
-        self._header_help_icon('Looping', 'looping')
-        self.looping_widget(header_opened)
+        expanded, _visible = imgui_utils.collapsing_header('Performance & OSC', default=True)
+        if self.show_help and imgui.is_item_hovered():
+            imgui.set_tooltip(self.help_texts.get("performance_osc", "Performance and OSC settings"))
+        self.perf_widget(expanded)
 
-        # Performance & OSC
-        header_opened = imgui_utils.collapsing_header('Performance & OSC', default=True)[0]
-        self._header_help_icon('Performance & OSC', 'performance_osc')
-        self.perf_widget(header_opened)
+        expanded, _visible = imgui_utils.collapsing_header('Adjust Input', default=True)
+        if self.show_help and imgui.is_item_hovered():
+            imgui.set_tooltip(self.help_texts.get("adjust_input", "Input adjustment tools"))
+        self.adjuster_widget(expanded)
 
-        # Adjust Input
-        header_opened = imgui_utils.collapsing_header('Adjust Input', default=True)[0]
-        self._header_help_icon('Adjust Input', 'adjust_input')
-        self.adjuster_widget(header_opened)
+        expanded, _visible = imgui_utils.collapsing_header('Layer Transformations', default=True)
+        if self.show_help and imgui.is_item_hovered():
+            imgui.set_tooltip(self.help_texts.get("layer_transform", "Layer transformation controls"))
+        self.collapsed_widget(expanded)
 
-        # Layer Transformations
-        header_opened = imgui_utils.collapsing_header('Layer Transformations', default=True)[0]
-        self._header_help_icon('Layer Transformations', 'layer_transform')
-        self.collapsed_widget(header_opened)
+        expanded, _visible = imgui_utils.collapsing_header('Model Mixing', default=True)
+        if self.show_help and imgui.is_item_hovered():
+            imgui.set_tooltip(self.help_texts.get("model_mixing", "Model mixing settings"))
+        self.mixing_widget(expanded)
 
-        # Model Mixing
-        header_opened = imgui_utils.collapsing_header('Model Mixing', default=True)[0]
-        self._header_help_icon('Model Mixing', 'model_mixing')
-        self.mixing_widget(header_opened)
+        expanded, _visible = imgui_utils.collapsing_header('Presets', default=True)
+        if self.show_help and imgui.is_item_hovered():
+            imgui.set_tooltip(self.help_texts.get("presets", "Preset management"))
+        self.preset_widget(expanded)
 
-        # Presets
-        header_opened = imgui_utils.collapsing_header('Presets', default=True)[0]
-        self._header_help_icon('Presets', 'presets')
-        self.preset_widget(header_opened)
+        expanded, _visible = imgui_utils.collapsing_header('Audio Module', default=True)
+        if self.show_help and imgui.is_item_hovered():
+            imgui.set_tooltip(self.help_texts.get("audio", "Audio settings"))
 
-        # Audio Module
-        header_opened = imgui_utils.collapsing_header('Audio Module', default=True)[0]
-        self._header_help_icon('Audio Module', 'audio')
-
-        if header_opened:
+        if expanded:
             button_label = "Enable" if not self.audio_widget_enabled else "Disable"
             if imgui.button(button_label):
                 if self.audio_widget_enabled:
@@ -687,7 +711,7 @@ class Visualizer:
                 imgui.text('No microphone found')
 
         if self.audio_widget_enabled and self.audio_widget is not None:
-            self.audio_widget(header_opened)
+            self.audio_widget(expanded)
 
 
         # go back to menu
@@ -727,9 +751,10 @@ class Visualizer:
                     except Exception:
                         pass
                 
-                self.video_frame.data = img
-                self.video_frame.FourCC = ndi.FOURCC_VIDEO_TYPE_BGRX
-                ndi.send_send_video_v2(self.ndi_send, self.video_frame)
+                if NDI_AVAILABLE and self.video_frame is not None:
+                    self.video_frame.data = img
+                    self.video_frame.FourCC = ndi.FOURCC_VIDEO_TYPE_BGRX
+                    ndi.send_send_video_v2(self.ndi_send, self.video_frame)
                 if self._tex_obj is None or not self._tex_obj.is_compatible(image=self._tex_img):
                     self._tex_obj = gl_utils.Texture(image=self._tex_img, bilinear=False, mipmap=False)
                 else:

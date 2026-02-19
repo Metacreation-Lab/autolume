@@ -53,13 +53,16 @@ class Autolume(imgui_window.ImguiWindow):
 
     def close(self):
         if self.data_preprocessing is not None:
+            print("Cleaning up data preprocessing...")
             self.data_preprocessing.cleanup()
             self.data_preprocessing = None
         
         if self.menu is not None and hasattr(self.menu, 'training'):
+            print("Cleaning up training module...")
             self.menu.training.cleanup_dataset_process()
         
         super().close()
+
 
     def open_menu(self):
         from modules.menu import Menu
@@ -108,7 +111,12 @@ class Autolume(imgui_window.ImguiWindow):
         from modules.preprocessing_module import DataPreprocessing
         self.data_preprocessing = DataPreprocessing(self)
         self.data_preprocessing()
+        print("starting preprocessing window")
         self.state = States.PREPROCESSING
+
+    def return_to_menu(self):
+        print("returning to menu from preprocessing")
+        self.state = States.MENU
 
     def draw_frame(self):
 

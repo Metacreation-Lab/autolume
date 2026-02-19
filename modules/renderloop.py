@@ -1,5 +1,6 @@
 import gc
 import multiprocessing
+import queue
 import torch
 
 import dnnlib
@@ -56,19 +57,26 @@ class AsyncRenderer:
 
     def set_args(self, **args):
         if not self._closed:
-            if self._args_queue.qsize() == 0:
-                if not compare_args(args, self._cur_args):
-                    self._args_queue.put([args, self._cur_stamp])
-                self._cur_args = args
+            # Skip qsize() check for macOS compatibility - just update if changed
+            if not compare_args(args, self._cur_args):
+                self._args_queue.put([args, self._cur_stamp])
+            self._cur_args = args
 
     def get_result(self):
         if not self._closed:
             if self._result_queue is not None:
-                if self._result_queue.qsize() > 0:
-                    result, stamp = self._result_queue.get()
-                    while self._result_queue.qsize() > 0:
-                        result, stamp = self._result_queue.get()
+                # Use get_nowait() instead of qsize() for macOS compatibility
+                try:
+                    result, stamp = self._result_queue.get_nowait()
+                    # Get all remaining items
+                    while True:
+                        try:
+                            result, stamp = self._result_queue.get_nowait()
+                        except queue.Empty:
+                            break
                     self._cur_result = result
+                except queue.Empty:
+                    pass
             return self._cur_result
 
     def clear_result(self):
@@ -89,9 +97,18 @@ class AsyncRenderer:
         new_arg = False
         with torch.inference_mode():
             while True:
-                if args_queue.qsize() > 0:
-                    args, stamp = args_queue.get()
+                # Drain args queue to get the most recent args (reduces latency)
+                try:
+                    args, stamp = args_queue.get_nowait()
                     new_arg = True
+                    # Get all remaining items to skip intermediate updates (macOS-compatible)
+                    while True:
+                        try:
+                            args, stamp = args_queue.get_nowait()
+                        except queue.Empty:
+                            break
+                except queue.Empty:
+                    pass
                 if new_arg:
                     with torch.no_grad():
                         result = renderer_obj.render(**args)
