@@ -429,9 +429,8 @@ def training_loop(
             reply.put([' '.join(fields), False])
 
         # Save image snapshot.
+        print('Saving image snapshot.')
         if (rank == 0) and (image_snapshot_ticks is not None) and (done or cur_tick % image_snapshot_ticks == 0):
-            print('Saving image snapshot.')
-
             output = G_ema(z=grid_z[0], c=grid_c[0], noise_mode='const')
             if isinstance(output, tuple):
                 images = torch.cat([G_ema(z=z, c=c, noise_mode='const')[0].cpu() for z, c in zip(grid_z, grid_c)]).numpy()
@@ -443,8 +442,8 @@ def training_loop(
         # Save network snapshot.
         snapshot_pkl = None
         snapshot_data = None
+        print('Save network snapshot.')
         if (network_snapshot_ticks is not None) and (done or cur_tick % network_snapshot_ticks == 0):
-            print('Save network snapshot.')
             snapshot_data = dict(G=G, D=D, G_ema=G_ema, augment_pipe=augment_pipe, training_set_kwargs=dict(training_set_kwargs))
             for key, value in snapshot_data.items():
                 if isinstance(value, torch.nn.Module):

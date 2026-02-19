@@ -47,7 +47,11 @@ echo Copying assets and models...
 xcopy assets dist\Autolume\assets /s /e /y /i
 xcopy sr_models dist\Autolume\sr_models /s /e /y /i
 if not exist dist\Autolume\models mkdir dist\Autolume\models
+<<<<<<< HEAD
 xcopy models\stylegan2-ffhq-512x512.pkl dist\Autolume\models\ /y
+=======
+xcopy models\ffhq.pkl dist\Autolume\models\ /y
+>>>>>>> 9775bae (Initial commit with code only (no model files))
 
 echo Creating directories...
 if not exist dist\Autolume\screenshots mkdir dist\Autolume\screenshots

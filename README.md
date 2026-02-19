@@ -146,6 +146,7 @@ The documentation will be served at `http://127.0.0.1:8000/`.
 - Peter Chen: Contributions to the super-resolution module
 - Manuel Bolduc: User testing
 - Ahmed Abuzuraiq: Research associate
+- Anthony Hong: Mac compatibility development
 
 ## Acknowledgment
 

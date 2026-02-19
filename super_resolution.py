@@ -81,22 +81,29 @@ class Writer:
         self.stream_writer.wait()
 
 
-def load_model(choice, path):
+def load_model(choice, path, device='cuda'):
+    """Load super-resolution model on specified device.
+
+    Args:
+        choice: Model type ('Quality', 'Balance', or 'Fast')
+        path: Path to model weights
+        device: Device to load model on ('cuda', 'mps', or 'cpu')
+    """
     if choice == 'Quality':
-        model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=4).to('cuda')
+        model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=4).to(device)
         model_sd = torch.load(path)['params_ema']
         model.load_state_dict(model_sd)
         return model
 
     if choice == 'Balance':
         model = model = SRVGGNetCompact(num_in_ch=3, num_out_ch=3, num_feat=64, num_conv=32, upscale=4,
-                                        act_type='prelu').to('cuda')
+                                        act_type='prelu').to(device)
         model_sd = torch.load(path)['params']
         model.load_state_dict(model_sd)
         return model
 
     if choice == 'Fast':
-        model = SRVGGNetPlus(num_in_ch=3, num_out_ch=3, num_feat=48, upscale=4, act_type='prelu').to('cuda')
+        model = SRVGGNetPlus(num_in_ch=3, num_out_ch=3, num_feat=48, upscale=4, act_type='prelu').to(device)
         model_sd = torch.load(path)
         model.load_state_dict(model_sd)
         return model
@@ -117,6 +124,14 @@ def load_model(choice, path):
 @click.option('--out_width', '-ow', required=False, type=click.INT, default=None, help='Output Width')
 @click.option('--out_height', '-oh', required=False, type=click.INT, default=None, help='Output Height')
 def super_res_main(input_dir, output_dir, scale_mode, sharpening_factor, model, scale_factor=None, out_width=None,out_height=None):
+    # Auto-detect best available device
+    if torch.cuda.is_available():
+        device = 'cuda'
+    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        device = 'mps'
+    else:
+        device = 'cpu'
+    print(f"Using device: {device}")
 
     msg = "Running Super Resolution on " + ", ".join(input_dir) + " storing Results at" + output_dir + " with " + model + " model" + " and " + scale_mode + " scale mode"
     if scale_mode == "Factor" and scale_factor is None:
@@ -143,7 +158,7 @@ def super_res_main(input_dir, output_dir, scale_mode, sharpening_factor, model, 
         model_path = "./sr_models/Fast.pt"
 
     print("Loading Model", model_path)
-    super_res_model = load_model(model, model_path)
+    super_res_model = load_model(model, model_path, device=device)
 
     # if output directory does not exist create it
     if not os.path.exists(output_dir):
@@ -166,7 +181,7 @@ def super_res_main(input_dir, output_dir, scale_mode, sharpening_factor, model, 
             data_transformer = transforms.Compose([transforms.ToTensor()])
             image = cv2.imread(file)
             input_width, input_height = image.shape[0], image.shape[1]
-            image = data_transformer(image).to('cuda')
+            image = data_transformer(image).to(device)
             input = torch.unsqueeze(image, 0)
 
             with torch.inference_mode():

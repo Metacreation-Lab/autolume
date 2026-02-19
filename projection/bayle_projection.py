@@ -207,10 +207,16 @@ def project(
     reply_queue.put(['Starting projection...', None, False, False])
     for step in range(num_steps):
         halt = False
-        if queue.qsize() > 0:
-            halt = queue.get()
-            while queue.qsize() > 0:
-                halt = queue.get()
+        # Check for halt signal (qsize not available on macOS)
+        try:
+            halt = queue.get_nowait()
+            while True:
+                try:
+                    halt = queue.get_nowait()
+                except:
+                    break
+        except:
+            pass
         if halt:
             # cut off w_out to current step
             w_out = w_out[:step]
@@ -334,9 +340,13 @@ def run_projection(
     network_pkl,target_fname,target_text,initial_latent,outdir,save_video,seed,lr,num_steps,use_vgg,use_clip,use_pixel,\
         use_penalty, use_center,use_kmeans = queue.get()
 
-    while queue.qsize() > 0:
-        network_pkl, target_fname, target_text, initial_latent, outdir, save_video, seed, lr, num_steps, use_vgg, \
-            use_clip, use_pixel,use_penalty, use_center, use_kmeans = queue.get()
+    # Drain queue to get latest parameters (qsize not available on macOS)
+    while True:
+        try:
+            network_pkl, target_fname, target_text, initial_latent, outdir, save_video, seed, lr, num_steps, use_vgg, \
+                use_clip, use_pixel,use_penalty, use_center, use_kmeans = queue.get_nowait()
+        except:
+            break
 
 
 
@@ -422,10 +432,16 @@ def run_projection(
         reply_queue.put([f'Saving optimization progress video "{save_path}/proj.mp4"', None, True, False])
         for i, projected_w in enumerate(projected_w_steps):
             halt = False
-            if queue.qsize() > 0:
-                halt = queue.get()
-                while queue.qsize() > 0:
-                    halt = queue.get()
+            # Check for halt signal (qsize not available on macOS)
+            try:
+                halt = queue.get_nowait()
+                while True:
+                    try:
+                        halt = queue.get_nowait()
+                    except:
+                        break
+            except:
+                pass
             if halt:
                 break
             reply_queue.put([f'Generating frame {i}/{len(projected_w_steps)-1}...', None, True, False])
