@@ -578,11 +578,26 @@ class ImageFolderDataset(Dataset):
                 f"image at index {idx} is not square ({width}x{height}). "
                 "GAN training only accepts square images."
             )
-        if list(image.shape) != self.image_shape:
+        if width <= 0 or (width & (width - 1)) != 0:
             raise ValueError(
                 "Dataset is not preprocessed correctly: "
-                f"image at index {idx} has shape {list(image.shape)}, expected {self.image_shape}. "
-                "Ensure all images are square and have uniform resolution (e.g. 512x512)."
+                f"image at index {idx} has resolution {width}x{height}; resolution must be a power of 2. "
+                "GAN training requires power-of-2 resolution (e.g. 256, 512, 1024)."
+            )
+        channels = image.shape[0]
+        expected_channels = self.image_shape[0]
+        if channels != expected_channels:
+            raise ValueError(
+                "Dataset is not preprocessed correctly: "
+                f"image at index {idx} has {channels} channel(s), expected {expected_channels}. "
+                "Ensure all images have the same number of channels (e.g. RGB = 3)."
+            )
+        expected_height, expected_width = self.image_shape[1], self.image_shape[2]
+        if height != expected_height or width != expected_width:
+            raise ValueError(
+                "Dataset is not preprocessed correctly: "
+                f"image at index {idx} has resolution {width}x{height}, expected {expected_width}x{expected_height}. "
+                "Ensure all images have uniform resolution (e.g. 512x512)."
             )
         if image.dtype != np.uint8:
             raise ValueError(
