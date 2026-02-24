@@ -1,0 +1,1028 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+      
+        <link rel="prev" href="../live-module/">
+      
+      
+        <link rel="next" href="../training-aug/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/logo.webp">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.2">
+    
+    
+      
+        <title>Offline Modules - Autolume - Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#offline-modules" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Autolume - Documentation" class="md-header__button md-logo" aria-label="Autolume - Documentation" data-md-component="logo">
+      
+  <img src="../assets/logo.webp" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Autolume - Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Offline Modules
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/Metacreation-Lab/autolume" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Metacreation-Lab/autolume
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Autolume - Documentation" class="md-nav__button md-logo" aria-label="Autolume - Documentation" data-md-component="logo">
+      
+  <img src="../assets/logo.webp" alt="logo">
+
+    </a>
+    Autolume - Documentation
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/Metacreation-Lab/autolume" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Metacreation-Lab/autolume
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../live-module/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Live Module
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Offline Modules
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Offline Modules
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#data-preparation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Preparation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Data Preparation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#data-preparation-module" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Preparation Module
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#data-preparation-quick-settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Preparation Quick Settings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#supported-file-formats" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supported File Formats
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#training" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Training
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Training">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#dataset" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dataset
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#training-augmentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Training Augmentation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#training-process" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Training Process
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#additional-resources" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Additional Resources
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#alternative-training-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Alternative Training Options
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#projection-module" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Projection Module
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ganspace" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GANSpace
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#super-resolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Super-resolution
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#model-mixing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Model Mixing
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../training-aug/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Training Augmentation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../windows-requirements/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Windows Requirements
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#data-preparation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Preparation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Data Preparation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#data-preparation-module" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Preparation Module
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#data-preparation-quick-settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Preparation Quick Settings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#supported-file-formats" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supported File Formats
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#training" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Training
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Training">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#dataset" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dataset
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#training-augmentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Training Augmentation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#training-process" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Training Process
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#additional-resources" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Additional Resources
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#alternative-training-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Alternative Training Options
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#projection-module" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Projection Module
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ganspace" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GANSpace
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#super-resolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Super-resolution
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#model-mixing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Model Mixing
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="offline-modules">Offline Modules</h1>
+<h2 id="data-preparation">Data Preparation</h2>
+<p>This module provides options for dataset preparation prior to model training. The Data Preparation Module can be used for advanced configuration, while the Quick Settings feature allows faster dataset creation with basic parameters. It supports importing image and video files, formatting data into a consistent structure required for training. When a video file is imported, frames are automatically extracted based on the specified frame rate, converting motion footage into a sequence of still images suitable for training.</p>
+<p><img alt="" src="../assets/offline-modules-data-preparation-01.png" /></p>
+<h3 id="data-preparation-module">Data Preparation Module</h3>
+<p>The Data Preparation Module offers extended functionality and finer control over dataset creation. It includes options such as non-square framing to preserve image aspect ratios, image augmentations to expand dataset size and diversity, and integrated tools for managing and organizing data directly within the application. This module enables data to be imported, refined, and compiled entirely in-app. A built-in preview panel displays preprocessing results in real time, allowing visual verification of all applied changes before preprocessing and saving.</p>
+<p><img alt="" src="../assets/offline-modules-data-preparation-02.png" /></p>
+<h3 id="data-preparation-quick-settings">Data Preparation Quick Settings</h3>
+<p>Unlike the full Data Preparation Module, the Quick Settings feature provides only the essential parameters needed for preparing data. It is designed for fast dataset creation and requires precompiled data, offering a simplified workflow for generating datasets quickly.</p>
+<h3 id="supported-file-formats">Supported File Formats</h3>
+<p>The Data Preparation Module supports importing both image and video files. The following formats are supported:</p>
+<p>Image formats:</p>
+<ul>
+<li>PNG (.png)</li>
+<li>JPEG (.jpg, .jpeg)</li>
+<li>BMP (.bmp)</li>
+<li>WebP (.webp)</li>
+<li>GIF (.gif)</li>
+</ul>
+<p>Video formats:</p>
+<ul>
+<li>MP4 (.mp4)</li>
+<li>AVI (.avi)</li>
+<li>MOV (.mov)</li>
+<li>MKV (.mkv)</li>
+<li>WebM (.webm)</li>
+<li>GIF (.gif)</li>
+</ul>
+<p>Data Preparation Process</p>
+<p>To prepare a dataset, provide the following:</p>
+<ul>
+<li>Quick Settings:</li>
+<li>Data Path: Specifies the source directory containing the image and video files. All supported media within this directory will be imported automatically.</li>
+<li>Resize Mode: Determines how images are resized during preprocessing. Options include stretch and center-crop.</li>
+<li>Resolution: Sets the target pixel dimensions (width × height) for all processed images using the + and – controls. Higher resolutions produce sharper outputs but require more GPU memory during training. It is recommended to test system limits before finalizing this setting.</li>
+<li>Folder Name: Defines the name of the output directory for the processed dataset. By default, the system appends a resolution suffix (e.g., dataset_1024x1024) to the folder name to indicate the dataset’s resolution size.</li>
+<li>Directory Path: Specifies the destination path where the processed dataset folder will be created.</li>
+<li>Data Preprocessing Module:</li>
+<li>Non-square Framing: Enables image resizing while maintaining the original aspect ratio instead of forcing a square crop.<ul>
+<li>Aspect Ratio (Height &amp; Width): Sets custom height and width proportions for non-square datasets.</li>
+<li>Padding Mode: Determines how empty areas are filled when adjusting aspect ratios.</li>
+</ul>
+</li>
+<li>Augmentation: Applies augmentation techniques to the imported images during processing. These transformations are used to increase dataset size. It is important to select augmentation options carefully based on the nature of the data; for example, if the dataset contains orientation-sensitive subjects such as human faces, flip operations should be adjusted accordingly.</li>
+</ul>
+<h2 id="training">Training</h2>
+<p>The Training Module enables users to train models using datasets prepared through the Data Preparation Module. It supports both training from scratch and resuming from existing checkpoints. The module also leverages data augmentation during training to improve model stability and performance, particularly when working with smaller or less diverse datasets. Throughout the training process, checkpoints and image outputs are automatically generated to document progress and model development.</p>
+<p><img alt="" src="../assets/offline-modules-training-01.png" /></p>
+<h3 id="dataset">Dataset</h3>
+<p>The dataset size can range from fewer than a hundred to several thousand samples. A minimum of 50–200 samples is recommended, depending on the diversity and variability of the data. For optimal results, all images within a dataset must have the same dimensions, as a consistent image size is required for model training. Resizing can be performed manually or handled automatically within Autolume using the data preparation module.</p>
+<h3 id="training-augmentation">Training Augmentation</h3>
+<p>To facilitate training with smaller datasets, two augmentation methods are provided in Autolume: Adaptive Discriminator Augmentation (ADA) and Differentiable Augmentation for Data-Efficient GAN Training (DiffAug). These augmentation methods apply visual transformations to your data during training without modifying your original dataset to help the model continue learning effectively, even when limited data is available. Each method offers a set of pipelines, which are simply different combinations of these transformations applied dynamically during training.</p>
+<p>While both methods serve the same purpose, they differ in how they apply these transformations. DiffAug uses fixed-strength, randomized augmentations in every training batch, introducing consistent variation. In contrast, ADA adjusts the strength of augmentations automatically based on how well the model is learning. It's recommended to experiment with both methods and their pipelines to find what works best for your dataset.</p>
+<p>If training performance remains poor even after experimenting with augmentation methods and pipelines, consider increasing the size and diversity of your dataset. Additional data can significantly improve model stability and output quality. You may also use the Data Preparation Module’s augmentation features to expand your dataset before training.</p>
+<p>For a detailed guide on choosing the right augmentation method and pipeline, refer to this document: <a href="../training-aug/">How to Select Augmentation Method and Pipeline</a> </p>
+<p>For more technical details, please refer to:<br />
+ADA: <a href="https://www.google.com/url?q=https://github.com/NVlabs/stylegan2-ada-pytorch&amp;sa=D&amp;source=editors&amp;ust=1769724592275861&amp;usg=AOvVaw19KrbXZXtytksKuFDBKJa5">https://github.com/NVlabs/stylegan2-ada-pytorch</a><br />
+DiffAug: <a href="https://www.google.com/url?q=https://github.com/mit-han-lab/data-efficient-gans&amp;sa=D&amp;source=editors&amp;ust=1769724592276125&amp;usg=AOvVaw2Snhq4HaRpOS1Nc915Txjl">https://github.com/mit-han-lab/data-efficient-gans</a></p>
+<h3 id="training-process">Training Process</h3>
+<p>To train a model, provide the following:</p>
+<ul>
+<li>Save Path: Choose the location where the training files will be saved.</li>
+<li>Dataset: Select the dataset on which the model will be trained. (See <a href="#dataset">Dataset</a>)</li>
+<li>Resume Pkl: Resume training from a previous training run or a pre-trained model by selecting a .pkl file. Skip this field if you are training the model from scratch.</li>
+<li>Training Augmentation: Select the style of augmentation to be applied during training. Experiment with different styles to find the one that works best for your data. (See <a href="#training-augmentation">Training Augmentation</a>)</li>
+<li>Augmentation Pipeline: Choose the types of augmentation to be performed. (See <a href="../training-aug/">Choosing Augmentation Pipeline</a>)</li>
+<li>Batch Size: Determine the number of images processed at once. This value is limited by the GPU memory available. A batch size of 8 is recommended for NVIDIA RTX 2070 GPU and above. Reduce to lower values (minimum 2) if memory issues arise.</li>
+<li>Configuration: Selects from a set of preset training configurations that serve as reliable starting points for different model resolutions. For example, the paper256 configuration is recommended when training models at 256×256 resolution. Refer to the Training New Networks section of <a href="https://www.google.com/url?q=https://github.com/NVlabs/stylegan2-ada-pytorch&amp;sa=D&amp;source=editors&amp;ust=1769724592279946&amp;usg=AOvVaw2lzyqjjDrZbdBs8gHhrKX4">this link</a> for more details on the available configurations.</li>
+</ul>
+<p>Advanced Options:</p>
+<ul>
+<li>Generator and Discriminator Learning Rates: Keeping the default value (0.002) is recommended for most cases. If changing all other hyperparameters does not lead to successful training, you can lower these values to 0.001.</li>
+<li>Gamma: Experiment with different gamma values if the default value (10) is not leading to successful training results. We recommend trying out at least a few different values of Gamma for each new dataset. Using increments of 10 is recommended.</li>
+<li>Number of ticks between snapshots: Specifies how often image snapshots and checkpoint files are generated during training. Each tick represents a defined training interval. Lower values produce snapshots more frequently, allowing closer monitoring of progress, but the visual changes between snapshots will be smaller. A setting between 1 and 4 is generally recommended for balanced tracking and performance.</li>
+</ul>
+<p>After selecting the desired options, click the Train button to begin the training process. During training, the model periodically saves checkpoint (.pkl) files to the specified Save Path. A preview window displays a grid of randomly generated images from the model, corresponding to the latest image snapshot files saved in the fakesXXXXXX format (e.g., fakes000352) in the same directory.</p>
+<p>Training can be stopped at any time by clicking the Cancel button in the preview window. The final model is saved as a .pkl file in the specified Save Path, and progress can be tracked through the series of generated image snapshots.</p>
+<h3 id="additional-resources">Additional Resources</h3>
+<p>Please refer to these resources for more advanced discussions about hyperparameters for training.</p>
+<p><a href="https://www.google.com/url?q=https://medium.com/@jules.padova/stylegan-deep-dive-from-its-architecture-to-how-to-make-synthetic-humans-e02c242a8b7d&amp;sa=D&amp;source=editors&amp;ust=1769724592284434&amp;usg=AOvVaw0FRJqPuzAS_TpFk0f-QqAN">StyleGan Deep Dive</a> </p>
+<p>Jules Padova</p>
+<p><a href="https://www.google.com/url?q=https://github.com/NVlabs/stylegan3/blob/main/docs/configs.md%23training-configurations&amp;sa=D&amp;source=editors&amp;ust=1769724592284799&amp;usg=AOvVaw2ubjFQf_4b4gW-dlPtw8lh">Training configurations</a> </p>
+<p>Tero Karras &amp; Janne Hellsten (NVIDIA Research)</p>
+<h3 id="alternative-training-options">Alternative Training Options</h3>
+<p>While Autolume provides the necessary features for network training on a local machine, for more serious training sessions, users can use cloud-based alternative options to train a StyleGAN2 model on more powerful GPUs. The trained model (either using Tensorflow or PyTorch) can then be used in Autolume-live for real-time use or in other modules. A number of alternative options are as follows:</p>
+<ul>
+<li>Google Colab (simple, both free and paid options) </li>
+<li><a href="https://www.google.com/url?q=https://colab.research.google.com/github/dvschultz/stylegan2-ada-pytorch/blob/main/SG2_ADA_PyTorch.ipynb&amp;sa=D&amp;source=editors&amp;ust=1769724592286379&amp;usg=AOvVaw06oiCjt41W8dzxXMYqWsaE">Colab notebook 1</a></li>
+<li><a href="https://www.google.com/url?q=https://colab.research.google.com/drive/1BBUxv6QO2hY4lTkCpeAPvSn7H50nTLSi?usp%3Dsharing%23scrollTo%3DNVTn49qEhR1L&amp;sa=D&amp;source=editors&amp;ust=1769724592286630&amp;usg=AOvVaw0pz4u0l394XyARv_kz5p6q">Colab notebook 2</a></li>
+<li>Paperspace (advanced, paid)</li>
+<li><a href="https://www.google.com/url?q=https://blog.paperspace.com/how-to-set-up-stylegan2-ada-pytorch-on-paperspace/&amp;sa=D&amp;source=editors&amp;ust=1769724592287066&amp;usg=AOvVaw3u0tnlEOPRoepCoNOKbIck">How to Run StyleGAN2-ADA-PyTorch on Paperspace</a></li>
+</ul>
+<h2 id="projection-module">Projection Module</h2>
+<p>The projection module allows loading a target image, a text prompt, or a combination of both,  to find the closest corresponding latent vector of a trained model. Different methods are provided to search for the corresponding latent vector that you can choose from. The output is the calculated vector plus a process video showing the search process.</p>
+<p><img alt="" src="../assets/offline-modules-projection-module-01.png" /></p>
+<p>The following options are available for the projection module:</p>
+<ul>
+<li>Models: Select the .pkl file of the model used for projection.</li>
+<li>Target Image: Choose a single image that should be found in the model.</li>
+<li>Target Text: Provide a description of an image that should be found in the model.</li>
+<li>Save Path: Specify the path where the closest match should be saved. The saved result includes the position in the model and the closest match.</li>
+<li>Save Video: Select this option to save a video of the process of finding the closest match.</li>
+<li>Seed: Select a seed to ensure consistent results for the closest match.</li>
+<li>Learning Rate: Adjust the learning rate of the projection to control convergence speed. Higher values result in faster projections but may be less accurate.</li>
+<li>Steps: Determine the number of steps for the projection. Higher values increase accuracy but require more time.</li>
+<li>Use VGG: Enable this option to use the VGG16 network for calculating image distance based on general features rather than pixel-by-pixel comparisons.</li>
+<li>Use CLIP: Enable this option to use the CLIP network for calculating image and text distance based on general features rather than pixel-by-pixel comparisons.</li>
+<li>Use Pixel: Enable this option to use pixel distance for image comparison. This puts more weight on pixel similarity between the match and the target.</li>
+<li>Use Penalty: Enable this option to penalize large update steps, resulting in a smoother projection and avoiding local minimums.</li>
+<li>Use Center: Enable this option to use an additional center crop as the target image. This can improve matching accuracy but may reduce overall accuracy.</li>
+</ul>
+<h2 id="ganspace">GANSpace</h2>
+<p>This module identifies and extracts interpretable feature directions in the latent space of a trained model based on Principal Component Analysis (PCA). These extracted feature directions can be then accessible in the Renderer (see <a href="../live-module/#adjust-input">Adjust Input</a>).</p>
+<p><img alt="" src="../assets/offline-modules-ganspace-01.png" /></p>
+<p>The module provides the following options:</p>
+<ul>
+<li>Models: Select the .pkl file of the model for GANSpace exploration.</li>
+<li>PCA Estimator: Choose an algorithm to find salient directions in the latent space. Different algorithms result in slightly different extracted directions. Experiment with each option to find the best fit for your model.</li>
+<li>Features: Specify the number of features to extract. More features result in more adjustable directions in the real-time interface but also increase file size. Often, extracting around 10 features is recommended.</li>
+<li>Sparsity: This parameter adjusts the sparsity of the extracted directions. Leave it at the default if you are unsure about its impact.</li>
+<li>Save Path: Choose the path to save the GANSpace results, which include the extracted directions. These directions can be loaded in the "<a href="../live-module/#adjust-input">Adjust Input</a>" widget in the real-time interface.</li>
+</ul>
+<p>For more technical information on GANSpace, please refer to the following resources:</p>
+<p><a href="https://www.google.com/url?q=https://arxiv.org/abs/2004.02546&amp;sa=D&amp;source=editors&amp;ust=1769724592296454&amp;usg=AOvVaw1GSkgPNlwUg633Ht9d3zn6">GANSpace Paper</a></p>
+<p><a href="https://www.google.com/url?q=https://github.com/harskish/ganspace&amp;sa=D&amp;source=editors&amp;ust=1769724592296788&amp;usg=AOvVaw3Xsw5-fahRCc_ZXrq6FtT5">GANSpace Repository on GitHub</a></p>
+<h2 id="super-resolution">Super-resolution</h2>
+<p>The Super-resolution module provides the feature to upscale images and videos for higher resolution distribution of your work. There are three different models available: Quality, Balance, and Fast. While the Processing speeds of the models differ, Quality being the slowest and Fast being the fastest, the slower models tend to preserve more details from the original image/video. However, the quality of the results also depends on the type of visual content and is better to be tested with all three models to find the desired option.</p>
+<p><img alt="" src="../assets/offline-modules-super-resolution-01.png" /></p>
+<p>The following options are available:</p>
+<ul>
+<li>Input Files: Select the path to the images or videos that should be upscaled. Multiple files can be selected at once.</li>
+<li>Result Path: Specify the path where the upscaled images or videos should be saved.</li>
+<li>Model: Choose the upscaling model to be used: Fast, Balanced, or Quality. Fast is the quickest but provides lower quality, while Quality is the slowest but provides the highest quality.</li>
+<li>Scale Mode: Choose between defining the exact Height and Width of the output or using a Scale Factor. If the scale factor is selected, the height and width will be automatically calculated based on the scale factor.</li>
+<li>Sharpening: Adjust the sharpness of the upscaled image. Sharpening=1 means no added sharpness. Higher values result in sharper images but may introduce artifacts.</li>
+</ul>
+<h2 id="model-mixing">Model Mixing</h2>
+<p>This module provides the ability to mix two trained models to make a new model. It works based on selecting parts of one model and parts of a different model, thereby mixing the features of the two models.</p>
+<p><img alt="" src="../assets/offline-modules-model-mixing-01.png" /></p>
+<p>To mix two models, specify the following:</p>
+<ul>
+<li>Model 1: Select the .pkl file of the first model to be mixed.</li>
+<li>Model 2: Select the .pkl file of the second model to be mixed.</li>
+</ul>
+<p>After pressing "Combine," you can select the layers to be used from each model. The layers are listed in order, from early to late layers. While lower-resolution layers (e.g. 4x4, 8x8, 16x16) correspond to coarse and higher-level features, higher-resolution layers correspond to fine features and textures. This can be used to determine what type of features the mixed model inherits from each source. Each layer can also be expanded to select detailed components for advanced mixing. Additionally, features can be removed from the mix. This can be useful when one of the models generates images of higher resolution, and you want to align the resolution with the lower-resolution model.</p>
+<p><img alt="" src="../assets/offline-modules-model-mixing-02.png" /></p>
+<p>Finally, you have the option to save the mixed model as a new .pkl file, which can be used anywhere in Autolume.</p>
+<p>For real-time model mixing in the Renderer, see <a href="../live-module/#model-mixing-real-time">Model Mixing (real-time)</a>.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../live-module/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Live Module">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Live Module
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../training-aug/" class="md-footer__link md-footer__link--next" aria-label="Next: Training Augmentation">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Training Augmentation
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.footer"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
