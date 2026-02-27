@@ -549,8 +549,13 @@ class ImageFolderDataset(Dataset):
         return self._load_raw_image(0).shape[1:]
 
     def __getitem__(self, idx):
-        image = self._load_raw_image(self._raw_idx[idx])
+        raw_idx = int(self._raw_idx[idx])
+        image = self._load_raw_image(raw_idx)
         assert isinstance(image, np.ndarray)
+
+        fname = self._image_fnames[raw_idx]
+        filename = os.path.basename(fname.replace('\\', '/'))
+
         if image.shape[0] == 1: # Greyscale images
             image = np.repeat(image, 3, axis=0) # Convert greyscale to RGB
         if image.shape[0] == 4: # RGBA images
@@ -564,45 +569,45 @@ class ImageFolderDataset(Dataset):
                 else:
                     image = image.transpose(1, 2, 0)
                     pil_image = PIL.Image.fromarray(image.astype(np.uint8))  # Convert NumPy array to PIL Image
-                    resize_transform = torchvision.transforms.Resize(min(self.height, self.width))  # 先等比例缩放
-                    resized_image = resize_transform(pil_image)  # 应用 Resize 变换
+                    resize_transform = torchvision.transforms.Resize(min(self.height, self.width)) 
+                    resized_image = resize_transform(pil_image)
                     crop_transform  = torchvision.transforms.CenterCrop((self.height, self.width))  # Target size
-                    cropped_image = crop_transform(resized_image )  # Perform the center crop
+                    cropped_image = crop_transform(resized_image)
                     image = np.array(cropped_image)  # Convert back to NumPy array
                     image = image.transpose(2,0,1)
         
         height, width = image.shape[1], image.shape[2]
         if height != width:
             raise ValueError(
-                "Dataset is not preprocessed correctly: "
-                f"image at index {idx} is not square ({width}x{height}). "
-                "GAN training only accepts square images."
+                "Invalid dataset:\n"
+                f"- Image '{filename}' is not square ({width}x{height}).\n"
+                "- StyleGAN3 training only accepts square images."
             )
         if width <= 0 or (width & (width - 1)) != 0:
             raise ValueError(
-                "Dataset is not preprocessed correctly: "
-                f"image at index {idx} has resolution {width}x{height}; resolution must be a power of 2. "
-                "GAN training requires power-of-2 resolution (e.g. 256, 512, 1024)."
+                "Invalid dataset:\n"
+                f"- Image '{filename}' has resolution {width}x{height}. Resolution must be a power of 2.\n"
+                "- StyleGAN3 training requires power-of-2 resolution (e.g. 256, 512, 1024)."
             )
         channels = image.shape[0]
         expected_channels = self.image_shape[0]
         if channels != expected_channels:
             raise ValueError(
-                "Dataset is not preprocessed correctly: "
-                f"image at index {idx} has {channels} channel(s), expected {expected_channels}. "
-                "Ensure all images have the same number of channels (e.g. RGB = 3)."
+                "Invalid dataset:\n"
+                f"- Image '{filename}' has {channels} channel(s), expected {expected_channels}.\n"
+                "- Ensure all images have the same number of channels (e.g. RGB = 3)."
             )
         expected_height, expected_width = self.image_shape[1], self.image_shape[2]
         if height != expected_height or width != expected_width:
             raise ValueError(
-                "Dataset is not preprocessed correctly: "
-                f"image at index {idx} has resolution {width}x{height}, expected {expected_width}x{expected_height}. "
-                "Ensure all images have uniform resolution (e.g. 512x512)."
+                "Invalid dataset:\n"
+                f"- Image '{filename}' has resolution {width}x{height}, expected {expected_width}x{expected_height}.\n"
+                "- Ensure all images have uniform resolution (e.g. 512x512)."
             )
         if image.dtype != np.uint8:
             raise ValueError(
-                "Dataset is not preprocessed correctly: "
-                f"image at index {idx} has dtype {image.dtype}, expected uint8."
+                "Invalid dataset:\n"
+                f"- Image '{filename}' has dtype {image.dtype}, expected uint8."
             )
         if self._xflip[idx]:
             assert image.ndim == 3 # CHW
