@@ -12,15 +12,20 @@ class ThumbnailWidget:
     """Widget for handling image thumbnails with caching and display"""
     
     def __init__(self):
-        self.thumbnail_size = 140 # Determines quality of thumbnails (resolution)
-        self.thumbnails = {}  # Cache for thumbnail textures
-        self.placeholder_textures = {}  # Cache for placeholder textures
-        self.generate_thumbnails = False  # Default to performance mode (no thumbnails, only placeholders)
+        self.thumbnail_size = 140  # Quality of thumbnails (resolution)
+        self.thumbnails = {}  
+        self.placeholder_textures = {}  
+        self.generate_thumbnails = False  # Default to performance mode (placeholders)
         self.selected_files = []
         self.last_selected_idx = None
-        self.selected_indices = []  # For multi-selection
+        self.selected_indices = [] 
         self.last_mode_switch_time = 0  # For debouncing rapid toggles
-        self.delete_pressed = False  # Flag for delete key press
+        self.delete_pressed = False  
+
+        self.file_index_map = {}  
+        self.visible_start_index = 0
+        self.visible_end_index = -1
+        self.lazy_buffer_items = 100  # Extra items rendered above/below viewport
     
     def create_placeholder_thumbnail(self, file_path):
         """Create a grey placeholder thumbnail with image name"""
@@ -108,8 +113,8 @@ class ThumbnailWidget:
     def update_thumbnails(self, file_paths):
         """Update thumbnails for all provided files"""
         self.selected_files = file_paths
-        for file_path in file_paths:
-            self.get_thumbnail(file_path)
+        
+        self.file_index_map = {fp: idx for idx, fp in enumerate(file_paths)}
     
     def clear_thumbnails(self):
         """Clear all thumbnails and free memory"""
@@ -139,6 +144,9 @@ class ThumbnailWidget:
         """Clear both actual and placeholder thumbnails"""
         self.clear_thumbnails()
         self.clear_placeholder_thumbnails()
+        self.file_index_map.clear()
+        self.visible_start_index = 0
+        self.visible_end_index = -1
     
     def render_thumbnails(self, available_width, available_height):
         if not self.selected_files:
@@ -170,12 +178,63 @@ class ThumbnailWidget:
         total_row_width = thumbnails_per_row * thumb_size + (thumbnails_per_row - 1) * spacing_x
         left_margin = max(0, (available_width - total_row_width) // 2)
 
+        # --- Lazy rendering based on scroll position ---
+        text_line_height = imgui.get_text_line_height()
+        row_height = thumb_size + text_line_height + spacing_y
+        total_rows = (n + thumbnails_per_row - 1) // thumbnails_per_row if n > 0 else 0
+
+        if row_height <= 0:
+            row_height = 1
+
+        scroll_y = imgui.get_scroll_y()
+        window_height = imgui.get_window_height()
+
+        if total_rows > 0:
+            first_row_visible = int(max(0, scroll_y // row_height))
+            last_row_visible = int(min(total_rows - 1, (scroll_y + window_height) // row_height))
+
+            first_index_visible = first_row_visible * thumbnails_per_row
+            last_index_visible = min(n - 1, ((last_row_visible + 1) * thumbnails_per_row) - 1)
+
+            start_idx = max(0, first_index_visible - self.lazy_buffer_items)
+            end_idx = min(n - 1, last_index_visible + self.lazy_buffer_items)
+        else:
+            start_idx = 0
+            end_idx = -1
+
+        self.visible_start_index = start_idx
+        self.visible_end_index = end_idx
+
+        keep_paths = set(self.selected_files[start_idx : end_idx + 1]) if end_idx >= start_idx else set()
+        for path in list(self.thumbnails.keys()):
+            if path not in keep_paths:
+                tex = self.thumbnails.pop(path, None)
+                if tex is not None and hasattr(tex, 'delete') and callable(tex.delete):
+                    try:
+                        tex.delete()
+                    except Exception as e:
+                        print(f"Error evicting thumbnail texture: {e}")
+        for path in list(self.placeholder_textures.keys()):
+            if path not in keep_paths:
+                tex = self.placeholder_textures.pop(path, None)
+                if tex is not None and hasattr(tex, 'delete') and callable(tex.delete):
+                    try:
+                        tex.delete()
+                    except Exception as e:
+                        print(f"Error evicting placeholder texture: {e}")
+
+        start_row = start_idx // thumbnails_per_row if n > 0 else 0
+        end_row = end_idx // thumbnails_per_row if n > 0 and end_idx >= 0 else -1
+
+        imgui.dummy(0, start_row * row_height)
+
         if not hasattr(self, 'last_selected_idx'):
             self.last_selected_idx = None
         if not hasattr(self, 'selected_indices'):
             self.selected_indices = []
 
-        for idx, file_path in enumerate(self.selected_files):
+        for idx in range(start_idx, end_idx + 1):
+            file_path = self.selected_files[idx]
             texture = self.get_thumbnail(file_path)
             if texture is not None and hasattr(texture, 'gl_id') and texture.gl_id is not None:
                 col = idx % thumbnails_per_row
@@ -249,6 +308,12 @@ class ThumbnailWidget:
                 if col == thumbnails_per_row - 1:
                     imgui.new_line()
                     imgui.dummy(0, spacing_y)
+
+        if n > 0 and end_row >= start_row:
+            rows_after = max(0, total_rows - end_row - 1)
+            if rows_after > 0:
+                imgui.new_line()
+                imgui.dummy(0, rows_after * row_height)
     
     def get_thumbnail_count(self):
         """Get the number of thumbnails"""

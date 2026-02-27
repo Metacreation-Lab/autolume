@@ -865,6 +865,41 @@ class DataPreprocessing:
     # ------------------------------
 
      # --- Background Thumbnail Generation Helper Functions ---
+    def _get_thumbnail_processing_order(self):
+        """Order thumbnails so rendering starts from current viewport, then above, then below."""
+        n = len(self.imported_files)
+        if n == 0:
+            return []
+
+        visible_start = getattr(self.thumbnail_widget, "visible_start_index", 0)
+        visible_end = getattr(self.thumbnail_widget, "visible_end_index", n - 1)
+
+        visible_start = max(0, min(visible_start, n - 1))
+        visible_end = max(visible_start, min(visible_end, n - 1))
+
+        ordered_indices = []
+
+        # Current viewport range
+        for idx in range(visible_start, visible_end + 1):
+            ordered_indices.append(idx)
+
+        # Above the viewport (from just above upwards)
+        for idx in range(visible_start - 1, -1, -1):
+            ordered_indices.append(idx)
+
+        # Below the viewport
+        for idx in range(visible_end + 1, n):
+            ordered_indices.append(idx)
+
+        seen = set()
+        ordered_paths = []
+        for idx in ordered_indices:
+            if 0 <= idx < n and idx not in seen:
+                seen.add(idx)
+                ordered_paths.append(self.imported_files[idx])
+
+        return ordered_paths
+
     def _start_background_thumbnail_generation(self):
         """Start background thumbnail generation process"""
         if not self.thumbnail_process_started or (self.thumbnail_process is not None and not self.thumbnail_process.is_alive()):
@@ -876,10 +911,13 @@ class DataPreprocessing:
             self.thumbnail_process_started = True
 
         self.is_processing_thumbnails = True
+        file_paths = self._get_thumbnail_processing_order()
+        if not file_paths:
+            file_paths = self.imported_files
         
         request = {
             'type': 'generate_thumbnails',
-            'file_paths': self.imported_files,
+            'file_paths': file_paths,
             'thumbnail_size': self.thumbnail_widget.thumbnail_size
         }
         self.thumbnail_queue.put(request)
