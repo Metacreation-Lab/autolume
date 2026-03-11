@@ -723,6 +723,12 @@ class DataPreprocessing:
         # End Thumbnails Scroll
         
         self._check_background_thumbnail_results()
+        if (
+            self.thumbnail_widget.generate_thumbnails
+            and self.imported_files
+            and not self.is_processing_thumbnails
+        ):
+            self._start_background_thumbnail_generation()
 
         remove_selected = imgui.button("Remove Selected Images", width=available_width, height=30)
         remove_selected = remove_selected or self.thumbnail_widget.is_delete_pressed()
@@ -866,7 +872,11 @@ class DataPreprocessing:
 
      # --- Background Thumbnail Generation Helper Functions ---
     def _get_thumbnail_processing_order(self):
-        """Order thumbnails so rendering starts from current viewport, then above, then below."""
+        """Order thumbnails for background generation based on current viewport.
+
+        Only thumbnails within the lazily rendered range (visible region ± buffer)
+        are requested from the background process, matching the placeholder logic.
+        """
         n = len(self.imported_files)
         if n == 0:
             return []
@@ -877,28 +887,11 @@ class DataPreprocessing:
         visible_start = max(0, min(visible_start, n - 1))
         visible_end = max(visible_start, min(visible_end, n - 1))
 
-        ordered_indices = []
+        if visible_end < visible_start:
+            return []
 
-        # Current viewport range
-        for idx in range(visible_start, visible_end + 1):
-            ordered_indices.append(idx)
-
-        # Above the viewport (from just above upwards)
-        for idx in range(visible_start - 1, -1, -1):
-            ordered_indices.append(idx)
-
-        # Below the viewport
-        for idx in range(visible_end + 1, n):
-            ordered_indices.append(idx)
-
-        seen = set()
-        ordered_paths = []
-        for idx in ordered_indices:
-            if 0 <= idx < n and idx not in seen:
-                seen.add(idx)
-                ordered_paths.append(self.imported_files[idx])
-
-        return ordered_paths
+        indices = range(visible_start, visible_end + 1)
+        return [self.imported_files[i] for i in indices if 0 <= i < n]
 
     def _start_background_thumbnail_generation(self):
         """Start background thumbnail generation process"""
