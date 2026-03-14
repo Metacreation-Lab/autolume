@@ -139,7 +139,9 @@ class TrainingModule:
             while self.reply.qsize() > 0:
                 self.message, self.done = self.reply.get()
 
-            print(self.message, self.done)
+            # avoid re-printing stats lines
+            if not self.message.strip().startswith('tick '):
+                print(self.message)
 
         # Create fixed regions to seperate training and preprocessing regions.
         # Max 94% height, or scroll bar would show up
