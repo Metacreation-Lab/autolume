@@ -24,6 +24,7 @@ from torch_utils.ops import conv2d_gradfix, grid_sample_gradfix
 from queue import Empty
 
 from metrics import metric_main
+from codecarbon import EmissionsTracker
 
 #----------------------------------------------------------------------------
 
@@ -315,6 +316,19 @@ def training_loop(
         except ImportError as err:
             print('Skipping tfevents export:', err)
 
+    # Initialize emissions tracker.
+    tracker = None
+    if rank == 0:
+        tracker = EmissionsTracker(
+            output_dir=run_dir,
+            output_file="emissions.csv",
+            save_to_api=False,
+            log_level="warning",
+            tracking_mode="process",
+            project_name="autolume",
+        )
+        tracker.start()
+
     # Train.
     if rank == 0:
         print(f'Training for {total_kimg} kimg...')
@@ -327,6 +341,8 @@ def training_loop(
     batch_idx = 0
     if progress_fn is not None:
         progress_fn(0, total_kimg)
+    prev_energy_wh = 0
+    prev_co2_g = 0
     while True:
         # Fetch training data.
         with torch.autograd.profiler.record_function('data_fetch'):
@@ -424,6 +440,19 @@ def training_loop(
         fields += [f"augment {training_stats.report0('Progress/augment', float(augment_pipe.p.cpu()) if augment_pipe is not None else 0):.3f}"]
         training_stats.report0('Timing/total_hours', (tick_end_time - start_time) / (60 * 60))
         training_stats.report0('Timing/total_days', (tick_end_time - start_time) / (24 * 60 * 60))
+        if rank == 0 and tracker is not None:
+            energy_wh = tracker._total_energy.kWh * 1000
+            co2_g = tracker._total_emissions * 1000
+            energy_tick = energy_wh - prev_energy_wh
+            co2_tick = co2_g - prev_co2_g
+            prev_energy_wh = energy_wh
+            prev_co2_g = co2_g
+            fields += [f"energy {energy_tick:.4f} Wh"]
+            fields += [f"co2 {co2_tick:.4f} g"]
+            training_stats.report0('Emissions/energy_wh', energy_wh)
+            training_stats.report0('Emissions/energy_wh_per_tick', energy_tick)
+            training_stats.report0('Emissions/co2eq_g', co2_g)
+            training_stats.report0('Emissions/co2eq_g_per_tick', co2_tick)
         if rank == 0:
             print(' '.join(fields))
             reply.put([' '.join(fields), False])
@@ -494,6 +523,8 @@ def training_loop(
                 value = phase.start_event.elapsed_time(phase.end_event)
             training_stats.report0('Timing/' + phase.name, value)
         stats_collector.update()
+        if rank == 0 and tracker is not None:
+            tracker.flush()
         stats_dict = stats_collector.as_dict()
 
         # Update logs.
@@ -524,6 +555,9 @@ def training_loop(
     # Done.
     if rank == 0:
         print()
+        if tracker is not None:
+            emissions = tracker.stop()
+            print(f'Total emissions: {emissions * 1000:.4f} g CO2eq')
         print('Exiting...')
 
 #----------------------------------------------------------------------------

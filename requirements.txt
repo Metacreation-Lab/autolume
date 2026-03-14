@@ -22,6 +22,7 @@ opencv-python==4.8.1.78
 opensimplex==0.4.5
 pandas==2.1.1
 pillow==9.3.0
+codecarbon>=3.2.3
 psutil==5.9.6
 pyaudio==0.2.13
 pyinstaller==6.16.0
