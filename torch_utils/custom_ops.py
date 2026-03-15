@@ -9,6 +9,7 @@
 import glob
 import hashlib
 import importlib
+import importlib.util
 import os
 import re
 import shutil
@@ -16,7 +17,6 @@ import uuid
 import traceback
 import torch
 import torch.utils.cpp_extension
-from torch.utils.file_baton import FileBaton
 import subprocess
 
 #----------------------------------------------------------------------------
@@ -113,13 +113,6 @@ def get_plugin(module_name, sources, headers=None, source_dir=None, **build_kwar
     # Already cached?
     if module_name in _cached_plugins:
         return _cached_plugins[module_name]
-    
-    # 添加调试信息
-    print(f"Attempting to load plugin {module_name}")
-    print(f"Sources: {sources}")
-    print(f"Headers: {headers}")
-    print(f"Source directory: {source_dir}")
-    print(f"Build kwargs: {build_kwargs}")
 
     # Print status.
     if verbosity == 'full':
@@ -173,6 +166,31 @@ def get_plugin(module_name, sources, headers=None, source_dir=None, **build_kwar
             build_top_dir = torch.utils.cpp_extension._get_build_directory(module_name, verbose=verbose_build) # pylint: disable=protected-access
             cached_build_dir = os.path.join(build_top_dir, f'{source_digest}-{_get_mangled_gpu_name()}')
 
+            if os.path.isdir(cached_build_dir):
+                compiled_file = None
+                for ext in ['.pyd', '.so']:
+                    candidate = os.path.join(cached_build_dir, f'{module_name}{ext}')
+                    if os.path.isfile(candidate):
+                        compiled_file = candidate
+                        break
+
+                if compiled_file is not None:
+                    try:
+                        spec = importlib.util.spec_from_file_location(module_name, compiled_file)
+                        module = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(module)
+                        if verbosity != 'none':
+                            print(f'Loaded cached PyTorch plugin "{module_name}".')
+                        _cached_plugins[module_name] = module
+                        return module
+                    except Exception as e:
+                        if verbosity != 'none':
+                            print(f'Cached plugin "{module_name}" failed to load ({e}), rebuilding...')
+                else:
+                    if verbosity != 'none':
+                        print(f'Incomplete cache for plugin "{module_name}", deleting cache and rebuilding...')
+                    shutil.rmtree(cached_build_dir)
+
             if not os.path.isdir(cached_build_dir):
                 tmpdir = f'{build_top_dir}/srctmp-{uuid.uuid4().hex}'
                 os.makedirs(tmpdir)
@@ -181,11 +199,9 @@ def get_plugin(module_name, sources, headers=None, source_dir=None, **build_kwar
                 try:
                     os.replace(tmpdir, cached_build_dir) # atomic
                 except OSError:
-                    # source directory already exists, delete tmpdir and its contents.
                     shutil.rmtree(tmpdir)
                     if not os.path.isdir(cached_build_dir): return False
 
-            # Compile.
             cached_sources = [os.path.join(cached_build_dir, os.path.basename(fname)) for fname in sources]
             torch.utils.cpp_extension.load(name=module_name, build_directory=cached_build_dir,
                 verbose=verbose_build, sources=cached_sources, **build_kwargs)

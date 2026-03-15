@@ -1,7 +1,5 @@
-import glob
 import multiprocessing
 import os
-import shutil
 import sys
 
 import torch
@@ -27,13 +25,6 @@ os.environ["PATH"] = BIN_DIR + os.pathsep + os.environ.get("PATH", "")
 
 
 def main():
-    torch_extension_pattern = 'C:/Users/*/AppData/Local/torch_extensions'
-    matches = sorted(glob.glob(torch_extension_pattern))
-    if len(matches):
-        print("Found torch extension at", matches)
-        shutil.rmtree(matches[-1])
-        print("Deleted", matches[-1])
-
     app = Autolume()
 
     while not app.should_close():
