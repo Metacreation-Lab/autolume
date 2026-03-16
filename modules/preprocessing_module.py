@@ -34,6 +34,7 @@ class DataPreprocessing:
         self.thumbnail_process = None
         self.is_processing_thumbnails = False
         self.thumbnail_process_started = False
+        self._last_thumbnail_visible_range = None  # (start, end) last range we requested; only re-request on scroll
         
         # Video thumbnail processing
         self.video_thumbnail_queue = mp.Queue()
@@ -723,10 +724,17 @@ class DataPreprocessing:
         # End Thumbnails Scroll
         
         self._check_background_thumbnail_results()
+        # Only start thumbnail generation when visible range changed (user scrolled) or first time; stop once viewport+buffer are done
+        current_range = (
+            getattr(self.thumbnail_widget, "visible_start_index", 0),
+            getattr(self.thumbnail_widget, "visible_end_index", -1),
+        )
+        visible_range_changed = current_range != self._last_thumbnail_visible_range
         if (
             self.thumbnail_widget.generate_thumbnails
             and self.imported_files
             and not self.is_processing_thumbnails
+            and visible_range_changed
         ):
             self._start_background_thumbnail_generation()
 
@@ -894,7 +902,23 @@ class DataPreprocessing:
         return [self.imported_files[i] for i in indices if 0 <= i < n]
 
     def _start_background_thumbnail_generation(self):
-        """Start background thumbnail generation process"""
+        """Start background thumbnail generation only for visible range + buffer; only request paths that don't have thumbnails yet."""
+        current_start = getattr(self.thumbnail_widget, "visible_start_index", 0)
+        current_end = getattr(self.thumbnail_widget, "visible_end_index", -1)
+        n = len(self.imported_files)
+        if n == 0:
+            return
+        current_end = max(current_start, min(current_end, n - 1))
+        if current_end < current_start:
+            return
+
+        file_paths = self._get_thumbnail_processing_order()
+        # Only request thumbnails we don't already have
+        file_paths = [p for p in file_paths if p not in self.thumbnail_widget.thumbnails]
+        if not file_paths:
+            self._last_thumbnail_visible_range = (current_start, current_end)
+            return
+
         if not self.thumbnail_process_started or (self.thumbnail_process is not None and not self.thumbnail_process.is_alive()):
             self.thumbnail_process = mp.Process(
                 target=ThumbnailWidget.process_thumbnails_background,
@@ -903,11 +927,8 @@ class DataPreprocessing:
             self.thumbnail_process.start()
             self.thumbnail_process_started = True
 
+        self._last_thumbnail_visible_range = (current_start, current_end)
         self.is_processing_thumbnails = True
-        file_paths = self._get_thumbnail_processing_order()
-        if not file_paths:
-            file_paths = self.imported_files
-        
         request = {
             'type': 'generate_thumbnails',
             'file_paths': file_paths,
@@ -976,6 +997,7 @@ class DataPreprocessing:
         # Reset processing state
         self.is_processing_thumbnails = False
         self.thumbnail_process_started = False
+        self._last_thumbnail_visible_range = None  # allow next request when user enables again or scrolls
     
     def _check_background_thumbnail_results(self):
         """Check for background thumbnail generation results"""

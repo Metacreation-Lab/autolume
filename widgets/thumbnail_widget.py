@@ -288,8 +288,8 @@ class ThumbnailWidget:
                 is_hovered = imgui.is_item_hovered()
 
                 imgui.set_cursor_screen_pos((cursor_pos[0], cursor_pos[1]))
-                imgui.image(texture.gl_id, thumb_size, thumb_size)
-
+                imgui.image(int(texture.gl_id), thumb_size, thumb_size)
+                
                 if is_hovered or is_selected:
                     x1, y1 = cursor_pos
                     x2, y2 = x1 + thumb_size, y1 + thumb_size

@@ -84,7 +84,7 @@ class ImagePreviewWidget:
         imgui.set_cursor_pos_y(center_y)
 
         if self.texture.gl_id is not None:
-            imgui.image(self.texture.gl_id, disp_w, disp_h)
+            imgui.image(int(self.texture.gl_id), disp_w, disp_h)
         else:
             imgui.dummy(disp_w, disp_h)
 

@@ -101,7 +101,7 @@ class HelpIconWidget:
         imgui.same_line()
         if self.help_icon_texture is not None:
             icon_size = imgui.get_font_size() 
-            imgui.image(self.help_icon_texture.gl_id, icon_size, icon_size)
+            imgui.image(int(self.help_icon_texture.gl_id), icon_size, icon_size)
         else:
             imgui.text_disabled("(?)")
         

@@ -149,8 +149,8 @@ class Texture:
         assert isinstance(self.channels, int) and self.channels >= 1
         assert self.is_compatible(width=width, height=height, channels=channels, dtype=dtype)
 
-        # Create texture object.
-        self.gl_id = gl.glGenTextures(1)
+        ids = gl.glGenTextures(1)
+        self.gl_id = int(ids[0] if hasattr(ids, '__len__') and len(ids) == 1 else ids)
         with self.bind():
             gl.glTexParameterf(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_EDGE)
             gl.glTexParameterf(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_EDGE)
