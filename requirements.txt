@@ -14,7 +14,6 @@ librosa==0.10.1
 lmdb==1.5.1
 lpips==0.1.4
 matplotlib==3.8.0
-mkdocs-material==9.7.1
 ndi-python==5.1.1.1
 ninja==1.11.1.1
 numpy==1.26.4
@@ -39,3 +38,4 @@ torch==2.8.0+cu128
 torchaudio==2.8.0+cu128
 torchvision==0.23.0+cu128
 tqdm==4.66.1
+zensical==0.0.23

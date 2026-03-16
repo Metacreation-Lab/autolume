@@ -4,6 +4,7 @@ import io
 
 import imgui
 import multiprocessing as mp
+import psutil
 import PIL.Image
 
 import dnnlib
@@ -23,6 +24,8 @@ diffaug_pipes = ['color,translation,cutout', 'color,translation', 'color,cutout'
                  'translation', 'cutout,translation', 'cutout']
 configs = ['auto', 'stylegan2', 'paper256', 'paper512', 'paper1024', 'cifar']
 resize_mode = ['stretch','center crop']
+MBSTD_GROUP = 2
+BATCH_SIZE_CHOICES = [MBSTD_GROUP * x for x in range(1, 33)]
 
 class TrainingModule:
     def __init__(self, menu):
@@ -41,7 +44,9 @@ class TrainingModule:
         self.ada_pipe = 7
         self.diffaug_pipe = 0
         self.batch_size = 8
-        
+        if self.batch_size not in BATCH_SIZE_CHOICES:
+            self.batch_size = min(BATCH_SIZE_CHOICES, key=lambda x: abs(x - self.batch_size))
+
         # Native browsers for main training paths
         self.data_path_browser = NativeBrowserWidget()
         self.save_path_browser = NativeBrowserWidget()
@@ -140,7 +145,10 @@ class TrainingModule:
             self.message, self.done = self.reply.get()
             while self.reply.qsize() > 0:
                 self.message, self.done = self.reply.get()
-            print(self.message, self.done)
+
+            # avoid re-printing stats lines
+            if not self.message.strip().startswith('tick '):
+                print(self.message)
 
         # Create fixed regions to seperate training and preprocessing regions.
         # Max 94% height, or scroll bar would show up
@@ -393,10 +401,22 @@ class TrainingModule:
 
             imgui.text("Batch Size")
             imgui.same_line()
-            _, self.batch_size = imgui.input_int("##Batch Size", self.batch_size)
-            if self.batch_size < 1:
-                self.batch_size = 1
-            
+            input_width = int(self.menu.app.font_size * 6)
+            button_width = self.menu.app.font_size * 1.2
+            with imgui_utils.item_width(input_width):
+                imgui.input_text("##Batch Size", str(self.batch_size), 32, flags=imgui.INPUT_TEXT_READ_ONLY)
+            imgui.same_line()
+            if self.batch_size not in BATCH_SIZE_CHOICES:
+                self.batch_size = min(BATCH_SIZE_CHOICES, key=lambda x: abs(x - self.batch_size))
+            batch_idx = BATCH_SIZE_CHOICES.index(self.batch_size)
+            if imgui.button("-##batch_size", width=button_width):
+                batch_idx = max(0, batch_idx - 1)
+                self.batch_size = BATCH_SIZE_CHOICES[batch_idx]
+            imgui.same_line()
+            if imgui.button("+##batch_size", width=button_width):
+                batch_idx = min(len(BATCH_SIZE_CHOICES) - 1, batch_idx + 1)
+                self.batch_size = BATCH_SIZE_CHOICES[batch_idx]
+
             imgui.text("Configuration")
             imgui.same_line()
             _, self.config = imgui.combo("##Configuration", self.config, configs)
@@ -444,6 +464,54 @@ class TrainingModule:
                 print("training")
 
                 kwargs = dnnlib.EasyDict(
+                    outdir=str(self.save_path),
+                    data=str(target_dataset_path),
+                    cfg=configs[self.config],
+                    batch=self.batch_size,
+                    topk=None,
+                    gpus=1,
+                    gamma=self.gamma,
+                    z_dim=512,
+                    w_dim=512,
+                    cond=False,
+                    mirror=self.mirror,
+                    resolution=detected_resolution,
+                    resize_mode = resize_mode[self.resize_mode],
+                    aug="ada" if augs[self.aug] == "ADA" else "noaug",
+                    augpipe=ada_pipes[self.ada_pipe],
+                    resume=self.resume_pkl if self.resume_pkl != "" else None,
+                    freezed=0,
+                    p=0.2,
+                    target=0.6,
+                    batch_gpu=self.batch_size//1, #gpus param?
+                    cbase=32768,
+                    cmax=512,
+                    glr=self.glr,
+                    dlr=self.dlr,
+                    map_depth=8,
+                    mbstd_group=MBSTD_GROUP,
+                    initstrength=None,
+                    projected=False,
+                    diffaugment= diffaug_pipes[self.diffaug_pipe] if self.aug == 1 else None,
+                    desc="",
+                    metrics=[],
+                    kimg=25000,
+                    nkimg=0,
+                    tick=4,
+                    snap=self.snap,
+                    seed=0,
+                    nobench=False,
+                    dry_run=False,
+                    fp32=False,
+                    workers=4,
+                    kd_l1_lambda=0.0,
+                    kd_lpips_lambda=0.0,
+                    kd_mode="Output_Only",
+                    content_aware_kd=False,
+                    teacher = None,
+                    custom=True,
+                    lpips_image_size=256,
+                    fps=self.fps if self.found_video else 10,
                         outdir=str(self.save_path),
                         data=str(target_dataset_path),
                         cfg=configs[self.config],
@@ -493,11 +561,12 @@ class TrainingModule:
                         lpips_image_size=256,
                         fps=self.fps if self.found_video else 10,
                 )
-                if self.done == True:
+
+                if self.training_process.pid is not None:
                     self.queue = mp.Queue()
                     self.reply = mp.Queue()
                     self.training_process = mp.Process(target=train_main, args=(self.queue, self.reply), name='TrainingProcess')
-                    self.done = False
+                self.done = False
                 self.queue.put(kwargs)
                 self.training_process.start()
         imgui.end_child()
@@ -731,17 +800,19 @@ class TrainingModule:
                 fake_display_height = training_popup_height - 200
                 fake_display_width = int((self.grid.shape[1] / self.grid.shape[0]) * fake_display_height)
                 imgui.image(self.grid_texture.gl_id, fake_display_width, fake_display_height)
-            if imgui_utils.button("Stop Training", enabled=1):
-                self.queue.put('done')
-                self.done_button = True
-            if self.done:
-                self.training_process.terminate()
+            if self.done_button:
+                imgui_utils.button("Stopping...", enabled=0)
+            else:
+                if imgui_utils.button("Stop Training", enabled=1):
+                    self._kill_training_process()
+                    self.done_button = True
+            if (self.done or self.done_button) and not self.training_process.is_alive():
                 self.training_process.join()
-                if self.done_button == True:
-                    imgui.close_current_popup()
-                    self.message = ''
-                    self.done_button = False
-                    self.image_path = ''
+                imgui.close_current_popup()
+                self.message = ''
+                self.done = False
+                self.done_button = False
+                self.image_path = ''
             imgui.end_popup()
             # End of Training Popup Modal
 
@@ -871,6 +942,15 @@ class TrainingModule:
         self.dataset_process.start()
         self.video_extraction_in_progress = False
     
+    def _kill_training_process(self):
+        try:
+            parent = psutil.Process(self.training_process.pid)
+            for child in parent.children(recursive=True):
+                child.kill()
+            parent.kill()
+        except psutil.NoSuchProcess:
+            pass
+
     def cleanup_dataset_process(self):
         """Clean up dataset creation process"""
         if self.dataset_process and self.dataset_process.is_alive():

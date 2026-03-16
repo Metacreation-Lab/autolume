@@ -121,7 +121,7 @@ The release will be output to `dist/Autolume`
 ### Building documentation
 
 ```bash
-mkdocs build
+zensical build
 ```
 
 The documentation will be output to `site`.
@@ -129,7 +129,7 @@ The documentation will be output to `site`.
 To serve the documentation locally:
 
 ```bash
-mkdocs serve
+zensical serve
 ```
 
 The documentation will be served at `http://127.0.0.1:8000/`.

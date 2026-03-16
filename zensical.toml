@@ -1,0 +1,16 @@
+[project]
+site_name = "Autolume - Documentation"
+site_url = "https://metacreation-lab.github.io/autolume"
+repo_name = "Metacreation-Lab/autolume"
+repo_url = "https://github.com/Metacreation-Lab/autolume"
+extra_css = ["assets/extra.css"]
+
+[project.theme]
+variant = "classic"
+favicon = "assets/logo.webp"
+logo = "assets/logo.webp"
+features = ["navigation.footer"]
+
+[project.theme.palette]
+primary = "custom"
+accent = "custom"
