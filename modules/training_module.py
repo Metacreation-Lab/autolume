@@ -3,6 +3,7 @@ import zipfile
 
 import imgui
 import multiprocessing as mp
+import psutil
 
 import dnnlib
 from utils.gui_utils import imgui_utils
@@ -518,11 +519,11 @@ class TrainingModule:
                     fps=self.fps if self.found_video else 10,
                 )
 
-                if self.done == True:
+                if self.training_process.pid is not None:
                     self.queue = mp.Queue()
                     self.reply = mp.Queue()
                     self.training_process = mp.Process(target=train_main, args=(self.queue, self.reply), name='TrainingProcess')
-                    self.done = False
+                self.done = False
                 self.queue.put(kwargs)
                 self.training_process.start()
         imgui.end_child()
@@ -752,17 +753,19 @@ class TrainingModule:
                 fake_display_height = training_popup_height - 200
                 fake_display_width = int((self.grid.shape[1] / self.grid.shape[0]) * fake_display_height)
                 imgui.image(self.grid_texture.gl_id, fake_display_width, fake_display_height)
-            if imgui_utils.button("Stop Training", enabled=1):
-                self.queue.put('done')
-                self.done_button = True
-            if self.done:
-                self.training_process.terminate()
+            if self.done_button:
+                imgui_utils.button("Stopping...", enabled=0)
+            else:
+                if imgui_utils.button("Stop Training", enabled=1):
+                    self._kill_training_process()
+                    self.done_button = True
+            if (self.done or self.done_button) and not self.training_process.is_alive():
                 self.training_process.join()
-                if self.done_button == True:
-                    imgui.close_current_popup()
-                    self.message = ''
-                    self.done_button = False
-                    self.image_path = ''
+                imgui.close_current_popup()
+                self.message = ''
+                self.done = False
+                self.done_button = False
+                self.image_path = ''
             imgui.end_popup()
             # End of Training Popup Modal
 
@@ -892,6 +895,15 @@ class TrainingModule:
         self.dataset_process.start()
         self.video_extraction_in_progress = False
     
+    def _kill_training_process(self):
+        try:
+            parent = psutil.Process(self.training_process.pid)
+            for child in parent.children(recursive=True):
+                child.kill()
+            parent.kill()
+        except psutil.NoSuchProcess:
+            pass
+
     def cleanup_dataset_process(self):
         """Clean up dataset creation process"""
         if self.dataset_process and self.dataset_process.is_alive():
