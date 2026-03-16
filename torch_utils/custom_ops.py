@@ -6,7 +6,6 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
-import glob
 import hashlib
 import importlib
 import importlib.util
@@ -27,61 +26,53 @@ verbosity = 'brief' # Verbosity level: 'none', 'brief', 'full'
 #----------------------------------------------------------------------------
 # Internal helper funcs.
 
-# def _find_compiler_bindir():
-#     patterns = [
-#         'C:/Program Files*/Microsoft Visual Studio/*/Professional/VC/Tools/MSVC/*/bin/Hostx64/x64',
-#         'C:/Program Files*/Microsoft Visual Studio/*/BuildTools/VC/Tools/MSVC/*/bin/Hostx64/x64',
-#         'C:/Program Files*/Microsoft Visual Studio/*/Community/VC/Tools/MSVC/*/bin/Hostx64/x64',
-#         'C:/Program Files*/Microsoft Visual Studio */vc/bin',
-#         'C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.41.34120/bin/Hostx64/x64'
-#     ]
-#     for pattern in patterns:
-#         matches = sorted(glob.glob(pattern))
-#         if len(matches):
-#             return matches[-1]
-#     return None
+_msvc_env_activated = False
 
+def _activate_msvc_env():
+    global _msvc_env_activated
+    if os.name != 'nt':
+        return True
+    if _msvc_env_activated or 'VSCMD_ARG_TGT_ARCH' in os.environ:
+        return True
+    if shutil.which('cl'):
+        return True
 
-def _find_compiler_bindir():
-    # 尝试通过 vswhere 找到 Visual Studio 编译器
-    compiler_bindir = find_vs_compiler()
-    if compiler_bindir:
-        return compiler_bindir
+    vswhere = r'C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe'
+    if not os.path.isfile(vswhere):
+        return False
 
-    # 如果 vswhere 失败，则使用硬编码路径模式
-    patterns = [
-        'C:/Program Files*/Microsoft Visual Studio/*/Professional/VC/Tools/MSVC/*/bin/Hostx64/x64',
-        'C:/Program Files*/Microsoft Visual Studio/*/BuildTools/VC/Tools/MSVC/*/bin/Hostx64/x64',
-        'C:/Program Files*/Microsoft Visual Studio/*/Community/VC/Tools/MSVC/*/bin/Hostx64/x64',
-        'C:/Program Files*/Microsoft Visual Studio */vc/bin',
-        # 'C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.41.34120/bin/Hostx64/x64'
-    ]
-    
-    for pattern in patterns:
-        matches = sorted(glob.glob(pattern))
-        if matches:
-            return matches[-1]
-    
-    return None
-
-def find_vs_compiler():
     try:
         result = subprocess.run(
-            ['C:/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe',
-             '-latest',
-             '-products', '*',
+            [vswhere, '-latest', '-products', '*',
              '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64',
-             '-find', 'VC/Tools/MSVC/*/bin/Hostx64/x64/cl.exe'],
+             '-property', 'installationPath'],
             capture_output=True, text=True, check=True
         )
-        compiler_path = result.stdout.strip()
-        if compiler_path:
-            return os.path.dirname(compiler_path)
-        else:
-            return None
-    except Exception as e:
-        print(f"Failed to find compiler using vswhere: {str(e)}")
-        return None
+        vs_path = result.stdout.strip()
+        if not vs_path:
+            return False
+    except Exception:
+        return False
+
+    vcvarsall = os.path.join(vs_path, 'VC', 'Auxiliary', 'Build', 'vcvarsall.bat')
+    if not os.path.isfile(vcvarsall):
+        return False
+
+    try:
+        out = subprocess.check_output(
+            f'cmd /u /c "{vcvarsall}" x64 && set',
+            stderr=subprocess.STDOUT,
+        ).decode('utf-16le', errors='replace')
+    except subprocess.CalledProcessError:
+        return False
+
+    for line in out.splitlines():
+        key, _, value = line.partition('=')
+        if key and value:
+            os.environ[key] = value
+
+    _msvc_env_activated = True
+    return True
 
 
 
@@ -124,12 +115,9 @@ def get_plugin(module_name, sources, headers=None, source_dir=None, **build_kwar
     # Compile and load.
     try: # pylint: disable=too-many-nested-blocks
         # Make sure we can find the necessary compiler binaries.
-        if os.name == 'nt' and os.system("where cl.exe >nul 2>nul") != 0:
-            compiler_bindir = _find_compiler_bindir()
-            if compiler_bindir is None:
-                print(f'Could not find MSVC/GCC/CLANG installation on this computer. Check _find_compiler_bindir() in "{__file__}".')
-                return None
-            os.environ['PATH'] += ';' + compiler_bindir
+        if os.name == 'nt' and not _activate_msvc_env():
+            print('Could not find MSVC installation. Install Visual Studio Build Tools with the C++ workload.')
+            return None
 
         # Some containers set TORCH_CUDA_ARCH_LIST to a list that can either
         # break the build or unnecessarily restrict what's available to nvcc.
