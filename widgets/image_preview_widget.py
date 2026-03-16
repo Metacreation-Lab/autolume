@@ -83,18 +83,9 @@ class ImagePreviewWidget:
         imgui.set_cursor_pos_x(center_x)
         imgui.set_cursor_pos_y(center_y)
 
-        tex_id = None
-        if self.texture is not None and getattr(self.texture, "gl_id", None) is not None:
-            tex_id = getattr(self.texture, "gl_id", None)
-            try:
-                tex_id = int(tex_id)
-            except (TypeError, ValueError):
-                tex_id = None
-
-        if isinstance(tex_id, int) and tex_id > 0:
-            imgui.image(tex_id, disp_w, disp_h)
+        if self.texture.gl_id is not None:
+            imgui.image(self.texture.gl_id, disp_w, disp_h)
         else:
-            # Draw placeholder if texture is invalid
             imgui.dummy(disp_w, disp_h)
 
     def cleanup(self):
