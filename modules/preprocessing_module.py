@@ -34,7 +34,7 @@ class DataPreprocessing:
         self.thumbnail_process = None
         self.is_processing_thumbnails = False
         self.thumbnail_process_started = False
-        self._last_thumbnail_visible_range = None  # (start, end) last range we requested; only re-request on scroll
+        self._last_thumbnail_visible_range = None 
         
         # Video thumbnail processing
         self.video_thumbnail_queue = mp.Queue()
@@ -724,7 +724,6 @@ class DataPreprocessing:
         # End Thumbnails Scroll
         
         self._check_background_thumbnail_results()
-        # Only start thumbnail generation when visible range changed (user scrolled) or first time; stop once viewport+buffer are done
         current_range = (
             getattr(self.thumbnail_widget, "visible_start_index", 0),
             getattr(self.thumbnail_widget, "visible_end_index", -1),
@@ -902,7 +901,7 @@ class DataPreprocessing:
         return [self.imported_files[i] for i in indices if 0 <= i < n]
 
     def _start_background_thumbnail_generation(self):
-        """Start background thumbnail generation only for visible range + buffer; only request paths that don't have thumbnails yet."""
+        """Start background thumbnail generation process."""
         current_start = getattr(self.thumbnail_widget, "visible_start_index", 0)
         current_end = getattr(self.thumbnail_widget, "visible_end_index", -1)
         n = len(self.imported_files)
@@ -913,7 +912,6 @@ class DataPreprocessing:
             return
 
         file_paths = self._get_thumbnail_processing_order()
-        # Only request thumbnails we don't already have
         file_paths = [p for p in file_paths if p not in self.thumbnail_widget.thumbnails]
         if not file_paths:
             self._last_thumbnail_visible_range = (current_start, current_end)
@@ -994,10 +992,9 @@ class DataPreprocessing:
         except:
             pass
         
-        # Reset processing state
         self.is_processing_thumbnails = False
         self.thumbnail_process_started = False
-        self._last_thumbnail_visible_range = None  # allow next request when user enables again or scrolls
+        self._last_thumbnail_visible_range = None  
     
     def _check_background_thumbnail_results(self):
         """Check for background thumbnail generation results"""
