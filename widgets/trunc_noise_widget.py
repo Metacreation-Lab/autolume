@@ -22,7 +22,7 @@ except ModuleNotFoundError:
 class TruncationNoiseWidget:
     def __init__(self, viz):
         self.viz            = viz
-        self.params = dnnlib.EasyDict(trunc_psi=0.8, global_noise=1, noise_enable=True, noise_seed=0, noise_anim=False, reset=False)
+        self.params = dnnlib.EasyDict(trunc_psi=0.8, global_noise=1.0, noise_enable=True, noise_seed=0, noise_anim=False, reset=False)
         self.prev_num_ws    = 0
 
         funcs = dict(zip(["Diversity", "Global Noise", "Noise On/Off", "Noise Seed", "Animate Noise", "Reset"], [self.osc_handler(param) for param in
@@ -35,7 +35,6 @@ class TruncationNoiseWidget:
         def func(address, *args):
             try:
                 nec_type = type(self.params[param])
-                print(self.params)
                 self.params[param] = nec_type(args[-1])
             except Exception as e:
                 print(e)
@@ -46,6 +45,8 @@ class TruncationNoiseWidget:
 
     def set_params(self, params):
         self.params, self.osc_params = params
+        self.params.global_noise = float(self.params.global_noise)
+        self.params.trunc_psi = float(self.params.trunc_psi)
         self.osc_menu.set_params(self.osc_params)
 
     def save(self, path):
@@ -93,7 +94,7 @@ class TruncationNoiseWidget:
                     self.params.noise_enable = True
                     self.params.noise_seed = 0
                     self.params.noise_anim = False
-                    self.params.global_noise = 1
+                    self.params.global_noise = 1.0
                     self.params.reset = False
 
             self.osc_menu()
