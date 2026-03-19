@@ -22,4 +22,6 @@ models/
 recordings/
 training-runs/
 data/
+presets/
+torch_extensions/
 *.pth

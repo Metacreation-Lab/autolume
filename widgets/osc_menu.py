@@ -35,12 +35,14 @@ class OscMenu:
         return self.use_map, self.use_osc, self.osc_addresses, self.cached_osc_addresses, self.mappings
 
     def set_params(self, params):
-        # TODO unmap old addresses
         self.use_map, self.use_osc, self.osc_addresses, self.cached_osc_addresses, self.mappings = params
-        for key, func in self.funcs.items():  # maybe with map faster
+        for key, func in self.funcs.items():
             self.funcs[key] = self.check_osc(func, key)
         for key, func in self.funcs.items():
             self.wrapped_funcs[key] = self.map_func(self.funcs[key], key)
+        for key in self.funcs.keys():
+            if self.use_osc.get(key, False) and self.osc_addresses[key] != "...":
+                self.viz.osc_dispatcher.map(f"/{self.osc_addresses[key]}", self.wrapped_funcs[key])
 
     def check_osc(self, func, key):
         def wrapper(*args, **kwargs):
