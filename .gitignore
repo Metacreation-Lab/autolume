@@ -21,6 +21,7 @@ bin/
 models/
 recordings/
 training-runs/
+ganspace-features/
 data/
 presets/
 torch_extensions/

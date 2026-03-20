@@ -253,17 +253,36 @@ class LatentWidget:
     def model_handler(self):
         def func(address, *args):
             try:
-                assert (type(args[-1]) is str), f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {str}"
-                # check if the string that is sent in the message os.exists
-                print(os.getcwd() + os.sep + 'models' + os.sep + args[-1])
-                if os.path.exists(args[-1]):
-                    print(os.getcwd() + os.sep + 'models' + os.sep + args[-1])
-                    self.viz.pickle_widget.user_pkl = args[-1]
-                    self.viz.pickle_widget.load_pkl(args[-1])
-                elif os.path.exists(os.getcwd() + os.sep + 'models' + os.sep + args[-1]):
-                    print(os.getcwd() + os.sep + 'models' + os.sep + args[-1])
-                    self.viz.pickle_widget.user_pkl = os.getcwd() + os.sep + 'models' + os.sep + args[-1]
-                    self.viz.pickle_widget.load_pkl(os.getcwd() + os.sep + 'models' + os.sep + args[-1])
+                pickle_widget = self.viz.pickle_widget
+                value = args[-1]
+
+                if isinstance(value, (int, float)):
+                    index = round(value)
+                    if index < 0 or index >= len(pickle_widget.browse_cache):
+                        print(f"OSC model: index {index} out of range (0-{len(pickle_widget.browse_cache) - 1})")
+                        return
+                    target = pickle_widget.browse_cache[index]
+                elif isinstance(value, str):
+                    if os.path.exists(value):
+                        target = value
+                    elif os.path.exists(os.path.join(os.getcwd(), 'models', value)):
+                        target = os.path.join(os.getcwd(), 'models', value)
+                    else:
+                        target = None
+                        for path in pickle_widget.browse_cache:
+                            if value in os.path.basename(path):
+                                target = path
+                                break
+                    if target is None:
+                        print(f"OSC model: no model matching '{value}' found")
+                        return
+                else:
+                    return
+
+                if target == pickle_widget.cur_pkl:
+                    return
+
+                pickle_widget.load_pkl(target, ignore_errors=True)
             except Exception as e:
                 self.viz.print_error(e)
         return func
