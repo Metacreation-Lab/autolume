@@ -85,7 +85,7 @@ class LayerWidget:
         for i, trans in enumerate(self.cached_transforms):
             for j in range(len(trans.params)):
                 try:
-                    self.viz.osc_dispatcher.unmap(trans.osc_address[j],
+                    self.viz.osc_dispatcher.unmap(f"/{trans.osc_address[j]}",
                                                   self.transform_osc(trans, param_idx=j))
                 except Exception as e:
                     print(e)
@@ -94,19 +94,21 @@ class LayerWidget:
         self.cached_transforms = cached_transforms
         for i, trans in enumerate(self.cached_transforms):
             for j in range(len(trans.params)):
-                self.viz.osc_dispatcher.map(trans.osc_address[j],
-                                            self.transform_osc(trans, param_idx=j))
+                if trans.use_osc and trans.osc_address[j]:
+                    self.viz.osc_dispatcher.map(f"/{trans.osc_address[j]}",
+                                                self.transform_osc(trans, param_idx=j))
 
         for _, noise in self.noises.items():
             try:
-                self.viz.osc_dispatcher.unmap(noise["osc_address"],
+                self.viz.osc_dispatcher.unmap(f"/{noise['osc_address']}",
                                               self.noise_osc(noise))
             except Exception as e:
                 print(e)
                 print(f"{noise['osc_address']} is not mapped")
         self.noises = noises
         for _, noise in self.noises.items():
-            self.viz.osc_dispatcher.map(noise["osc_address"], self.noise_osc(noise))
+            if noise["use_osc"] and noise["osc_address"]:
+                self.viz.osc_dispatcher.map(f"/{noise['osc_address']}", self.noise_osc(noise))
 
     def save(self, path):
         with open(path, "wb") as f:
@@ -388,7 +390,7 @@ class LayerWidget:
 
                                         if changed:
                                             try:
-                                                self.viz.osc_dispatcher.unmap(trans.osc_address[j],
+                                                self.viz.osc_dispatcher.unmap(f"/{trans.osc_address[j]}",
                                                                               self.osc_funcs[trans.imgui_id][j])
                                                 print(f"Unmapped",trans.osc_address[j])
                                                 print(self.viz.osc_dispatcher.mappings)
@@ -396,7 +398,7 @@ class LayerWidget:
                                                 print(f"{trans.osc_address[j]} is not mapped")
                                                 print(e)
                                                 print(self.viz.osc_dispatcher._map)
-                                            self.viz.osc_dispatcher.map(address,
+                                            self.viz.osc_dispatcher.map(f"/{address}",
                                                                         self.osc_funcs[trans.imgui_id][j])
                                             trans.osc_address[j] = address
                                     # for j in range(len(trans.params)):
@@ -497,11 +499,11 @@ class LayerWidget:
                         if changed:
 
                             try:
-                                self.viz.osc_dispatcher.unmap(noise["osc_address"],
+                                self.viz.osc_dispatcher.unmap(f"/{noise['osc_address']}",
                                                               self.noise_osc(noise))
                             except:
                                 print(f"{noise['osc_address']} is not mapped")
-                            self.viz.osc_dispatcher.map(address,
+                            self.viz.osc_dispatcher.map(f"/{address}",
                                                         self.noise_osc(noise))
                             noise["osc_address"] = address
 

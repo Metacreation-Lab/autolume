@@ -156,8 +156,9 @@ class LayerWidget:
         self.cached_transforms = cached_transforms
         for i, trans in enumerate(self.cached_transforms):
             for j in range(len(trans.params)):
-                self.viz.osc_dispatcher.map(f"/{trans.osc_address[j]}",
-                                            self.transform_osc(trans, param_idx=j))
+                if trans.use_osc and trans.osc_address[j]:
+                    self.viz.osc_dispatcher.map(f"/{trans.osc_address[j]}",
+                                                self.transform_osc(trans, param_idx=j))
 
         for _, noise in self.noises.items():
             try:
@@ -168,7 +169,8 @@ class LayerWidget:
                 print(f"{noise['osc_address']} is not mapped")
         self.noises = noises
         for _, noise in self.noises.items():
-            self.viz.osc_dispatcher.map(f"/{noise['osc_address']}", self.noise_osc(noise))
+            if noise["use_osc"] and noise["osc_address"]:
+                self.viz.osc_dispatcher.map(f"/{noise['osc_address']}", self.noise_osc(noise))
 
     def save(self, path):
         with open(path, "wb") as f:

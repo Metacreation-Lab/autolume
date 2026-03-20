@@ -44,13 +44,14 @@ class AdjusterWidget:
         self.dirs, self.paths, self.all_dir, self.weights, self.vslide_use_osc, new_addresses, self.vslide_mappings = params
         for i,old_address in enumerate(self.vslide_address):
             try:
-                self.viz.osc_dispatcher.unmap(old_address,
+                self.viz.osc_dispatcher.unmap(f"/{old_address}",
                                                 self.vec_handler(i))
             except:
                 print(f"{old_address} is not mapped")
         for i, new_address in enumerate(new_addresses):
-            self.viz.osc_dispatcher.map(new_address,
-                                          self.vec_handler(i))
+            if self.vslide_use_osc[i] and new_address and new_address != "...":
+                self.viz.osc_dispatcher.map(f"/{new_address}",
+                                              self.vec_handler(i))
         self.vslide_address = new_addresses
         self.file_dialogs = [BrowseWidget(self.viz, f"Vector##vec{i}", os.path.abspath(os.getcwd()), ["*",".pth", ".pt"], width=self.viz.app.button_w, multiple=False, traverse_folders=False) for i in range(len(self.weights))]
 
@@ -140,7 +141,7 @@ class AdjusterWidget:
                         self.viz.osc_dispatcher.map(f"/{new_address}",
                                                       self.vec_handler(i))
                         try:
-                            self.viz.osc_dispatcher.unmap(self.vslide_address[i],
+                            self.viz.osc_dispatcher.unmap(f"/{self.vslide_address[i]}",
                                                             self.vec_handler(i))
                         except:
                             print(f"{self.vslide_address[i]} is not mapped")
