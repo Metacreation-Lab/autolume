@@ -89,7 +89,7 @@ class TrainingModule:
                 
         self.preprocessing_data_browser = NativeBrowserWidget()
         self.preprocessing_save_browser = NativeBrowserWidget()
-        self.preprocessing_save_path = self.preprocessing_settings_obj.output_path  
+        self.preprocessing_save_path = str(self.preprocessing_settings_obj.output_path)
         self.preprocessing_folder_name = self.preprocessing_settings_obj.folder_name  
         self.preprocessing_data_path = Path.home() / "Desktop"
         self.data_path_has_videos = False  
@@ -276,7 +276,7 @@ class TrainingModule:
                 imgui.set_cursor_pos_y(current_y - 3)  
                 _, new_save_path = imgui_utils.input_text("##preprocessing_save", str(self.preprocessing_save_path), 1024, 0, 
                 width=imgui.get_window_width() - self.menu.app.button_w - imgui.calc_text_size("Browse")[0])
-                if new_save_path != self.preprocessing_save_path:
+                if new_save_path != str(self.preprocessing_save_path):
                     self.preprocessing_save_path = new_save_path
                 
                 imgui.same_line()
@@ -545,7 +545,7 @@ class TrainingModule:
                 imgui.push_text_wrap_pos(self.menu.app.content_width // 2.5 - 40)
                 imgui.text("The folder already exists at:")
                 imgui.spacing()
-                imgui.text_colored(self.dataset_output_path, 1.0, 1.0, 0.0, 1.0)
+                imgui.text_colored(str(self.dataset_output_path), 1.0, 1.0, 0.0, 1.0)
                 imgui.spacing()
                 imgui.text("If you continue, existing files in this folder may be overwritten.")
                 imgui.pop_text_wrap_pos()

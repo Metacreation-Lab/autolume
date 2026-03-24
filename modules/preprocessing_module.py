@@ -81,7 +81,7 @@ class DataPreprocessing:
         self.progress_file = ""
         self.processing_completed = False
         
-        self.save_path = self.settings.output_path 
+        self.save_path = str(self.settings.output_path)
 
         self.help_icon = HelpIconWidget()
         self.help_texts, self.help_urls = self.help_icon.load_help_texts("preprocessing")
@@ -487,7 +487,7 @@ class DataPreprocessing:
         imgui.text("Save Path")
         self.help_icon.render(self.help_texts.get("save_path"))
         
-        _, new_save_path = imgui_utils.input_text("##save_path", self.save_path, 1024, 0, 
+        _, new_save_path = imgui_utils.input_text("##save_path", str(self.save_path), 1024, 0, 
         width=parameter_column_width - imgui.calc_text_size("Browse##save_path")[0] + 8)
         if new_save_path != self.save_path:
             self.save_path = new_save_path.replace('\\', '/')
@@ -532,7 +532,7 @@ class DataPreprocessing:
                 imgui.push_text_wrap_pos(self.app.content_width // 2.5 - 40)
                 imgui.text("The folder already exists at:")
                 imgui.spacing()
-                imgui.text_colored(self.settings.output_path, 1.0, 1.0, 0.0, 1.0)
+                imgui.text_colored(str(self.settings.output_path), 1.0, 1.0, 0.0, 1.0)
                 imgui.spacing()
                 imgui.text("If you continue, existing files in this folder may be overwritten.")
                 imgui.pop_text_wrap_pos()

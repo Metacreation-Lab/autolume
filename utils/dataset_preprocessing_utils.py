@@ -26,7 +26,7 @@ class DatasetPreprocessingUtils:
             "yFlip": False
         }
         self.folder_name = "training_dataset"
-        self.output_path = str(Path.cwd() / "data")
+        self.output_path = Path.cwd() / "data"
 
     def load_images(self, image_path):
         """Load image, normalize color space to RGB, and handle EXIF orientation."""
