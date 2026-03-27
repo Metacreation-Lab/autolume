@@ -29,7 +29,7 @@ class PCA_Module:
         self.help_icon = HelpIconWidget()
         self.help_texts, self.help_urls = self.help_icon.load_help_texts("pca")
         cwd = os.getcwd()
-        self.save_path = os.path.join(cwd,"ganspace_features").replace('\\', '/')
+        self.save_path = os.path.join(cwd,"ganspace_features")
 
         self.menu = menu
         self.app = menu.app

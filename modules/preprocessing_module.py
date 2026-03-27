@@ -80,7 +80,7 @@ class DataPreprocessing:
         self.progress_file = ""
         self.processing_completed = False
         
-        self.save_path = self.settings.output_path 
+        self.save_path = str(self.settings.output_path) 
 
         self.help_icon = HelpIconWidget()
         self.help_texts, self.help_urls = self.help_icon.load_help_texts("preprocessing")
@@ -486,7 +486,7 @@ class DataPreprocessing:
         imgui.text("Save Path")
         self.help_icon.render(self.help_texts.get("save_path"))
         
-        _, new_save_path = imgui_utils.input_text("##save_path", self.save_path, 1024, 0, 
+        _, new_save_path = imgui_utils.input_text("##save_path", str(self.save_path), 1024, 0, 
         width=parameter_column_width - imgui.calc_text_size("Browse##save_path")[0] + 8)
         if new_save_path != self.save_path:
             self.save_path = new_save_path.replace('\\', '/')
@@ -1069,7 +1069,7 @@ class DataPreprocessing:
         """Construct output path from parent directory + folder name + resolution"""
         resolution_suffix = f"_{self.settings.size}x{self.settings.size}"
         folder_name_with_resolution = self.settings.folder_name + resolution_suffix
-        return (Path(self.save_path) / folder_name_with_resolution).as_posix()
+        return str(Path(self.save_path) / folder_name_with_resolution)
     
     def process_dataset(self):
         """Start the dataset processing in a separate process"""
