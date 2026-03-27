@@ -1,4 +1,5 @@
 from pathlib import Path
+from re import S
 import zipfile
 
 import imgui
@@ -28,8 +29,8 @@ BATCH_SIZE_CHOICES = [MBSTD_GROUP * x for x in range(1, 33)]
 class TrainingModule:
     def __init__(self, menu):
         cwd = Path.cwd()
-        self.save_path = (cwd / "training-runs").as_posix()
-        self.data_path = (cwd / "data").as_posix()
+        self.save_path = str(cwd / "training-runs")
+        self.data_path = str(cwd / "data")
         # create data folder if not exists
         data_dir = (cwd / "data").resolve()
         if not data_dir.exists():
@@ -87,9 +88,9 @@ class TrainingModule:
                 
         self.preprocessing_data_browser = NativeBrowserWidget()
         self.preprocessing_save_browser = NativeBrowserWidget()
-        self.preprocessing_save_path = self.preprocessing_settings_obj.output_path  
+        self.preprocessing_save_path = str(self.preprocessing_settings_obj.output_path)  
         self.preprocessing_folder_name = self.preprocessing_settings_obj.folder_name  
-        self.preprocessing_data_path = (Path.home() / "Desktop").as_posix()
+        self.preprocessing_data_path = str(Path.home() / "Desktop")
         self.data_path_has_videos = False  
         self.video_files_list = [] 
         
@@ -356,8 +357,8 @@ class TrainingModule:
                             if pkl_path.is_file():
                                 pkl_path_str = str(pkl_path)
                                 pkl_files.append(pkl_path_str)
-                                if pkl_path not in self.browse_cache:
-                                    self.browse_cache.append(pkl_path)
+                                if pkl_path_str not in self.browse_cache:
+                                    self.browse_cache.append(pkl_path_str)
                     
                     if pkl_files:
                         print(f"Found {len(pkl_files)} PKL files in directory:")
@@ -804,7 +805,7 @@ class TrainingModule:
         # Add resolution suffix to folder name and construct full path
         resolution_suffix = f"_{self.img_size}x{self.img_size}"
         folder_name_with_resolution = self.preprocessing_folder_name + resolution_suffix
-        self.dataset_output_path = (Path(self.preprocessing_save_path) / folder_name_with_resolution)
+        self.dataset_output_path = str(Path(self.preprocessing_save_path) / folder_name_with_resolution)
         
         self.temp_image_files = list(image_files)
         self.extracted_frame_directories = []
