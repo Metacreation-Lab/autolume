@@ -471,7 +471,7 @@ class TrainingModule:
 
                 kwargs = dnnlib.EasyDict(
                     outdir=self.save_path,
-                    data=target_data_path,
+                    data=str(target_data_path),
                     cfg=configs[self.config],
                     batch=self.batch_size,
                     topk=None,
