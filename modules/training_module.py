@@ -454,8 +454,11 @@ class TrainingModule:
                 target_dataset_path = Path(self.data_path)
 
                 if target_dataset_path.is_dir():
-                    image_files = [f for f in target_dataset_path.iterdir() 
-                                if f.is_file() and f.suffix.lower() == '.png']
+                    PIL.Image.init()
+                    image_files = sorted(
+                        f for f in target_dataset_path.iterdir()
+                        if f.is_file() and f.suffix.lower() in PIL.Image.EXTENSION
+                    )
                     if image_files:
                         first_image_path = str(image_files[0])
                         img = PIL.Image.open(first_image_path)
