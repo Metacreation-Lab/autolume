@@ -181,7 +181,6 @@ def training_loop(
         G.update_epochs(float(100 * nimg / (total_kimg * 1000)))  # 100 total top k "epochs" in total_kimg
         print('starting G epochs: ', G.epochs)
     except:
-        reply.put(['Exception occured during Network Construction..', True])
         traceback.print_exc()  # Prints the full traceback for better debugging
         reply.put(['Exception occurred during Network Construction..', True])
 
@@ -299,7 +298,8 @@ def training_loop(
         print(f"Exception message: {str(e)}")
         print("Traceback4:")
         traceback.print_exc()
-        reply.put(['Exception occured during Exporting of Sample Images..', True])
+        reply.put([str(e), True])
+        return
 
     # Initialize logs.
     if rank == 0:

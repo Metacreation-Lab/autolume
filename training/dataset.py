@@ -601,12 +601,14 @@ class ImageFolderDataset(Dataset):
         if height != expected_height or width != expected_width:
             raise ValueError(
                 "Invalid dataset:\n"
-                f"- '{filename}' is {width}x{height}, but the detected dataset resolution is expected to be {expected_width}x{expected_height}. Ensure all images have been preprocessed to the same size.\n"
+                f"- '{filename}' has a resolution of {width}x{height}, but the detected dataset resolution is expected to be {expected_width}x{expected_height}. \n"
+                "- Ensure all images have been preprocessed to the same resolution.\n"
             )
         if image.dtype != np.uint8:
             raise ValueError(
                 "Invalid dataset:\n"
-                f"- Image '{filename}' has dtype {image.dtype}, expected uint8."
+                f"- Image '{filename}' has dtype {image.dtype}, expected uint8. \n" 
+                "- Ensure all images have been preprocessed to the same dtype.\n"
             )
         if self._xflip[idx]: 
             assert image.ndim == 3 # CHW

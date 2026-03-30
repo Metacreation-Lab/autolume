@@ -754,19 +754,27 @@ class TrainingModule:
                 fake_display_height = training_popup_height - 200
                 fake_display_width = int((self.grid.shape[1] / self.grid.shape[0]) * fake_display_height)
                 imgui.image(self.grid_texture.gl_id, fake_display_width, fake_display_height)
-            if self.done_button:
+            if self.done and not self.training_process.is_alive():
+                self.training_process.join()
+                if imgui_utils.button("Close", enabled=1):
+                    imgui.close_current_popup()
+                    self.message = ''
+                    self.done = False
+                    self.done_button = False
+                    self.image_path = ''
+            elif self.done_button:
                 imgui_utils.button("Stopping...", enabled=0)
+                if not self.training_process.is_alive():
+                    self.training_process.join()
+                    imgui.close_current_popup()
+                    self.message = ''
+                    self.done = False
+                    self.done_button = False
+                    self.image_path = ''
             else:
                 if imgui_utils.button("Stop Training", enabled=1):
                     self._kill_training_process()
                     self.done_button = True
-            if (self.done or self.done_button) and not self.training_process.is_alive():
-                self.training_process.join()
-                imgui.close_current_popup()
-                self.message = ''
-                self.done = False
-                self.done_button = False
-                self.image_path = ''
             imgui.end_popup()
             # End of Training Popup Modal
 
