@@ -5,6 +5,7 @@ import zipfile
 import imgui
 import multiprocessing as mp
 import psutil
+import PIL.Image
 
 import dnnlib
 from utils.gui_utils import imgui_utils
@@ -448,30 +449,25 @@ class TrainingModule:
                 imgui.end_popup()
 
 
-            if imgui.button("Train", width=-1):
-                self._open_training_popup = True
-                print("training")
-                
-                target_data_path = self.data_path
-
-                # Manipulate resolution training parameter based on dataset resolution (for now)
-                # Read resolution from first image in dataset
+            if imgui.button("Train", width=-1): 
                 detected_resolution = None
-                target_path = Path(target_data_path)
-                if target_path.is_dir():
-                    image_files = [f for f in target_path.iterdir() 
+                target_dataset_path = Path(self.data_path)
+
+                if target_dataset_path.is_dir():
+                    image_files = [f for f in target_dataset_path.iterdir() 
                                 if f.is_file() and f.suffix.lower() == '.png']
                     if image_files:
                         first_image_path = str(image_files[0])
-                        img = cv2.imread(first_image_path)
-                        if img is not None:
-                            height, width = img.shape[:2]
-                            detected_resolution = (width, height)
-                            print(f"Detected image resolution from dataset: {detected_resolution}")
+                        img = PIL.Image.open(first_image_path)
+                        width, height = img.size
+                        detected_resolution = (width, height)
+
+                self._open_training_popup = True
+                print("training")
 
                 kwargs = dnnlib.EasyDict(
                     outdir=self.save_path,
-                    data=str(target_data_path),
+                    data=str(target_dataset_path),
                     cfg=configs[self.config],
                     batch=self.batch_size,
                     topk=None,
@@ -517,7 +513,7 @@ class TrainingModule:
                     teacher = None,
                     custom=True,
                     lpips_image_size=256,
-                    fps=self.fps if self.found_video else 10,
+                    fps=self.fps if self.found_video else 10
                 )
 
                 if self.training_process.pid is not None:
@@ -748,7 +744,11 @@ class TrainingModule:
                 self.grid_texture = gl_utils.Texture(image=self.grid, width=self.grid.shape[1],
                                                height=self.grid.shape[0], channels=self.grid.shape[2])
             elif self.message != "":
-                imgui.text(self.message)
+                if self.done:
+                    imgui.text_colored("Error:", 1.0, 0.3, 0.3, 1.0)
+                    imgui.text_wrapped(self.message)
+                else:
+                    imgui.text(self.message)
             if self.image_path != '':
                 imgui.text("Current sample of fake imagery")
                 fake_display_height = training_popup_height - 200

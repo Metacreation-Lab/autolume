@@ -549,8 +549,13 @@ class ImageFolderDataset(Dataset):
         return self._load_raw_image(0).shape[1:]
 
     def __getitem__(self, idx):
-        image = self._load_raw_image(self._raw_idx[idx])
+        raw_idx = int(self._raw_idx[idx])
+        image = self._load_raw_image(raw_idx)
         assert isinstance(image, np.ndarray)
+
+        fname = self._image_fnames[raw_idx]
+        filename = os.path.basename(fname)
+
         if image.shape[0] == 1: # Greyscale images
             image = np.repeat(image, 3, axis=0) # Convert greyscale to RGB
         if image.shape[0] == 4: # RGBA images
@@ -567,13 +572,43 @@ class ImageFolderDataset(Dataset):
                     resize_transform = torchvision.transforms.Resize(min(self.height, self.width))  # 先等比例缩放
                     resized_image = resize_transform(pil_image)  # 应用 Resize 变换
                     crop_transform  = torchvision.transforms.CenterCrop((self.height, self.width))  # Target size
-                    cropped_image = crop_transform(resized_image )  # Perform the center crop
+                    cropped_image = crop_transform(resized_image)  # Perform the center crop
                     image = np.array(cropped_image)  # Convert back to NumPy array
                     image = image.transpose(2,0,1)
         
-        assert list(image.shape) == self.image_shape
-        assert image.dtype == np.uint8
-        if self._xflip[idx]:
+        height, width = image.shape[1], image.shape[2]
+        if height != width:
+            raise ValueError(
+                "Invalid dataset:\n"
+                f"- Image '{filename}' is not square ({width}x{height}).\n"
+                "- StyleGAN training only accepts square images."
+            )
+        if width <= 0 or (width & (width - 1)) != 0:
+            raise ValueError(
+                "Invalid dataset:\n"
+                f"- Image '{filename}' has resolution {width}x{height}. Resolution must be a power of 2.\n"
+                "- StyleGAN training requires power-of-2 resolution (e.g. 256, 512, 1024)."
+            )
+        channels = image.shape[0]
+        expected_channels = self.image_shape[0]
+        if channels != expected_channels:
+            raise ValueError(
+                "Invalid dataset:\n"
+                f"- Image '{filename}' has {channels} channel(s), but the detected dataset is expected to have {expected_channels}.\n"
+                "- Ensure all images have the same colour channels (e.g. RGB = 3)."
+            )
+        expected_height, expected_width = self.image_shape[1], self.image_shape[2]
+        if height != expected_height or width != expected_width:
+            raise ValueError(
+                "Invalid dataset:\n"
+                f"- '{filename}' is {width}x{height}, but the detected dataset resolution is expected to be {expected_width}x{expected_height}. Ensure all images have been preprocessed to the same size.\n"
+            )
+        if image.dtype != np.uint8:
+            raise ValueError(
+                "Invalid dataset:\n"
+                f"- Image '{filename}' has dtype {image.dtype}, expected uint8."
+            )
+        if self._xflip[idx]: 
             assert image.ndim == 3 # CHW
             image = image[:, :, ::-1]
         return image.copy(), self.get_label(idx)
