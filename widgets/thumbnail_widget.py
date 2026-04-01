@@ -22,6 +22,7 @@ class ThumbnailWidget:
         self.selected_indices = []  # For multi-selection
         self.last_mode_switch_time = 0  # For debouncing rapid toggles
         self.delete_pressed = False  # Flag for delete key press
+        self._pending_render_paths = []  # Visible files still needing a rendered thumbnail
     
     def create_placeholder_thumbnail(self, file_path):
         """Create a grey placeholder thumbnail with image name"""
@@ -150,6 +151,22 @@ class ThumbnailWidget:
                     tex.delete()
                 except Exception:
                     pass
+
+    def _cleanup_offscreen_thumbnails(self, visible_files):
+        """Free rendered thumbnail textures that are outside the visible + buffer range."""
+        visible_set = set(visible_files)
+        to_remove = [fp for fp in self.thumbnails if fp not in visible_set]
+        for fp in to_remove:
+            tex = self.thumbnails.pop(fp)
+            if tex is not None:
+                try:
+                    tex.delete()
+                except Exception:
+                    pass
+
+    def get_pending_render_paths(self):
+        """Return visible file paths that still need a rendered thumbnail."""
+        return self._pending_render_paths
     
     def render_thumbnails(self, available_width, available_height):
         if not self.selected_files:
@@ -169,7 +186,7 @@ class ThumbnailWidget:
         min_thumb_size = 120
         max_thumb_size = 220
         spacing_x = 32
-        spacing_y = 32
+        spacing_y = 16
         grid_padding = 6
         n = len(self.selected_files)
 
@@ -296,6 +313,12 @@ class ThumbnailWidget:
             imgui.dummy(available_width, remaining_rows * row_height)
 
         self._cleanup_offscreen_placeholders(rendered_files)
+
+        if self.generate_thumbnails:
+            self._pending_render_paths = [fp for fp in rendered_files if fp not in self.thumbnails]
+            self._cleanup_offscreen_thumbnails(rendered_files)
+        else:
+            self._pending_render_paths = []
     
     def get_thumbnail_count(self):
         """Get the number of thumbnails"""

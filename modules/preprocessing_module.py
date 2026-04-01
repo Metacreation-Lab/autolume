@@ -34,6 +34,7 @@ class DataPreprocessing:
         self.thumbnail_process = None
         self.is_processing_thumbnails = False
         self.thumbnail_process_started = False
+        self._requested_thumbnail_paths = set()
         
         # Video thumbnail processing
         self.video_thumbnail_queue = mp.Queue()
@@ -724,6 +725,9 @@ class DataPreprocessing:
         
         self._check_background_thumbnail_results()
 
+        if self.thumbnail_widget.generate_thumbnails:
+            self._request_visible_thumbnails()
+
         remove_selected = imgui.button("Remove Selected Images", width=available_width, height=30)
         remove_selected = remove_selected or self.thumbnail_widget.is_delete_pressed()
         
@@ -736,6 +740,7 @@ class DataPreprocessing:
 
             self.thumbnail_widget.update_thumbnails(self.imported_files)
             self.thumbnail_widget.clear_selected()
+            self._requested_thumbnail_paths = set()
             self.last_selected_file = None
 
         imgui.end() 
@@ -866,7 +871,8 @@ class DataPreprocessing:
 
      # --- Background Thumbnail Generation Helper Functions ---
     def _start_background_thumbnail_generation(self):
-        """Start background thumbnail generation process"""
+        """Ensure the background thumbnail process is running. Actual file
+        requests are sent lazily each frame by _request_visible_thumbnails()."""
         if not self.thumbnail_process_started or (self.thumbnail_process is not None and not self.thumbnail_process.is_alive()):
             self.thumbnail_process = mp.Process(
                 target=ThumbnailWidget.process_thumbnails_background,
@@ -876,13 +882,26 @@ class DataPreprocessing:
             self.thumbnail_process_started = True
 
         self.is_processing_thumbnails = True
-        
+        self._requested_thumbnail_paths = set()
+
+    def _request_visible_thumbnails(self):
+        """Send generation requests for visible files that haven't been requested yet."""
+        if not self.thumbnail_process_started:
+            return
+
+        pending = self.thumbnail_widget.get_pending_render_paths()
+        new_paths = [fp for fp in pending if fp not in self._requested_thumbnail_paths]
+        if not new_paths:
+            return
+
         request = {
             'type': 'generate_thumbnails',
-            'file_paths': self.imported_files,
+            'file_paths': new_paths,
             'thumbnail_size': self.thumbnail_widget.thumbnail_size
         }
         self.thumbnail_queue.put(request)
+        self._requested_thumbnail_paths.update(new_paths)
+        self.is_processing_thumbnails = True
     
     def _start_video_thumbnail_generation(self):
         """Start background thumbnail generation process for video thumbnails"""
@@ -945,6 +964,7 @@ class DataPreprocessing:
         # Reset processing state
         self.is_processing_thumbnails = False
         self.thumbnail_process_started = False
+        self._requested_thumbnail_paths = set()
     
     def _check_background_thumbnail_results(self):
         """Check for background thumbnail generation results"""
@@ -956,10 +976,10 @@ class DataPreprocessing:
                 result = self.thumbnail_reply.get_nowait()
                 
                 if result['type'] == 'thumbnail':
-                    # Update thumbnail widget with processed data
                     file_path = result['file_path']
                     thumbnail_data = result['thumbnail_data']
                     self.thumbnail_widget.update_thumbnail_from_data(file_path, thumbnail_data)
+                    self._requested_thumbnail_paths.discard(file_path)
                 elif result['type'] == 'completed':
                     if self.thumbnail_queue.empty():
                         self.is_processing_thumbnails = False
