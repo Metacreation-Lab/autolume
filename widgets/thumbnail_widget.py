@@ -1,5 +1,6 @@
 import cv2
 import os
+import math
 import numpy as np
 import imgui
 from utils.gui_utils import gl_utils
@@ -106,10 +107,8 @@ class ThumbnailWidget:
                 self.update_thumbnails(self.selected_files)
     
     def update_thumbnails(self, file_paths):
-        """Update thumbnails for all provided files"""
+        """Update the file list. Textures are created lazily during render."""
         self.selected_files = file_paths
-        for file_path in file_paths:
-            self.get_thumbnail(file_path)
     
     def clear_thumbnails(self):
         """Clear all thumbnails and free memory"""
@@ -139,6 +138,18 @@ class ThumbnailWidget:
         """Clear both actual and placeholder thumbnails"""
         self.clear_thumbnails()
         self.clear_placeholder_thumbnails()
+
+    def _cleanup_offscreen_placeholders(self, visible_files):
+        """Free placeholder textures that are outside the visible + buffer range."""
+        visible_set = set(visible_files)
+        to_remove = [fp for fp in self.placeholder_textures if fp not in visible_set]
+        for fp in to_remove:
+            tex = self.placeholder_textures.pop(fp)
+            if tex is not None:
+                try:
+                    tex.delete()
+                except Exception:
+                    pass
     
     def render_thumbnails(self, available_width, available_height):
         if not self.selected_files:
@@ -157,31 +168,72 @@ class ThumbnailWidget:
 
         min_thumb_size = 120
         max_thumb_size = 220
-        spacing_x = 32  # horizontal space between thumbnails
-        spacing_y = 32  # vertical space between rows
+        spacing_x = 32
+        spacing_y = 32
+        grid_padding = 6
         n = len(self.selected_files)
 
-        thumbnails_per_row = max(1, int((available_width + spacing_x) // (min_thumb_size + spacing_x)))
+        inner_width = available_width - 2 * grid_padding
+
+        thumbnails_per_row = max(1, int((inner_width + spacing_x) // (min_thumb_size + spacing_x)))
         thumb_size = min(
             max_thumb_size,
-            max(min_thumb_size, int((available_width - (thumbnails_per_row - 1) * spacing_x) // thumbnails_per_row))
+            max(min_thumb_size, int((inner_width - (thumbnails_per_row - 1) * spacing_x) // thumbnails_per_row))
         )
 
         total_row_width = thumbnails_per_row * thumb_size + (thumbnails_per_row - 1) * spacing_x
-        left_margin = max(0, (available_width - total_row_width) // 2)
+        left_margin = grid_padding + max(0, (inner_width - total_row_width) // 2)
 
         if not hasattr(self, 'last_selected_idx'):
             self.last_selected_idx = None
         if not hasattr(self, 'selected_indices'):
             self.selected_indices = []
 
-        for idx, file_path in enumerate(self.selected_files):
+        text_line_height = imgui.get_text_line_height_with_spacing()
+        row_height = thumb_size + spacing_y + text_line_height
+        total_rows = math.ceil(n / thumbnails_per_row)
+
+        scroll_y = imgui.get_scroll_y()
+        first_visible_row = max(0, int(scroll_y / row_height))
+        last_visible_row = int((scroll_y + available_height) / row_height)
+
+        thumbnail_buffer = 100
+        buffer_rows = math.ceil(thumbnail_buffer / thumbnails_per_row)
+        first_render_row = max(0, first_visible_row - buffer_rows)
+        last_render_row = min(total_rows - 1, last_visible_row + buffer_rows)
+
+        first_render_idx = first_render_row * thumbnails_per_row
+        last_render_idx = min(n, (last_render_row + 1) * thumbnails_per_row)
+
+        # Top spacer to maintain scroll position for rows above the render range
+        if first_render_row > 0:
+            imgui.dummy(available_width, first_render_row * row_height)
+
+        # Keyboard shortcuts are checked once per frame, outside the per-thumbnail loop
+        ctrl_down = imgui.is_key_down(341) or imgui.is_key_down(345)
+        shift_down = imgui.is_key_down(340) or imgui.is_key_down(344)
+        a_pressed = imgui.is_key_pressed(65)
+        delete_pressed = imgui.is_key_pressed(261) or imgui.is_key_pressed(259)
+
+        if ctrl_down and a_pressed:
+            self.select_all()
+
+        if delete_pressed and (self.selected_indices or self.last_selected_idx is not None):
+            self.delete_pressed = True
+
+        rendered_files = []
+
+        for idx in range(first_render_idx, last_render_idx):
+            file_path = self.selected_files[idx]
             texture = self.get_thumbnail(file_path)
+            rendered_files.append(file_path)
+
             if texture is not None and hasattr(texture, 'gl_id') and texture.gl_id is not None:
                 col = idx % thumbnails_per_row
 
                 if col == 0:
                     imgui.dummy(left_margin, 0)
+                    imgui.same_line(spacing=0)
                 elif col > 0:
                     imgui.same_line(spacing=spacing_x)
 
@@ -199,17 +251,6 @@ class ThumbnailWidget:
                 frame_color = (0.8, 0.4, 0.1, 1.0) if is_selected else (1.0, 0.8, 0.2, 0.7)
                 border_thickness = 3 if is_selected else 2
 
-                ctrl_down = imgui.is_key_down(341) or imgui.is_key_down(345)
-                shift_down = imgui.is_key_down(340) or imgui.is_key_down(344)
-                a_pressed = imgui.is_key_pressed(65)
-                delete_pressed = imgui.is_key_pressed(261) or imgui.is_key_pressed(259) # Delete and backspace key
-
-                if ctrl_down and a_pressed:
-                    self.select_all()
-                
-                if delete_pressed and (self.selected_indices or self.last_selected_idx is not None):
-                    self.delete_pressed = True
-
                 if imgui.invisible_button("thumb", thumb_size, thumb_size):
                     if shift_down and self.last_selected_idx is not None:
                         start = min(self.last_selected_idx, idx)
@@ -222,7 +263,6 @@ class ThumbnailWidget:
                             self.selected_indices.append(idx)
                         self.last_selected_idx = idx
                     else:
-                        # Single selection
                         self.selected_indices = [idx]
                         self.last_selected_idx = idx
 
@@ -249,6 +289,13 @@ class ThumbnailWidget:
                 if col == thumbnails_per_row - 1:
                     imgui.new_line()
                     imgui.dummy(0, spacing_y)
+
+        # Bottom spacer for rows below the render range
+        remaining_rows = total_rows - 1 - last_render_row
+        if remaining_rows > 0:
+            imgui.dummy(available_width, remaining_rows * row_height)
+
+        self._cleanup_offscreen_placeholders(rendered_files)
     
     def get_thumbnail_count(self):
         """Get the number of thumbnails"""
