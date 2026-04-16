@@ -12,6 +12,7 @@ site/
 # IDE
 .vscode/
 .idea/
+.claude/
 
 # OS artifacts
 .DS_Store
