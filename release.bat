@@ -35,7 +35,8 @@ call pyinstaller main.py ^
   --add-data "%CONDA_PREFIX%\Lib\site-packages\clip\bpe_simple_vocab_16e6.txt.gz;clip" ^
   --add-data "%CONDA_PREFIX%\Lib\site-packages\torch\include;torch/include" ^
   --add-data "%CONDA_PREFIX%\include;include" ^
-  --collect-all "lpips"
+  --collect-all "lpips" ^
+  --collect-all "codecarbon"
 
 if %ERRORLEVEL% neq 0 (
     echo Error: Failed to execute PyInstaller
