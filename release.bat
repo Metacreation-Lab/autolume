@@ -32,6 +32,7 @@ call pyinstaller main.py ^
   --add-data "training;training" ^
   --add-data "torch_utils;torch_utils" ^
   --add-data "recordings;recordings" ^
+  --add-data "modules\help_texts.csv;modules" ^
   --add-data "%CONDA_PREFIX%\Lib\site-packages\clip\bpe_simple_vocab_16e6.txt.gz;clip" ^
   --add-data "%CONDA_PREFIX%\Lib\site-packages\torch\include;torch/include" ^
   --add-data "%CONDA_PREFIX%\include;include" ^

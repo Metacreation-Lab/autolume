@@ -4,6 +4,7 @@ import cv2
 import imgui
 import webbrowser
 from utils.gui_utils import gl_utils
+from utils.resource_paths import resource_path
 
 DOCS_BASE_URL = "https://metacreation-lab.github.io/autolume"
 
@@ -21,7 +22,7 @@ class HelpIconWidget:
         help_texts = {}
         help_urls = {}
         try:
-            csv_path = Path("modules/help_texts.csv")
+            csv_path = resource_path("modules", "help_texts.csv")
             if csv_path.exists():
                 df = pd.read_csv(csv_path)
                 if 'module' in df.columns:
