@@ -23,21 +23,3 @@ Minimum components:
 
 ![](assets/setup-cuda-01.png)
 ![](assets/setup-cuda-02.png)
-
-## Environment variables
-
-While CUDA should automatically be added to your system environment variables, you will still need to install the Microsoft C++ Build Tools variables manually.
-
-- In the Windows start menu, type "environment" and click "Edit the system environment variables", then click on the "Environment Variables..." button.
-
-- In the "System variables" section, find the `Path` variable and double click on it
-
-![](assets/setup-env-01.png)
-
-- Finally add a new line with value `C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64`
-
-![](assets/setup-env-02.png)
-
-- (OPTIONAL) If you want to verify that the dependencies are properly configured, in the Windows start menu, type "terminal" and click "Terminal", then first type `where.exe cl.exe` and enter, then `where.exe nvcc.exe` and enter. In both case it should retun the path as configured in the previous step.
-
-![](assets/setup-env-03.png)
