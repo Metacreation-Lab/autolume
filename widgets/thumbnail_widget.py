@@ -1,41 +1,99 @@
 import cv2
 import os
 import math
+import queue as queue_mod
+import multiprocessing as mp
 import numpy as np
 import imgui
 from utils.gui_utils import gl_utils
-import time
 import gc
 
 from utils.dataset_preprocessing_utils import DatasetPreprocessingUtils
 
+
+def _render_thumbnail(file_path, thumbnail_size):
+    """Pure helper: render an image/video file into a square thumbnail np.array.
+
+    Runs in worker processes. Returns None on failure.
+    """
+    video_extensions = ['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm']
+    file_ext = os.path.splitext(file_path)[1].lower()
+
+    try:
+        if file_ext in video_extensions:
+            cap = cv2.VideoCapture(file_path)
+            if not cap.isOpened():
+                return None
+            ret, frame = cap.read()
+            cap.release()
+            if not ret:
+                return None
+            if len(frame.shape) == 3 and frame.shape[2] == 3:
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            elif len(frame.shape) == 3 and frame.shape[2] == 4:
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2RGBA)
+            img = frame
+            padding_value = 0
+        else:
+            img = DatasetPreprocessingUtils().load_images(file_path)
+            padding_value = 26
+
+        if img is None:
+            return None
+
+        height, width = img.shape[:2]
+        max_dim = max(height, width)
+        channels = img.shape[2] if len(img.shape) > 2 else 1
+        canvas = np.full((max_dim, max_dim, channels), padding_value, dtype=img.dtype)
+        y_offset = (max_dim - height) // 2
+        x_offset = (max_dim - width) // 2
+        canvas[y_offset:y_offset + height, x_offset:x_offset + width] = img
+        return cv2.resize(canvas, (thumbnail_size, thumbnail_size), interpolation=cv2.INTER_AREA)
+    except Exception as e:
+        print(f"Error rendering thumbnail for {file_path}: {e}")
+        return None
+
+
 class ThumbnailWidget:
-    """Widget for handling image thumbnails with caching and display"""
-    
+    """Widget for handling image thumbnails with caching and display.
+
+    Owns its own background worker process for rendered thumbnails. Each frame
+    `render_thumbnails()` writes the latest desired set of paths to a single-slot
+    request queue, and `poll()` consumes streamed results. A generation counter
+    invalidates stale results when the file list or render mode changes.
+    """
+
     def __init__(self):
-        self.thumbnail_size = 140 # Determines quality of thumbnails (resolution)
-        self.thumbnails = {}  # Cache for thumbnail textures
+        self.thumbnail_size = 140  # Determines quality of thumbnails (resolution)
+        self.thumbnails = {}  # Cache for rendered thumbnail textures
         self.placeholder_textures = {}  # Cache for placeholder textures
-        self.generate_thumbnails = False  # Default to performance mode (no thumbnails, only placeholders)
+        self.generate_thumbnails = False  # Show rendered thumbnails (when available) vs placeholders
         self.selected_files = []
         self.last_selected_idx = None
-        self.selected_indices = []  # For multi-selection
-        self.last_mode_switch_time = 0  # For debouncing rapid toggles
-        self.delete_pressed = False  # Flag for delete key press
-        self._pending_render_paths = []  # Visible files still needing a rendered thumbnail
-        self._deferred_delete = []  # Textures to free at start of next render frame
-        self._frame_held_textures = []  # Strong refs for textures used in current draw list
-    
+        self.selected_indices = []
+        self.delete_pressed = False
+
+        # Texture lifetime helpers (deferred deletion + per-frame strong refs)
+        self._deferred_delete = []
+        self._frame_held_textures = []
+
+        # Background worker IPC for rendered thumbnails
+        self._req_q = None       # mp.Queue(maxsize=1) — latest-wins payload
+        self._rep_q = None       # mp.Queue() — streamed results
+        self._worker_proc = None
+        self._generation = 0     # bumped on file-list / render-mode change
+        self._render_mode_active = False  # tracks worker-intent independently from the public flag
+
     def create_placeholder_thumbnail(self, file_path):
         """Create a grey placeholder thumbnail with image name"""
         try:
             size = self.thumbnail_size
-            canvas = np.full((size, size, 3), [128, 128, 128], dtype=np.uint8)  
-            
+            canvas = np.full((size, size, 3), [128, 128, 128], dtype=np.uint8)
+
             filename = os.path.splitext(os.path.basename(file_path))[0]
-            
+
             canvas = self._add_text_to_canvas(canvas, filename, size)
-            
+
             # Create texture
             texture = gl_utils.Texture(
                 image=canvas,
@@ -43,100 +101,223 @@ class ThumbnailWidget:
                 height=size,
                 channels=3
             )
-            
+
             return texture
         except Exception as e:
             print(f"Failed to create placeholder thumbnail for {file_path}: {e}")
             return None
-    
+
     def _add_text_to_canvas(self, canvas, text, size):
         """Add text to the center of the thumbnail placeholder"""
         try:
             font_scale = 0.4
             font_thickness = 1
             font = cv2.FONT_HERSHEY_SIMPLEX
-            
+
             (text_width, text_height), baseline = cv2.getTextSize(text, font, font_scale, font_thickness)
-            
-            max_width = int(size * 0.9)  
+
+            max_width = int(size * 0.9)
             if text_width > max_width:
                 char_width = text_width / len(text)
-                max_chars = int(max_width / char_width) - 3 
+                max_chars = int(max_width / char_width) - 3
                 text = text[:max_chars] + "..."
                 (text_width, text_height), baseline = cv2.getTextSize(text, font, font_scale, font_thickness)
-            
+
             x = (size - text_width) // 2
             y = (size + text_height) // 2
-            
-            # Add text to canvas
+
             cv2.putText(canvas, text, (x, y), font, font_scale, (255, 255, 255), font_thickness)
-            
+
             return canvas
         except Exception as e:
             print(f"Failed to add text to canvas: {e}")
             return canvas
-    
+
     def get_thumbnail(self, file_path):
-        """Get thumbnail based on generate_thumbnails setting"""
-        if self.generate_thumbnails:
-            if file_path in self.thumbnails:
-                return self.thumbnails[file_path]
-            else:
-                if file_path not in self.placeholder_textures:
-                    self.placeholder_textures[file_path] = self.create_placeholder_thumbnail(file_path)
-                return self.placeholder_textures[file_path]
-        else:
-            if file_path not in self.placeholder_textures:
-                self.placeholder_textures[file_path] = self.create_placeholder_thumbnail(file_path)
-            return self.placeholder_textures[file_path]
-    
-    def set_thumbnail_mode(self, generate_thumbnails, prev_thumbnail_mode=None):
-        """Set thumbnail generation mode (placeholder or actual rendered thumbnails) and clear appropriate cache"""
-        prev_mode = prev_thumbnail_mode if prev_thumbnail_mode is not None else self.generate_thumbnails
-        if prev_mode != generate_thumbnails:
-            current_time = time.time()
-            
-            # Debounce rapid toggling (prevent switches faster than 100ms)
-            if current_time - self.last_mode_switch_time < 0.1:
+        """Return rendered texture if available + render mode on, else placeholder."""
+        if self.generate_thumbnails and file_path in self.thumbnails:
+            return self.thumbnails[file_path]
+        if file_path not in self.placeholder_textures:
+            self.placeholder_textures[file_path] = self.create_placeholder_thumbnail(file_path)
+        return self.placeholder_textures[file_path]
+
+    # --- Render mode + worker lifecycle -------------------------------------
+
+    def set_render_mode(self, enabled):
+        """Toggle whether the widget displays rendered thumbnails and feeds the worker.
+
+        Lazy-starts the worker on first enable. Disabling does NOT stop the worker
+        (so re-enabling is instant) and does NOT clear `self.thumbnails`.
+        Idempotent: only bumps generation on real state changes so callers can
+        invoke this every frame without dropping in-flight results.
+        """
+        enabled = bool(enabled)
+        self.generate_thumbnails = enabled
+        if enabled != self._render_mode_active:
+            self._render_mode_active = enabled
+            self._generation += 1
+        if enabled:
+            self._ensure_worker()
+
+    def _ensure_worker(self):
+        """Start the worker process and queues if not already running."""
+        if self._worker_proc is not None and self._worker_proc.is_alive():
+            return
+        self._req_q = mp.Queue(maxsize=1)
+        self._rep_q = mp.Queue()
+        self._worker_proc = mp.Process(
+            target=ThumbnailWidget._worker_main,
+            args=(self._req_q, self._rep_q),
+            daemon=True,
+        )
+        self._worker_proc.start()
+
+    def poll(self):
+        """Drain reply queue and apply results matching the current generation."""
+        if self._rep_q is None:
+            return
+        try:
+            while True:
+                msg = self._rep_q.get_nowait()
+                if msg.get('generation') != self._generation:
+                    continue
+                file_path = msg.get('file_path')
+                data = msg.get('data')
+                if file_path is None:
+                    continue
+                self.update_thumbnail_from_data(file_path, data)
+        except queue_mod.Empty:
+            return
+        except Exception as e:
+            print(f"Error polling thumbnail results: {e}")
+
+    def shutdown(self):
+        """Tear down the worker process and queues without raising BrokenPipeError."""
+        # Send wake/exit sentinel so worker can exit cleanly if it's blocking on get().
+        if self._req_q is not None:
+            try:
+                # Drain anything pending so put_nowait doesn't block.
+                try:
+                    self._req_q.get_nowait()
+                except Exception:
+                    pass
+                try:
+                    self._req_q.put_nowait(None)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+        proc = self._worker_proc
+        if proc is not None:
+            try:
+                proc.join(timeout=0.5)
+                if proc.is_alive():
+                    proc.terminate()
+                    proc.join(timeout=0.5)
+                if proc.is_alive():
+                    proc.kill()
+                    proc.join()
+            except Exception as e:
+                print(f"Error stopping thumbnail worker: {e}")
+
+        # Cancel feeder threads so any unflushed item doesn't raise BrokenPipeError.
+        for q in (self._req_q, self._rep_q):
+            if q is None:
+                continue
+            try:
+                q.cancel_join_thread()
+                q.close()
+            except Exception:
+                pass
+
+        self._worker_proc = None
+        self._req_q = None
+        self._rep_q = None
+
+    @staticmethod
+    def _worker_main(req_q, rep_q):
+        """Worker entry point: latest-wins payload, preempts between images."""
+        current = None
+        idx = 0
+        while True:
+            # Pick up new payload. Block briefly if idle, otherwise non-blocking
+            # so we can preempt mid-job.
+            payload = None
+            got_payload = False
+            try:
+                if current is None:
+                    payload = req_q.get(timeout=0.25)
+                else:
+                    payload = req_q.get_nowait()
+                got_payload = True
+            except queue_mod.Empty:
+                got_payload = False
+            except Exception:
+                # Queue closed / pipe broken — exit cleanly.
                 return
-            
-            self.last_mode_switch_time = current_time
-            
-            self.generate_thumbnails = generate_thumbnails
-            
-            self.clear_all_thumbnails()
-            
-            if not generate_thumbnails and self.selected_files:
-                self.update_thumbnails(self.selected_files)
-    
+
+            if got_payload:
+                if payload is None:
+                    return  # shutdown sentinel
+                if isinstance(payload, dict):
+                    current = payload
+                    idx = 0
+                else:
+                    continue
+
+            if current is None:
+                continue
+
+            paths = current.get('paths') or []
+            size = current.get('size', 140)
+            gen_id = current.get('generation', 0)
+
+            if idx >= len(paths):
+                current = None
+                continue
+
+            path = paths[idx]
+            idx += 1
+            data = _render_thumbnail(path, size)
+            try:
+                rep_q.put({'generation': gen_id, 'file_path': path, 'data': data})
+            except Exception:
+                return
+
+    # --- File list management -----------------------------------------------
+
+    def set_thumbnail_mode(self, generate_thumbnails, prev_thumbnail_mode=None):
+        """Public toggle: route to set_render_mode and clear placeholders.
+
+        Rendered cache survives the toggle so re-enabling is instant.
+        """
+        prev = prev_thumbnail_mode if prev_thumbnail_mode is not None else self.generate_thumbnails
+        if prev == generate_thumbnails:
+            return
+        self.clear_placeholder_thumbnails()
+        self.set_render_mode(generate_thumbnails)
+
     def update_thumbnails(self, file_paths):
         """Update the file list. Textures are created lazily during render."""
         self.selected_files = file_paths
-    
+        # New file list invalidates any in-flight worker results.
+        self._generation += 1
+
     def clear_thumbnails(self):
-        """Clear all thumbnails and free memory"""
-        textures_to_delete = list(self.thumbnails.values())
-        self.thumbnails.clear() 
-        
-        for texture in textures_to_delete:
-            if texture is not None:
-                try:
-                    texture.delete()
-                except Exception as e:
-                    print(f"Error deleting texture: {e}")
-    
+        """Defer-delete all rendered thumbnails."""
+        for tex in self.thumbnails.values():
+            if tex is not None:
+                self._deferred_delete.append(tex)
+        self.thumbnails.clear()
+
     def clear_placeholder_thumbnails(self):
-        """Clear all placeholder thumbnails and free memory"""
-        textures_to_delete = list(self.placeholder_textures.values())
-        self.placeholder_textures.clear()  
-        
-        for texture in textures_to_delete:
-            if texture is not None:
-                try:
-                    texture.delete()
-                except Exception as e:
-                    print(f"Error deleting placeholder texture: {e}")
-    
+        """Defer-delete all placeholder thumbnails."""
+        for tex in self.placeholder_textures.values():
+            if tex is not None:
+                self._deferred_delete.append(tex)
+        self.placeholder_textures.clear()
+
     def clear_all_thumbnails(self):
         """Clear both actual and placeholder thumbnails"""
         self.clear_thumbnails()
@@ -170,10 +351,8 @@ class ThumbnailWidget:
             if tex is not None:
                 self._deferred_delete.append(tex)
 
-    def get_pending_render_paths(self):
-        """Return visible file paths that still need a rendered thumbnail."""
-        return self._pending_render_paths
-    
+    # --- Rendering ----------------------------------------------------------
+
     def render_thumbnails(self, available_width, available_height):
         self._flush_deferred_deletes()
         self._frame_held_textures = []
@@ -210,11 +389,6 @@ class ThumbnailWidget:
         total_row_width = thumbnails_per_row * thumb_size + (thumbnails_per_row - 1) * spacing_x
         left_margin = grid_padding + max(0, (inner_width - total_row_width) // 2)
 
-        if not hasattr(self, 'last_selected_idx'):
-            self.last_selected_idx = None
-        if not hasattr(self, 'selected_indices'):
-            self.selected_indices = []
-
         text_line_height = imgui.get_text_line_height_with_spacing()
         row_height = thumb_size + spacing_y + text_line_height
         total_rows = math.ceil(n / thumbnails_per_row)
@@ -231,11 +405,9 @@ class ThumbnailWidget:
         first_render_idx = first_render_row * thumbnails_per_row
         last_render_idx = min(n, (last_render_row + 1) * thumbnails_per_row)
 
-        # Top spacer to maintain scroll position for rows above the render range
         if first_render_row > 0:
             imgui.dummy(available_width, first_render_row * row_height)
 
-        # Keyboard shortcuts are checked once per frame, outside the per-thumbnail loop
         ctrl_down = imgui.is_key_down(341) or imgui.is_key_down(345)
         shift_down = imgui.is_key_down(340) or imgui.is_key_down(344)
         a_pressed = imgui.is_key_pressed(65)
@@ -317,29 +489,78 @@ class ThumbnailWidget:
                     imgui.new_line()
                     imgui.dummy(0, spacing_y)
 
-        # Bottom spacer for rows below the render range
         remaining_rows = total_rows - 1 - last_render_row
         if remaining_rows > 0:
             imgui.dummy(available_width, remaining_rows * row_height)
 
+        # Always free off-screen textures to keep GPU memory bounded; the
+        # caches outlive render-mode toggles so this runs unconditionally.
         self._cleanup_offscreen_placeholders(rendered_files)
+        self._cleanup_offscreen_thumbnails(rendered_files)
 
+        # Schedule worker to render the visible/buffer set, viewport-first.
         if self.generate_thumbnails:
-            self._pending_render_paths = [fp for fp in rendered_files if fp not in self.thumbnails]
-            
-            self._cleanup_offscreen_thumbnails(rendered_files)
-        else:
-            self._pending_render_paths = []
-    
+            self._schedule_render_requests(
+                first_render_idx, last_render_idx,
+                first_visible_row, last_visible_row,
+                thumbnails_per_row,
+            )
+
+    def _schedule_render_requests(self, first_render_idx, last_render_idx,
+                                  first_visible_row, last_visible_row,
+                                  thumbnails_per_row):
+        """Build a center-out list of needed paths and post it to the worker slot."""
+        if self._req_q is None:
+            self._ensure_worker()
+            if self._req_q is None:
+                return
+
+        visible_first_idx = max(first_render_idx, first_visible_row * thumbnails_per_row)
+        visible_last_idx = min(last_render_idx, (last_visible_row + 1) * thumbnails_per_row)
+
+        ordered_indices = list(range(visible_first_idx, visible_last_idx))
+        above = list(range(visible_first_idx - 1, first_render_idx - 1, -1))
+        below = list(range(visible_last_idx, last_render_idx))
+        a = b = 0
+        while a < len(above) or b < len(below):
+            if b < len(below):
+                ordered_indices.append(below[b])
+                b += 1
+            if a < len(above):
+                ordered_indices.append(above[a])
+                a += 1
+
+        needed = [self.selected_files[i]
+                  for i in ordered_indices
+                  if self.selected_files[i] not in self.thumbnails]
+        if not needed:
+            return
+
+        payload = {
+            'generation': self._generation,
+            'paths': needed,
+            'size': self.thumbnail_size,
+        }
+        # Latest-wins: drain any stale slot, then put the new payload.
+        try:
+            self._req_q.get_nowait()
+        except Exception:
+            pass
+        try:
+            self._req_q.put_nowait(payload)
+        except Exception:
+            pass
+
+    # --- Selection / utilities ---------------------------------------------
+
     def get_thumbnail_count(self):
         """Get the number of thumbnails"""
         return len(self.selected_files)
-    
+
     def get_selected_files(self):
         """Get the list of selected files"""
         return self.selected_files.copy()
 
-    # Select All button
     def select_all(self):
         """Select all images"""
         self.selected_indices = list(range(len(self.selected_files)))
@@ -351,28 +572,30 @@ class ThumbnailWidget:
         elif self.last_selected_idx is not None:
             return [self.last_selected_idx]
         return []
-    
+
     def clear_selected(self):
         self.last_selected_idx = None
         self.selected_indices = []
-    
+
     def is_delete_pressed(self):
         """Check if delete was pressed and reset the flag"""
         if self.delete_pressed:
             self.delete_pressed = False
             return True
         return False
-    
+
     def update_thumbnail_from_data(self, file_path, thumbnail_data):
-        """Update a specific thumbnail with processed data from background processing"""
-        if thumbnail_data is not None:
-            texture = self._create_texture_from_data(thumbnail_data)
-            if texture is not None:
-                old = self.thumbnails.get(file_path)
-                if old is not None:
-                    self._deferred_delete.append(old)
-                self.thumbnails[file_path] = texture
-    
+        """Install a worker result as a rendered texture, deferring old texture deletion."""
+        if thumbnail_data is None:
+            return
+        texture = self._create_texture_from_data(thumbnail_data)
+        if texture is None:
+            return
+        old = self.thumbnails.get(file_path)
+        if old is not None:
+            self._deferred_delete.append(old)
+        self.thumbnails[file_path] = texture
+
     def _create_texture_from_data(self, thumbnail_data):
         """Create OpenGL texture from thumbnail data"""
         try:
@@ -386,84 +609,12 @@ class ThumbnailWidget:
             print(f"Error creating texture from thumbnail data: {e}")
             return None
 
-    @staticmethod
-    def process_thumbnails_background(queue, reply):
-        """Process thumbnails in background - static method called by multiprocessing."""
-        while True:
-            try:
-                request = queue.get(timeout=1.0)
-                if request is None or request.get('type') == 'shutdown':
-                    break
-                
-                if request['type'] == 'generate_thumbnails':
-                    file_paths = request['file_paths']
-                    thumbnail_size = request['thumbnail_size']
-                    
-                    for file_path in file_paths:
-                        try:
-                            thumbnail_data = None
-                            
-                            video_extensions = ['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm']
-                            file_ext = os.path.splitext(file_path)[1].lower()
-                            
-                            if file_ext in video_extensions:
-                                cap = cv2.VideoCapture(file_path)
-                                if cap.isOpened():
-                                    ret, frame = cap.read()
-                                    cap.release()
-                                    
-                                    if ret:
-                                        if len(frame.shape) == 3 and frame.shape[2] == 3:
-                                            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                                        elif len(frame.shape) == 3 and frame.shape[2] == 4:
-                                            frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2RGBA)
-                                        
-                                        height, width = frame.shape[:2]
-                                        max_dim = max(height, width)
-                                        canvas = np.zeros((max_dim, max_dim, frame.shape[2] if len(frame.shape) > 2 else 1), dtype=frame.dtype)
-                                        
-                                        y_offset = (max_dim - height) // 2
-                                        x_offset = (max_dim - width) // 2
-                                        canvas[y_offset:y_offset+height, x_offset:x_offset+width] = frame
-                                        
-                                        thumbnail_data = cv2.resize(canvas, (thumbnail_size, thumbnail_size), interpolation=cv2.INTER_AREA)
-                            else:
-                                utils = DatasetPreprocessingUtils()
-                                img = utils.load_images(file_path)
-
-                                height, width = img.shape[:2]
-                                max_dim = max(height, width)
-                                padding_colour = 26  
-                                canvas = np.full((max_dim, max_dim, img.shape[2] if len(img.shape) > 2 else 1), padding_colour, dtype=img.dtype)
-
-                                y_offset = (max_dim - height) // 2
-                                x_offset = (max_dim - width) // 2
-                                canvas[y_offset:y_offset+height, x_offset:x_offset+width] = img
-                                
-                                thumbnail_data = cv2.resize(canvas, (thumbnail_size, thumbnail_size), interpolation=cv2.INTER_AREA)
-                            
-                            reply.put({
-                                'type': 'thumbnail',
-                                'file_path': file_path,
-                                'thumbnail_data': thumbnail_data
-                            })
-                            
-                        except Exception as e:
-                            print(f"Error creating thumbnail for {file_path}: {e}")
-                            reply.put({
-                                'type': 'thumbnail',
-                                'file_path': file_path,
-                                'thumbnail_data': None
-                            })
-                    
-                    reply.put({'type': 'completed'})
-                
-            except:
-                continue  
+    # --- Cleanup ------------------------------------------------------------
 
     def cleanup(self):
-        """Clean up OpenGL textures and resources"""
+        """Tear down worker and free all textures."""
         try:
+            self.shutdown()
             self.generate_thumbnails = False
             self._flush_deferred_deletes()
             self._frame_held_textures = []
@@ -476,7 +627,7 @@ class ThumbnailWidget:
                     except Exception as e:
                         print(f"Error deleting thumbnail texture: {e}")
             self.thumbnails.clear()
-            
+
             for texture in self.placeholder_textures.values():
                 if texture is not None and hasattr(texture, 'delete') and callable(texture.delete):
                     try:
@@ -485,15 +636,15 @@ class ThumbnailWidget:
                     except Exception as e:
                         print(f"Error deleting placeholder texture: {e}")
             self.placeholder_textures.clear()
-            
+
             self.selected_files = []
             self.selected_indices = []
             self.last_selected_idx = None
-            
+
             gc.collect()
-            
+
         except Exception as e:
             print(f"Warning: Error during thumbnail widget cleanup: {e}")
 
     def __del__(self):
-        pass 
+        pass
