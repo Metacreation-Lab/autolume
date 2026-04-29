@@ -23,6 +23,8 @@ class ThumbnailWidget:
         self.last_mode_switch_time = 0  # For debouncing rapid toggles
         self.delete_pressed = False  # Flag for delete key press
         self._pending_render_paths = []  # Visible files still needing a rendered thumbnail
+        self._deferred_delete = []  # Textures to free at start of next render frame
+        self._frame_held_textures = []  # Strong refs for textures used in current draw list
     
     def create_placeholder_thumbnail(self, file_path):
         """Create a grey placeholder thumbnail with image name"""
@@ -140,6 +142,16 @@ class ThumbnailWidget:
         self.clear_thumbnails()
         self.clear_placeholder_thumbnails()
 
+    def _flush_deferred_deletes(self):
+        """Delete textures scheduled for deferred deletion (safe after prior frame rendered)."""
+        for tex in self._deferred_delete:
+            if tex is not None:
+                try:
+                    tex.delete()
+                except Exception:
+                    pass
+        self._deferred_delete.clear()
+
     def _cleanup_offscreen_placeholders(self, visible_files):
         """Free placeholder textures that are outside the visible + buffer range."""
         visible_set = set(visible_files)
@@ -147,10 +159,7 @@ class ThumbnailWidget:
         for fp in to_remove:
             tex = self.placeholder_textures.pop(fp)
             if tex is not None:
-                try:
-                    tex.delete()
-                except Exception:
-                    pass
+                self._deferred_delete.append(tex)
 
     def _cleanup_offscreen_thumbnails(self, visible_files):
         """Free rendered thumbnail textures that are outside the visible + buffer range."""
@@ -159,16 +168,16 @@ class ThumbnailWidget:
         for fp in to_remove:
             tex = self.thumbnails.pop(fp)
             if tex is not None:
-                try:
-                    tex.delete()
-                except Exception:
-                    pass
+                self._deferred_delete.append(tex)
 
     def get_pending_render_paths(self):
         """Return visible file paths that still need a rendered thumbnail."""
         return self._pending_render_paths
     
     def render_thumbnails(self, available_width, available_height):
+        self._flush_deferred_deletes()
+        self._frame_held_textures = []
+
         if not self.selected_files:
             message = "No images imported"
             text_width = imgui.calc_text_size(message)[0]
@@ -286,7 +295,8 @@ class ThumbnailWidget:
                 is_hovered = imgui.is_item_hovered()
 
                 imgui.set_cursor_screen_pos((cursor_pos[0], cursor_pos[1]))
-                imgui.image(texture.gl_id, thumb_size, thumb_size)
+                self._frame_held_textures.append(texture)
+                imgui.image(int(texture.gl_id), thumb_size, thumb_size)
 
                 if is_hovered or is_selected:
                     x1, y1 = cursor_pos
@@ -316,6 +326,7 @@ class ThumbnailWidget:
 
         if self.generate_thumbnails:
             self._pending_render_paths = [fp for fp in rendered_files if fp not in self.thumbnails]
+            
             self._cleanup_offscreen_thumbnails(rendered_files)
         else:
             self._pending_render_paths = []
@@ -357,6 +368,9 @@ class ThumbnailWidget:
         if thumbnail_data is not None:
             texture = self._create_texture_from_data(thumbnail_data)
             if texture is not None:
+                old = self.thumbnails.get(file_path)
+                if old is not None:
+                    self._deferred_delete.append(old)
                 self.thumbnails[file_path] = texture
     
     def _create_texture_from_data(self, thumbnail_data):
@@ -451,7 +465,9 @@ class ThumbnailWidget:
         """Clean up OpenGL textures and resources"""
         try:
             self.generate_thumbnails = False
-            
+            self._flush_deferred_deletes()
+            self._frame_held_textures = []
+
             for texture in self.thumbnails.values():
                 if texture is not None and hasattr(texture, 'delete') and callable(texture.delete):
                     try:
