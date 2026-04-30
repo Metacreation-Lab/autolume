@@ -14,3 +14,7 @@ features = ["navigation.footer"]
 [project.theme.palette]
 primary = "custom"
 accent = "custom"
+
+[project.extra.version]
+provider = "mike"
+default = "latest"
