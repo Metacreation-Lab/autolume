@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Autolume documentation
+    url: https://metacreation-lab.github.io/autolume
+    about: Read the user guide before filing — your question may already be answered.
+  - name: Metacreation Lab website
+    url: https://www.metacreation.net/autolume
+    about: Project background, demos, and gallery of artworks created with Autolume.
