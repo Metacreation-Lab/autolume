@@ -1,6 +1,7 @@
 import cv2
 import os
 import math
+import collections
 import queue as queue_mod
 import multiprocessing as mp
 import numpy as np
@@ -65,19 +66,21 @@ class ThumbnailWidget:
 
     def __init__(self):
         self.thumbnail_size = 140  # Determines quality of thumbnails (resolution)
-        self.thumbnails = {}  # Cache for rendered thumbnail textures
-        self.placeholder_textures = {}  # Cache for placeholder textures
+        self.thumbnails = {}  
+        self.placeholder_textures = {}  
         self.generate_thumbnails = False  # Show rendered thumbnails (when available) vs placeholders
         self.selected_files = []
         self.last_selected_idx = None
         self.selected_indices = []
         self.delete_pressed = False
 
-        # Texture lifetime helpers (deferred deletion + per-frame strong refs)
         self._deferred_delete = []
         self._frame_held_textures = []
 
-        # Background worker IPC for rendered thumbnails
+        # FIFO cache for rendered thumbnails outside the visible+buffer window.
+        self._cached_thumbnails = collections.OrderedDict()
+        self.max_cached_thumbnails = 1000
+
         self._req_q = None       # mp.Queue(maxsize=1) — latest-wins payload
         self._rep_q = None       # mp.Queue() — streamed results
         self._worker_proc = None
@@ -134,9 +137,19 @@ class ThumbnailWidget:
             return canvas
 
     def get_thumbnail(self, file_path):
-        """Return rendered texture if available + render mode on, else placeholder."""
-        if self.generate_thumbnails and file_path in self.thumbnails:
-            return self.thumbnails[file_path]
+        """Return rendered texture if available + render mode on, else placeholder.
+
+        Promotes a cached texture back into the active set when the path
+        re-enters the render window so subsequent demotions land it at the
+        tail of the FIFO again.
+        """
+        if self.generate_thumbnails:
+            if file_path in self.thumbnails:
+                return self.thumbnails[file_path]
+            cached = self._cached_thumbnails.pop(file_path, None)
+            if cached is not None:
+                self.thumbnails[file_path] = cached
+                return cached
         if file_path not in self.placeholder_textures:
             self.placeholder_textures[file_path] = self.create_placeholder_thumbnail(file_path)
         return self.placeholder_textures[file_path]
@@ -193,10 +206,8 @@ class ThumbnailWidget:
 
     def shutdown(self):
         """Tear down the worker process and queues without raising BrokenPipeError."""
-        # Send wake/exit sentinel so worker can exit cleanly if it's blocking on get().
         if self._req_q is not None:
             try:
-                # Drain anything pending so put_nowait doesn't block.
                 try:
                     self._req_q.get_nowait()
                 except Exception:
@@ -221,7 +232,6 @@ class ThumbnailWidget:
             except Exception as e:
                 print(f"Error stopping thumbnail worker: {e}")
 
-        # Cancel feeder threads so any unflushed item doesn't raise BrokenPipeError.
         for q in (self._req_q, self._rep_q):
             if q is None:
                 continue
@@ -241,8 +251,6 @@ class ThumbnailWidget:
         current = None
         idx = 0
         while True:
-            # Pick up new payload. Block briefly if idle, otherwise non-blocking
-            # so we can preempt mid-job.
             payload = None
             got_payload = False
             try:
@@ -254,12 +262,11 @@ class ThumbnailWidget:
             except queue_mod.Empty:
                 got_payload = False
             except Exception:
-                # Queue closed / pipe broken — exit cleanly.
                 return
 
             if got_payload:
                 if payload is None:
-                    return  # shutdown sentinel
+                    return 
                 if isinstance(payload, dict):
                     current = payload
                     idx = 0
@@ -301,8 +308,13 @@ class ThumbnailWidget:
     def update_thumbnails(self, file_paths):
         """Update the file list. Textures are created lazily during render."""
         self.selected_files = file_paths
-        # New file list invalidates any in-flight worker results.
         self._generation += 1
+        valid = set(file_paths)
+        stale = [fp for fp in self._cached_thumbnails if fp not in valid]
+        for fp in stale:
+            tex = self._cached_thumbnails.pop(fp)
+            if tex is not None:
+                self._deferred_delete.append(tex)
 
     def clear_thumbnails(self):
         """Defer-delete all rendered thumbnails."""
@@ -318,9 +330,17 @@ class ThumbnailWidget:
                 self._deferred_delete.append(tex)
         self.placeholder_textures.clear()
 
+    def clear_cached_thumbnails(self):
+        """Defer-delete all FIFO-cached offscreen thumbnails."""
+        for tex in self._cached_thumbnails.values():
+            if tex is not None:
+                self._deferred_delete.append(tex)
+        self._cached_thumbnails.clear()
+
     def clear_all_thumbnails(self):
-        """Clear both actual and placeholder thumbnails"""
+        """Clear actual, cached, and placeholder thumbnails"""
         self.clear_thumbnails()
+        self.clear_cached_thumbnails()
         self.clear_placeholder_thumbnails()
 
     def _flush_deferred_deletes(self):
@@ -342,14 +362,26 @@ class ThumbnailWidget:
             if tex is not None:
                 self._deferred_delete.append(tex)
 
-    def _cleanup_offscreen_thumbnails(self, visible_files):
-        """Free rendered thumbnail textures that are outside the visible + buffer range."""
+    def _demote_offscreen_thumbnails(self, visible_files):
+        """Move rendered thumbnails outside the render window into the FIFO cache,
+        evicting the oldest cached entries once the limit is exceeded."""
         visible_set = set(visible_files)
-        to_remove = [fp for fp in self.thumbnails if fp not in visible_set]
-        for fp in to_remove:
+        to_demote = [fp for fp in self.thumbnails if fp not in visible_set]
+        for fp in to_demote:
             tex = self.thumbnails.pop(fp)
-            if tex is not None:
-                self._deferred_delete.append(tex)
+            if tex is None:
+                continue
+
+            if fp in self._cached_thumbnails:
+                old = self._cached_thumbnails.pop(fp)
+                if old is not None and old is not tex:
+                    self._deferred_delete.append(old)
+            self._cached_thumbnails[fp] = tex
+
+        while len(self._cached_thumbnails) > self.max_cached_thumbnails:
+            _, evicted = self._cached_thumbnails.popitem(last=False)
+            if evicted is not None:
+                self._deferred_delete.append(evicted)
 
     # --- Rendering ----------------------------------------------------------
 
@@ -493,10 +525,8 @@ class ThumbnailWidget:
         if remaining_rows > 0:
             imgui.dummy(available_width, remaining_rows * row_height)
 
-        # Always free off-screen textures to keep GPU memory bounded; the
-        # caches outlive render-mode toggles so this runs unconditionally.
         self._cleanup_offscreen_placeholders(rendered_files)
-        self._cleanup_offscreen_thumbnails(rendered_files)
+        self._demote_offscreen_thumbnails(rendered_files)
 
         # Schedule worker to render the visible/buffer set, viewport-first.
         if self.generate_thumbnails:
@@ -627,6 +657,15 @@ class ThumbnailWidget:
                     except Exception as e:
                         print(f"Error deleting thumbnail texture: {e}")
             self.thumbnails.clear()
+
+            for texture in self._cached_thumbnails.values():
+                if texture is not None and hasattr(texture, 'delete') and callable(texture.delete):
+                    try:
+                        if texture.gl_id is not None:
+                            texture.delete()
+                    except Exception as e:
+                        print(f"Error deleting cached thumbnail texture: {e}")
+            self._cached_thumbnails.clear()
 
             for texture in self.placeholder_textures.values():
                 if texture is not None and hasattr(texture, 'delete') and callable(texture.delete):
