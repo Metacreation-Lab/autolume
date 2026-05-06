@@ -55,6 +55,27 @@ def _render_thumbnail(file_path, thumbnail_size):
         return None
 
 
+def _auto_cache_capacity(thumbnail_size, vram_fraction=0.01,
+                        min_slots=200, max_slots=5000, fallback=500):
+    """Return a thumbnail-cache size based on total CUDA VRAM.
+
+    Uses a small fraction of total VRAM (stable across the session) divided
+    by the per-thumbnail RGB byte cost, clamped to [min_slots, max_slots].
+    Returns `fallback` when CUDA is unavailable or queries fail.
+    """
+    bytes_per_thumb = max(1, thumbnail_size * thumbnail_size * 3)
+    try:
+        import torch
+        if not torch.cuda.is_available():
+            return fallback
+        total_vram = torch.cuda.get_device_properties(0).total_memory
+        budget = total_vram * vram_fraction
+        capacity = int(budget // bytes_per_thumb)
+        return max(min_slots, min(max_slots, capacity))
+    except Exception:
+        return fallback
+
+
 class ThumbnailWidget:
     """Widget for handling image thumbnails with caching and display.
 
@@ -79,7 +100,7 @@ class ThumbnailWidget:
 
         # FIFO cache for rendered thumbnails outside the visible+buffer window.
         self._cached_thumbnails = collections.OrderedDict()
-        self.max_cached_thumbnails = 1000
+        self.max_cached_thumbnails = _auto_cache_capacity(self.thumbnail_size)
 
         self._req_q = None       # mp.Queue(maxsize=1) — latest-wins payload
         self._rep_q = None       # mp.Queue() — streamed results
