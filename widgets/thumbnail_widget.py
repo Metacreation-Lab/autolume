@@ -457,6 +457,7 @@ class ThumbnailWidget:
 
         first_render_idx = first_render_row * thumbnails_per_row
         last_render_idx = min(n, (last_render_row + 1) * thumbnails_per_row)
+        first_render_idx = min(first_render_idx, last_render_idx)
 
         if first_render_row > 0:
             imgui.dummy(available_width, first_render_row * row_height)
@@ -568,6 +569,8 @@ class ThumbnailWidget:
 
         visible_first_idx = max(first_render_idx, first_visible_row * thumbnails_per_row)
         visible_last_idx = min(last_render_idx, (last_visible_row + 1) * thumbnails_per_row)
+        visible_first_idx = min(max(visible_first_idx, first_render_idx), last_render_idx)
+        visible_last_idx = min(max(visible_last_idx, first_render_idx), last_render_idx)
 
         ordered_indices = list(range(visible_first_idx, visible_last_idx))
         above = list(range(visible_first_idx - 1, first_render_idx - 1, -1))
@@ -581,9 +584,10 @@ class ThumbnailWidget:
                 ordered_indices.append(above[a])
                 a += 1
 
+        n = len(self.selected_files)
         needed = [self.selected_files[i]
                   for i in ordered_indices
-                  if self.selected_files[i] not in self.thumbnails]
+                  if 0 <= i < n and self.selected_files[i] not in self.thumbnails]
         if not needed:
             return
 
