@@ -13,7 +13,7 @@ from utils.dataset_preprocessing_utils import DatasetPreprocessingUtils
 
 
 def _render_thumbnail(file_path, thumbnail_size):
-    """Pure helper: render an image/video file into a square thumbnail np.array.
+    """Render an image/video file into a square thumbnail np.array.
 
     Runs in worker processes. Returns None on failure.
     """
@@ -57,12 +57,7 @@ def _render_thumbnail(file_path, thumbnail_size):
 
 def _auto_cache_capacity(thumbnail_size, vram_fraction=0.01,
                         min_slots=200, max_slots=5000, fallback=500):
-    """Return a thumbnail-cache size based on total CUDA VRAM.
-
-    Uses a small fraction of total VRAM (stable across the session) divided
-    by the per-thumbnail RGB byte cost, clamped to [min_slots, max_slots].
-    Returns `fallback` when CUDA is unavailable or queries fail.
-    """
+    """Return a thumbnail-cache size based on total CUDA VRAM."""
     bytes_per_thumb = max(1, thumbnail_size * thumbnail_size * 3)
     try:
         import torch
@@ -77,13 +72,7 @@ def _auto_cache_capacity(thumbnail_size, vram_fraction=0.01,
 
 
 class ThumbnailWidget:
-    """Widget for handling image thumbnails with caching and display.
-
-    Owns its own background worker process for rendered thumbnails. Each frame
-    `render_thumbnails()` writes the latest desired set of paths to a single-slot
-    request queue, and `poll()` consumes streamed results. A generation counter
-    invalidates stale results when the file list or render mode changes.
-    """
+    """Widget for handling image thumbnails with caching and display."""
 
     def __init__(self):
         self.thumbnail_size = 140  # Determines quality of thumbnails (resolution)
@@ -178,13 +167,7 @@ class ThumbnailWidget:
     # --- Render mode + worker lifecycle -------------------------------------
 
     def set_render_mode(self, enabled):
-        """Toggle whether the widget displays rendered thumbnails and feeds the worker.
-
-        Lazy-starts the worker on first enable. Disabling does NOT stop the worker
-        (so re-enabling is instant) and does NOT clear `self.thumbnails`.
-        Idempotent: only bumps generation on real state changes so callers can
-        invoke this every frame without dropping in-flight results.
-        """
+        """Toggle whether the widget displays rendered thumbnails and feeds the worker."""
         enabled = bool(enabled)
         self.generate_thumbnails = enabled
         if enabled != self._render_mode_active:
@@ -596,7 +579,6 @@ class ThumbnailWidget:
             'paths': needed,
             'size': self.thumbnail_size,
         }
-        # Latest-wins: drain any stale slot, then put the new payload.
         try:
             self._req_q.get_nowait()
         except Exception:
