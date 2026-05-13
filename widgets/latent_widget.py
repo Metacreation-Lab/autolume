@@ -168,7 +168,7 @@ class LatentWidget:
             self.latent.next = torch.randn(self.latent.next.shape)
 
         imgui.same_line()
-        if imgui_utils.button(f"{modes[self.latent.update_mode]}##latent"):
+        if imgui_utils.button(f"{modes[(int(self.latent.update_mode) + 1) % len(modes)]}##latent"):
             self.latent.update_mode = (int(self.latent.update_mode) + 1) % len(modes)
         imgui.same_line()
         with imgui_utils.item_width(viz.app.button_w * 2 - viz.app.spacing * 2):
