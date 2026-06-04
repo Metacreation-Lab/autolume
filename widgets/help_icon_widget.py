@@ -4,9 +4,9 @@ import cv2
 import imgui
 import webbrowser
 from utils.gui_utils import gl_utils
-from utils.resource_paths import resource_path
+from utils.resource_paths import get_version, resource_path
 
-DOCS_BASE_URL = "https://metacreation-lab.github.io/autolume"
+DOCS_BASE_URL = f"https://metacreation-lab.github.io/autolume/{get_version()}"
 
 class HelpIconWidget:
     """Reusable widget for displaying a help icon next to labels"""

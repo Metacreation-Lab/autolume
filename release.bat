@@ -27,6 +27,7 @@ call pyinstaller main.py ^
   --add-binary ".venv\Lib\site-packages\torch\lib\torch.lib;torch/lib" ^
   --add-binary ".venv\Lib\site-packages\torch\lib\torch_python.lib;torch/lib" ^
   --add-binary ".venv\libs\python310.lib;libs" ^
+  --add-data "pyproject.toml;." ^
   --add-data "architectures;architectures" ^
   --add-data "assets;assets" ^
   --add-data "training;training" ^

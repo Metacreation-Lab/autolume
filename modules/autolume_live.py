@@ -6,7 +6,7 @@ import time
 import gc
 
 from utils.gui_utils import imgui_window, gl_utils
-from utils.version import get_version
+from utils.resource_paths import get_version
 from enum import IntEnum
 class States(IntEnum):
     ERROR = -2

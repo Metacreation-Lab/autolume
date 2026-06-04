@@ -1,6 +1,9 @@
 """Resolve paths to bundled resource files across source and PyInstaller runtimes."""
+from functools import lru_cache
 from pathlib import Path
 import sys
+
+import tomli
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -18,3 +21,15 @@ def resource_root() -> Path:
 def resource_path(*parts: str) -> Path:
     """Resolve a resource path relative to :func:`resource_root`."""
     return resource_root().joinpath(*parts)
+
+
+@lru_cache(maxsize=1)
+def _project_table() -> dict:
+    """Parse the ``[project]`` table from the bundled ``pyproject.toml``."""
+    with open(resource_path("pyproject.toml"), "rb") as fp:
+        return tomli.load(fp)["project"]
+
+
+def get_version() -> str:
+    """Return the application version declared in ``pyproject.toml``."""
+    return _project_table()["version"]
