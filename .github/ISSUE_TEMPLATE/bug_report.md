@@ -26,12 +26,10 @@ assignees: ""
 
 ## Environment
 
-- **OS** (and version): <!-- e.g. Windows 11 23H2, Ubuntu 24.04 -->
-- **GPU** (model and driver version): <!-- e.g. RTX 4080, driver 566.36 -->
-- **CUDA version**: <!-- e.g. 12.8 -->
-- **Python version**: <!-- output of `python --version` -->
-- **Autolume version**: <!-- value from `pyproject.toml`, or release tag (e.g. 2.16.2) -->
-- **Install method**: <!-- `uv sync` from source, or packaged Windows release -->
+- **OS** (and version):
+- **GPU** (graphics card model):
+- **CUDA version**:
+- **Autolume version**:
 
 ## Logs and screenshots
 
