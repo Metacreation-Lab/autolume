@@ -4,14 +4,17 @@ echo Cleaning up old builds...
 if exist dist rmdir /s /q dist
 if exist build rmdir /s /q build
 
-echo Activating uv environment...
+echo Activating Python environment...
 call .venv\Scripts\activate.bat
 
 if %ERRORLEVEL% neq 0 (
-    echo "Error: Failed to activate uv environment"
+    echo "Error: Failed to activate Python environment"
     pause
     exit /b
 )
+
+echo Resolving base Python prefix...
+for /f "delims=" %%i in ('python -c "import sys; print(sys.base_prefix)"') do set "PYBASE=%%i"
 
 echo Running PyInstaller...
 call pyinstaller main.py ^
@@ -26,7 +29,7 @@ call pyinstaller main.py ^
   --add-binary ".venv\Lib\site-packages\torch\lib\torch_cuda.lib;torch/lib" ^
   --add-binary ".venv\Lib\site-packages\torch\lib\torch.lib;torch/lib" ^
   --add-binary ".venv\Lib\site-packages\torch\lib\torch_python.lib;torch/lib" ^
-  --add-binary ".venv\libs\python310.lib;libs" ^
+  --add-binary "%PYBASE%\libs\python310.lib;libs" ^
   --add-data "pyproject.toml;." ^
   --add-data "architectures;architectures" ^
   --add-data "assets;assets" ^
@@ -36,7 +39,7 @@ call pyinstaller main.py ^
   --add-data "modules\help_texts.csv;modules" ^
   --add-data ".venv\Lib\site-packages\clip\bpe_simple_vocab_16e6.txt.gz;clip" ^
   --add-data ".venv\Lib\site-packages\torch\include;torch/include" ^
-  --add-data ".venv\include;include" ^
+  --add-data "%PYBASE%\include;include" ^
   --collect-all "lpips" ^
   --collect-all "codecarbon"
 
