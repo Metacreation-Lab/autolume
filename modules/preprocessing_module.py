@@ -22,8 +22,8 @@ class DataPreprocessing:
         self.settings = DatasetPreprocessingUtils()
 
         self.data_browser = NativeBrowserWidget()
-        self.thumbnail_widget = ThumbnailWidget() # Imported image thumbnails
-        self.video_thumbnail_widget = ThumbnailWidget()  # Video popup thumbnails
+        self.thumbnail_widget = ThumbnailWidget(padding_value=26)  # Imported image thumbnails
+        self.video_thumbnail_widget = ThumbnailWidget()  # Video popup thumbnails (black padding)
         self.image_preview_widget = ImagePreviewWidget()
         self.loading_widget = LoadingOverlayManager(app)  # Enhanced loading overlay manager
 
@@ -177,7 +177,6 @@ class DataPreprocessing:
                     delattr(self, 'last_fps')
                 if hasattr(self, 'last_expected_frames'):
                     delattr(self, 'last_expected_frames')
-                self.video_thumbnail_widget.set_render_mode(True)
                 imgui.open_popup("Video Frame Extraction")
 
         # Video Frame Extraction Popup
@@ -275,7 +274,6 @@ class DataPreprocessing:
 
             if imgui_utils.button("Back to Main Menu", width=left_popup_width - 10, enabled=True):
                 self.selected_video_files = []
-                self.video_thumbnail_widget.set_render_mode(False)
                 # Reset cache variables when closing popup
                 if hasattr(self, 'last_video_count'):
                     delattr(self, 'last_video_count')
@@ -667,21 +665,10 @@ class DataPreprocessing:
         imgui.same_line()
         imgui.text(f"({len(self.imported_files)} images)")
         
-        imgui.same_line(position=imgui.get_window_width() - imgui.calc_text_size("Render Thumbnail")[0] - imgui.calc_text_size("Select All")[0] - 70)
+        imgui.same_line(position=imgui.get_window_width() - imgui.calc_text_size("Select All")[0] - 50)
 
-        prev_thumbnail_mode = self.thumbnail_widget.generate_thumbnails
-        generate_thumbnails_clicked, self.thumbnail_widget.generate_thumbnails = imgui.checkbox(
-            "Render Thumbnail", self.thumbnail_widget.generate_thumbnails
-        )
-
-        imgui.same_line()
-        
         if imgui.button("Select All"):
             self.thumbnail_widget.select_all()
-        
-        if generate_thumbnails_clicked:
-            new_thumbnail_mode = self.thumbnail_widget.generate_thumbnails
-            self.thumbnail_widget.set_thumbnail_mode(new_thumbnail_mode, prev_thumbnail_mode)
 
         imgui.separator()
 
