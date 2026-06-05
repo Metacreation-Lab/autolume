@@ -51,8 +51,12 @@ class Menu:
 
         imgui.set_next_window_position(0, 0)
         imgui.set_next_window_size(self.app.content_width, self.menu_height)
+        # temporarily update the window style to remove annoying gaps around the banner
+        imgui.push_style_var(imgui.STYLE_WINDOW_PADDING, (0, 0))
+        imgui.push_style_var(imgui.STYLE_WINDOW_BORDERSIZE, 0)
         imgui.begin('##Menu', closable=False, flags=(
                 imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS | imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_SCROLLBAR))
+        imgui.pop_style_var(2)
 
         imgui.get_window_draw_list().add_rect_filled(0, 0, self.app.content_width, self.menu_height, imgui.get_color_u32_rgba(*RED))
 
