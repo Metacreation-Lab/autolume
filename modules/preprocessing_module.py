@@ -667,7 +667,7 @@ class DataPreprocessing:
         
         imgui.same_line(position=imgui.get_window_width() - imgui.calc_text_size("Select All")[0] - 50)
 
-        if imgui.button("Select All"):
+        if imgui.button("Select All", width=self.app.button_w):
             self.thumbnail_widget.select_all()
 
         imgui.separator()
@@ -685,7 +685,7 @@ class DataPreprocessing:
 
         self.thumbnail_widget.poll()
 
-        remove_selected = imgui.button("Remove Selected Images", width=available_width, height=30)
+        remove_selected = imgui.button("Remove Selected Images", width=available_width + 18, height=30)
         remove_selected = remove_selected or self.thumbnail_widget.is_delete_pressed()
         
         if remove_selected:
@@ -710,7 +710,7 @@ class DataPreprocessing:
         
         imgui.text("Image Preview")
 
-        imgui.same_line(position=imgui.get_window_width() - imgui.calc_text_size("Preview Original")[0] - 50)
+        imgui.same_line(position=imgui.get_window_width() - imgui.calc_text_size("Preview Original")[0] - 55)
         # Preview Original button
         preview_original_clicked, preview_original_new = imgui.checkbox("Preview Original", self.preview_original)
         if preview_original_clicked:
