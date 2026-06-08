@@ -259,7 +259,8 @@ class DataPreprocessing:
                             current = progress_data.get('current', 0)
                             total = progress_data.get('total', 0)
                             current_file = progress_data.get('current_file', '')
-                            self.loading_widget.update_progress(current, total, current_file)
+                            percentage = progress_data.get('percentage', None)
+                            self.loading_widget.update_progress(current, total, current_file, percentage=percentage)
                             
                         elif progress_data.get('type') == 'completed':
                             # Extraction completed
