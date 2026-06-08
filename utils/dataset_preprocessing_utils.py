@@ -122,7 +122,7 @@ class DatasetPreprocessingUtils:
         return augmented_images
 
     @staticmethod
-    def calculate_expected_video_frames(video_path, fps=10):
+    def calculate_video_duration(video_path):
         probe = ffmpeg.probe(video_path)
         video_info = next(s for s in probe['streams'] if s['codec_type'] == 'video')
 
@@ -160,9 +160,12 @@ class DatasetPreprocessingUtils:
             print(f"Warning: Could not determine duration for video {video_path}, using default estimate")
             duration = 0
         
-        expected_frames = int(duration * fps) if duration > 0 else 0
+        return duration
 
-        return expected_frames
+    @staticmethod
+    def calculate_expected_video_frames(video_path, fps=10):
+        duration = DatasetPreprocessingUtils.calculate_video_duration(video_path)
+        return int(duration * fps) if duration > 0 else 0
 
     @staticmethod
     def extract_videos(video_paths, fps, queue_in, queue_out):
