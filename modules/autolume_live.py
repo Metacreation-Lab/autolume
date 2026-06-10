@@ -21,6 +21,9 @@ class States(IntEnum):
 
 class Autolume(imgui_window.ImguiWindow):
     # State handler that greets user, shows menu (allowing for training, compression, ganspace), and renders
+
+    DEFAULT_FPS_LIMIT = 60
+    
     def __init__(self):
         super().__init__(title=f'Autolume-Live v{get_version()}', window_width=3840, window_height=2160)
 
@@ -39,6 +42,7 @@ class Autolume(imgui_window.ImguiWindow):
                                                height=self.splash.shape[0], channels=self.splash.shape[2])
 
         # Initialize window.
+        self.set_fps_limit(self.DEFAULT_FPS_LIMIT)
         self.label_w = 0
         self.button_w = 0
         self.set_position(0, 0)
@@ -87,6 +91,7 @@ class Autolume(imgui_window.ImguiWindow):
         from modules.menu import Menu
         print("setting visible menu ------------------------")
         self.state = States.MENU
+        self.set_fps_limit(self.DEFAULT_FPS_LIMIT)
         if self.viz is not None:
             self.viz.close()
             self.viz = None
