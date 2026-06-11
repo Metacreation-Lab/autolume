@@ -35,7 +35,12 @@ from audio.audio_stream import NoMicrophoneError
 from pythonosc.osc_server import BlockingOSCUDPServer
 from pythonosc.dispatcher import Dispatcher
 from pythonosc.udp_client import SimpleUDPClient
-import NDIlib as ndi
+try:
+    import NDIlib as ndi
+except ImportError:
+    ndi = None  # ndi-python has no macOS wheels; NDI streaming is disabled there.
+
+from utils import device_utils
 
 import glfw
 from OpenGL import GL as gl
@@ -77,10 +82,13 @@ class Visualizer:
 
         # NDI parameters
         self.ndi_name = 'Autolume Live'
-        send_settings = ndi.SendCreate()
-        send_settings.ndi_name = self.ndi_name
-        self.ndi_send = ndi.send_create(send_settings)
-        self.video_frame = ndi.VideoFrameV2()
+        self.ndi_send = None
+        self.video_frame = None
+        if ndi is not None:
+            send_settings = ndi.SendCreate()
+            send_settings.ndi_name = self.ndi_name
+            self.ndi_send = ndi.send_create(send_settings)
+            self.video_frame = ndi.VideoFrameV2()
 
         # Internals.
 
@@ -496,7 +504,7 @@ class Visualizer:
             self.server.shutdown()
             self.server = None
 
-        if self.ndi_send is not None:
+        if ndi is not None and self.ndi_send is not None:
             ndi.send_destroy(self.ndi_send)
             self.ndi_send = None
 
@@ -564,8 +572,13 @@ class Visualizer:
 
 
         imgui.same_line(self.app.spacing * 54)
-        
-        if imgui.button("Full Screen Display" if not self.is_fullscreen_display else "Exit Full Screen"):
+
+        # The preview window uses a core-profile GL 3.3 context that shares textures
+        # with the main legacy context; macOS cannot share across those profiles.
+        fullscreen_available = not device_utils.is_macos()
+        with imgui_utils.grayed_out(not fullscreen_available):
+            fullscreen_clicked = imgui.button("Full Screen Display" if not self.is_fullscreen_display else "Exit Full Screen")
+        if fullscreen_clicked and fullscreen_available:
             if self.is_fullscreen_display:
                 self.is_fullscreen_display = False
                 if self.fullscreen_window:
@@ -727,9 +740,10 @@ class Visualizer:
                     except Exception:
                         pass
                 
-                self.video_frame.data = img
-                self.video_frame.FourCC = ndi.FOURCC_VIDEO_TYPE_BGRX
-                ndi.send_send_video_v2(self.ndi_send, self.video_frame)
+                if ndi is not None and self.ndi_send is not None:
+                    self.video_frame.data = img
+                    self.video_frame.FourCC = ndi.FOURCC_VIDEO_TYPE_BGRX
+                    ndi.send_send_video_v2(self.ndi_send, self.video_frame)
                 if self._tex_obj is None or not self._tex_obj.is_compatible(image=self._tex_img):
                     self._tex_obj = gl_utils.Texture(image=self._tex_img, bilinear=False, mipmap=False)
                 else:
