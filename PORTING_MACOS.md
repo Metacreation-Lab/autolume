@@ -29,6 +29,10 @@ All code that previously hardcoded `'cuda'` or `cuda if available else cpu` now 
 
 The vendored StyleGAN custom CUDA ops (`torch_utils/ops/`) need no changes: `bias_act`, `upfirdn2d`, and `filtered_lrelu` only compile their CUDA kernels when the input tensor is on a CUDA device and otherwise use their reference PyTorch implementations, which run on MPS. The generator architectures already force fp32 on non-CUDA devices (`use_fp16 ... and x.device.type == 'cuda'`), so MPS renders in fp32.
 
+## Multiprocessing
+
+`multiprocessing.Queue.qsize()` raises `NotImplementedError` on macOS (`sem_getvalue` is missing on Darwin). All queue polling now uses `empty()` instead, which behaves identically for these single-producer/consumer checks on every platform. Affected: [modules/renderloop.py](modules/renderloop.py), [modules/projection_module.py](modules/projection_module.py), [projection/bayle_projection.py](projection/bayle_projection.py), [modules/pca_module.py](modules/pca_module.py), [ganspace/extract_pca.py](ganspace/extract_pca.py), [widgets/looping_widget.py](widgets/looping_widget.py), [modules/training_module.py](modules/training_module.py). The thread queue in the visualizer (`queue.Queue`) is unaffected.
+
 ## OpenGL / GUI
 
 macOS exposes either legacy OpenGL 2.1 or a 3.2+ core profile, never a compatibility profile (see the 2024 "Autolume for macOS" analysis). Autolume's drawing code ([utils/gui_utils/gl_utils.py](utils/gui_utils/gl_utils.py), [utils/gui_utils/glfw_window.py](utils/gui_utils/glfw_window.py)) is fixed-function GL, while pyimgui's default backend needs GLSL 330. Instead of rewriting the drawing code for core profile, macOS stays on the default GL 2.1 context and the imgui backend is swapped:

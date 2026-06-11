@@ -146,9 +146,9 @@ class TrainingModule:
                 imgui.text("and is not available on macOS.")
             return
 
-        if self.reply.qsize() > 0:
+        if not self.reply.empty():
             self.message, self.done = self.reply.get()
-            while self.reply.qsize() > 0:
+            while not self.reply.empty():
                 self.message, self.done = self.reply.get()
 
             # avoid re-printing stats lines

@@ -57,7 +57,7 @@ class AsyncRenderer:
 
     def set_args(self, **args):
         if not self._closed:
-            if self._args_queue.qsize() == 0:
+            if self._args_queue.empty():
                 if not compare_args(args, self._cur_args):
                     self._args_queue.put([args, self._cur_stamp])
                 self._cur_args = args
@@ -65,9 +65,9 @@ class AsyncRenderer:
     def get_result(self):
         if not self._closed:
             if self._result_queue is not None:
-                if self._result_queue.qsize() > 0:
+                if not self._result_queue.empty():
                     result, stamp = self._result_queue.get()
-                    while self._result_queue.qsize() > 0:
+                    while not self._result_queue.empty():
                         result, stamp = self._result_queue.get()
                     self._cur_result = result
             return self._cur_result
@@ -90,7 +90,7 @@ class AsyncRenderer:
         new_arg = False
         with torch.inference_mode():
             while True:
-                if args_queue.qsize() > 0:
+                if not args_queue.empty():
                     args, stamp = args_queue.get()
                     new_arg = True
                 if new_arg:

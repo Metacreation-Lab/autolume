@@ -85,7 +85,7 @@ labels = ["Seed", "Vector", "Keyframe"]
 def noise_loop(args_queue, results_queue):
     while True:
         args = args_queue.get()
-        while args_queue.qsize() > 0:
+        while not args_queue.empty():
             args = args_queue.get()
         seed, radius = args
         feats = [OSN(seed + i, radius) for i in range(512)]
@@ -393,7 +393,7 @@ class LoopingWidget:
 
     @imgui_utils.scoped_by_object_id
     def __call__(self, show=True):
-        if self.results_queue.qsize() > 0:
+        if not self.results_queue.empty():
             self.noise_loop_feats = self.results_queue.get()
 
         if self.osc_address != "":

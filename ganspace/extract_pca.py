@@ -39,7 +39,7 @@ def get_max_batch_size(model, device):
 
 def fit(queue, reply):
     name, num_features, model, device, project, alpha = queue.get()
-    while queue.qsize() > 0:
+    while not queue.empty():
         name, num_features, model, device, project, alpha = queue.get()
 
     model = model.to(device)
