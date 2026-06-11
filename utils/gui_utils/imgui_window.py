@@ -7,6 +7,7 @@
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
 import os
+import sys
 import imgui
 import imgui.integrations.glfw
 
@@ -99,5 +100,18 @@ class _GlfwRenderer(imgui.integrations.glfw.GlfwRenderer):
 
     def scroll_callback(self, window, x_offset, y_offset):
         self.io.mouse_wheel += y_offset * self.mouse_wheel_multiplier
+
+if sys.platform == 'darwin':
+    # macOS offers either a GL 2.1 context or a 3.2+ core profile, never both.
+    # The app draws with fixed-function GL, so it runs on the 2.1 context, where
+    # the default imgui backend cannot compile its GLSL 330 shaders. Swap the
+    # rendering methods for pyimgui's fixed-function backend instead.
+    from imgui.integrations.opengl import FixedPipelineRenderer
+
+    class _GlfwRenderer(_GlfwRenderer):
+        refresh_font_texture = FixedPipelineRenderer.refresh_font_texture
+        render = FixedPipelineRenderer.render
+        _create_device_objects = FixedPipelineRenderer._create_device_objects
+        _invalidate_device_objects = FixedPipelineRenderer._invalidate_device_objects
 
 #----------------------------------------------------------------------------
