@@ -727,7 +727,10 @@ class Visualizer:
         if 'image' in self.result:
             if self._tex_img is not self.result.image:
                 self._tex_img = self.result.image
-                img = cv2.cvtColor(self._tex_img, cv2.COLOR_RGB2BGRA)
+                send_ndi = ndi is not None and self.ndi_send is not None
+                # The BGRA copy is only needed for NDI and recording; skip the
+                # per-frame conversion otherwise.
+                img = cv2.cvtColor(self._tex_img, cv2.COLOR_RGB2BGRA) if (self.is_recording or send_ndi) else None
                 
                 # Recording 逻辑保持不变
                 if self.is_recording:
@@ -740,7 +743,7 @@ class Visualizer:
                     except Exception:
                         pass
                 
-                if ndi is not None and self.ndi_send is not None:
+                if send_ndi:
                     self.video_frame.data = img
                     self.video_frame.FourCC = ndi.FOURCC_VIDEO_TYPE_BGRX
                     ndi.send_send_video_v2(self.ndi_send, self.video_frame)

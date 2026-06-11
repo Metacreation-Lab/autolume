@@ -41,6 +41,7 @@ macOS exposes either legacy OpenGL 2.1 or a 3.2+ core profile, never a compatibi
 - [utils/gui_utils/glfw_window.py](utils/gui_utils/glfw_window.py): `COCOA_RETINA_FRAMEBUFFER` is disabled on macOS so the framebuffer stays 1:1 with window coordinates, which the existing `glViewport`/`glReadPixels` math assumes. Tradeoff: the UI is not retina-crisp.
 - [utils/gui_utils/gl_utils.py](utils/gui_utils/gl_utils.py): texture mipmaps are disabled on macOS (`glGenerateMipmap` needs GL 3.0+).
 - [utils/gui_utils/imgui_window.py](utils/gui_utils/imgui_window.py): mouse presses are latched from the GLFW button callback and held for one frame. pyimgui's backend only polls button state once per frame, so clicks shorter than a frame (trackpad taps, any click at low FPS) were dropped, which made buttons feel hit or miss. This mirrors the official Dear ImGui GLFW backend and applies on all platforms.
+- Frame-time reductions (all platforms, click latency scales with frame time): [utils/gui_utils/gl_utils.py](utils/gui_utils/gl_utils.py) streams frames with `glTexSubImage2D` instead of re-specifying the texture each frame, and [modules/visualizer.py](modules/visualizer.py) skips the per-frame RGB to BGRA conversion unless recording or NDI streaming is active.
 
 ## Dependencies
 
