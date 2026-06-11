@@ -2,6 +2,11 @@ import multiprocessing
 import os
 import sys
 
+if sys.platform == 'darwin':
+    # Let torch fall back to CPU for operators not yet implemented on MPS.
+    # Must be set before torch is imported.
+    os.environ.setdefault('PYTORCH_ENABLE_MPS_FALLBACK', '1')
+
 import torch
 
 from modules.autolume_live import Autolume
