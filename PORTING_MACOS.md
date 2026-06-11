@@ -51,6 +51,7 @@ macOS prerequisites before `uv sync`:
 - Xcode Command Line Tools (`xcode-select --install`): `imgui` and `pyaudio` have no macOS arm64 wheels and build from source.
 - `brew install portaudio` (required to build `pyaudio`).
 - `brew install ffmpeg` (super-res video, recording).
+- `brew install python-tk@3.10` if using Homebrew Python: it ships Tk separately, and tkinter backs the native file dialogs ([widgets/native_browser_widget.py](widgets/native_browser_widget.py)). Without it the app still runs; Browse dialogs are no-ops with a console hint.
 - The pre-trained models from the README (sr_models etc.), same as other platforms.
 
 ## Features disabled on macOS (greyed out)
