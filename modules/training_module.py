@@ -7,6 +7,7 @@ import multiprocessing as mp
 import psutil
 
 import dnnlib
+from utils import device_utils
 from utils.gui_utils import imgui_utils
 from train import main as train_main
 from widgets.native_browser_widget import NativeBrowserWidget
@@ -139,6 +140,11 @@ class TrainingModule:
 
     @imgui_utils.scoped_by_object_id
     def __call__(self):
+        if device_utils.is_macos():
+            with imgui_utils.grayed_out():
+                imgui.text("Training requires an NVIDIA GPU (CUDA)")
+                imgui.text("and is not available on macOS.")
+            return
 
         if self.reply.qsize() > 0:
             self.message, self.done = self.reply.get()

@@ -3,6 +3,7 @@ import os
 import imgui
 
 import dnnlib
+from utils import device_utils
 from utils.gui_utils import imgui_utils
 from prune import main as prune_main
 from widgets.model_download_widget import ModelDropdownButton
@@ -44,6 +45,12 @@ class CompressModule:
 
     @imgui_utils.scoped_by_object_id
     def __call__(self):
+        if device_utils.is_macos():
+            with imgui_utils.grayed_out():
+                imgui.text("Model compression requires an NVIDIA GPU (CUDA)")
+                imgui.text("and is not available on macOS.")
+            return
+
         imgui.text("Prune unnecessary layers from a network")
         _, self.save_path = imgui.input_text("Save Path", self.save_path, 1024)
         _, self.compress_pkl = imgui.input_text("Learner Pkl", self.compress_pkl, 1024)
