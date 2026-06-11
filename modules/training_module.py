@@ -11,7 +11,9 @@ from utils.gui_utils import imgui_utils
 from train import main as train_main
 from widgets.native_browser_widget import NativeBrowserWidget
 from utils.dataset_preprocessing_utils import DatasetPreprocessingUtils
+from utils.model_dir import list_model_pkls
 from widgets.help_icon_widget import HelpIconWidget
+from widgets.model_download_widget import ModelDropdownButton
 
 import cv2
 from utils.gui_utils import gl_utils
@@ -50,12 +52,10 @@ class TrainingModule:
         self.data_path_browser = NativeBrowserWidget()
         self.save_path_browser = NativeBrowserWidget()
 
-        models_dir = Path.cwd() / "models"
-        for pkl in models_dir.iterdir() if models_dir.exists() else []:
-            if pkl.suffix == ".pkl":
-                pkl_path = str(pkl)
-                print(pkl.name, pkl_path)
-                self.browse_cache.append(pkl_path)
+        # browse_cache holds extra pkls found in the selected data directory; the
+        # dropdown merges them with a fresh scan of the models folder on open.
+        self.model_dropdown = ModelDropdownButton(menu.model_downloader, label='Browse',
+                                                  items_provider=lambda: list_model_pkls() + self.browse_cache)
 
         self.menu = menu
         
@@ -376,15 +376,9 @@ class TrainingModule:
             width=imgui.get_window_width() - imgui.calc_text_size("Browse##Resume Pkl")[0])
             
             imgui.same_line()
-            if imgui_utils.button('Browse##Resume Pkl', enabled=len(self.browse_cache) > 0, width=self.menu.app.button_w):
-                imgui.open_popup('browse_pkls_popup_training')
-
-            if imgui.begin_popup('browse_pkls_popup_training'):
-                for pkl in self.browse_cache:
-                    clicked, _state = imgui.menu_item(pkl)
-                    if clicked:
-                        self.resume_pkl = pkl
-                imgui.end_popup()
+            picked = self.model_dropdown(width=self.menu.app.button_w)
+            if picked is not None:
+                self.resume_pkl = picked
 
             imgui.text("Training Augmentation")
             imgui.same_line()

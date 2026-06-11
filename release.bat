@@ -31,6 +31,7 @@ call pyinstaller main.py ^
   --add-binary ".venv\Lib\site-packages\torch\lib\torch_python.lib;torch/lib" ^
   --add-binary "%PYBASE%\libs\python310.lib;libs" ^
   --add-data "pyproject.toml;." ^
+  --add-data "models.csv;." ^
   --add-data "architectures;architectures" ^
   --add-data "assets;assets" ^
   --add-data "training;training" ^
@@ -52,8 +53,6 @@ if %ERRORLEVEL% neq 0 (
 echo Copying assets and models...
 xcopy assets dist\Autolume\assets /s /e /y /i
 xcopy sr_models dist\Autolume\sr_models /s /e /y /i
-if not exist dist\Autolume\models mkdir dist\Autolume\models
-xcopy models\stylegan2-ffhq-512x512.pkl dist\Autolume\models\ /y
 
 echo Creating directories...
 if not exist dist\Autolume\screenshots mkdir dist\Autolume\screenshots

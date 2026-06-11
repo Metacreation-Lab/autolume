@@ -24,11 +24,14 @@ from modules.network_mixing import MixingModule
 
 from modules.super_res_module import SuperResModule
 
+from utils.model_dir import models_dir
 from widgets.help_icon_widget import DOCS_BASE_URL
+from widgets.model_download_widget import ModelDownloadWidget
 #----------------------------------------------------------------------------
 class Menu:
     def __init__(self, app):
         self.app = app
+        self.model_downloader = ModelDownloadWidget(app, models_dir())
         self.pca = PCA_Module(self)
         self.training = TrainingModule(self)
         self.compress = CompressModule(self)
@@ -131,6 +134,8 @@ class Menu:
         if imgui_utils.button("START", width=self.app.button_w):
             self.app.start_renderer()
         imgui.end()
+
+        self.model_downloader()
 
         imgui.pop_style_color(3)
 

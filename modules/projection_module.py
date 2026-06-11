@@ -14,6 +14,7 @@ from modules.filedialog import FileDialog
 from projection.bayle_projection import run_projection
 from widgets.browse_widget import BrowseWidget
 from widgets.help_icon_widget import HelpIconWidget
+from widgets.model_download_widget import ModelDropdownButton
 
 class ProjectionModule:
     def __init__(self, menu):
@@ -28,7 +29,6 @@ class ProjectionModule:
         self.network_path = ""
         self._pkl_data = dict()
         self._networks = dict()
-        self.models = []
         self.target_fname = ""
         self.target_text = ""
         self.initial_latent = None
@@ -58,11 +58,7 @@ class ProjectionModule:
                                              traverse_folders=False, add_folder_button=True, width=self.app.button_w + 30)
         self.projected_texture = None
 
-
-
-        for pkl in os.listdir("./models"):
-            if pkl.endswith(".pkl"):
-                self.models.append(os.path.join(os.getcwd(),"models",pkl))
+        self.model_dropdown = ModelDropdownButton(menu.model_downloader)
 
     @imgui_utils.scoped_by_object_id
     def __call__(self):
@@ -102,20 +98,9 @@ class ProjectionModule:
                                                         width=-self.app.button_w - self.app.spacing - 30,
                                                         help_text='<PATH> | <URL> | <RUN_DIR> | <RUN_ID> | <RUN_ID>/<KIMG>.pkl')
         imgui.same_line()
-        if imgui_utils.button(f'Models ##projection', enabled=len(self.models) > 0, width = self.app.button_w):
-            imgui.open_popup(f'browse_pkls_popup##projection')
-            self.browse_refocus = True
-
-        if imgui.begin_popup(f'browse_pkls_popup##projection'):
-            for pkl in self.models:
-                clicked, _state = imgui.menu_item(pkl)
-                if clicked:
-                    self.network_path = pkl
-            if self.browse_refocus:
-                imgui.set_scroll_here()
-                self.browse_refocus = False
-
-            imgui.end_popup()
+        picked = self.model_dropdown(width=self.app.button_w)
+        if picked is not None:
+            self.network_path = picked
 
 
         joined = '\n'.join(self.target_fname)

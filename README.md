@@ -63,13 +63,6 @@ tar -xf bin\ffmpeg-7.1.1-full_build.zip -C bin
 
 On Linux, FFmpeg is installed via `apt` (see [Linux dependencies](#linux-only-ubuntu-2404) above).
 
-#### Download default FFHQ model
-
-```bash
-mkdir -p models
-curl -L 'https://api.ngc.nvidia.com/v2/models/org/nvidia/team/research/stylegan2/1/files?redirect=true&path=stylegan2-ffhq-512x512.pkl' -o 'models/stylegan2-ffhq-512x512.pkl'
-```
-
 ### Running the program
 
 Start the program

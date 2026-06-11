@@ -6,6 +6,8 @@ import dnnlib
 from torch_utils import legacy
 from architectures import custom_stylegan2
 from utils.gui_utils import imgui_utils
+from utils.model_dir import ensure_models_dir
+from widgets.model_download_widget import ModelDropdownButton
 import pickle
 
 import glob
@@ -39,18 +41,13 @@ class SurgeryModule:
         self.pkl2 = None
         self.data2 = None
 
-        self.browse_refocus = False
-
-        self.models = []
         self.combined_layers = []
         self.cached_layers = []
         self.collapsed = []
 
         self.show_interface = False
 
-        for pkl in os.listdir("./models"):
-            if pkl.endswith(".pkl"):
-                self.models.append(os.path.join(os.getcwd(),"models",pkl))
+        self.model_dropdowns = {m: ModelDropdownButton(menu.model_downloader, label='Browse...') for m in (1, 2)}
 
 
     def load_pkl(self, pkl, m,ignore_errors=False):
@@ -127,20 +124,9 @@ class SurgeryModule:
             self.load_pkl(self.model1 if m == 1 else self.model2, m,ignore_errors=True)
 
         imgui.same_line()
-        if imgui_utils.button(f'Browse...##{m}', enabled=len(self.models) > 0):
-            imgui.open_popup(f'browse_pkls_popup##{m}')
-            self.browse_refocus = True
-
-        if imgui.begin_popup(f'browse_pkls_popup##{m}'):
-            for pkl in self.models:
-                clicked, _state = imgui.menu_item(pkl)
-                if clicked:
-                    self.load_pkl(pkl, m, ignore_errors=True)
-            if self.browse_refocus:
-                imgui.set_scroll_here()
-                self.browse_refocus = False
-
-            imgui.end_popup()
+        picked = self.model_dropdowns[m]()
+        if picked is not None:
+            self.load_pkl(picked, m, ignore_errors=True)
 
         imgui.end_group()
 
@@ -284,7 +270,7 @@ class SurgeryModule:
         print("Saving model...")
         data = dict([('G', None), ('D', None), ('G_ema', None)])
 
-        with open(os.path.join(os.getcwd(),"models",self.output_name), 'wb') as f:
+        with open(os.path.join(ensure_models_dir(), self.output_name), 'wb') as f:
             data['G_ema'] = model_out
             data['G'] = model_out
             data['D'] = self.data2['D']
