@@ -12,6 +12,7 @@ except ModuleNotFoundError:
     import pickle
 
 import dnnlib
+from utils import device_utils
 from utils.gui_utils import imgui_utils
 from widgets import osc_menu
 from widgets.browse_widget import BrowseWidget
@@ -211,7 +212,9 @@ class LoopingWidget:
         key = (tuple(ref.shape), ref.dtype)
         buf = self._pinned_bufs.get(key, None)
         if buf is None:
-            buf = torch.empty(ref.shape, dtype=ref.dtype).pin_memory()
+            buf = torch.empty(ref.shape, dtype=ref.dtype)
+            if torch.cuda.is_available():
+                buf = buf.pin_memory()
             self._pinned_bufs[key] = buf
         return buf
 
@@ -439,7 +442,7 @@ class LoopingWidget:
                 with imgui_utils.item_width(viz.app.font_size * 5):
                     changed, new_keyframes = imgui.input_int("# of Keyframes", self.params.num_keyframes)
                 if changed and new_keyframes > 0:
-                    vecs = [torch.randn(1, 512).cuda() for _ in range(new_keyframes)]
+                    vecs = [torch.randn(1, 512).to(device_utils.get_device()) for _ in range(new_keyframes)]
                     vecs[:min(new_keyframes, self.params.num_keyframes)] = self.keyframes[:min(new_keyframes,
                                                                                                self.params.num_keyframes)]
                     self.keyframes = vecs

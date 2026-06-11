@@ -8,6 +8,8 @@ from torchvision import transforms
 import torchvision.transforms.functional as F
 import numpy as np
 
+from utils import device_utils
+from utils.device_utils import get_device
 from utils.gui_utils import imgui_utils
 from super_res.super_res import main as super_res_main, load_model, get_resolution, check_width_height, get_audio, Reader, Writer
 
@@ -337,7 +339,7 @@ class SuperResModule:
                 data_transformer = transforms.Compose([transforms.ToTensor()])
                 image = cv2.imread(file)
                 input_height, input_width = image.shape[0], image.shape[1]
-                image = data_transformer(image).to('cuda')
+                image = data_transformer(image).to(get_device())
                 input = torch.unsqueeze(image, 0)
 
                 # 处理图像
@@ -372,7 +374,7 @@ class SuperResModule:
                 self.file_idx += 1
 
         # 清理内存
-        torch.cuda.empty_cache()
+        device_utils.empty_cache()
         gc.collect()
 
         # 当所有文件处理完后停止运行
@@ -411,7 +413,7 @@ class SuperResModule:
             img = reader.get_frame()
             if img is not None:
                 with torch.inference_mode():
-                    sr_input = torch.tensor(img).permute(2, 0, 1).unsqueeze(0).float().to('cuda') / 255
+                    sr_input = torch.tensor(img).permute(2, 0, 1).unsqueeze(0).float().to(get_device()) / 255
                     sr_output = self.super_res_model(sr_input)
                     sr_output = F.adjust_sharpness(sr_output, self.args.sharpen_scale) * 255
                     sr_output = sr_output[0].permute(1, 2, 0).cpu().numpy().astype(np.uint8)
@@ -436,7 +438,7 @@ class SuperResModule:
         writer.close()
 
         # 清理内存
-        torch.cuda.empty_cache()
+        device_utils.empty_cache()
         gc.collect()
 
 

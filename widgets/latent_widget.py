@@ -77,7 +77,7 @@ class LatentWidget:
         self.viz.args.mode = self.latent.mode
         self.viz.args.project = self.latent.project
         self.viz.args.seed = [self.latent.x, self.latent.y]  # [[seed, weight], ...]
-        self.viz.args.vec = self.latent.vec.pin_memory() if torch.cuda.is_available else self.latent.vec
+        self.viz.args.vec = self.latent.vec.pin_memory() if torch.cuda.is_available() else self.latent.vec
 
     def drag(self, dx, dy):
         viz = self.viz

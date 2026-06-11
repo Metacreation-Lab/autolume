@@ -10,6 +10,7 @@ import pandas as pd
 
 import dnnlib
 from torch_utils import legacy
+from utils import device_utils
 from utils.gui_utils import imgui_utils
 from ganspace.extract_pca import fit
 from widgets.model_download_widget import ModelDropdownButton
@@ -144,7 +145,11 @@ class PCA_Module:
             self.running = True
             self.X_comp, self.Z_comp = None, None
             os.makedirs(self.save_path, exist_ok=True)
-            self.queue.put((pca_modes[self.pca_mode], self.num_features, self.G, "cuda" if torch.cuda.is_available() else "cpu", True, self.alpha))
+            device = device_utils.get_device()
+            # MPS tensors cannot be sent across processes; ship the model on CPU
+            # and let the worker move it to the device.
+            G = self.G.cpu() if device.type == 'mps' else self.G
+            self.queue.put((pca_modes[self.pca_mode], self.num_features, G, device.type, True, self.alpha))
             self.pca_process.start()
 
 
@@ -188,4 +193,4 @@ class PCA_Module:
         path = self.resolve_pkl(user_pkl)
         with dnnlib.util.open_url(path, verbose=False) as f:
             data = legacy.load_network_pkl(f, custom=True)
-        self.G = data["G"].to("cuda" if torch.cuda.is_available() else "cpu")
+        self.G = data["G"].to(device_utils.get_device())
