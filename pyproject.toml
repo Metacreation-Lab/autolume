@@ -43,9 +43,12 @@ dependencies = [
     "setuptools<70",
     "timm==0.5.4",
     "tomli>=2.0.1",
-    "torch==2.8.0+cu128",
-    "torchaudio==2.8.0+cu128",
-    "torchvision==0.23.0+cu128",
+    "torch==2.8.0+cu128 ; sys_platform != 'darwin'",
+    "torch==2.8.0 ; sys_platform == 'darwin'",
+    "torchaudio==2.8.0+cu128 ; sys_platform != 'darwin'",
+    "torchaudio==2.8.0 ; sys_platform == 'darwin'",
+    "torchvision==0.23.0+cu128 ; sys_platform != 'darwin'",
+    "torchvision==0.23.0 ; sys_platform == 'darwin'",
     "tqdm==4.66.1",
     "zensical==0.0.23",
 ]
@@ -55,7 +58,8 @@ name = "pytorch-cu128"
 url = "https://download.pytorch.org/whl/cu128"
 explicit = true
 
+# On macOS there are no CUDA builds; torch comes from PyPI (arm64 wheels with MPS).
 [tool.uv.sources]
-torch = [{ index = "pytorch-cu128" }]
-torchaudio = [{ index = "pytorch-cu128" }]
-torchvision = [{ index = "pytorch-cu128" }]
+torch = [{ index = "pytorch-cu128", marker = "sys_platform != 'darwin'" }]
+torchaudio = [{ index = "pytorch-cu128", marker = "sys_platform != 'darwin'" }]
+torchvision = [{ index = "pytorch-cu128", marker = "sys_platform != 'darwin'" }]
