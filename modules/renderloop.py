@@ -3,6 +3,7 @@ import multiprocessing
 import torch
 
 import dnnlib
+from utils import device_utils
 from widgets import renderer
 
 def compare_args(args, cur_args):
@@ -103,4 +104,4 @@ class AsyncRenderer:
                 # gc.collect() # Putting a garbage collect here stabilizes the memory usage, but slows down the rendering
                                # Torch seems to store values in the background even with nograd that slow down StyleGAN2 over time
                                # This is a workaround to keep the memory usage stable, but conflicts with imgui causing drops in GUI performance
-                torch.cuda.empty_cache()
+                device_utils.empty_cache()

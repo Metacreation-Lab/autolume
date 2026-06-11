@@ -7,6 +7,7 @@
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
 import sys
+import contextlib
 import copy
 import time
 import traceback
@@ -17,6 +18,7 @@ import torch.fft
 import torch.nn
 import matplotlib.cm
 import dnnlib
+from utils import device_utils
 from bending.transform_layers import ManipulationLayer
 from torch_utils.ops import upfirdn2d, params
 from torch_utils import legacy
@@ -27,8 +29,8 @@ from utils.model_dir import ensure_models_dir
 import os
 import pickle
 
-super_res = SRVGGNetPlus(num_in_ch=3, num_out_ch=3, num_feat=48, upscale=4, act_type='prelu').eval().to("cuda" if torch.cuda.is_available() else "cpu")
-model_sd=torch.load('./sr_models/Fast.pt', map_location=torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+super_res = SRVGGNetPlus(num_in_ch=3, num_out_ch=3, num_feat=48, upscale=4, act_type='prelu').eval().to(device_utils.get_device())
+model_sd=torch.load('./sr_models/Fast.pt', map_location=device_utils.get_device())
 super_res.load_state_dict(model_sd)
 
 # ----------------------------------------------------------------------------
@@ -221,8 +223,8 @@ def slerp(t, v0, v1, DOT_THRESHOLD=0.9995):
 class Renderer:
     def __init__(self):
         self.step_y = 100
-        self._device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-        self.kernel_type = "cuda" if torch.cuda.is_available() else "cpu"
+        self._device = device_utils.get_device()
+        self.kernel_type = self._device.type
         self._pkl_data = dict()  # {pkl: dict | CapturedException, ...}
         self._networks = dict()  # {cache_key: torch.nn.Module, ...}
         self._pinned_bufs = dict()  # {(shape, dtype): torch.Tensor, ...}
@@ -260,6 +262,7 @@ class Renderer:
         if self._device.type == 'cuda':
             self._end_event.record()
         else:
+            device_utils.synchronize(self._device)
             self._end_event = time.time()
         if 'image' in res:
             res.image = self.to_cpu(res.image).numpy()
@@ -280,7 +283,7 @@ class Renderer:
         data = self._pkl_data.get(pkl, None)
         if data is None:
             print(f'Loading "{pkl}"... ', end='', flush=True)
-            if not self.checked_custom_kernel:
+            if not self.checked_custom_kernel and torch.cuda.is_available():
                 print("Trying to compile custom cuda kernel, this can take a while...", flush=True)
             try:
                 with dnnlib.util.open_url(pkl, verbose=False) as f:
@@ -419,8 +422,10 @@ class Renderer:
                      save_model = False,
                      save_path = "",
                      snapped=None,
-                     device="cuda"
+                     device=None
                      ):
+        if device is None:
+            device = device_utils.get_device().type
         res.has_custom = params.has_custom
         if self.checked_custom_kernel:
             if device == "custom":
@@ -801,7 +806,13 @@ class Renderer:
                 if isinstance(out, tuple):
                     out = out[0]
                 if use_superres:
-                    with torch.autocast("cuda" if self._device.type == "cuda" else "cpu"):
+                    if self._device.type == "mps":
+                        # MPS has no autocast support; CPU autocast would corrupt
+                        # dtypes of operators that fall back to CPU.
+                        autocast_ctx = contextlib.nullcontext()
+                    else:
+                        autocast_ctx = torch.autocast("cuda" if self._device.type == "cuda" else "cpu")
+                    with autocast_ctx:
                         out = super_res(out)
         except CaptureSuccess as e:
             out = e.out

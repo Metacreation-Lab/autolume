@@ -10,20 +10,22 @@ import ffmpeg
 import cv2
 from torchvision import transforms
 from super_res.net_base import SRVGGNetPlus, SRVGGNetCompact, RRDBNet
+from utils.device_utils import get_device
 
 def load_model(choice,path):
+  device = get_device()
   if choice =='Quality':
-    model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=4).to('cuda')
-    model_sd=torch.load(path)['params_ema']
+    model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=4).to(device)
+    model_sd=torch.load(path, map_location=device)['params_ema']
     model.load_state_dict(model_sd)
   if choice =='Balance':
-    model = model = SRVGGNetCompact(num_in_ch=3, num_out_ch=3, num_feat=64, num_conv=32, upscale=4, act_type='prelu').to('cuda')
-    model_sd=torch.load(path)['params']
+    model = model = SRVGGNetCompact(num_in_ch=3, num_out_ch=3, num_feat=64, num_conv=32, upscale=4, act_type='prelu').to(device)
+    model_sd=torch.load(path, map_location=device)['params']
     model.load_state_dict(model_sd)
 
   if choice =='Fast':
-    model = SRVGGNetPlus(num_in_ch=3, num_out_ch=3, num_feat=48, upscale=4, act_type='prelu').to('cuda')
-    model_sd=torch.load(path)
+    model = SRVGGNetPlus(num_in_ch=3, num_out_ch=3, num_feat=48, upscale=4, act_type='prelu').to(device)
+    model_sd=torch.load(path, map_location=device)
     model.load_state_dict(model_sd)
   return model
 
@@ -159,7 +161,7 @@ def process(args,file):
     while True:
       img = reader.get_frame()
       if img is not None:
-        input=torch.tensor(img).permute(2,0,1).float().to('cuda')/255
+        input=torch.tensor(img).permute(2,0,1).float().to(get_device())/255
         input=torch.unsqueeze(input,0)
         with torch.inference_mode():
           output = upsampler(input)
@@ -199,7 +201,7 @@ def process(args,file):
     image = cv2.imread(file)
     input_width, input_height = image.shape[0], image.shape[1]
     print("INPUT DIMENSIONS", input_width, input_height, image.shape)
-    image = data_transformer(image).to('cuda')
+    image = data_transformer(image).to(get_device())
     input = torch.unsqueeze(image, 0)
 
     with torch.inference_mode():

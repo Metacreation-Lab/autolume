@@ -5,6 +5,7 @@ import numpy as np
 from tqdm import trange
 
 from ganspace import estimators
+from utils import device_utils
 
 
 def setup_estimator(name, num_features, alpha):
@@ -17,6 +18,9 @@ def sample_latent(n_latents, model, device, c=None, project=False):
     return latent
 
 def get_max_batch_size(model, device):
+    if torch.device(device).type != 'cuda':
+        # CUDA memory statistics are unavailable; use the default cap.
+        return 20
     # Reset statistics
     torch.cuda.reset_max_memory_cached(device)
     torch.cuda.reset_max_memory_allocated(device)
@@ -38,6 +42,7 @@ def fit(queue, reply):
     while queue.qsize() > 0:
         name, num_features, model, device, project, alpha = queue.get()
 
+    model = model.to(device)
 
     sample_shape = model.w_dim
     sample_dims = np.prod(sample_shape)
@@ -127,7 +132,7 @@ def fit(queue, reply):
     # Normalize
     Z_comp /= np.linalg.norm(Z_comp, axis=-1, keepdims=True)
 
-    torch.cuda.empty_cache()
+    device_utils.empty_cache(device)
     reply.put(("", (X_comp, Z_comp), True))
 
 

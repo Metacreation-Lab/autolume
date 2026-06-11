@@ -11,6 +11,9 @@ import torch
 from torchvision import transforms
 import torchvision.transforms.functional as F
 
+from utils import device_utils
+from utils.device_utils import get_device
+
 
 def get_audio(video_path):
     probe = ffmpeg.probe(video_path)
@@ -82,22 +85,23 @@ class Writer:
 
 
 def load_model(choice, path):
+    device = get_device()
     if choice == 'Quality':
-        model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=4).to('cuda')
-        model_sd = torch.load(path)['params_ema']
+        model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=4).to(device)
+        model_sd = torch.load(path, map_location=device)['params_ema']
         model.load_state_dict(model_sd)
         return model
 
     if choice == 'Balance':
         model = model = SRVGGNetCompact(num_in_ch=3, num_out_ch=3, num_feat=64, num_conv=32, upscale=4,
-                                        act_type='prelu').to('cuda')
-        model_sd = torch.load(path)['params']
+                                        act_type='prelu').to(device)
+        model_sd = torch.load(path, map_location=device)['params']
         model.load_state_dict(model_sd)
         return model
 
     if choice == 'Fast':
-        model = SRVGGNetPlus(num_in_ch=3, num_out_ch=3, num_feat=48, upscale=4, act_type='prelu').to('cuda')
-        model_sd = torch.load(path)
+        model = SRVGGNetPlus(num_in_ch=3, num_out_ch=3, num_feat=48, upscale=4, act_type='prelu').to(device)
+        model_sd = torch.load(path, map_location=device)
         model.load_state_dict(model_sd)
         return model
 
@@ -166,7 +170,7 @@ def super_res_main(input_dir, output_dir, scale_mode, sharpening_factor, model, 
             data_transformer = transforms.Compose([transforms.ToTensor()])
             image = cv2.imread(file)
             input_width, input_height = image.shape[0], image.shape[1]
-            image = data_transformer(image).to('cuda')
+            image = data_transformer(image).to(get_device())
             input = torch.unsqueeze(image, 0)
 
             with torch.inference_mode():
@@ -225,7 +229,7 @@ def super_res_main(input_dir, output_dir, scale_mode, sharpening_factor, model, 
                 if img is None:
                     break
                 with torch.inference_mode():
-                    sr_input = torch.tensor(img).permute(2, 0, 1).unsqueeze(0).float().to('cuda') / 255
+                    sr_input = torch.tensor(img).permute(2, 0, 1).unsqueeze(0).float().to(get_device()) / 255
                     sr_output = super_res_model(sr_input)
                     sr_output = F.adjust_sharpness(sr_output, sharpening_factor) * 255
 
@@ -249,7 +253,7 @@ def super_res_main(input_dir, output_dir, scale_mode, sharpening_factor, model, 
                     writer.write_frame(sr_output)
                     ret, img = video.read()
             writer.close()
-            torch.cuda.empty_cache()
+            device_utils.empty_cache()
             gc.collect()
         else:
             print("File type not supported. \n Supported file types are: \n jpg, jpeg, png, mp4, avi, mov")
