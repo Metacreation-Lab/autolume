@@ -62,9 +62,9 @@ class ProjectionModule:
 
     @imgui_utils.scoped_by_object_id
     def __call__(self):
-        if self.reply.qsize() > 0:
+        if not self.reply.empty():
             self.message, projected_img, self.done_projecting, self.done_recording = self.reply.get()
-            while self.reply.qsize() > 0:
+            while not self.reply.empty():
                 self.message, projected_img, self.done_projecting, self.done_recording = self.reply.get()
 
             if projected_img is not None:

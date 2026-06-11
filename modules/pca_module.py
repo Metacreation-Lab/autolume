@@ -76,9 +76,9 @@ class PCA_Module:
 
         imgui.separator()
 
-        if self.reply.qsize() > 0:
+        if not self.reply.empty():
             self.message, (self.X_comp, self.Z_comp), self.done = self.reply.get()
-            while self.reply.qsize() > 0:
+            while not self.reply.empty():
                 self.message, (self.X_comp, self.Z_comp), self.done = self.reply.get()
 
         if self.done:
