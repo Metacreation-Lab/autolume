@@ -1,30 +1,38 @@
-import tkinter as tk
-from tkinter import filedialog
+try:
+    import tkinter as tk
+    from tkinter import filedialog
+except ImportError:
+    # Some Python builds ship Tk separately (Homebrew on macOS: brew install
+    # python-tk@3.10). Degrade to no-op dialogs instead of crashing at import.
+    tk = None
+    filedialog = None
 import os
 from typing import List, Optional, Tuple
 
 class NativeBrowserWidget:
     def __init__(self):
-        # Hide main tkinter window
-        self.root = tk.Tk()
-        self.root.withdraw()
-        
-        # Configure tkinter for better performance with large directories
-        self.root.option_add('*Dialog.msg.font', 'TkDefaultFont')
-        self.root.option_add('*Dialog.msg.wrapLength', '3i')
-        
-        # Set tkinter options to improve performance with large directories
-        self.root.tk.call('tk', 'scaling', 1.0)  # Disable DPI scaling issues
-        
-        # Optimize for large file lists
-        self.root.option_add('*Listbox.font', 'TkDefaultFont')
-        self.root.option_add('*Listbox.selectBackground', 'lightblue')
-        self.root.option_add('*Listbox.selectForeground', 'black')
-        
-        # Reduce visual effects for better performance
-        self.root.option_add('*Button.relief', 'flat')
-        self.root.option_add('*Button.borderWidth', '1')
-        
+        self.root = None
+        if tk is not None:
+            # Hide main tkinter window
+            self.root = tk.Tk()
+            self.root.withdraw()
+
+            # Configure tkinter for better performance with large directories
+            self.root.option_add('*Dialog.msg.font', 'TkDefaultFont')
+            self.root.option_add('*Dialog.msg.wrapLength', '3i')
+
+            # Set tkinter options to improve performance with large directories
+            self.root.tk.call('tk', 'scaling', 1.0)  # Disable DPI scaling issues
+
+            # Optimize for large file lists
+            self.root.option_add('*Listbox.font', 'TkDefaultFont')
+            self.root.option_add('*Listbox.selectBackground', 'lightblue')
+            self.root.option_add('*Listbox.selectForeground', 'black')
+
+            # Reduce visual effects for better performance
+            self.root.option_add('*Button.relief', 'flat')
+            self.root.option_add('*Button.borderWidth', '1')
+
         # Image extensions 
         self.image_extensions = [
             ('Image files', '*.png *.jpg *.jpeg *.bmp *.tiff *.tif *.webp *.gif'),
@@ -67,6 +75,13 @@ class NativeBrowserWidget:
         self._page_size = 500  # Load files in chunks of 500
         self._current_page = 0
     
+    def _dialogs_available(self) -> bool:
+        if self.root is None:
+            print("Native file dialogs unavailable: tkinter is not installed "
+                  "(on macOS: brew install python-tk@3.10)")
+            return False
+        return True
+
     def _build_extension_set(self, extensions_list: List[Tuple[str, str]]) -> set:
         """Build a set of extensions for O(1) lookup instead of nested loops."""
         ext_set = set()
@@ -114,6 +129,8 @@ class NativeBrowserWidget:
     
     def select_image_directory(self):
         """Select a directory containing image files - returns directory path only for lazy loading."""
+        if not self._dialogs_available():
+            return None
         folder_path = filedialog.askdirectory(
             title="Select a folder containing image dataset"
         )
@@ -158,6 +175,8 @@ class NativeBrowserWidget:
     
     def select_image_files_native(self):
         """Select multiple image files using native OS dialog with enhanced performance."""
+        if not self._dialogs_available():
+            return []
         try:
             # Configure tkinter for better performance with large directories
             self.root.update_idletasks()
@@ -187,6 +206,8 @@ class NativeBrowserWidget:
 
     def select_video_files(self):
         """Select one or more video files using native OS dialog with enhanced performance."""
+        if not self._dialogs_available():
+            return []
         try:
             # Configure tkinter for better performance with large directories
             self.root.update_idletasks()
@@ -211,6 +232,8 @@ class NativeBrowserWidget:
     
     def select_video_directory(self):
         """Select a directory containing video files - returns directory path only for lazy loading."""
+        if not self._dialogs_available():
+            return None
         folder_path = filedialog.askdirectory(
             title="Select a folder containing video dataset"
         )
@@ -259,6 +282,8 @@ class NativeBrowserWidget:
         Select a directory using native OS dialog.
         Returns the directory path or None if cancelled.
         """
+        if not self._dialogs_available():
+            return None
         try:
             # Configure tkinter for better performance
             self.root.update_idletasks()
@@ -281,6 +306,8 @@ class NativeBrowserWidget:
         Select a directory and check if it contains video files.
         Returns (directory_path, has_video_files, video_files_list)
         """
+        if not self._dialogs_available():
+            return None, False, []
         try:
             # Configure tkinter for better performance
             self.root.update_idletasks()
@@ -317,6 +344,8 @@ class NativeBrowserWidget:
 
     def cleanup(self):
         """Clean up the tkinter root window."""
+        if self.root is None:
+            return
         try:
             self.root.destroy()
         except:
