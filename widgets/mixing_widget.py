@@ -5,6 +5,7 @@ import numpy as np
 
 import dnnlib
 from utils.gui_utils import imgui_utils
+from widgets.model_download_widget import ModelDropdownButton
 
 try:
     import cPickle as pickle
@@ -58,13 +59,11 @@ class MixingWidget:
         self.output_name = ""
         self.model_pth = ""
         self.main_model = ""
-        self.browse_refocus = False
         self.layer1 = []
         self.layer2 = []
         self.output_name = ""
         self._save = False
 
-        self.models = []
         self.combined_layers = []
         self.collapsed = []
         self.cached_layers = []
@@ -73,9 +72,7 @@ class MixingWidget:
         self.browser = browse_widget.BrowseWidget(viz, "Find", ".", [".pkl"], width=self.viz.app.button_w,
                                                   multiple=False, traverse_folders=False)
 
-        for pkl in os.listdir("./models"):
-            if pkl.endswith(".pkl"):
-                self.models.append(os.path.join(os.getcwd(),"models",pkl))
+        self.model_dropdown = ModelDropdownButton(viz.pickle_widget.model_downloader)
 
     @imgui_utils.scoped_by_object_id
     def __call__(self, show):
@@ -90,9 +87,10 @@ class MixingWidget:
 
 
             imgui.same_line()
-            if imgui_utils.button(f'Models##mixingWidget', enabled=len(self.models) > 0):
-                imgui.open_popup(f'browse_pkls_popup##mixingWidget')
-                self.browse_refocus = True
+            picked = self.model_dropdown()
+            if picked is not None:
+                self.model_pth = resolve_pkl(picked)
+                model_changed = True
 
             imgui.same_line()
             _clicked, pkl = self.browser()
@@ -100,18 +98,6 @@ class MixingWidget:
                 print("SELECTED", pkl)
                 self.model_pth = resolve_pkl(pkl[0])
                 model_changed = True
-
-            if imgui.begin_popup(f'browse_pkls_popup##mixingWidget'):
-                for pkl in self.models:
-                    clicked, _state = imgui.menu_item(pkl)
-                    if clicked:
-                        self.model_pth = resolve_pkl(pkl)
-                        model_changed = True
-                if self.browse_refocus:
-                    imgui.set_scroll_here()
-                    self.browse_refocus = False
-
-                imgui.end_popup()
             
             imgui.same_line()
             with imgui_utils.item_width(self.viz.app.button_w):

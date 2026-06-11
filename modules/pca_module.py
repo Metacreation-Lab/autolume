@@ -12,6 +12,7 @@ import dnnlib
 from torch_utils import legacy
 from utils.gui_utils import imgui_utils
 from ganspace.extract_pca import fit
+from widgets.model_download_widget import ModelDropdownButton
 from widgets.browse_widget import BrowseWidget
 from widgets.native_browser_widget import NativeBrowserWidget
 from widgets.help_icon_widget import HelpIconWidget
@@ -38,7 +39,6 @@ class PCA_Module:
         self.pca_mode = 0
         self.num_features = 0
         self.alpha = 1
-        self.browse_cache = []
         self.running = False
         self.queue = mp.Queue()
         self.reply = mp.Queue()
@@ -49,10 +49,7 @@ class PCA_Module:
         self.save_path_browser = NativeBrowserWidget()
         self.X_comp, self.Z_comp = None, None
         self.done = False
-        for pkl in os.listdir("./models"):
-            if pkl.endswith(".pkl"):
-                print(pkl, os.path.join(os.getcwd(), "models", pkl))
-                self.browse_cache.append(os.path.join(os.getcwd(), "models", pkl))
+        self.model_dropdown = ModelDropdownButton(menu.model_downloader)
 
     @imgui_utils.scoped_by_object_id
     def __call__(self):
@@ -98,22 +95,10 @@ class PCA_Module:
             self.load(self.user_pkl)
 
         imgui.same_line()
-        if imgui_utils.button('Models', enabled=len(self.browse_cache) > 0, width=button_width):
-            imgui.open_popup('browse_pkls_popup')
-            self.browse_refocus = True
-
-        if imgui.begin_popup('browse_pkls_popup'):
-            for pkl in self.browse_cache:
-                clicked, _state = imgui.menu_item(pkl)
-                if clicked:
-                    self.user_pkl = pkl
-                    self.load(pkl)
-
-            if self.browse_refocus:
-                imgui.set_scroll_here()
-                self.menu.app.skip_frame()  # Focus will change on next frame.
-                self.browse_refocus = False
-            imgui.end_popup()
+        picked = self.model_dropdown(width=button_width)
+        if picked is not None:
+            self.user_pkl = picked
+            self.load(picked)
 
         help_width = imgui.calc_text_size("(?)").x + 10
         input_width = -(self.app.button_w + self.app.spacing + help_width)

@@ -19,7 +19,9 @@ import dnnlib
 import imgui
 import numpy as np
 from utils.gui_utils import imgui_utils
+from utils.model_dir import list_model_pkls, models_dir
 from widgets import browse_widget
+from widgets.model_download_widget import ModelDownloadWidget, ModelDropdownButton
 
 from . import renderer
 
@@ -37,17 +39,18 @@ class PickleWidget:
         self.user_pkl       = ''
         self.recent_pkls    = []
         self.browse_cache = []
-        self.browse_refocus = False
         self.load_pkl('', ignore_errors=True)
         self.use_osc = False
         self.osc_addresses = ""
 
         self.browser = browse_widget.BrowseWidget(viz, "Find", os.path.abspath("."), [".pkl"], width=self.viz.app.button_w, multiple=False, traverse_folders=False)
 
-        for pkl in os.listdir("./models"):
-            if pkl.endswith(".pkl"):
-                print(pkl, os.path.join(os.getcwd(),"models",pkl))
-                self.browse_cache.append(os.path.join(os.getcwd(),"models",pkl))
+        self.rescan_models()
+        self.model_downloader = ModelDownloadWidget(viz.app, models_dir=models_dir(), on_complete=self.rescan_models)
+        self.model_dropdown = ModelDropdownButton(self.model_downloader)
+
+    def rescan_models(self):
+        self.browse_cache = list_model_pkls()
 
     def get_params(self):
         return (self.recent_pkls, self.browse_cache, self.cur_pkl, self.user_pkl, self.use_osc, self.osc_addresses)
@@ -141,9 +144,9 @@ class PickleWidget:
                 print("SELECTED", pkl)
                 self.load_pkl(pkl[0], ignore_errors=True)
             imgui.same_line()
-            if imgui_utils.button('Models', enabled=len(self.browse_cache) > 0, width=-1):
-                imgui.open_popup('browse_pkls_popup')
-                self.browse_refocus = True
+            picked = self.model_dropdown(width=-1)
+            if picked is not None:
+                self.load_pkl(picked, ignore_errors=True)
 
         if imgui.begin_popup('recent_pkls_popup'):
             for pkl in recent_pkls:
@@ -152,19 +155,7 @@ class PickleWidget:
                     self.load_pkl(pkl, ignore_errors=True)
             imgui.end_popup()
 
-        if imgui.begin_popup('browse_pkls_popup'):
-            for pkl in self.browse_cache:
-                pkl_name = os.path.basename(pkl)
-                clicked, _state = imgui.menu_item(pkl_name)
-                if clicked:
-                    self.load_pkl(pkl, ignore_errors=True)
-
-            if self.browse_refocus:
-                imgui.set_scroll_here()
-                viz.app.skip_frame()  # Focus will change on next frame.
-                self.browse_refocus = False
-
-            imgui.end_popup()
+        self.model_downloader()
 
         paths = viz.app.pop_drag_and_drop_paths()
         if paths is not None and len(paths) >= 1:

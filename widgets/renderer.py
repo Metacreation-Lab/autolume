@@ -23,6 +23,7 @@ from torch_utils import legacy
 from architectures import custom_stylegan2
 from super_res.net_base import SRVGGNetPlus
 from modules.network_mixing import extract_conv_names, extract_mapping_names
+from utils.model_dir import ensure_models_dir
 import os
 import pickle
 
@@ -480,7 +481,7 @@ class Renderer:
                 data['G_ema'] = self.G_mixed
                 data['G'] = self.G_mixed
 
-                with open(os.path.join(os.getcwd(),"models",save_path+".pkl"), 'wb') as f:
+                with open(os.path.join(ensure_models_dir(), save_path+".pkl"), 'wb') as f:
                     pickle.dump(data, f)
 
             if mixing and not (self.G_mixed is None):

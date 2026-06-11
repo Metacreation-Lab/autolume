@@ -1,0 +1,6 @@
+name,filename,resolution,author,license,url
+Flickr Faces HQ,stylegan2-ffhq-1024x1024.pkl,1024,Nvidia,Nvidia Source Code License-NC,https://api.ngc.nvidia.com/v2/models/org/nvidia/team/research/stylegan2/1/files?redirect=true&path=stylegan2-ffhq-1024x1024.pkl
+Flickr Faces HQ,stylegan2-ffhq-512x512.pkl,512,Nvidia,Nvidia Source Code License-NC,https://api.ngc.nvidia.com/v2/models/org/nvidia/team/research/stylegan2/1/files?redirect=true&path=stylegan2-ffhq-512x512.pkl
+AFHQ Cats,stylegan2-afhqcat-512x512.pkl,512,Nvidia,Nvidia Source Code License-NC,https://api.ngc.nvidia.com/v2/models/org/nvidia/team/research/stylegan2/1/files?redirect=true&path=stylegan2-afhqcat-512x512.pkl
+AFHQ Dogs,stylegan2-afhqdog-512x512.pkl,512,Nvidia,Nvidia Source Code License-NC,https://api.ngc.nvidia.com/v2/models/org/nvidia/team/research/stylegan2/1/files?redirect=true&path=stylegan2-afhqdog-512x512.pkl
+Rivers,rivers-1024.pkl,1024,Philippe Pasquier,Creative Commons BY-NC,https://drive.google.com/uc?export=download&id=1ajIHlAtm97ooMIZCiQILS0guz4uBDHqY
