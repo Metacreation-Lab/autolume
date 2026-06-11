@@ -1,9 +1,6 @@
-from pathlib import Path
 import pandas as pd
-import cv2
 import imgui
 import webbrowser
-from utils.gui_utils import gl_utils
 from utils.resource_paths import get_version, resource_path
 
 DOCS_BASE_URL = f"https://metacreation-lab.github.io/autolume/{get_version()}"
@@ -11,12 +8,9 @@ DOCS_BASE_URL = f"https://metacreation-lab.github.io/autolume/{get_version()}"
 class HelpIconWidget:
     """Reusable widget for displaying a help icon next to labels"""
     
-    def __init__(self, icon_path="assets/help_icon.png"):
-        self.icon_path = icon_path # currently unavailable
-        self.help_icon_texture = None
+    def __init__(self):
         self._open_popup_id = None
-        self._popup_position = None  
-        self._load_icon()
+        self._popup_position = None
 
     def load_help_texts(self, module_name):
         help_texts = {}
@@ -52,22 +46,6 @@ class HelpIconWidget:
         path = url_or_path if url_or_path.startswith("/") else "/" + url_or_path
         return base + path
 
-    def _load_icon(self):
-        """Load the help icon image as a texture"""
-        try:
-            if Path(self.icon_path).exists():
-                help_img = cv2.imread(str(Path(self.icon_path).as_posix()), cv2.IMREAD_UNCHANGED)
-                if help_img is not None:
-                    self.help_icon_texture = gl_utils.Texture(
-                        image=help_img,
-                        width=help_img.shape[1],
-                        height=help_img.shape[0],
-                        channels=help_img.shape[2]
-                    )
-        except Exception as e:
-            print(f"Error loading help icon: {e}")
-            self.help_icon_texture = None
-    
     def render(self, tooltip_text):
         """Render help icon with tooltip (no URL)"""
         if tooltip_text is None:
@@ -100,12 +78,8 @@ class HelpIconWidget:
             hyperlinks: List of tuples (url, link_text) for hyperlinks, or None
         """
         imgui.same_line()
-        if self.help_icon_texture is not None:
-            icon_size = imgui.get_font_size() 
-            imgui.image(self.help_icon_texture.gl_id, icon_size, icon_size)
-        else:
-            imgui.text_disabled("(?)")
-        
+        imgui.text_disabled("(?)")
+
         popup_id = f"##HelpPopup_{abs(hash(tooltip_text))}"
         
         icon_hovered = imgui.is_item_hovered()
@@ -193,10 +167,6 @@ class HelpIconWidget:
                 imgui.text(line)
     
     def cleanup(self):
-        try:
-            if self.help_icon_texture is not None:
-                self.help_icon_texture.delete()
-                self.help_icon_texture = None
-        except Exception as e:
-            print(f"Warning: Error during help icon cleanup: {e}")
+        """No-op retained for API compatibility (no GL resources to release)."""
+        pass
 
