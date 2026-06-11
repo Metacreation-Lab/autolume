@@ -8,6 +8,7 @@
 
 import os
 import sys
+import glfw
 import imgui
 import imgui.integrations.glfw
 
@@ -97,6 +98,24 @@ class _GlfwRenderer(imgui.integrations.glfw.GlfwRenderer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.mouse_wheel_multiplier = 1
+        # The base class only polls button state once per frame, so a click whose
+        # press and release both happen between two frames (e.g. a trackpad tap,
+        # or any click while the frame rate is low) is lost. Latch presses from
+        # the event callback and hold them for one frame, like the official
+        # Dear ImGui GLFW backend does.
+        self._mouse_just_pressed = [False, False, False]
+        glfw.set_mouse_button_callback(self.window, self._mouse_button_callback)
+
+    def _mouse_button_callback(self, _window, button, action, _mods):
+        if action == glfw.PRESS and 0 <= button < len(self._mouse_just_pressed):
+            self._mouse_just_pressed[button] = True
+
+    def process_inputs(self):
+        super().process_inputs()
+        for i in range(len(self._mouse_just_pressed)):
+            if self._mouse_just_pressed[i]:
+                self.io.mouse_down[i] = True
+                self._mouse_just_pressed[i] = False
 
     def scroll_callback(self, window, x_offset, y_offset):
         self.io.mouse_wheel += y_offset * self.mouse_wheel_multiplier
