@@ -159,6 +159,9 @@ class Texture:
             gl.glTexParameterf(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_EDGE)
             gl.glTexParameterf(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR if self.bilinear else gl.GL_NEAREST)
             gl.glTexParameterf(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR_MIPMAP_LINEAR if self.mipmap else gl.GL_NEAREST)
+            # Allocate storage once; update() streams into it with glTexSubImage2D.
+            fmt = get_texture_format(self.dtype, self.channels)
+            gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, fmt.internalformat, self.width, self.height, 0, fmt.format, fmt.type, None)
         self.update(image)
 
     def delete(self):
@@ -180,14 +183,17 @@ class Texture:
         gl.glBindTexture(gl.GL_TEXTURE_2D, prev_id)
 
     def update(self, image):
-        if image is not None:
-            image = prepare_texture_data(image)
-            assert self.is_compatible(image=image)
+        if image is None:
+            return
+        image = prepare_texture_data(image)
+        assert self.is_compatible(image=image)
         with self.bind():
             fmt = get_texture_format(self.dtype, self.channels)
             gl.glPushClientAttrib(gl.GL_CLIENT_PIXEL_STORE_BIT)
             gl.glPixelStorei(gl.GL_UNPACK_ALIGNMENT, 1)
-            gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, fmt.internalformat, self.width, self.height, 0, fmt.format, fmt.type, image)
+            # Stream into the existing allocation; re-specifying the texture with
+            # glTexImage2D every frame forces a driver reallocation.
+            gl.glTexSubImage2D(gl.GL_TEXTURE_2D, 0, 0, 0, self.width, self.height, fmt.format, fmt.type, image)
             if self.mipmap:
                 gl.glGenerateMipmap(gl.GL_TEXTURE_2D)
             gl.glPopClientAttrib()
