@@ -123,14 +123,19 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
         self.set_window_size(width, height + self.title_bar_height)
 
     def maximize(self):
+        area_x, area_y, area_width, area_height = self._get_work_area()
         if sys.platform == 'darwin':
             # glfw.maximize_window is [NSWindow zoom:] on macOS, which animates
             # the resize and misbehaves on undecorated windows; set the frame to
             # the work area explicitly and instantly instead.
-            area_x, area_y, area_width, area_height = self._get_work_area()
             glfw.set_window_pos(self._glfw_window, area_x, area_y + self.title_bar_height)
             glfw.set_window_size(self._glfw_window, area_width, max(area_height - self.title_bar_height, 1))
         else:
+            # Clear any stale maximized state first: maximizing an already
+            # zoom-flagged window is a no-op and leaves it wherever it was.
+            # Anchoring at the work-area origin also selects the right monitor.
+            glfw.restore_window(self._glfw_window)
+            glfw.set_window_pos(self._glfw_window, area_x, area_y + self.title_bar_height)
             glfw.maximize_window(self._glfw_window)
 
     def set_position(self, x, y):
