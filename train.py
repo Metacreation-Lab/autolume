@@ -13,7 +13,14 @@ import os
 import click
 import re
 import json
+import sys
 import tempfile
+
+if sys.platform == 'darwin':
+    # Allow torch to fall back to CPU for operators not yet implemented on MPS.
+    # Must be set before torch is imported (mirrors main.py for the CLI path).
+    os.environ.setdefault('PYTORCH_ENABLE_MPS_FALLBACK', '1')
+
 import torch
 import traceback
 
