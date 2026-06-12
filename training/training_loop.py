@@ -323,9 +323,10 @@ def training_loop(
         except ImportError as err:
             print('Skipping tfevents export:', err)
 
-    # Initialize emissions tracker.
+    # Initialize emissions tracker. Disabled on macOS: codecarbon shells out to
+    # powermetrics there, which prompts for a sudo password mid-run.
     tracker = None
-    if rank == 0:
+    if rank == 0 and not device_utils.is_macos():
         tracker = EmissionsTracker(
             output_dir=run_dir,
             output_file="emissions.csv",

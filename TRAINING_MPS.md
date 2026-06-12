@@ -34,7 +34,7 @@ One environment detail: `PYTORCH_ENABLE_MPS_FALLBACK=1` is inherited by the trai
 - `nan_to_num`, EMA updates, ADA's `p` update via `misc.constant`: device-agnostic.
 - tf32 and cudnn flags: harmless no-ops off CUDA.
 - KD / teacher / LPIPS / face parsing: only constructed when a teacher is set, which is the compression path; it stays gated on macOS and out of scope.
-- codecarbon's EmissionsTracker runs degraded on Apple Silicon (estimates instead of RAPL); worst case is warnings.
+- codecarbon's EmissionsTracker is disabled on macOS: it shells out to `powermetrics`, which prompts for a sudo password mid-run. All its call sites were already None-guarded, so only the construction is gated; energy fields simply drop from the tick line on macOS.
 
 ## The one real unknown: ADA geometric augmentations
 
