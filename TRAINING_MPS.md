@@ -50,6 +50,25 @@ Every change is conditioned on the resolved device type, sourced from [utils/dev
 
 Honest framing, to be validated in Phase 2: fp32 single-device StyleGAN2 training on an M-series Max class GPU should land in the minutes-per-kimg range at 512 (versus seconds-per-kimg on a modern high-end NVIDIA card), putting a 200 to 600 kimg fine-tune in the hours-to-a-day band and a 25000 kimg from-scratch run out of practical reach. Levers, in expected order of impact: keep the augmentation pipeline free of CPU fallbacks (see above); size `batch_gpu` to fill unified memory at the target resolution; prefer 256 or 512 fine-tunes over 1024; reduce snapshot frequency (each snapshot deep-copies G, D, and G_ema); keep 2 to 4 DataLoader workers. Two experiments worth trying after correctness is established, both behind explicit flags: allowing fp16 layers on MPS (extend the dtype condition in the architectures; risk of instability since StyleGAN's clamping scheme was tuned on CUDA) and `torch.compile` with the experimental Metal backend in recent PyTorch.
 
+## Probe results (M1 Max 64 GB, torch 2.8.0, 2026-06)
+
+| Probe | Result |
+|-------|--------|
+| float64 cast on mps | FAIL, as expected (documents the training_stats detour) |
+| training_stats report/collect with the CPU detour | NATIVE |
+| grid_sample first-order backward | CPU-FALLBACK: `aten::grid_sampler_2d_backward` |
+| grid_sample r1-style second-order | NATIVE (see note) |
+| conv double backward (R1 micro-step) | NATIVE |
+| path-length second order | NATIVE |
+| ADA sampling + upfirdn2d reference ops | NATIVE |
+| DiffAugment color,translation,cutout | NATIVE |
+| EMA lerp/copy + nan_to_num | NATIVE |
+| Integrated one-batch G/D step (real classes, ada bgc) | NATIVE (see note) |
+
+Note: PyTorch emits the fallback warning once per op per process, so the second-order and integrated probes reuse the already-warned `grid_sampler_2d_backward`; their NATIVE status means "ran correctly", not "no fallback inside".
+
+Interpretation. Training is functionally complete on MPS: the integrated step exercises the real generator, discriminator, augment pipe, and loss, including both regularizers, and the only operation leaving the GPU is the backward of `grid_sample`. The conv double-backward risk from the register is retired. The remaining cost: ADA folds the blit augs (xflip, rotate90, integer translation) into the same affine `grid_sample` as the geometric ones, so any blit or geometric augmentation pays one CPU crossing per batch per phase. At 64x64 this is small; at 256+ it may dominate. If Phase 2 timing shows it matters, the prepared remedy is a device-gated pure-tensor-ops bilinear grid sampler inside `grid_sample_gradfix` (gather and scatter based, every op MPS-native, differentiable to arbitrary order by plain autograd), keeping CUDA on the existing path.
+
 ## Phased plan
 
 Phase 0, op probe (about an hour, mostly runtime): a small script that exercises each suspect op on `mps` and reports native / cpu-fallback / fail: float64 casts, `grid_sampler_2d_backward` through the gradfix Function, an R1 micro-step on a two-layer conv discriminator (double backward), a path-length micro-step, lognormal sampling used by ADA, DiffAugment policies. Its output decides the augmentation default and confirms the conv double-backward assumption before any code changes.
