@@ -1,6 +1,6 @@
 # Apple Silicon (macOS) port
 
-This document records the key changes that make Autolume run natively on Apple Silicon Macs using the PyTorch MPS backend. The live visualizer/renderer is the primary supported feature. Training and model compression are intentionally not supported on macOS and their UI is greyed out. Windows and Linux behavior is unchanged: every macOS adaptation is behind a platform or device check.
+This document records the key changes that make Autolume run natively on Apple Silicon Macs using the PyTorch MPS backend. The live visualizer/renderer is the primary supported feature. Model compression is not supported on macOS and its UI is greyed out; the training UI is accessible but the training stack itself is CUDA-only and has not been ported, so starting a run on macOS is expected to fail. Windows and Linux behavior is unchanged: every macOS adaptation is behind a platform or device check.
 
 ## Device selection
 
@@ -67,13 +67,12 @@ tkinter cannot run inside this app on macOS: Tk's Cocoa layer calls its own sele
 
 | Feature | Where | Why |
 |---------|-------|-----|
-| Training (incl. dataset prep UI) | [modules/training_module.py](modules/training_module.py) | CUDA-only training stack; impractical on Apple GPUs |
-| Compression / distillation | [modules/compress_module.py](modules/compress_module.py) | Same CUDA-only training stack ([prune.py](prune.py), [train.py](train.py) untouched) |
+| Compression / distillation | [modules/compress_module.py](modules/compress_module.py) | CUDA-only training stack ([prune.py](prune.py), [train.py](train.py) untouched) |
 | NDI streaming | [modules/visualizer.py](modules/visualizer.py), [widgets/performance_widget.py](widgets/performance_widget.py) | `ndi-python` publishes no macOS wheels; import is optional, send/destroy guarded, NDI name input greyed |
 | Full Screen Display window | [modules/visualizer.py](modules/visualizer.py) | The preview window creates a GL 3.3 core context sharing textures with the legacy main context; macOS cannot share across profiles |
 | Custom CUDA kernel toggle | already greyed via `has_custom` | Kernels never compile without CUDA |
 
-Everything else stays enabled on macOS and runs through MPS: live renderer, network bending, model mixing, looping, audio reactivity, OSC, presets, projection, GANSpace feature extraction, super resolution, screenshots, recording.
+Everything else stays enabled on macOS and runs through MPS: live renderer, network bending, model mixing, looping, audio reactivity, OSC, presets, projection, GANSpace feature extraction, super resolution, screenshots, recording. The training UI (including dataset preparation) is also accessible, but launching a training run exercises unported CUDA-only code and is expected to fail; porting it is future work.
 
 ## Known limitations and follow-ups
 
