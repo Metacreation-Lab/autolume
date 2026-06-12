@@ -88,6 +88,8 @@ class AsyncRenderer:
         args = None
         stamp = 0
         new_arg = False
+        is_mps = device_utils.get_device().type == 'mps'
+        renders_since_flush = 0
         with torch.inference_mode():
             while True:
                 if not args_queue.empty():
@@ -101,7 +103,16 @@ class AsyncRenderer:
                     result_queue.put([result, stamp])
                     del result
                     new_arg = False
+                    renders_since_flush += 1
                 # gc.collect() # Putting a garbage collect here stabilizes the memory usage, but slows down the rendering
                                # Torch seems to store values in the background even with nograd that slow down StyleGAN2 over time
                                # This is a workaround to keep the memory usage stable, but conflicts with imgui causing drops in GUI performance
-                device_utils.empty_cache()
+                if is_mps:
+                    # torch.mps.empty_cache() synchronizes the GPU; flushing every
+                    # iteration costs more than the memory it returns, so flush
+                    # periodically instead.
+                    if renders_since_flush >= 120:
+                        device_utils.empty_cache()
+                        renders_since_flush = 0
+                else:
+                    device_utils.empty_cache()

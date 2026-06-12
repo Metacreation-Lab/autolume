@@ -16,7 +16,7 @@ All code that previously hardcoded `'cuda'` or `cuda if available else cpu` now 
 | File | What changed |
 |------|--------------|
 | [widgets/renderer.py](widgets/renderer.py) | Renderer device, super-res model load (`map_location`), render-time measurement (`synchronize` on MPS before timing), `device` arg defaults to `get_device()`, autocast skipped on MPS, custom-kernel log only when CUDA exists |
-| [modules/renderloop.py](modules/renderloop.py) | Per-frame cache flush via `device_utils.empty_cache()` |
+| [modules/renderloop.py](modules/renderloop.py) | Cache flush via `device_utils.empty_cache()`; on MPS the flush synchronizes the GPU, so it runs every 120 rendered frames instead of every loop iteration (CUDA keeps the original per-iteration flush, measured ~2 FPS gain on Apple Silicon) |
 | [widgets/performance_widget.py](widgets/performance_widget.py) | Default device, GPU checkbox now selects CUDA or MPS, greyed when neither exists |
 | [widgets/looping_widget.py](widgets/looping_widget.py) | Keyframe vectors on `get_device()` instead of `.cuda()`, pinned buffers only with CUDA |
 | [widgets/latent_widget.py](widgets/latent_widget.py) | `pin_memory()` only with CUDA (also fixes a missing-parentheses bug that always pinned) |
