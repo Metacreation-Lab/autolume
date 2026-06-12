@@ -1,6 +1,6 @@
 # StyleGAN training on Apple Silicon (MPS): feasibility report
 
-Status: analysis only, no implementation yet. Companion to [PORTING_MACOS.md](PORTING_MACOS.md).
+Status: Phase 0 (probe script, [probe_mps_training_ops.py](probe_mps_training_ops.py)) and Phase 1 (the gated fixes below) are implemented on this branch. Benchmark and probe results pending. Companion to [PORTING_MACOS.md](PORTING_MACOS.md).
 
 ## Verdict
 
