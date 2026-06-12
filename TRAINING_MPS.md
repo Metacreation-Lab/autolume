@@ -54,11 +54,21 @@ Honest framing, to be validated in Phase 2: fp32 single-device StyleGAN2 trainin
 
 Phase 0, op probe (about an hour, mostly runtime): a small script that exercises each suspect op on `mps` and reports native / cpu-fallback / fail: float64 casts, `grid_sampler_2d_backward` through the gradfix Function, an R1 micro-step on a two-layer conv discriminator (double backward), a path-length micro-step, lognormal sampling used by ADA, DiffAugment policies. Its output decides the augmentation default and confirms the conv double-backward assumption before any code changes.
 
-Phase 1, hard blockers plus correctness: implement the five gated fixes, then on the Mac run a 100-to-200-image dataset at 256 for a few kimg from scratch and a short fine-tune from a pretrained pickle. Pass criteria: finite losses, `r1_penalty` and `pl_penalty` statistics in normal ranges, ADA `p` adapting, visibly improving fakes grid, snapshot loading in the live renderer on both macOS and a CUDA machine.
+Phase 1, hard blockers plus correctness: implement the five gated fixes, then run the reference dataset (below) on the M1 Max for a few kimg from scratch. Pass criteria: finite losses, `r1_penalty` and `pl_penalty` statistics in normal ranges, ADA `p` adapting, visibly improving fakes grid, snapshot loading in the live renderer on both macOS and the CUDA machine.
 
-Phase 2, performance: sec/kimg sweeps over batch size and resolution, an MPS fallback audit over one tick (the fallback env var warns once per op), geometric-augs on/off comparison, then pick macOS defaults for the training UI (suggested batch, augpipe, snapshot cadence) and record measured numbers in this document.
+Phase 2, performance: the reference benchmark on both machines, plus sec/kimg sweeps over batch size, an MPS fallback audit over one tick (the fallback env var warns once per op), and a geometric-augs on/off comparison on MPS. Then pick macOS defaults for the training UI (suggested batch, augpipe, snapshot cadence) and record measured numbers in this document.
 
-Phase 3, CUDA parity and UI: fixed-seed before/after diff on a CUDA box, surface an "experimental on Apple Silicon" notice plus the chosen defaults in the training pane, update PORTING_MACOS.md.
+Phase 3, CUDA parity and UI: fixed-seed before/after diff of `stats.jsonl` on the 4090 machine using the reference config, surface an "experimental on Apple Silicon" notice plus the chosen defaults in the training pane, update PORTING_MACOS.md.
+
+## Reference benchmark
+
+Hardware: M1 Max 64 GB versus laptop RTX 4090 16 GB. Dataset: the existing 500-image 64x64 set, identical copy on both machines.
+
+Config, identical on both sides: `cfg=stylegan2`, resolution 64, `batch=16`, `batch_gpu=16`, default `gamma=10`, `aug=ada` with `bgc`, `metrics` empty, fixed `seed`, `kimg=20` for timing runs, snapshots effectively disabled (`snap` large) so they do not pollute timing. Measure the mean of `Timing/sec_per_tick` and `Timing/sec_per_kimg` from `stats.jsonl`, discarding the first tick (warmup and compilation). Record alongside: device, torch version, augmentation pipeline, and whether any MPS fallback warnings fired.
+
+Two caveats so the numbers are read correctly. At 64x64 both GPUs are heavily underutilized and per-op dispatch overhead dominates, a regime that flatters neither backend but penalizes MPS dispatch latency disproportionately, so the 64px ratio is a floor-ish indicator, not representative of 256/512 behavior; a follow-up datapoint at 256 (the same images upscaled, or any handy 256 set) is worth one run on each machine before drawing throughput conclusions. And with 500 images ADA will push `p` high fairly quickly, which is fine for benchmarking and correctness but not a statement about achievable quality.
+
+The same dataset doubles as the correctness fixture: run 5 kimg with a fixed seed on both machines and compare the shape of `Loss/D/loss`, `Loss/G/loss`, `Loss/r1_penalty`, `Loss/pl_penalty`, and `Progress/augment` curves. Bitwise equality across backends is not expected (different kernels, different reduction orders); same-ballpark curves and equally healthy fakes grids are the bar. Bitwise equality IS expected on the 4090 between builds with and without the MPS change set, which is the isolation proof.
 
 ## Risk register
 
