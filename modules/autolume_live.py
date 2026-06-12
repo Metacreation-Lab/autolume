@@ -131,10 +131,14 @@ class Autolume(imgui_window.ImguiWindow):
         if self.state == States.SPLASH:
             imgui.set_next_window_position(0, 0)
             imgui.set_next_window_size(self.content_width, self.content_height)
+            # No padding or border so the splash image fills the window edge to edge.
+            imgui.push_style_var(imgui.STYLE_WINDOW_PADDING, (0, 0))
+            imgui.push_style_var(imgui.STYLE_WINDOW_BORDERSIZE, 0)
             imgui.begin('##welcome', closable=False,
                         flags=(imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_SCROLLBAR))
             imgui.image(self.splash_texture.gl_id, self.content_width, self.content_height)
             imgui.end()
+            imgui.pop_style_var(2)
             self.splash_delay -= 1
             if self.splash_delay <= 0:
                 self.set_visible_menu()
@@ -145,10 +149,14 @@ class Autolume(imgui_window.ImguiWindow):
         if self.state == States.WELCOME:
             imgui.set_next_window_position(0, 0)
             imgui.set_next_window_size(self.content_width, self.content_height)
+            # No padding or border so the splash image fills the window edge to edge.
+            imgui.push_style_var(imgui.STYLE_WINDOW_PADDING, (0, 0))
+            imgui.push_style_var(imgui.STYLE_WINDOW_BORDERSIZE, 0)
             imgui.begin('##welcome', closable=False,
                         flags=(imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE| imgui.WINDOW_NO_SCROLLBAR))
             imgui.image(self.splash_texture.gl_id, self.content_width, self.content_height)
             imgui.end()
+            imgui.pop_style_var(2)
             self.state = States.SPLASH
             self.splash_delay = 30
 
