@@ -117,12 +117,16 @@ class Autolume(imgui_window.ImguiWindow):
 
     def draw_frame(self):
 
-        if self.state == States.SPLASH:
-            self.set_window_size(self.splash_texture.width//2, self.splash_texture.height//2)
+        if self.state == States.WELCOME:
+            # Configure the still-hidden window for the splash once: borderless,
+            # at image scale but capped below the work area (reaching work-area
+            # size would trigger the maximize path), and centered.
             self.hide_title_bar()
-
-            # set size of app window/ frame to self.splash_texture.width //2 , self.splash_texture.height //2
-
+            splash_w = self.splash_texture.width // 2
+            splash_h = self.splash_texture.height // 2
+            fit = min(0.8 * self.monitor_width / splash_w, 0.8 * self.monitor_height / splash_h, 1)
+            self.set_window_size(int(splash_w * fit), int(splash_h * fit))
+            self.center()
 
         self.begin_frame()
         self.button_w = self.font_size * 5
@@ -142,8 +146,12 @@ class Autolume(imgui_window.ImguiWindow):
             self.splash_delay -= 1
             if self.splash_delay <= 0:
                 self.set_visible_menu()
-                self.set_window_size(3840,2160)
+                # Restore the decoration before sizing: with the title bar hidden its
+                # height reads as 0, so the window ends up one title bar taller than
+                # the work area and the bottom is cropped (visible on macOS, where
+                # the later maximize does not re-fit the frame).
                 self.show_title_bar()
+                self.set_window_size(3840, 2160)
 
 
         if self.state == States.WELCOME:
