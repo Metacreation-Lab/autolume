@@ -6,6 +6,7 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
+import sys
 import time
 import glfw
 import OpenGL.GL as gl
@@ -82,14 +83,26 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
         _left, top, _right, _bottom = glfw.get_window_frame_size(self._glfw_window)
         return top
 
+    def _get_work_area(self):
+        monitor = glfw.get_primary_monitor()
+        area_x, area_y, area_width, area_height = glfw.get_monitor_workarea(monitor)
+        if area_width <= 0 or area_height <= 0:
+            # Early in startup macOS can report a zero-sized work area (NSScreen
+            # metrics not ready yet); fall back to the video mode, which comes
+            # from CGDisplay and is always valid, minus the reported origin.
+            mode = glfw.get_video_mode(monitor)
+            area_width = mode.size.width - area_x
+            area_height = mode.size.height - area_y
+        return area_x, area_y, area_width, area_height
+
     @property
     def monitor_width(self):
-        _, _, width, _height = glfw.get_monitor_workarea(glfw.get_primary_monitor())
+        _area_x, _area_y, width, _height = self._get_work_area()
         return width
 
     @property
     def monitor_height(self):
-        _, _, _width, height = glfw.get_monitor_workarea(glfw.get_primary_monitor())
+        _area_x, _area_y, _width, height = self._get_work_area()
         return height
 
     @property
@@ -110,12 +123,20 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
         self.set_window_size(width, height + self.title_bar_height)
 
     def maximize(self):
-        glfw.maximize_window(self._glfw_window)
+        if sys.platform == 'darwin':
+            # glfw.maximize_window is [NSWindow zoom:] on macOS, which animates
+            # the resize and misbehaves on undecorated windows; set the frame to
+            # the work area explicitly and instantly instead.
+            area_x, area_y, area_width, area_height = self._get_work_area()
+            glfw.set_window_pos(self._glfw_window, area_x, area_y + self.title_bar_height)
+            glfw.set_window_size(self._glfw_window, area_width, max(area_height - self.title_bar_height, 1))
+        else:
+            glfw.maximize_window(self._glfw_window)
 
     def set_position(self, x, y):
         # Offset by the work area origin; otherwise the macOS menu bar pushes the
         # window down and crops the bottom (the origin is 0,0 on most other setups).
-        area_x, area_y, _area_width, _area_height = glfw.get_monitor_workarea(glfw.get_primary_monitor())
+        area_x, area_y, _area_width, _area_height = self._get_work_area()
         glfw.set_window_pos(self._glfw_window, area_x + x, area_y + y + self.title_bar_height)
 
     def center(self):
