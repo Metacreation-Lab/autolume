@@ -6,7 +6,6 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
-import sys
 import time
 import glfw
 import OpenGL.GL as gl
@@ -34,10 +33,6 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
         # Create window.
         glfw.init()
         glfw.window_hint(glfw.VISIBLE, False)
-        if sys.platform == 'darwin':
-            # Keep the framebuffer 1:1 with the window size on retina displays;
-            # the GL code uses window coordinates for glViewport and glReadPixels.
-            glfw.window_hint(glfw.COCOA_RETINA_FRAMEBUFFER, glfw.FALSE)
         self._glfw_window = glfw.create_window(width=window_width, height=window_height, title=title, monitor=None, share=None)
         self._attach_glfw_callbacks()
         self.make_context_current()
@@ -118,7 +113,10 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
         glfw.maximize_window(self._glfw_window)
 
     def set_position(self, x, y):
-        glfw.set_window_pos(self._glfw_window, x, y + self.title_bar_height)
+        # Offset by the work area origin; otherwise the macOS menu bar pushes the
+        # window down and crops the bottom (the origin is 0,0 on most other setups).
+        area_x, area_y, _area_width, _area_height = glfw.get_monitor_workarea(glfw.get_primary_monitor())
+        glfw.set_window_pos(self._glfw_window, area_x + x, area_y + y + self.title_bar_height)
 
     def center(self):
         self.set_position((self.monitor_width - self.window_width) // 2, (self.monitor_height - self.window_height) // 2)
@@ -197,8 +195,11 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
         self._drawing_frame = True
         self.make_context_current()
 
-        # Initialize GL state.
-        gl.glViewport(0, 0, self.content_width, self.content_height)
+        # Initialize GL state. The viewport covers the framebuffer, which is larger
+        # than the window on scaled (retina) displays; the projection below keeps
+        # all drawing in window coordinates.
+        fb_width, fb_height = glfw.get_framebuffer_size(self._glfw_window)
+        gl.glViewport(0, 0, fb_width, fb_height)
         gl.glMatrixMode(gl.GL_PROJECTION)
         gl.glLoadIdentity()
         gl.glTranslate(-1, 1, 0)
@@ -223,7 +224,7 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
 
         # Capture frame if requested.
         if self._capture_next_frame:
-            self._captured_frame = gl_utils.read_pixels(self.content_width, self.content_height)
+            self._captured_frame = gl_utils.read_pixels(*glfw.get_framebuffer_size(self._glfw_window))
             self._capture_next_frame = False
 
         # Update window.

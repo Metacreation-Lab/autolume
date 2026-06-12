@@ -41,7 +41,13 @@ class ImguiWindow(glfw_window.GlfwWindow):
         self._attach_glfw_callbacks()
         imgui.get_io().ini_saving_rate = 0 # Disable creating imgui.ini at runtime.
         imgui.get_io().mouse_drag_threshold = 0 # Improve behavior with imgui_utils.drag_custom().
-        self._imgui_fonts = {size: imgui.get_io().fonts.add_font_from_file_ttf(font, size) for size in font_sizes}
+        # Rasterize fonts at the framebuffer scale (2x on retina displays) so text
+        # stays sharp; sizes exposed to the UI remain in window coordinates.
+        fb_width = glfw.get_framebuffer_size(self._glfw_window)[0]
+        win_width = glfw.get_window_size(self._glfw_window)[0]
+        font_scale = max(1, round(fb_width / max(win_width, 1)))
+        imgui.get_io().font_global_scale = 1 / font_scale
+        self._imgui_fonts = {size: imgui.get_io().fonts.add_font_from_file_ttf(font, size * font_scale) for size in font_sizes}
         self._imgui_renderer.refresh_font_texture()
 
     def close(self):
