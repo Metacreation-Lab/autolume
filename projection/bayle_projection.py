@@ -50,6 +50,14 @@ def slugify(value, allow_unicode=False):
 image_mean = torch.tensor([0.48145466, 0.4578275, 0.40821073]).to(get_device())
 image_std = torch.tensor([0.26862954, 0.26130258, 0.27577711]).to(get_device())
 
+def _area_interpolate(x, size):
+    # MPS adaptive pool needs input divisible by output; area-mode interpolate falls back to CPU on MPS when it isn't
+    if x.device.type == 'mps':
+        out_h, out_w = (size, size) if isinstance(size, int) else size
+        if x.shape[-2] % out_h or x.shape[-1] % out_w:
+            return F.interpolate(x.cpu(), size=size, mode='area').to(x.device)
+    return F.interpolate(x, size=size, mode='area')
+
 def score_images(G, model, text, latents, device, label_class = 0, batch_size = 8):
   scores = []
   all_images = []
@@ -57,7 +65,7 @@ def score_images(G, model, text, latents, device, label_class = 0, batch_size = 
     images = G.synthesis(torch.tensor(latents[i*batch_size:(i+1)*batch_size,:,:], dtype=torch.float32, device=device), noise_mode='const')[0]
     with torch.no_grad():
         image_input = (torch.clamp(images, -1, 1) + 1) * 0.5
-        image_input = F.interpolate(image_input, size=(256, 256), mode='area')
+        image_input = _area_interpolate(image_input, (256, 256))
         image_input = image_input[:, :, 16:240, 16:240] # 256 -> 224, center crop
         image_input -= image_mean[None, :, None, None]
         image_input /= image_std[None, :, None, None]
@@ -124,8 +132,16 @@ def project(
     z_samples = np.random.RandomState(123).randn(w_avg_samples, G.z_dim)
     labels = None
     if (G.mapping.c_dim):
-        labels = torch.from_numpy(0.5*np.random.RandomState(123).randn(w_avg_samples, G.mapping.c_dim)).to(device)
-    w_samples = G.mapping(torch.from_numpy(z_samples).to(device), labels)  # [N, L, C]
+        labels = torch.from_numpy(0.5*np.random.RandomState(123).randn(w_avg_samples, G.mapping.c_dim))
+    # MPS has no float64; cast the RandomState samples to float32 before moving to device (CUDA path unchanged)
+    z = torch.from_numpy(z_samples)
+    if device.type == 'mps':
+        z = z.to(torch.float32)
+        if labels is not None:
+            labels = labels.to(torch.float32)
+    if labels is not None:
+        labels = labels.to(device)
+    w_samples = G.mapping(z.to(device), labels)  # [N, L, C]
     w_samples = w_samples.cpu().numpy().astype(np.float32)                 # [N, L, C]
     w_samples_1d = w_samples[:, :1, :].astype(np.float32)
 
@@ -171,10 +187,10 @@ def project(
     if target_image is not None:
         reply_queue.put([f'Analysing image', (target_image).clamp(0, 255).to(torch.uint8).permute(1, 2, 0).cpu().detach(), False, False])
         target_images = target_image.unsqueeze(0).to(device).to(torch.float32)
-        small_target = F.interpolate(target_images, size=(64, 64), mode='area')
+        small_target = _area_interpolate(target_images, (64, 64))
         if use_center:
-            center_target = F.interpolate(target_images, size=(448, 448), mode='area')[:, :, 112:336, 112:336]
-        target_images = F.interpolate(target_images, size=(256, 256), mode='area')
+            center_target = _area_interpolate(target_images, (448, 448))[:, :, 112:336, 112:336]
+        target_images = _area_interpolate(target_images, (256, 256))
         target_images = target_images[:, :, 16:240, 16:240] # 256 -> 224, center crop
 
 
@@ -234,10 +250,10 @@ def project(
         curr_img = (synth_images * 127.5 + 128)[0].clamp(0, 255).to(torch.uint8).permute(1, 2, 0).cpu().detach()
         # Downsample image to 256x256 if it's larger than that. CLIP was built for 224x224 images.
         synth_images = (torch.clamp(synth_images, -1, 1) + 1) * (255/2)
-        small_synth = F.interpolate(synth_images, size=(64, 64), mode='area')
+        small_synth = _area_interpolate(synth_images, (64, 64))
         if use_center:
-            center_synth = F.interpolate(synth_images, size=(448, 448), mode='area')[:, :, 112:336, 112:336]
-        synth_images = F.interpolate(synth_images, size=(256, 256), mode='area')
+            center_synth = _area_interpolate(synth_images, (448, 448))[:, :, 112:336, 112:336]
+        synth_images = _area_interpolate(synth_images, (256, 256))
 
         # Features for synth images.
         synth_images = synth_images[:, :, 16:240, 16:240] # 256 -> 224, center crop
