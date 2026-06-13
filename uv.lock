@@ -92,8 +92,7 @@ dependencies = [
     { name = "lmdb" },
     { name = "lpips" },
     { name = "matplotlib" },
-    { name = "ndi-python", version = "5.1.1.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'win32'" },
-    { name = "ndi-python", version = "5.1.1.2", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'linux'" },
+    { name = "ndi-python" },
     { name = "ninja" },
     { name = "numpy" },
     { name = "openai-clip" },
@@ -143,8 +142,7 @@ requires-dist = [
     { name = "lmdb", specifier = "==1.5.1" },
     { name = "lpips", specifier = "==0.1.4" },
     { name = "matplotlib", specifier = "==3.8.0" },
-    { name = "ndi-python", marker = "sys_platform == 'linux'", specifier = "==5.1.1.2" },
-    { name = "ndi-python", marker = "sys_platform == 'win32'", specifier = "==5.1.1.1" },
+    { name = "ndi-python", specifier = "==6.3.2.3" },
     { name = "ninja", specifier = "==1.11.1.1" },
     { name = "numpy", specifier = "==1.26.4" },
     { name = "openai-clip", specifier = "==1.0.1" },
@@ -806,32 +804,17 @@ wheels = [
 
 [[package]]
 name = "ndi-python"
-version = "5.1.1.1"
+version = "6.3.2.3"
 source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "sys_platform == 'win32'",
-]
 dependencies = [
-    { name = "numpy", marker = "sys_platform == 'win32'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/fd/f5/ea94ea421b4115963694874986f2f80fa18bae3072f624864e3971ac53e5/ndi-python-5.1.1.1.tar.gz", hash = "sha256:97dac329c1cc2cf42122faa5ca1f9c928048bd316b83f31a472e4d4bb694b8a0", size = 16073, upload-time = "2022-03-21T12:25:24.211Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/70/39/bf3c3fe7890e4a74a89105290d8ae540ff0b9a24bc17feb07d774a4c8515/ndi_python-5.1.1.1-cp310-cp310-win_amd64.whl", hash = "sha256:45b37b553ac21904f5578f726cef7fc94b3ee325127a339839d16b35395feab9", size = 3396106, upload-time = "2022-03-21T11:53:18.206Z" },
-]
-
-[[package]]
-name = "ndi-python"
-version = "5.1.1.2"
-source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "platform_machine != 'aarch64' and sys_platform == 'linux'",
-]
-dependencies = [
-    { name = "numpy", marker = "sys_platform == 'linux'" },
+    { name = "numpy" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/6f/f2/6cc5583c10a9b3d7a98598a37a0ccba4229f3b8ed35482bd6924fbda96d1/ndi_python-5.1.1.2-cp310-cp310-manylinux2014_x86_64.whl", hash = "sha256:e1759346b536f36c57655c3035bd1103d061fa050e032bfbcc76271dd9333270", size = 9707096, upload-time = "2022-03-21T16:25:02.688Z" },
+    { url = "https://files.pythonhosted.org/packages/b6/b5/a87a38ef037ba1b44b081e867b66546f46d755866c464e2851f744dd5383/ndi_python-6.3.2.3-cp310-cp310-macosx_13_0_arm64.whl", hash = "sha256:ca5600e542f7d82a62d05c79a94db2b18f09f93ff97a02d4bc58d129f340c4b4", size = 4850659, upload-time = "2026-06-09T01:00:10.544Z" },
+    { url = "https://files.pythonhosted.org/packages/e8/9b/fe68c09be01296641c53965c0d8df58aef8072956ea83a64dbe68adee911/ndi_python-6.3.2.3-cp310-cp310-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:bd15a02babf2c495cbdc1c4e10013e883e750f02f2a2b5ecb02cdf08ab332f05", size = 5674677, upload-time = "2026-06-09T01:00:13.203Z" },
+    { url = "https://files.pythonhosted.org/packages/17/79/5bd36397de4e778586a8868bca2b577ce12ffee1e795329b05a9a788899a/ndi_python-6.3.2.3-cp310-cp310-manylinux_2_26_armv7l.manylinux_2_31_armv7l.whl", hash = "sha256:804bd5c9d17934245284627f7108d54fc27be83baa923c5e2ed42bac99247b03", size = 5609171, upload-time = "2026-06-09T01:00:15.256Z" },
+    { url = "https://files.pythonhosted.org/packages/cb/78/3ba67a6d6a49c89941e9b6d937ed127baf524281deb7579a0c8535afa092/ndi_python-6.3.2.3-cp310-cp310-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:c8ef8ef8dd445ce5da9bd6929acee3ac2a5265f775ee3f7e697296f0498c171d", size = 10338323, upload-time = "2026-06-09T01:00:17.558Z" },
+    { url = "https://files.pythonhosted.org/packages/ca/c8/8711d7b97340a91dc52297d982b95370af2136c0a427f23a7acc6acbe2a9/ndi_python-6.3.2.3-cp310-cp310-win_amd64.whl", hash = "sha256:16819a5aa18518b49f8a4105a86846e1e66b9cbdce95dac41e39fa885bcc0356", size = 3871946, upload-time = "2026-06-09T01:00:20.15Z" },
 ]
 
 [[package]]
