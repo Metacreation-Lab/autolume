@@ -734,7 +734,16 @@ class TrainingModule:
 
         if imgui.begin_popup_modal("Training")[0]:
             imgui.text("Training...")
-            if Path(self.message).exists() and self.image_path != self.message:
+            # Replies are either progress text or the path of a snapshot grid.
+            # Only stat plausible paths: arbitrary text (e.g. the multi-line
+            # config JSON) raises ENAMETOOLONG from Path.exists() on macOS.
+            message_is_image = False
+            if self.message and '\n' not in self.message and self.message.lower().endswith('.png'):
+                try:
+                    message_is_image = Path(self.message).exists()
+                except OSError:
+                    message_is_image = False
+            if message_is_image and self.image_path != self.message:
                 self.image_path = self.message
                 self.grid = cv2.imread(self.image_path, cv2.IMREAD_UNCHANGED)
                 self.grid = cv2.cvtColor(self.grid, cv2.COLOR_BGRA2RGBA)
