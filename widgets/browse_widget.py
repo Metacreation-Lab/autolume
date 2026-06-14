@@ -79,7 +79,7 @@ class BrowseWidget():
         # draw the file list
         imgui.begin_child("file_list", 0, -self.parent.app.font_size * 2, border=True, flags=0)
         # get all files and folders in the current directory
-        self.files = os.listdir(self.directory)
+        self.files = sorted(os.listdir(self.directory), key=str.lower)
         # draw the files
         for i, f in enumerate(self.files):
             # if the file is a directory draw it as a selectable or if it is a file and has the correct extension draw it as a selectable
