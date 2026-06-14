@@ -65,25 +65,40 @@ class SuperResModule:
 
 
     def display_progress(self):
-        imgui.begin("Super Resolution", False)
-        imgui.text('Super Resolution...')
-        imgui.text("Files: " + str(self.file_idx + 1) + "/" + str(len(self.files)))
+        width = imgui.get_font_size() * 22
+        label = f"Processing file {min(self.file_idx + 1, len(self.files))} of {len(self.files)}"
         if self.file_idx < len(self.files):
-            imgui.text("Current File: " + self.files[self.file_idx])
+            label += f": {os.path.basename(self.files[self.file_idx])}"
+        imgui.text(label)
         if self.total_frames > 0:
-            percent = (self.super_res_idx + 1) / self.total_frames * 100
-            bar = "#" * int(self.super_res_idx / self.total_frames * 10 + 1)
-            imgui.text("Progress: " + bar + " " + f"{percent:.1f}%")
+            frac = min(self.super_res_idx / self.total_frames, 1.0)
+            imgui.progress_bar(frac, (width, 0.0), f"{self.super_res_idx}/{self.total_frames}")
         else:
-            imgui.text("Progress: preparing...")
-        # self.eta is in seconds so we convert it to hours minutes and seconds if not -1
+            imgui.progress_bar(0.0, (width, 0.0), "preparing...")
         if self.eta != -1:
-            hours = int(self.eta/3600)
-            minutes = int((self.eta - hours*3600)/60)
-            seconds = int(self.eta - hours*3600 - minutes*60)
-            imgui.text("ETA: " + str(hours) + "h " + str(minutes) + "m " + str(seconds) + "s")
-        imgui.text(str(self.super_res_idx) + "/" + str(self.total_frames) + " frames")
-        imgui.end()
+            hours = int(self.eta / 3600)
+            minutes = int((self.eta - hours * 3600) / 60)
+            seconds = int(self.eta - hours * 3600 - minutes * 60)
+            if hours:
+                eta_str = f"{hours}h {minutes}m {seconds}s"
+            elif minutes:
+                eta_str = f"{minutes}m {seconds}s"
+            else:
+                eta_str = f"{seconds}s"
+        else:
+            eta_str = "estimating..."
+        imgui.text(f"ETA: {eta_str}")
+        imgui.spacing()
+        if imgui.button("Cancel", width=width):
+            self.cancel_super_res()
+
+    def cancel_super_res(self):
+        # Stop the worker process; the partial output file is left as-is.
+        if self.sr_process is not None:
+            self.sr_process.terminate()
+            self.sr_process.join(timeout=1)
+            self.sr_process = None
+        self.running = False
 
 
     @imgui_utils.scoped_by_object_id
@@ -118,9 +133,6 @@ class SuperResModule:
         self.help_icon.render_with_url(self.help_texts.get("super_res_module"), self.help_urls.get("super_res_module"), "Read More")
 
         imgui.separator()
-
-        if self.running:
-            self.display_progress()
 
         # Input path
         joined = '\n'.join(self.input_path)
@@ -205,9 +217,16 @@ class SuperResModule:
                 self.args = args
                 print("Starting Super Resolution")
                 self.start_super_res()
+                imgui.open_popup("Super Resolution")
 
         except Exception as e:
             print("SRR ERROR", e)
+
+        if imgui.begin_popup_modal("Super Resolution", flags=imgui.WINDOW_NO_SCROLLBAR | imgui.WINDOW_ALWAYS_AUTO_RESIZE)[0]:
+            self.display_progress()
+            if not self.running:
+                imgui.close_current_popup()
+            imgui.end_popup()
 
 
 
