@@ -46,7 +46,6 @@ Apple Silicon uses unified memory shared between the CPU and GPU; there is no se
 | Feature | Why |
 |---------|-----|
 | Model compression / distillation | Relies on the CUDA-only training and pruning stack |
-| NDI streaming | `ndi-python` ships no macOS wheels |
 | Full-screen display window | Requires sharing textures across OpenGL profiles, which macOS does not allow |
 | Custom CUDA kernel toggle | The custom kernels only compile for CUDA |
 

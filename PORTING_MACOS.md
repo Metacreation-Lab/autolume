@@ -48,7 +48,7 @@ macOS exposes either legacy OpenGL 2.1 or a 3.2+ core profile, never a compatibi
 [pyproject.toml](pyproject.toml) now resolves per platform:
 
 - `torch` / `torchvision` / `torchaudio`: cu128 builds from the PyTorch index on Windows/Linux (unchanged); the same versions from PyPI on macOS (arm64 wheels with MPS, verified present for Python 3.10).
-- `ndi-python` was already Windows/Linux only; the code now imports it optionally.
+- `ndi-python` now ships a macOS arm64 wheel (6.3.2.3) and resolves on all platforms; the code imports it optionally, so NDI works on macOS too once installed.
 
 After pulling this branch, regenerate the lockfile once (any platform): `uv lock`, then `uv sync`. Plain `uv sync` also re-locks automatically.
 
@@ -68,7 +68,6 @@ tkinter cannot run inside this app on macOS: Tk's Cocoa layer calls its own sele
 | Feature | Where | Why |
 |---------|-------|-----|
 | Compression / distillation | [modules/compress_module.py](modules/compress_module.py) | CUDA-only training stack ([prune.py](prune.py), [train.py](train.py) untouched) |
-| NDI streaming | [modules/visualizer.py](modules/visualizer.py), [widgets/performance_widget.py](widgets/performance_widget.py) | `ndi-python` publishes no macOS wheels; import is optional, send/destroy guarded, NDI name input greyed |
 | Full Screen Display window | [modules/visualizer.py](modules/visualizer.py) | The preview window creates a GL 3.3 core context sharing textures with the legacy main context; macOS cannot share across profiles |
 | Custom CUDA kernel toggle | already greyed via `has_custom` | Kernels never compile without CUDA |
 
