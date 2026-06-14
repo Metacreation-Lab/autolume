@@ -20,7 +20,7 @@ from pythonosc.udp_client import SimpleUDPClient
 try:
     import NDIlib as ndi
 except ImportError:
-    ndi = None  # ndi-python has no macOS wheels; NDI streaming is disabled there.
+    ndi = None  # NDIlib is optional; NDI streaming is disabled when it isn't installed.
 
 # ----------------------------------------------------------------------------
 class PerformanceWidget:
