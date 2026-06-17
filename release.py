@@ -70,18 +70,27 @@ def ensure_ffmpeg() -> tuple[Path, Path]:
     return ffmpeg, ffprobe
 
 
-def glfw_native_lib() -> Path:
-    """The GLFW shared library shipped inside the glfw package, per platform."""
+def glfw_native_libs() -> list[tuple[Path, str]]:
+    """GLFW shared libraries to bundle, as (src, dest_dir) pairs for PyInstaller.
+
+    On Linux the pyglfw wheel ships x11/ and wayland/ variants in subdirectories.
+    The frozen glfw loader resolves the correct one via PYGLFW_LIBRARY_VARIANT or
+    XDG_SESSION_TYPE, so both must be bundled preserving that directory structure.
+    """
     glfw = package_dir("glfw")
-    patterns = {
-        "Windows": "glfw3.dll",
-        "Darwin": "libglfw*.dylib",
-        "Linux": "libglfw*.so*",
-    }
+    if IS_LINUX:
+        result = []
+        for variant in ("x11", "wayland"):
+            matches = sorted((glfw / variant).glob("libglfw*.so*"))
+            if not matches:
+                fail(f"no GLFW native library in {glfw / variant}")
+            result.append((matches[0], f"glfw/{variant}"))
+        return result
+    patterns = {"Windows": "glfw3.dll", "Darwin": "libglfw*.dylib"}
     matches = sorted(glfw.glob(patterns[SYSTEM]))
     if not matches:
         fail(f"no GLFW native library matching '{patterns[SYSTEM]}' in {glfw}")
-    return matches[0]
+    return [(matches[0], ".")]
 
 
 def ninja_binary() -> Path:
@@ -121,7 +130,7 @@ def build_args() -> list[str]:
     # with the `ffmpeg` (ffmpeg-python) package PyInstaller packs at the root.
     # main.py adds this bin/ dir to PATH at runtime.
     ffmpeg, ffprobe = ensure_ffmpeg()
-    binaries = [(ffmpeg, "bin"), (ffprobe, "bin"), (glfw_native_lib(), ".")]
+    binaries = [(ffmpeg, "bin"), (ffprobe, "bin"), *glfw_native_libs()]
 
     # --- Data files shipped on every platform -----------------------------
     clip = package_dir("clip")
