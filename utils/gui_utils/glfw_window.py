@@ -10,7 +10,9 @@ import sys
 import time
 import glfw
 import OpenGL.GL as gl
+import PIL.Image
 from . import gl_utils
+from utils.resource_paths import resource_path
 
 #----------------------------------------------------------------------------
 
@@ -35,6 +37,7 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
         glfw.init()
         glfw.window_hint(glfw.VISIBLE, False)
         self._glfw_window = glfw.create_window(width=window_width, height=window_height, title=title, monitor=None, share=None)
+        self._set_window_icon()
         self._attach_glfw_callbacks()
         self.make_context_current()
 
@@ -45,6 +48,14 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
             glfw.show_window(self._glfw_window)
 
 
+
+    def _set_window_icon(self):
+        # GLFW needs raw RGBA pixels, so load the PNG rather than the .exe .ico.
+        try:
+            image = PIL.Image.open(resource_path('assets', 'metacreation-logo.png')).convert('RGBA')
+            glfw.set_window_icon(self._glfw_window, 1, [image])
+        except Exception as err: # pylint: disable=broad-except
+            print(f'Warning: failed to set window icon: {err}', file=sys.stderr)
 
     def close(self):
         if self._drawing_frame:

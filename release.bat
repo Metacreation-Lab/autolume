@@ -19,6 +19,7 @@ for /f "delims=" %%i in ('python -c "import sys; print(sys.base_prefix)"') do se
 echo Running PyInstaller...
 call pyinstaller main.py ^
   --name Autolume ^
+  --icon "assets\metacreation-logo.ico" ^
   --add-binary "bin\ffmpeg-7.1.1-full_build\bin\ffmpeg.exe;." ^
   --add-binary "bin\ffmpeg-7.1.1-full_build\bin\ffprobe.exe;." ^
   --add-binary ".venv\Lib\site-packages\ninja\data\bin\ninja.exe;." ^
