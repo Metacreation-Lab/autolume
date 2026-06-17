@@ -551,18 +551,21 @@ class Visualizer:
         imgui.set_next_window_position(0, 0)
         imgui.set_next_window_size(self.pane_w, self.app.content_height)
         imgui.begin('##control_pane', closable=False, flags=(imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE))
+        # Scale with the UI font, calibrated to 36px at font 14.
+        toolbar_height = round(self.app.font_size * 36 / 14)
+        logo_height = toolbar_height / 2
+
         # set red background
-        imgui.get_window_draw_list().add_rect_filled(0, 0, self.pane_w, 36,
+        imgui.get_window_draw_list().add_rect_filled(0, 0, self.pane_w, toolbar_height,
                                                      imgui.get_color_u32_rgba(*DARKGRAY))
         # draw gray line
-        imgui.get_window_draw_list().add_line(0, 36, self.pane_w, 36, imgui.get_color_u32_rgba(*LIGHTGRAY), 1)
+        imgui.get_window_draw_list().add_line(0, toolbar_height, self.pane_w, toolbar_height, imgui.get_color_u32_rgba(*LIGHTGRAY), 1)
 
         # calculate logo shape ratio
         logo_ratio = self.logo.shape[1] / self.logo.shape[0]
-        # logo with height of 30px centered in y axis
-        imgui.set_cursor_pos_y(18 - (18 / 2))
+        imgui.set_cursor_pos_y((toolbar_height - logo_height) / 2)
         imgui.set_cursor_pos_x(self.app.spacing * 2)
-        imgui.image(self.logo_texture.gl_id, 18 * logo_ratio, 18, tint_color=(1, 1, 1, 0.5))
+        imgui.image(self.logo_texture.gl_id, logo_height * logo_ratio, logo_height, tint_color=(1, 1, 1, 0.5))
 
         # The fullscreen display uses a core-profile GL 3.3 context that shares
         # textures with the main legacy context; macOS cannot share across those
@@ -611,6 +614,9 @@ class Visualizer:
                 self.start_recording(f'recordings/{current_time_str}.mp4')
             else:
                 self.stop_recording()
+
+        # Start the widgets below the bar (the row above may be shorter than it).
+        imgui.set_cursor_pos_y(toolbar_height + self.app.spacing)
 
         # # calculate metacreation shape ratio
         # metacreation_ratio = self.metacreation.shape[1] / self.metacreation.shape[0]

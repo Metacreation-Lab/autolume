@@ -44,10 +44,10 @@ class Menu:
 
         self.metacreation = cv2.imread("assets/metalogo.png", cv2.IMREAD_UNCHANGED)
         self.metacreation_texture = gl_utils.Texture(image=self.metacreation, width=self.metacreation.shape[1], height=self.metacreation.shape[0], channels=self.metacreation.shape[2])
-        
-        self.menu_height = 50
 
     def __call__(self):
+        # Scale with the UI font, calibrated to 50px at font 23.
+        self.menu_height = round(self.app.font_size * 2.2)
         imgui.push_style_color(imgui.COLOR_TITLE_BACKGROUND,*OPAQUEGREEN)
         imgui.push_style_color(imgui.COLOR_TITLE_BACKGROUND_ACTIVE, *OPAQUEGREEN)
         imgui.push_style_color(imgui.COLOR_TITLE_BACKGROUND_COLLAPSED, *OPAQUEGREEN)
