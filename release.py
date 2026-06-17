@@ -7,8 +7,7 @@ right PyInstaller invocation:
   python headers) because the custom StyleGAN ops are compiled on first use when
   running on CUDA. Windows additionally ships ``python310.lib``.
 - macOS skips that toolchain entirely (the ops fall back to reference PyTorch on
-  MPS, see PORTING_MACOS.md) and produces an ``Autolume.app`` bundle instead of a
-  plain folder.
+  MPS) and produces an ``Autolume.app`` bundle instead of a plain folder.
 
 ffmpeg/ffprobe are bundled on every platform via ffmpeg-downloader so the
 artifact is self-contained.
