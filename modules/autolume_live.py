@@ -23,7 +23,13 @@ class Autolume(imgui_window.ImguiWindow):
     # State handler that greets user, shows menu (allowing for training, compression, ganspace), and renders
 
     DEFAULT_FPS_LIMIT = 60
-    
+
+    # Standard-DPI UI font size. Divided by the display's DPI scale so the UI is a
+    # constant, DPI-appropriate size that does NOT change when the window resizes.
+    # scale 1 (Windows/non-retina) -> 23 (clamps to the max key);
+    # scale 2 (retina)             -> 11.5 -> snaps to the min key 14.
+    BASE_FONT_SIZE = 23
+
     def __init__(self):
         super().__init__(title=f'Autolume-Live v{get_version()}', window_width=3840, window_height=2160)
 
@@ -51,7 +57,7 @@ class Autolume(imgui_window.ImguiWindow):
 
     def _adjust_font_size(self):
         old = self.font_size
-        self.set_font_size(min(self.content_width / 120, self.content_height / 60))
+        self.set_font_size(self.BASE_FONT_SIZE / self._font_dpi_scale)
         if self.font_size != old:
             self.skip_frame() # Layout changed.
 

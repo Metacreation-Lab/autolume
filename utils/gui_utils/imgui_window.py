@@ -46,6 +46,7 @@ class ImguiWindow(glfw_window.GlfwWindow):
         fb_width = glfw.get_framebuffer_size(self._glfw_window)[0]
         win_width = glfw.get_window_size(self._glfw_window)[0]
         font_scale = max(1, round(fb_width / max(win_width, 1)))
+        self._font_dpi_scale = font_scale
         imgui.get_io().font_global_scale = 1 / font_scale
         self._imgui_fonts = {size: imgui.get_io().fonts.add_font_from_file_ttf(font, size * font_scale) for size in font_sizes}
         self._imgui_renderer.refresh_font_texture()
