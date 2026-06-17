@@ -6,7 +6,7 @@ import time
 import gc
 
 from utils.gui_utils import imgui_window, gl_utils
-from utils.resource_paths import get_version
+from utils.resource_paths import get_version, resource_path
 from enum import IntEnum
 class States(IntEnum):
     ERROR = -2
@@ -42,7 +42,7 @@ class Autolume(imgui_window.ImguiWindow):
         self.splash_delay = 0
         self.data_preprocessing = None
 
-        self.splash = cv2.imread("assets/splashscreen.jpg", cv2.IMREAD_UNCHANGED)
+        self.splash = cv2.imread(str(resource_path("assets", "splashscreen.jpg")), cv2.IMREAD_UNCHANGED)
         self.splash = cv2.cvtColor(self.splash, cv2.COLOR_BGRA2RGBA)
         self.splash_texture = gl_utils.Texture(image=self.splash, width=self.splash.shape[1],
                                                height=self.splash.shape[0], channels=self.splash.shape[2])

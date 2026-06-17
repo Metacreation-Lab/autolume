@@ -129,7 +129,7 @@ requires-dist = [
     { name = "click", specifier = ">=8.1.8" },
     { name = "codecarbon", specifier = ">=3.2.6" },
     { name = "fbpca", specifier = "==1.0" },
-    { name = "ffmpeg-downloader", specifier = "==0.4.1" },
+    { name = "ffmpeg-downloader", specifier = ">=0.5.2" },
     { name = "ffmpeg-python", specifier = "==0.2.0" },
     { name = "filedialpy", specifier = "==1.3.4" },
     { name = "glfw", specifier = "==2.6.2" },
@@ -377,17 +377,19 @@ sdist = { url = "https://files.pythonhosted.org/packages/a7/a5/2085d0645a4bb4f0b
 
 [[package]]
 name = "ffmpeg-downloader"
-version = "0.4.1"
+version = "0.5.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "packaging" },
     { name = "platformdirs" },
     { name = "requests" },
+    { name = "tabulate" },
     { name = "tqdm" },
+    { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/63/b4/0f96e40e132d9f28728fd956aeaea18d3e77f1b6149ea131d0c759593489/ffmpeg_downloader-0.4.1.tar.gz", hash = "sha256:388fa765176b8f140b7674a17aef70cf4d944174ea17e32a16187dc72cbc9c3b", size = 30923, upload-time = "2025-11-14T21:30:54.949Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/79/42/71b4291e8b6ad58e0e9953d9ad7384f5e2d05191ba07e610223ddd47c022/ffmpeg_downloader-0.5.2.tar.gz", hash = "sha256:ba616a66f159715234e5215b8c1f50d1f021d5d5b7dcb467feaf385df3c091e9", size = 39641, upload-time = "2026-06-04T02:03:29.309Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/6c/fd/c1eee0e4f9e2f75a61bccc3cf14653e89b3cc82cd9920709fde76e05bdcf/ffmpeg_downloader-0.4.1-py3-none-any.whl", hash = "sha256:a70e8d9c622c3c263b792661454e3be64969dd8c1654e84ad64f28dfd232a6b5", size = 34560, upload-time = "2025-11-14T21:30:53.446Z" },
+    { url = "https://files.pythonhosted.org/packages/4b/64/561a1c9ed1d0835e9e1d8d0cc40e260b9d411b6007b5fa41f8288fd4d0f2/ffmpeg_downloader-0.5.2-py3-none-any.whl", hash = "sha256:deb8167ae1696bd4c6f5644d3a6a7ee1972cb5b5cc98a1032857562cf4d42ca0", size = 49142, upload-time = "2026-06-04T02:03:27.975Z" },
 ]
 
 [[package]]
@@ -1057,11 +1059,11 @@ wheels = [
 
 [[package]]
 name = "packaging"
-version = "26.1"
+version = "26.2"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/df/de/0d2b39fb4af88a0258f3bac87dfcbb48e73fbdea4a2ed0e2213f9a4c2f9a/packaging-26.1.tar.gz", hash = "sha256:f042152b681c4bfac5cae2742a55e103d27ab2ec0f3d88037136b6bfe7c9c5de", size = 215519, upload-time = "2026-04-14T21:12:49.362Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d7/f1/e7a6dd94a8d4a5626c03e4e99c87f241ba9e350cd9e6d75123f992427270/packaging-26.2.tar.gz", hash = "sha256:ff452ff5a3e828ce110190feff1178bb1f2ea2281fa2075aadb987c2fb221661", size = 228134, upload-time = "2026-04-24T20:15:23.917Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7a/c2/920ef838e2f0028c8262f16101ec09ebd5969864e5a64c4c05fad0617c56/packaging-26.1-py3-none-any.whl", hash = "sha256:5d9c0669c6285e491e0ced2eee587eaf67b670d94a19e94e3984a481aba6802f", size = 95831, upload-time = "2026-04-14T21:12:47.56Z" },
+    { url = "https://files.pythonhosted.org/packages/df/b2/87e62e8c3e2f4b32e5fe99e0b86d576da1312593b39f47d8ceef365e95ed/packaging-26.2-py3-none-any.whl", hash = "sha256:5fc45236b9446107ff2415ce77c807cee2862cb6fac22b8a73826d0693b0980e", size = 100195, upload-time = "2026-04-24T20:15:22.081Z" },
 ]
 
 [[package]]
@@ -1634,6 +1636,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/83/d3/803453b36afefb7c2bb238361cd4ae6125a569b4db67cd9e79846ba2d68c/sympy-1.14.0.tar.gz", hash = "sha256:d3d3fe8df1e5a0b42f0e7bdf50541697dbe7d23746e894990c030e2b05e72517", size = 7793921, upload-time = "2025-04-27T18:05:01.611Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135c444fc97158ef34a095e5681d0a6c10b75bf356191/sympy-1.14.0-py3-none-any.whl", hash = "sha256:e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5", size = 6299353, upload-time = "2025-04-27T18:04:59.103Z" },
+]
+
+[[package]]
+name = "tabulate"
+version = "0.10.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/46/58/8c37dea7bbf769b20d58e7ace7e5edfe65b849442b00ffcdd56be88697c6/tabulate-0.10.0.tar.gz", hash = "sha256:e2cfde8f79420f6deeffdeda9aaec3b6bc5abce947655d17ac662b126e48a60d", size = 91754, upload-time = "2026-03-04T18:55:34.402Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/99/55/db07de81b5c630da5cbf5c7df646580ca26dfaefa593667fc6f2fe016d2e/tabulate-0.10.0-py3-none-any.whl", hash = "sha256:f0b0622e567335c8fabaaa659f1b33bcb6ddfe2e496071b743aa113f8774f2d3", size = 39814, upload-time = "2026-03-04T18:55:31.284Z" },
 ]
 
 [[package]]

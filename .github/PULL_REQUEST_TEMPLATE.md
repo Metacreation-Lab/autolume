@@ -40,5 +40,5 @@ Describe the steps you took to confirm the change works:
 - [ ] PR title follows Conventional Commits without a scope (`<type>: <subject>`)
 - [ ] I have read [CONTRIBUTING.md](../CONTRIBUTING.md)
 - [ ] Documentation in `docs/` or `README.md` is updated if user-visible behavior changed
-- [ ] If this PR adds new runtime files, they are included in `release.bat` (as a `--add-binary`/`--add-data` flag or an `xcopy` step) so the Windows release still ships them
+- [ ] If this PR adds new runtime files, they are included in `release.py` (in the shared `datas`/`binaries` lists, a per-platform branch, or `post_build()`) so the packaged release still ships them
 - [ ] Screenshots or a short clip are attached for UI changes

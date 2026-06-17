@@ -80,7 +80,7 @@ Everything else stays enabled on macOS and runs through MPS: live renderer, netw
 - Super resolution runs fp32 on MPS (no autocast). Expect lower FPS than CUDA fp16.
 - The 2024 analysis observed UI lag on macOS while rendering. The fixed-pipeline imgui backend changes the rendering path, so this needs re-measuring; further UI optimization is out of scope here.
 - Projection and PCA on MPS are best-effort ports of gradient-based / statistics code and need on-device validation.
-- Packaging (PyInstaller) is Windows-only ([release.bat](release.bat)); a macOS .app bundle is a separate effort.
+- Packaging is cross-platform via [release.py](release.py) (`uv run release.py`); on macOS it builds an unsigned `Autolume.app`. Note that app code loading models through hardcoded `./sr_models/...` relative paths resolves against the CWD, which is unreliable for a double-clicked `.app` — those call sites should move to `resource_paths.resource_path(...)` for the packaged app to find bundled weights.
 - README does not yet have a macOS install section; this document covers it in the meantime.
 
 ## How was this tested

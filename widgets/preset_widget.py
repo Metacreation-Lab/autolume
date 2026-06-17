@@ -230,22 +230,18 @@ class PresetWidget:
         self.scroll_index = 0  # 添加滚动索引
 
         self.path = "presets"
-        if not os.path.isdir(self.path):
-            os.mkdir(self.path)
-        if len(os.listdir(self.path)) == 0:
-            for i in range(self.num_presets):
-                os.makedirs(self.path + '/' + str(i))
-        else:
-            print(self.path)
-            for i, dir in enumerate(os.listdir(self.path)):
-                if i < self.num_presets:
-                    self.dir_name[i] = dir
-                else:
-                    self.num_presets = i + 1
-                    self.dir_name = np.resize(self.dir_name, self.num_presets)
-                    self.dir_name[i] = dir
-                    self.active = np.resize(self.active, self.num_presets)
-                    self.active[i] = False
+        # Presets are created lazily: the folder and its slots are materialised
+        # when the first preset is saved (see save()/open_path()). Until then the
+        # grid uses in-memory slot names and nothing touches the disk.
+        for i, dir in enumerate(self._preset_dirs()):
+            if i < self.num_presets:
+                self.dir_name[i] = dir
+            else:
+                self.num_presets = i + 1
+                self.dir_name = np.resize(self.dir_name, self.num_presets)
+                self.dir_name[i] = dir
+                self.active = np.resize(self.active, self.num_presets)
+                self.active[i] = False
         self.tmp_path = self.path
         self.paths = np.asarray([f"{self.path}/{i}" for i in range(self.num_presets)], dtype=object)
         print(self.dir_name)
@@ -255,10 +251,12 @@ class PresetWidget:
         self.osc_addresses = ""
         self.browser = BrowseWidget(self.viz, "Preset Path##presetwidget", os.path.abspath(os.getcwd()), [""], width=viz.app.font_size * 10, multiple=False, traverse_folders=False)
 
+    def _preset_dirs(self):
+        """Existing preset folders on disk; empty until the first preset is saved."""
+        return os.listdir(self.path) if os.path.isdir(self.path) else []
+
     def check_presets(self):
-        if not os.path.exists(self.path):
-            os.makedirs(self.path)
-        dirs = os.listdir(self.path)
+        dirs = self._preset_dirs()
         self.num_presets = max(12, len(dirs))
         self.active = np.resize(self.active, self.num_presets)
         self.dir_name = np.resize(self.dir_name, self.num_presets)
@@ -276,7 +274,7 @@ class PresetWidget:
     def create_new_folder(self):
         try:
             # 确保 self.num_presets 至少等于当前文件夹数量
-            current_folders = len([name for name in os.listdir(self.path) if os.path.isdir(os.path.join(self.path, name))])
+            current_folders = len([name for name in self._preset_dirs() if os.path.isdir(os.path.join(self.path, name))])
             self.num_presets = max(self.num_presets, current_folders)
 
             new_folder_index = self.num_presets
@@ -524,8 +522,8 @@ class PresetWidget:
 
         if show:
             # 检查是否需要更新预设列表
-            current_dirs = set(os.listdir(self.path))
-            if set(self.dir_name) != current_dirs:
+            current_dirs = set(self._preset_dirs())
+            if current_dirs and set(self.dir_name) != current_dirs:
                 self.open_path(self.path)  # 重新加载当前路径
             
             # 创建一个水平布局
@@ -544,7 +542,7 @@ class PresetWidget:
                     if _changed:
                         self.dir_name[i] = str(dir_name)
                         self.paths[i] = str(self.tmp_path + '/' + self.dir_name[i])
-                        if dir_name_copy in os.listdir(self.path):
+                        if dir_name_copy in self._preset_dirs():
                             os.rename(self.tmp_path + '/' + dir_name_copy,  self.paths[i])
                 imgui.end_group()
             

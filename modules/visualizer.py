@@ -18,6 +18,7 @@ from assets import GRAY, DARKGRAY, LIGHTGRAY
 from utils.gui_utils import imgui_utils
 from utils.gui_utils import gl_utils
 from utils.gui_utils import text_utils
+from utils.resource_paths import resource_path
 from widgets import pickle_widget
 from widgets import latent_widget
 from widgets import trunc_noise_widget
@@ -118,11 +119,11 @@ class Visualizer:
         self.audio_widget_enabled = False
         self.audio_widget_error = None
 
-        self.logo = cv2.imread("assets/Autolume-logo.png", cv2.IMREAD_UNCHANGED)
+        self.logo = cv2.imread(str(resource_path("assets", "Autolume-logo.png")), cv2.IMREAD_UNCHANGED)
         self.logo_texture = gl_utils.Texture(image=self.logo, width=self.logo.shape[1], height=self.logo.shape[0],
                                              channels=self.logo.shape[2])
 
-        self.metacreation = cv2.imread("assets/metalogo.png", cv2.IMREAD_UNCHANGED)
+        self.metacreation = cv2.imread(str(resource_path("assets", "metalogo.png")), cv2.IMREAD_UNCHANGED)
         self.metacreation_texture = gl_utils.Texture(image=self.metacreation, width=self.metacreation.shape[1],
                                                      height=self.metacreation.shape[0],
                                                      channels=self.metacreation.shape[2])
@@ -470,6 +471,7 @@ class Visualizer:
                 frame = self.frame_queue.get()
                 if out is None:
                     height, width, channels = frame.shape
+                    os.makedirs(os.path.dirname(self.recording_file_path), exist_ok=True)
                     out = cv2.VideoWriter(self.recording_file_path, fourcc, 30.0, (width, height))
                 out.write(frame)
         if out is not None:
@@ -483,6 +485,7 @@ class Visualizer:
             image_data = cv2.cvtColor(image_data, cv2.COLOR_RGB2BGRA)
 
             # Save the image using OpenCV
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
             cv2.imwrite(file_path, image_data)
         else:
             print("No render result available to capture.")
