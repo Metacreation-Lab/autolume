@@ -142,8 +142,7 @@ class Visualizer:
         self.fullscreen_vbo = None
         self.window_created = False
 
-        self.fit_screen = False  
-        self.show_help = False  # 添加显示帮助的状态标志
+        self.fit_screen = False
     
     def enable_audio_widget(self):
         if self.audio_widget_enabled:
@@ -565,42 +564,47 @@ class Visualizer:
         imgui.set_cursor_pos_x(self.app.spacing * 2)
         imgui.image(self.logo_texture.gl_id, 18 * logo_ratio, 18, tint_color=(1, 1, 1, 0.5))
 
-        # Position the button in the middle
-        imgui.same_line(self.app.spacing * 44)  
-        if imgui_utils.button("Help On" if not self.show_help else "Help Off", width=80):
-            self.show_help = not self.show_help
+        # The fullscreen display uses a core-profile GL 3.3 context that shares
+        # textures with the main legacy context; macOS cannot share across those
+        # profiles, so the button is omitted there.
+        show_fullscreen = not device_utils.is_macos()
+        fullscreen_label = "Full Screen Display" if not self.is_fullscreen_display else "Exit Full Screen"
+        fit_label = "Fit Screen" if not self.fit_screen else "Raw Scale"
+        record_label = 'Start Recording' if not self.is_recording else 'Stop Recording'
 
+        # Right-align the toolbar so its last button lines up with the section
+        # buttons below, by anchoring the group at right_edge minus its width.
+        labels = ([fullscreen_label] if show_fullscreen else []) + [fit_label, 'Screen Capture', record_label]
+        style = imgui.get_style()
+        button_padding = style.frame_padding[0] * 2
+        gap = style.item_spacing[0]
+        total_width = sum(imgui.calc_text_size(label)[0] + button_padding for label in labels) + gap * (len(labels) - 1)
+        imgui.same_line(imgui.get_window_content_region_max()[0] - total_width)
 
-        imgui.same_line(self.app.spacing * 54)
-
-        # The preview window uses a core-profile GL 3.3 context that shares textures
-        # with the main legacy context; macOS cannot share across those profiles.
-        fullscreen_available = not device_utils.is_macos()
-        with imgui_utils.grayed_out(not fullscreen_available):
-            fullscreen_clicked = imgui.button("Full Screen Display" if not self.is_fullscreen_display else "Exit Full Screen")
-        if fullscreen_clicked and fullscreen_available:
-            if self.is_fullscreen_display:
-                self.is_fullscreen_display = False
-                if self.fullscreen_window:
-                    glfw.destroy_window(self.fullscreen_window)
-                    self.fullscreen_window = None
+        if show_fullscreen:
+            if imgui.button(fullscreen_label):
+                if self.is_fullscreen_display:
+                    self.is_fullscreen_display = False
+                    if self.fullscreen_window:
+                        glfw.destroy_window(self.fullscreen_window)
+                        self.fullscreen_window = None
+                        self.window_created = False
+                else:
+                    self.is_fullscreen_display = True
                     self.window_created = False
-            else:
-                self.is_fullscreen_display = True
-                self.window_created = False
+            imgui.same_line()
 
-        imgui.same_line(self.app.spacing * 72)
-        if imgui.button("Fit Screen" if not self.fit_screen else "Raw Scale"):
+        if imgui.button(fit_label):
             self.fit_screen = not self.fit_screen
 
-        imgui.same_line(self.app.spacing * 82)
+        imgui.same_line()
         if imgui.button('Screen Capture'):
             now = datetime.datetime.now()
             current_time_str = now.strftime("%Y-%m-%d %H-%M-%S")
             self.capture_screenshot(f'screenshots/{current_time_str}.png')
 
-        imgui.same_line(self.app.spacing * 97) 
-        if imgui.button('Start Recording' if not self.is_recording else 'Stop Recording'):
+        imgui.same_line()
+        if imgui.button(record_label):
             if not self.is_recording:
                 now = datetime.datetime.now()
                 current_time_str = now.strftime("%Y-%m-%d %H-%M-%S")
