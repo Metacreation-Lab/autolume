@@ -2,10 +2,31 @@ import multiprocessing
 import os
 import sys
 
+IS_FROZEN = getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS")
+
 if sys.platform == 'darwin':
     # Let torch fall back to CPU for operators not yet implemented on MPS.
     # Must be set before torch is imported.
     os.environ.setdefault('PYTORCH_ENABLE_MPS_FALLBACK', '1')
+
+if IS_FROZEN:
+    # pyglfw loads its native library through ctypes at runtime; its frozen-mode
+    # search does not include the bundle root where the lib is packed, so point
+    # it at the bundled copy explicitly (checked before any other search path).
+    for _glfw_lib in ("libglfw.3.dylib", "glfw3.dll", "libglfw.so.3", "libglfw.so"):
+        _glfw_cand = os.path.join(sys._MEIPASS, _glfw_lib)
+        if os.path.exists(_glfw_cand):
+            os.environ.setdefault("PYGLFW_LIBRARY", _glfw_cand)
+            break
+
+    if sys.platform == "darwin":
+        # A double-clicked .app starts with cwd="/". Read-only resources are
+        # resolved from the bundle via utils.resource_paths, so move the working
+        # directory next to the .app; user data (models, presets, recordings,
+        # screenshots, training output) is then written there, outside the bundle.
+        # Those output folders are created lazily by their features, not here.
+        from pathlib import Path
+        os.chdir(Path(sys.executable).resolve().parents[3])
 
 import torch
 
@@ -13,9 +34,10 @@ from modules.autolume_live import Autolume
 
 
 def get_runtime_bin_dir():
-    # PyInstaller frozen app
-    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-        return sys._MEIPASS
+    # PyInstaller frozen app: bundled ffmpeg/ffprobe/ninja live in _MEIPASS/bin
+    # (a subdir, to avoid colliding with same-named Python packages at the root).
+    if IS_FROZEN:
+        return os.path.join(sys._MEIPASS, "bin")
 
     # Development mode
     base = os.path.dirname(os.path.abspath(__file__))

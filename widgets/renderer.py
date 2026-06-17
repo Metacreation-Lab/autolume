@@ -19,6 +19,7 @@ import torch.nn
 import matplotlib.cm
 import dnnlib
 from utils import device_utils
+from utils.resource_paths import resource_path
 from bending.transform_layers import ManipulationLayer
 from torch_utils.ops import upfirdn2d, params
 from torch_utils import legacy
@@ -30,7 +31,7 @@ import os
 import pickle
 
 super_res = SRVGGNetPlus(num_in_ch=3, num_out_ch=3, num_feat=48, upscale=4, act_type='prelu').eval().to(device_utils.get_device())
-model_sd=torch.load('./sr_models/Fast.pt', map_location=device_utils.get_device())
+model_sd=torch.load(str(resource_path('sr_models', 'Fast.pt')), map_location=device_utils.get_device())
 super_res.load_state_dict(model_sd)
 
 # ----------------------------------------------------------------------------

@@ -14,7 +14,7 @@ Autolume is a no-coding generative AI system for real-time visual performances u
 | `uv run main.py` | Launch the application |
 | `uv run zensical build` | Build the documentation site to `site/` |
 | `uv run zensical serve` | Serve docs locally at http://127.0.0.1:8000 |
-| `release.bat` | Windows-only: build the PyInstaller release into `dist/Autolume` |
+| `uv run release.py` | Build the PyInstaller release (cross-platform): `dist/Autolume/` on Windows/Linux, `dist/Autolume.app` on macOS. Run it on the target OS — PyInstaller cannot cross-compile |
 
 Initial setup also requires CUDA 12.8, MSVC build tools (Windows), `portaudio19-dev` + `ffmpeg` (Linux), pre-trained Real-ESRGAN/face-parsing models, and an FFmpeg binary on Windows. Full details in the [README](README.md#development-instructions).
 
@@ -24,7 +24,7 @@ Initial setup also requires CUDA 12.8, MSVC build tools (Windows), `portaudio19-
 autolume/
   main.py                     # Application entry point
   pyproject.toml              # Dependencies, Python pin (3.10), CUDA torch index
-  release.bat                 # Windows release script (drives PyInstaller)
+  release.py                  # Cross-platform release script (drives PyInstaller)
 
   architectures/              # Generator/discriminator network definitions
   audio/                      # Audio capture and analysis (librosa, pyaudio)
@@ -52,7 +52,7 @@ autolume/
 
 - [main.py](main.py) — entry point; wires the UI and rendering pipeline.
 - [pyproject.toml](pyproject.toml) — pinned dependencies; `torch==2.8.0+cu128` is a hard requirement, do not relax it.
-- [release.bat](release.bat) — Windows release script; invokes PyInstaller with `--add-binary`/`--add-data` flags and then `xcopy`s `assets/`, `sr_models/`, and the default model. **This is where to add new runtime files** — the auto-generated `Autolume.spec` is gitignored and rebuilt every release.
+- [release.py](release.py) — cross-platform release script (`uv run release.py`); detects the host OS, resolves package locations via `importlib`, and assembles the PyInstaller `--add-binary`/`--add-data` flags per platform, then copies `sr_models/` and creates runtime dirs. **This is where to add new runtime files** — the auto-generated `Autolume.spec` is gitignored and rebuilt every release. Windows/Linux bundle the runtime JIT toolchain (torch headers/libs, ninja); macOS skips it (ops fall back to reference PyTorch on MPS) and produces `Autolume.app`.
 - [.github/workflows/docs.yml](.github/workflows/docs.yml) — only CI workflow; publishes versioned docs.
 - [zensical.toml](zensical.toml) — docs site config (Material theme variant).
 
@@ -90,13 +90,13 @@ Do not claim to have tested a UI workflow you could not actually perform. Honest
 - **Windows-first project.** Many code paths assume Windows; `Path` objects come back as `WindowsPath` and break JSON serialization (e.g. training kwargs, preset save). Wrap as `str()` defensively. See commits `d77d944`, `1000e66`, `b75b68d` for prior fixes.
 - **CUDA 12.8 is mandatory.** `pyproject.toml` pins `torch==2.8.0+cu128` against a custom uv index. Do not suggest CPU torch, do not relax the pin to test a fix locally — it will break the release.
 - **Custom CUDA ops are JIT-compiled** under `torch_utils/ops/`. Cache busting and runtime MSVC autoresolution exist (commits `8f806ee`, `da2b384`) — do not re-introduce env-var-based MSVC selection or break the cache key.
-- **PyInstaller bundle is the shipped artifact.** New runtime files (help texts, models, assets) must be added to [release.bat](release.bat) — either as a `--add-binary`/`--add-data` flag in the `pyinstaller` invocation, or as an `xcopy` step after the build (commit `c8958da` shows the pattern for `modules\help_texts.csv`). The auto-generated `Autolume.spec` is gitignored — never edit it, the change will be lost on the next build. The bundle also needs to load resources conditionally depending on whether the app is running from source or bundled — use the `utils/resource_paths.py` helpers.
+- **PyInstaller bundle is the shipped artifact.** New runtime files (help texts, models, assets) must be added to [release.py](release.py) — either to the shared `datas`/`binaries` lists, a per-platform branch, or the `post_build()` copy step. The auto-generated `Autolume.spec` is gitignored — never edit it, the change will be lost on the next build. The bundle also needs to load resources conditionally depending on whether the app is running from source or bundled — use the `utils/resource_paths.py` helpers. Note: app code that loads files via hardcoded `./relative/...` paths (e.g. `sr_models/`) resolves against the CWD, which is unreliable inside `Autolume.app` — prefer `resource_paths.resource_path(...)`.
 - **No test suite** — relying on type checks or static analysis alone is not enough; you must exercise the UI manually.
 - **Vendored NVIDIA code** in `dnnlib/` and `torch_utils/` carries the [Nvidia Source Code License](https://github.com/NVlabs/stylegan2-ada-pytorch/blob/main/LICENSE.txt). Treat those modules as upstream — do not refactor them, and minimize edits.
 
 ## Workflow
 
-- Use the [PR template](.github/PULL_REQUEST_TEMPLATE.md) — the checklist mirrors the gotchas above (`release.bat` updates for new runtime files, manual test description, screenshots for UI work).
+- Use the [PR template](.github/PULL_REQUEST_TEMPLATE.md) — the checklist mirrors the gotchas above (`release.py` updates for new runtime files, manual test description, screenshots for UI work).
 - For docs changes, edit Markdown files in [docs/](docs/) and verify locally with `uv run zensical serve`. The site is rebuilt on push to `main`.
 - Do not put contributor-facing docs in [docs/](docs/) — that directory is for end-user documentation only. Contributor docs belong in [CONTRIBUTING.md](CONTRIBUTING.md) or this file.
 

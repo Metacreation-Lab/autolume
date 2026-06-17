@@ -12,6 +12,7 @@ from torchvision import transforms
 from super_res.net_base import SRVGGNetPlus, SRVGGNetCompact, RRDBNet
 from utils.device_utils import get_device
 from utils import device_utils
+from utils.resource_paths import resource_path
 import time
 import gc
 
@@ -128,11 +129,11 @@ def base_args():
 def process(args,file):
   print("Processing", args)
   if args.model_type=="Quality":
-    model_path= "../sr_models/Quality.pth"
+    model_path= str(resource_path("sr_models", "Quality.pth"))
   elif args.model_type=="Balance":
-    model_path= "../sr_models/Balance.pth"
+    model_path= str(resource_path("sr_models", "Balance.pth"))
   elif args.model_type=="Fast":
-    model_path= "../sr_models/Fast.pt"
+    model_path= str(resource_path("sr_models", "Fast.pt"))
 
   upsampler=load_model(args.model_type,model_path)
   head, tail = os.path.split(file)
@@ -317,11 +318,11 @@ def run_super_res(queue, reply_queue):
     while not queue.empty():
         args = queue.get()
     if args.model_type == "Quality":
-        model_path = "./sr_models/Quality.pth"
+        model_path = str(resource_path("sr_models", "Quality.pth"))
     elif args.model_type == "Balance":
-        model_path = "./sr_models/Balance.pth"
+        model_path = str(resource_path("sr_models", "Balance.pth"))
     elif args.model_type == "Fast":
-        model_path = "./sr_models/Fast.pt"
+        model_path = str(resource_path("sr_models", "Fast.pt"))
     model = load_model(args.model_type, model_path)
     files = args.input_path
     for file_idx, file in enumerate(files):

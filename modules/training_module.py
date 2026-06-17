@@ -33,10 +33,8 @@ class TrainingModule:
         cwd = Path.cwd()
         self.save_path = str(cwd / "training-runs")
         self.data_path = str(cwd / "data")
-        # create data folder if not exists
-        data_dir = (cwd / "data").resolve()
-        if not data_dir.exists():
-            data_dir.mkdir(parents=True, exist_ok=True)
+        # training-runs/ and data/ are created lazily when a training run or
+        # dataset preprocessing actually writes to them, not on startup.
         self.app = menu.app
         self.config = 1
         self.resume_pkl = ""

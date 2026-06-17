@@ -25,6 +25,7 @@ from modules.network_mixing import MixingModule
 from modules.super_res_module import SuperResModule
 
 from utils.model_dir import models_dir
+from utils.resource_paths import resource_path
 from widgets.help_icon_widget import DOCS_BASE_URL
 from widgets.model_download_widget import ModelDownloadWidget
 #----------------------------------------------------------------------------
@@ -39,10 +40,10 @@ class Menu:
         self.projection = ProjectionModule(self)
         self.super_res = SuperResModule(self)
         self.mixing_module = MixingModule(self)
-        self.logo = cv2.imread("assets/Autolume-logo.png", cv2.IMREAD_UNCHANGED)
+        self.logo = cv2.imread(str(resource_path("assets", "Autolume-logo.png")), cv2.IMREAD_UNCHANGED)
         self.logo_texture = gl_utils.Texture(image=self.logo, width=self.logo.shape[1], height=self.logo.shape[0], channels=self.logo.shape[2])
 
-        self.metacreation = cv2.imread("assets/metalogo.png", cv2.IMREAD_UNCHANGED)
+        self.metacreation = cv2.imread(str(resource_path("assets", "metalogo.png")), cv2.IMREAD_UNCHANGED)
         self.metacreation_texture = gl_utils.Texture(image=self.metacreation, width=self.metacreation.shape[1], height=self.metacreation.shape[0], channels=self.metacreation.shape[2])
 
     def __call__(self):

@@ -7,6 +7,7 @@ import torch
 from assets import LIGHTGRAY
 from utils.gui_utils import imgui_utils, gl_utils
 from utils.gui_utils import imgui_window
+from utils.resource_paths import resource_path
 
 
 
@@ -31,7 +32,7 @@ class BrowseWidget():
         self.open = False
 
         # read as rgba
-        self.folder = cv2.imread("assets/folder.png", cv2.IMREAD_UNCHANGED)
+        self.folder = cv2.imread(str(resource_path("assets", "folder.png")), cv2.IMREAD_UNCHANGED)
         self.folder = cv2.cvtColor(self.folder, cv2.COLOR_BGRA2RGBA)
 
         # in the alpha channel we put alpha to 0 where the image is black

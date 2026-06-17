@@ -26,6 +26,7 @@ import yaml
 
 import dnnlib
 from utils.gui_utils import imgui_utils, gl_utils
+from utils.resource_paths import resource_path
 from widgets import osc_menu
 from assets.colors import *
 
@@ -88,7 +89,7 @@ class LayerWidget:
         self.osc_menu = osc_menu.OscMenu(self.viz, funcs, None, label="##LayerOSCMenu")
 
         # read as rgba
-        self.edit_img = cv2.imread("assets/pen.png")
+        self.edit_img = cv2.imread(str(resource_path("assets", "pen.png")))
         self.edit_img = cv2.cvtColor(self.edit_img, cv2.COLOR_BGR2RGBA)
 
         # in the alpha channel we put alpha to 0 where the image is black
@@ -96,7 +97,7 @@ class LayerWidget:
         self.edit_texture = gl_utils.Texture(image=self.edit_img, width=self.edit_img.shape[1],
                                              height=self.edit_img.shape[0], channels=self.edit_img.shape[2])
 
-        self.view_img = cv2.imread("assets/eye.png")
+        self.view_img = cv2.imread(str(resource_path("assets", "eye.png")))
         self.view_img = cv2.cvtColor(self.view_img, cv2.COLOR_BGR2RGBA)
 
         # in the alpha channel we put alpha to 0 where the image is black
@@ -104,7 +105,7 @@ class LayerWidget:
         self.view_texture = gl_utils.Texture(image=self.view_img, width=self.view_img.shape[1],
                                              height=self.view_img.shape[0], channels=self.view_img.shape[2])
 
-        self.transform_img = cv2.imread("assets/transformation.png")
+        self.transform_img = cv2.imread(str(resource_path("assets", "transformation.png")))
         self.transform_img = cv2.cvtColor(self.transform_img, cv2.COLOR_BGR2RGBA)
         print("UNIQUES", np.unique(self.transform_img))
 
@@ -113,7 +114,7 @@ class LayerWidget:
                                                   height=self.transform_img.shape[0],
                                                   channels=self.transform_img.shape[2])
 
-        self.noise_img = cv2.imread("assets/noise.png")
+        self.noise_img = cv2.imread(str(resource_path("assets", "noise.png")))
         self.noise_img = cv2.cvtColor(self.noise_img, cv2.COLOR_BGR2RGBA)
         self.noise_img[:, :, 3] = np.where(self.noise_img[:, :, 0] == 255, 255, 0)
         self.noise_texture = gl_utils.Texture(image=self.noise_img, width=self.noise_img.shape[1],
