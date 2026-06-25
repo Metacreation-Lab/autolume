@@ -50,6 +50,9 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
 
 
     def _set_window_icon(self):
+        # macOS has no per-window icons.
+        if sys.platform == 'darwin':
+            return
         # GLFW needs raw RGBA pixels, so load the PNG rather than the .exe .ico.
         try:
             image = PIL.Image.open(resource_path('assets', 'metacreation-logo.png')).convert('RGBA')
