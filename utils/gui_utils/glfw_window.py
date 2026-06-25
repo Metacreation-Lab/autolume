@@ -96,15 +96,16 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
 
     def _get_work_area(self):
         monitor = glfw.get_primary_monitor()
-        area_x, area_y, area_width, area_height = glfw.get_monitor_workarea(monitor)
-        if area_width <= 0 or area_height <= 0:
-            # Early in startup macOS can report a zero-sized work area (NSScreen
-            # metrics not ready yet); fall back to the video mode, which comes
-            # from CGDisplay and is always valid, minus the reported origin.
-            mode = glfw.get_video_mode(monitor)
-            area_width = mode.size.width - area_x
-            area_height = mode.size.height - area_y
-        return area_x, area_y, area_width, area_height
+        # glfwGetMonitorWorkarea can crash on macOS, so use it only elsewhere,
+        # where it correctly excludes the taskbar. A zero-sized result (metrics
+        # not ready at startup) falls through to the always-valid video mode.
+        if sys.platform != 'darwin':
+            area_x, area_y, area_width, area_height = glfw.get_monitor_workarea(monitor)
+            if area_width > 0 and area_height > 0:
+                return area_x, area_y, area_width, area_height
+        area_x, area_y = glfw.get_monitor_pos(monitor)
+        mode = glfw.get_video_mode(monitor)
+        return area_x, area_y, mode.size.width, mode.size.height
 
     @property
     def monitor_width(self):
