@@ -9,8 +9,8 @@ if sys.platform == 'darwin':
     os.environ.setdefault('PYTORCH_ENABLE_MPS_FALLBACK', '1')
 
 if sys.platform == 'linux' and os.environ.get('WAYLAND_DISPLAY'):
-    # Use X11 GLFW (XWayland) so GNOME decorates the window; libdecor's GTK
-    # plugin crashes on this system.
+    # Use X11 GLFW (XWayland) so GNOME decorates the window; native Wayland
+    # requires libdecor-gtk which is unavailable or crashes on some systems.
     os.environ.setdefault('PYGLFW_LIBRARY_VARIANT', 'x11')
 
 
