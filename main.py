@@ -5,9 +5,14 @@ import sys
 IS_FROZEN = getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS")
 
 if sys.platform == 'darwin':
-    # Let torch fall back to CPU for operators not yet implemented on MPS.
     # Must be set before torch is imported.
     os.environ.setdefault('PYTORCH_ENABLE_MPS_FALLBACK', '1')
+
+if sys.platform == 'linux' and os.environ.get('WAYLAND_DISPLAY'):
+    # Use X11 GLFW (XWayland) so GNOME decorates the window; libdecor's GTK
+    # plugin crashes on this system.
+    os.environ.setdefault('PYGLFW_LIBRARY_VARIANT', 'x11')
+
 
 if IS_FROZEN:
     # pyglfw loads its native library through ctypes at runtime; its frozen-mode

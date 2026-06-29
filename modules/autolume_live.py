@@ -1,4 +1,5 @@
 import os
+import sys
 
 import cv2
 import imgui
@@ -124,10 +125,10 @@ class Autolume(imgui_window.ImguiWindow):
     def draw_frame(self):
 
         if self.state == States.WELCOME:
-            # Configure the still-hidden window for the splash once: borderless,
-            # at image scale but capped below the work area (reaching work-area
-            # size would trigger the maximize path), and centered.
-            self.hide_title_bar()
+            # Size the still-hidden window to the splash image and center it.
+            # Skip borderless on Linux: Wayland can't restore decorations later.
+            if sys.platform != 'linux':
+                self.hide_title_bar()
             splash_w = self.splash_texture.width // 2
             splash_h = self.splash_texture.height // 2
             fit = min(0.8 * self.monitor_width / splash_w, 0.8 * self.monitor_height / splash_h, 1)
@@ -152,12 +153,10 @@ class Autolume(imgui_window.ImguiWindow):
             self.splash_delay -= 1
             if self.splash_delay <= 0:
                 self.set_visible_menu()
-                # Restore the decoration before sizing: with the title bar hidden its
-                # height reads as 0, so the window ends up one title bar taller than
-                # the work area and the bottom is cropped (visible on macOS, where
-                # the later maximize does not re-fit the frame).
-                self.show_title_bar()
-                self.set_window_size(3840, 2160)
+                if sys.platform != 'linux':
+                    # Title bar height reads 0 while hidden; restore before sizing.
+                    self.show_title_bar()
+                self.maximize()
 
 
         if self.state == States.WELCOME:
