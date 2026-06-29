@@ -82,6 +82,18 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
         except:
             pass
 
+    def _content_scale(self):
+        # macOS/native Wayland return logical pixels from get_window_size; no correction needed.
+        # XWayland returns physical pixels (fb == win), so read the OS content scale instead.
+        if sys.platform != 'linux':
+            return 1.0
+        fb_w, _ = glfw.get_framebuffer_size(self._glfw_window)
+        win_w, _ = glfw.get_window_size(self._glfw_window)
+        if fb_w == win_w:
+            xscale, _ = glfw.get_window_content_scale(self._glfw_window)
+            return max(1.0, xscale)
+        return 1.0
+
     @property
     def window_width(self):
         return self.content_width
@@ -92,18 +104,18 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
 
     @property
     def content_width(self):
-        width, _height = glfw.get_window_size(self._glfw_window)
-        return width
+        width, _ = glfw.get_window_size(self._glfw_window)
+        return round(width / self._content_scale())
 
     @property
     def content_height(self):
-        _width, height = glfw.get_window_size(self._glfw_window)
-        return height
+        _, height = glfw.get_window_size(self._glfw_window)
+        return round(height / self._content_scale())
 
     @property
     def title_bar_height(self):
         _left, top, _right, _bottom = glfw.get_window_frame_size(self._glfw_window)
-        return top
+        return round(top / self._content_scale())
 
     def _get_work_area(self):
         monitor = glfw.get_primary_monitor()
@@ -119,13 +131,13 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
 
     @property
     def monitor_width(self):
-        _area_x, _area_y, width, _height = self._get_work_area()
-        return width
+        _, _, width, _ = self._get_work_area()
+        return round(width / self._content_scale())
 
     @property
     def monitor_height(self):
-        _area_x, _area_y, _width, height = self._get_work_area()
-        return height
+        _, _, _, height = self._get_work_area()
+        return round(height / self._content_scale())
 
     @property
     def frame_delta(self):
@@ -137,8 +149,12 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
     def set_window_size(self, width, height):
         width = min(width, self.monitor_width)
         height = min(height, self.monitor_height)
+        scale = self._content_scale()
+        tbh = round(self.title_bar_height * scale)  # physical title-bar height
         glfw.restore_window(self._glfw_window)
-        glfw.set_window_size(self._glfw_window, width, max(height - self.title_bar_height, 0))
+        glfw.set_window_size(self._glfw_window,
+                             round(width * scale),
+                             max(round(height * scale) - tbh, 0))
         if width == self.monitor_width and height == self.monitor_height:
             self.maximize()
 
@@ -147,30 +163,33 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
 
     def maximize(self):
         area_x, area_y, area_width, area_height = self._get_work_area()
+        tbh = round(self.title_bar_height * self._content_scale())  # logical → OS units
         if sys.platform == 'darwin':
             # maximize_window animates via NSWindow zoom and misbehaves on
             # undecorated windows; set the frame directly instead.
-            glfw.set_window_pos(self._glfw_window, area_x, area_y + self.title_bar_height)
-            glfw.set_window_size(self._glfw_window, area_width, max(area_height - self.title_bar_height, 1))
+            glfw.set_window_pos(self._glfw_window, area_x, area_y + tbh)
+            glfw.set_window_size(self._glfw_window, area_width, max(area_height - tbh, 1))
         elif _wayland_session():
-            # maximize_window is unreliable on Wayland/XWayland; fill the work
-            # area explicitly instead.
+            # XWayland: maximize_window unreliable; fill work area explicitly.
             glfw.restore_window(self._glfw_window)
-            glfw.set_window_size(self._glfw_window, area_width, max(area_height - self.title_bar_height, 1))
+            glfw.set_window_size(self._glfw_window, area_width, max(area_height - tbh, 1))
         else:
             # Clear stale maximized state and anchor at the work area origin
             # (selects the right monitor) before maximizing.
             glfw.restore_window(self._glfw_window)
-            glfw.set_window_pos(self._glfw_window, area_x, area_y + self.title_bar_height)
+            glfw.set_window_pos(self._glfw_window, area_x, area_y + tbh)
             glfw.maximize_window(self._glfw_window)
 
     def set_position(self, x, y):
         # Wayland: compositor owns window position.
         if glfw.get_platform() == glfw.PLATFORM_WAYLAND:
             return
-        # Offset by the work area origin (e.g. macOS menu bar).
-        area_x, area_y, _area_width, _area_height = self._get_work_area()
-        glfw.set_window_pos(self._glfw_window, area_x + x, area_y + y + self.title_bar_height)
+        # Offset by the work-area origin (e.g. macOS menu bar).
+        area_x, area_y, _, _ = self._get_work_area()
+        scale = self._content_scale()
+        glfw.set_window_pos(self._glfw_window,
+                            area_x + round(x * scale),
+                            area_y + round((y + self.title_bar_height) * scale))
 
     def center(self):
         self.set_position((self.monitor_width - self.window_width) // 2, (self.monitor_height - self.window_height) // 2)

@@ -41,11 +41,12 @@ class ImguiWindow(glfw_window.GlfwWindow):
         self._attach_glfw_callbacks()
         imgui.get_io().ini_saving_rate = 0 # Disable creating imgui.ini at runtime.
         imgui.get_io().mouse_drag_threshold = 0 # Improve behavior with imgui_utils.drag_custom().
-        # Rasterize fonts at the framebuffer scale (2x on retina displays) so text
-        # stays sharp; sizes exposed to the UI remain in window coordinates.
+        # Rasterize fonts at the framebuffer scale (2x on HiDPI) so text stays
+        # sharp; sizes exposed to the UI remain in logical (content) coordinates.
+        self._font_path  = font
+        self._font_sizes = font_sizes
         fb_width = glfw.get_framebuffer_size(self._glfw_window)[0]
-        win_width = glfw.get_window_size(self._glfw_window)[0]
-        font_scale = max(1, round(fb_width / max(win_width, 1)))
+        font_scale = max(1, round(fb_width / max(self.content_width, 1)))
         self._font_dpi_scale = font_scale
         imgui.get_io().font_global_scale = 1 / font_scale
         self._imgui_fonts = {size: imgui.get_io().fonts.add_font_from_file_ttf(font, size * font_scale) for size in font_sizes}
@@ -77,6 +78,20 @@ class ImguiWindow(glfw_window.GlfwWindow):
     def set_font_size(self, target): # Applied on next frame.
         self._cur_font_size = min((abs(key - target), key) for key in self._imgui_fonts.keys())[1]
 
+    def _update_font_scale(self):
+        # Rebuild the font atlas when the window moves to a monitor with a different DPI scale.
+        fb_width = glfw.get_framebuffer_size(self._glfw_window)[0]
+        new_scale = max(1, round(fb_width / max(self.content_width, 1)))
+        if new_scale == self._font_dpi_scale:
+            return
+        self._font_dpi_scale = new_scale
+        imgui.get_io().font_global_scale = 1 / new_scale
+        imgui.get_io().fonts.clear()
+        self._imgui_fonts = {size: imgui.get_io().fonts.add_font_from_file_ttf(
+            self._font_path, size * new_scale) for size in self._font_sizes}
+        self._imgui_renderer.refresh_font_texture()
+        self.skip_frame()
+
     def begin_frame(self):
         # Begin glfw frame.
         super().begin_frame()
@@ -85,6 +100,7 @@ class ImguiWindow(glfw_window.GlfwWindow):
         self._imgui_renderer.mouse_wheel_multiplier = self._cur_font_size / 10
         if self.content_width > 0 and self.content_height > 0:
             self._imgui_renderer.process_inputs()
+        self._update_font_scale()
 
         # Begin imgui frame.
         imgui.new_frame()
@@ -123,6 +139,18 @@ class _GlfwRenderer(imgui.integrations.glfw.GlfwRenderer):
             if self._mouse_just_pressed[i]:
                 self.io.mouse_down[i] = True
                 self._mouse_just_pressed[i] = False
+        # XWayland HiDPI: correct display_size, display_fb_scale, and mouse_pos
+        # to logical units (GLFW returns physical pixels on XWayland).
+        if sys.platform == 'linux':
+            fb_w, fb_h = glfw.get_framebuffer_size(self.window)
+            win_w, win_h = glfw.get_window_size(self.window)
+            if fb_w == win_w:
+                xscale, yscale = glfw.get_window_content_scale(self.window)
+                if xscale > 1.0:
+                    self.io.display_size = win_w / xscale, win_h / yscale
+                    self.io.display_fb_scale = xscale, yscale
+                    cx, cy = glfw.get_cursor_pos(self.window)
+                    self.io.mouse_pos = cx / xscale, cy / yscale
 
     def scroll_callback(self, window, x_offset, y_offset):
         self.io.mouse_wheel += y_offset * self.mouse_wheel_multiplier
