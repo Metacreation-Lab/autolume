@@ -6,6 +6,7 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
+import os
 import sys
 import time
 import glfw
@@ -50,8 +51,8 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
 
 
     def _set_window_icon(self):
-        # macOS has no per-window icons.
-        if sys.platform == 'darwin':
+        # macOS and Wayland have no per-window icons.
+        if sys.platform == 'darwin' or os.environ.get('WAYLAND_DISPLAY'):
             return
         # GLFW needs raw RGBA pixels, so load the PNG rather than the .exe .ico.
         try:
@@ -145,6 +146,13 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
             # the work area explicitly and instantly instead.
             glfw.set_window_pos(self._glfw_window, area_x, area_y + self.title_bar_height)
             glfw.set_window_size(self._glfw_window, area_width, max(area_height - self.title_bar_height, 1))
+        elif os.environ.get('WAYLAND_DISPLAY'):
+            # maximize_window() enters Wayland's protocol maximized state, which
+            # causes libdecor to drop CSD decorations expecting the compositor to
+            # supply them — but mutter doesn't always do so. Fill the work area
+            # explicitly so the window stays normal and keeps its decorations.
+            glfw.restore_window(self._glfw_window)
+            glfw.set_window_size(self._glfw_window, area_width, max(area_height - self.title_bar_height, 1))
         else:
             # Clear any stale maximized state first: maximizing an already
             # zoom-flagged window is a no-op and leaves it wherever it was.
@@ -154,6 +162,9 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
             glfw.maximize_window(self._glfw_window)
 
     def set_position(self, x, y):
+        # Wayland compositor manages window position.
+        if os.environ.get('WAYLAND_DISPLAY'):
+            return
         # Offset by the work area origin; otherwise the macOS menu bar pushes the
         # window down and crops the bottom (the origin is 0,0 on most other setups).
         area_x, area_y, _area_width, _area_height = self._get_work_area()
