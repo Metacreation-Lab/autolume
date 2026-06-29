@@ -15,6 +15,9 @@ import PIL.Image
 from . import gl_utils
 from utils.resource_paths import resource_path
 
+def _wayland_session():
+    return sys.platform == 'linux' and bool(os.environ.get('WAYLAND_DISPLAY'))
+
 #----------------------------------------------------------------------------
 
 class GlfwWindow: # pylint: disable=too-many-public-methods
@@ -37,6 +40,10 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
         # Create window.
         glfw.init()
         glfw.window_hint(glfw.VISIBLE, False)
+        # XWayland: force an EGL context so PyOpenGL's EGL platform (not the
+        # buggy GLX one) picks it up.
+        if _wayland_session():
+            glfw.window_hint(glfw.CONTEXT_CREATION_API, glfw.EGL_CONTEXT_API)
         self._glfw_window = glfw.create_window(width=window_width, height=window_height, title=title, monitor=None, share=None)
         self._set_window_icon()
         self._attach_glfw_callbacks()
@@ -51,8 +58,8 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
 
 
     def _set_window_icon(self):
-        # macOS and Wayland have no per-window icons.
-        if sys.platform == 'darwin' or os.environ.get('WAYLAND_DISPLAY'):
+        # macOS and Wayland don't support per-window icons.
+        if sys.platform == 'darwin' or glfw.get_platform() == glfw.PLATFORM_WAYLAND:
             return
         # GLFW needs raw RGBA pixels, so load the PNG rather than the .exe .ico.
         try:
@@ -100,9 +107,8 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
 
     def _get_work_area(self):
         monitor = glfw.get_primary_monitor()
-        # glfwGetMonitorWorkarea can crash on macOS, so use it only elsewhere,
-        # where it correctly excludes the taskbar. A zero-sized result (metrics
-        # not ready at startup) falls through to the always-valid video mode.
+        # get_monitor_workarea can crash on macOS; use it elsewhere only.
+        # A zero-sized result falls through to the always-valid video mode.
         if sys.platform != 'darwin':
             area_x, area_y, area_width, area_height = glfw.get_monitor_workarea(monitor)
             if area_width > 0 and area_height > 0:
@@ -131,6 +137,7 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
     def set_window_size(self, width, height):
         width = min(width, self.monitor_width)
         height = min(height, self.monitor_height)
+        glfw.restore_window(self._glfw_window)
         glfw.set_window_size(self._glfw_window, width, max(height - self.title_bar_height, 0))
         if width == self.monitor_width and height == self.monitor_height:
             self.maximize()
@@ -141,32 +148,27 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
     def maximize(self):
         area_x, area_y, area_width, area_height = self._get_work_area()
         if sys.platform == 'darwin':
-            # glfw.maximize_window is [NSWindow zoom:] on macOS, which animates
-            # the resize and misbehaves on undecorated windows; set the frame to
-            # the work area explicitly and instantly instead.
+            # maximize_window animates via NSWindow zoom and misbehaves on
+            # undecorated windows; set the frame directly instead.
             glfw.set_window_pos(self._glfw_window, area_x, area_y + self.title_bar_height)
             glfw.set_window_size(self._glfw_window, area_width, max(area_height - self.title_bar_height, 1))
-        elif os.environ.get('WAYLAND_DISPLAY'):
-            # maximize_window() enters Wayland's protocol maximized state, which
-            # causes libdecor to drop CSD decorations expecting the compositor to
-            # supply them — but mutter doesn't always do so. Fill the work area
-            # explicitly so the window stays normal and keeps its decorations.
+        elif _wayland_session():
+            # maximize_window is unreliable on Wayland/XWayland; fill the work
+            # area explicitly instead.
             glfw.restore_window(self._glfw_window)
             glfw.set_window_size(self._glfw_window, area_width, max(area_height - self.title_bar_height, 1))
         else:
-            # Clear any stale maximized state first: maximizing an already
-            # zoom-flagged window is a no-op and leaves it wherever it was.
-            # Anchoring at the work-area origin also selects the right monitor.
+            # Clear stale maximized state and anchor at the work area origin
+            # (selects the right monitor) before maximizing.
             glfw.restore_window(self._glfw_window)
             glfw.set_window_pos(self._glfw_window, area_x, area_y + self.title_bar_height)
             glfw.maximize_window(self._glfw_window)
 
     def set_position(self, x, y):
-        # Wayland compositor manages window position.
-        if os.environ.get('WAYLAND_DISPLAY'):
+        # Wayland: compositor owns window position.
+        if glfw.get_platform() == glfw.PLATFORM_WAYLAND:
             return
-        # Offset by the work area origin; otherwise the macOS menu bar pushes the
-        # window down and crops the bottom (the origin is 0,0 on most other setups).
+        # Offset by the work area origin (e.g. macOS menu bar).
         area_x, area_y, _area_width, _area_height = self._get_work_area()
         glfw.set_window_pos(self._glfw_window, area_x + x, area_y + y + self.title_bar_height)
 
