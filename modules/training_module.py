@@ -12,6 +12,7 @@ from train import main as train_main
 from widgets.native_browser_widget import NativeBrowserWidget
 from utils.dataset_preprocessing_utils import DatasetPreprocessingUtils
 from utils.model_dir import list_model_pkls
+from utils.user_data import data_path
 from widgets.help_icon_widget import HelpIconWidget
 from widgets.model_download_widget import ModelDropdownButton
 
@@ -30,9 +31,8 @@ BATCH_SIZE_CHOICES = [MBSTD_GROUP * x for x in range(1, 33)]
 
 class TrainingModule:
     def __init__(self, menu):
-        cwd = Path.cwd()
-        self.save_path = str(cwd / "training-runs")
-        self.data_path = str(cwd / "data")
+        self.save_path = str(data_path("training-runs"))
+        self.data_path = str(data_path("data"))
         # training-runs/ and data/ are created lazily when a training run or
         # dataset preprocessing actually writes to them, not on startup.
         self.app = menu.app

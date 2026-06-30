@@ -44,6 +44,8 @@ class Autolume(imgui_window.ImguiWindow):
         self.pkls = []
         self.splash_delay = None
         self.data_preprocessing = None
+        self.settings = None
+        self.settings_open = False
 
         self.splash = cv2.imread(str(resource_path("assets", "splashscreen.jpg")), cv2.IMREAD_UNCHANGED)
         self.splash = cv2.cvtColor(self.splash, cv2.COLOR_BGRA2RGBA)
@@ -124,6 +126,17 @@ class Autolume(imgui_window.ImguiWindow):
         self.data_preprocessing()
         self.state = States.PREPROCESSING
 
+    # Settings modal (drawn as an overlay over the menu, not its own state)
+    def open_settings(self):
+        from modules.settings import Settings
+        if self.settings is None:
+            self.settings = Settings(self)
+        self.settings_open = True
+        self.settings.open()
+
+    def close_settings(self):
+        self.settings_open = False
+
     def _draw_splash(self):
         imgui.set_next_window_position(0, 0)
         imgui.set_next_window_size(self.content_width, self.content_height)
@@ -171,6 +184,8 @@ class Autolume(imgui_window.ImguiWindow):
                 self.state = States.ERROR
             else:
                 self.menu()
+                if self.settings_open and self.settings is not None:
+                    self.settings()
 
         if self.state == States.RENDER:
             if self.viz is None or self.render_loop is None:

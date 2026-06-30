@@ -19,6 +19,7 @@ from utils.gui_utils import imgui_utils
 from utils.gui_utils import gl_utils
 from utils.gui_utils import text_utils
 from utils.resource_paths import resource_path
+from utils.user_data import data_path
 from widgets import pickle_widget
 from widgets import latent_widget
 from widgets import trunc_noise_widget
@@ -607,14 +608,14 @@ class Visualizer:
         if imgui.button('Screen Capture'):
             now = datetime.datetime.now()
             current_time_str = now.strftime("%Y-%m-%d %H-%M-%S")
-            self.capture_screenshot(f'screenshots/{current_time_str}.png')
+            self.capture_screenshot(str(data_path('screenshots', f'{current_time_str}.png')))
 
         imgui.same_line()
         if imgui.button(record_label):
             if not self.is_recording:
                 now = datetime.datetime.now()
                 current_time_str = now.strftime("%Y-%m-%d %H-%M-%S")
-                self.start_recording(f'recordings/{current_time_str}.mp4')
+                self.start_recording(str(data_path('recordings', f'{current_time_str}.mp4')))
             else:
                 self.stop_recording()
 

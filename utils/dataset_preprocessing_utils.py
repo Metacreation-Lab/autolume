@@ -8,6 +8,9 @@ import PIL.ImageOps
 import torchvision.transforms as transforms
 import ffmpeg
 
+from utils.user_data import data_path
+
+
 class DatasetPreprocessingUtils:
     """Utility class to support dataset preprocessing functions."""
     def __init__(self):
@@ -26,7 +29,7 @@ class DatasetPreprocessingUtils:
             "yFlip": False
         }
         self.folder_name = "training_dataset"
-        self.output_path = Path.cwd() / "data"
+        self.output_path = data_path("data")
 
 
     def load_images(self, image_path):

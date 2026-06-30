@@ -19,3 +19,16 @@ On Apple Silicon, training is expected to be extremely slow — roughly 17× slo
 ## Downloading Autolume
 
 Get the latest release from the official website: [Download at metacreation.net](https://www.metacreation.net/autolume#:~:text=Run%20Autolume)
+
+## Where Autolume stores your data
+
+Autolume keeps everything you generate or download — models, presets, recordings,
+screenshots, GANSpace features, training runs, and datasets — in a single
+**data folder**. By default this is `~/autolume` (i.e. `autolume/` inside your
+user home folder).
+
+The preferences file that records your data folder lives at
+`~/.config/autolume/config.json`.
+
+Open **Settings** from the top banner in the menu to point Autolume at a
+different folder, open it in your file manager, or reset it to the default.
