@@ -1,6 +1,6 @@
 # Autolume
 
-Autolume-Live is a tool for real-time visual performances using StyleGAN.
+Autolume-Live is a cross-platform tool for real-time visual performances using StyleGAN.
 
 For detailed documentation and demos look at the [Metacreation Lab Website](https://www.metacreation.net/autolume).
 
@@ -17,38 +17,28 @@ For examples of artworks created with Autolume see: https://www.metacreation.net
 
 ## Development instructions
 
+We recommend `uv` for managing python venv ([installation link](https://docs.astral.sh/uv/#installation))
+
 ### Dependencies
-
-- [uv](https://docs.astral.sh/uv/#installation)
-- CUDA 12.8 ([download link](https://developer.nvidia.com/cuda-12-8-0-download-archive)) — Windows/Linux with an NVIDIA GPU
-  - Minimum components: CUDA Development + CUDA Runtime
-
-System dependencies are installed per platform with the OS package manager:
 
 #### Windows
 
+- CUDA ([download link](https://developer.nvidia.com/cuda-downloads))
+  - Minimum components: CUDA Development + CUDA Runtime
 - Microsoft C++ Build Tools ([download link](https://download.visualstudio.microsoft.com/download/pr/13907dbe-8bb3-4cfe-b0ae-147e70f8b2f3/a3193e6e6135ef7f598d6a9e429b010d77260dba33dddbee343a47494b5335a3/vs_BuildTools.exe))
   - Minimum components: Desktop development with C++
+- FFmpeg: `winget install Gyan.FFmpeg`
 
-FFmpeg:
+#### Linux (Ubuntu 24+)
 
-```bash
-winget install Gyan.FFmpeg
-```
-
-#### Linux (Ubuntu 24.04)
-
-```bash
-sudo apt install portaudio19-dev ffmpeg
-```
+- CUDA ([download link](https://developer.nvidia.com/cuda-downloads))
+  - Minimum components: CUDA Development + CUDA Runtime
+- FFmpeg and PortAudio: `sudo apt install portaudio19-dev ffmpeg`
 
 #### macOS
 
-```bash
-brew install portaudio ffmpeg
-```
-
-`imgui` and `pyaudio` have no Apple Silicon wheels and build from source, so also install the Xcode Command Line Tools with `xcode-select --install`.
+- FFmpeg and PortAudio: `brew install portaudio ffmpeg`
+- Command Line Tools for Xcode: `xcode-select --install`
 
 ### Initial setup
 
@@ -89,8 +79,7 @@ ffmpeg/ffprobe are downloaded and bundled into the release automatically via
 
 - **Windows / Linux:** output is the `dist/Autolume/` folder.
 - **macOS:** output is `dist/Autolume.app`. It is unsigned, so the first launch
-  needs right-click → Open (or notarize it yourself). The build uses
-  `assets/metacreation-logo.icns`.
+  needs right-click → Open.
 
 ### Building documentation
 
