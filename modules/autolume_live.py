@@ -15,7 +15,6 @@ class States(IntEnum):
     WELCOME = 0
     MENU = 1
     RENDER = 2
-    SPLASH = 3
     PREPROCESSING = 4
 
 
@@ -24,6 +23,9 @@ class Autolume(imgui_window.ImguiWindow):
     # State handler that greets user, shows menu (allowing for training, compression, ganspace), and renders
 
     DEFAULT_FPS_LIMIT = 60
+
+    # Number of frames to hold the startup splash screen before opening the menu.
+    SPLASH_FRAMES = 30
 
     # Standard-DPI UI font size. Divided by the display's DPI scale so the UI is a
     # constant, DPI-appropriate size that does NOT change when the window resizes.
@@ -40,7 +42,7 @@ class Autolume(imgui_window.ImguiWindow):
         self.viz = None
         self.render_loop = None
         self.pkls = []
-        self.splash_delay = 0
+        self.splash_delay = None
         self.data_preprocessing = None
 
         self.splash = cv2.imread(str(resource_path("assets", "splashscreen.jpg")), cv2.IMREAD_UNCHANGED)
@@ -122,11 +124,24 @@ class Autolume(imgui_window.ImguiWindow):
         self.data_preprocessing()
         self.state = States.PREPROCESSING
 
+    def _draw_splash(self):
+        imgui.set_next_window_position(0, 0)
+        imgui.set_next_window_size(self.content_width, self.content_height)
+        # No padding or border so the splash image fills the window edge to edge.
+        imgui.push_style_var(imgui.STYLE_WINDOW_PADDING, (0, 0))
+        imgui.push_style_var(imgui.STYLE_WINDOW_BORDERSIZE, 0)
+        imgui.begin('##welcome', closable=False,
+                    flags=(imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_SCROLLBAR))
+        imgui.image(self.splash_texture.gl_id, self.content_width, self.content_height)
+        imgui.end()
+        imgui.pop_style_var(2)
+
     def draw_frame(self):
 
-        if self.state == States.WELCOME:
-            # Size the still-hidden window to the splash image and center it.
-            # Skip borderless on Linux: Wayland can't restore decorations later.
+        if self.state == States.WELCOME and self.splash_delay is None:
+            # First splash frame: size the still-hidden window to the splash image and
+            # center it. Must run before begin_frame() so the frame renders at the fitted
+            # size. Skip borderless on Linux: Wayland can't restore decorations later.
             if sys.platform != 'linux':
                 self.hide_title_bar()
             splash_w = self.splash_texture.width // 2
@@ -134,22 +149,15 @@ class Autolume(imgui_window.ImguiWindow):
             fit = min(0.8 * self.monitor_width / splash_w, 0.8 * self.monitor_height / splash_h, 1)
             self.set_window_size(int(splash_w * fit), int(splash_h * fit))
             self.center()
+            self.splash_delay = self.SPLASH_FRAMES
 
         self.begin_frame()
         self.button_w = self.font_size * 5
         self.label_w = round(self.font_size * 4.5)
 
-        if self.state == States.SPLASH:
-            imgui.set_next_window_position(0, 0)
-            imgui.set_next_window_size(self.content_width, self.content_height)
-            # No padding or border so the splash image fills the window edge to edge.
-            imgui.push_style_var(imgui.STYLE_WINDOW_PADDING, (0, 0))
-            imgui.push_style_var(imgui.STYLE_WINDOW_BORDERSIZE, 0)
-            imgui.begin('##welcome', closable=False,
-                        flags=(imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_SCROLLBAR))
-            imgui.image(self.splash_texture.gl_id, self.content_width, self.content_height)
-            imgui.end()
-            imgui.pop_style_var(2)
+        if self.state == States.WELCOME:
+            # Hold the splash image for SPLASH_FRAMES frames, then open the menu.
+            self._draw_splash()
             self.splash_delay -= 1
             if self.splash_delay <= 0:
                 self.set_visible_menu()
@@ -157,23 +165,6 @@ class Autolume(imgui_window.ImguiWindow):
                     # Title bar height reads 0 while hidden; restore before sizing.
                     self.show_title_bar()
                 self.maximize()
-
-
-        if self.state == States.WELCOME:
-            imgui.set_next_window_position(0, 0)
-            imgui.set_next_window_size(self.content_width, self.content_height)
-            # No padding or border so the splash image fills the window edge to edge.
-            imgui.push_style_var(imgui.STYLE_WINDOW_PADDING, (0, 0))
-            imgui.push_style_var(imgui.STYLE_WINDOW_BORDERSIZE, 0)
-            imgui.begin('##welcome', closable=False,
-                        flags=(imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE| imgui.WINDOW_NO_SCROLLBAR))
-            imgui.image(self.splash_texture.gl_id, self.content_width, self.content_height)
-            imgui.end()
-            imgui.pop_style_var(2)
-            self.state = States.SPLASH
-            self.splash_delay = 30
-
-
 
         if self.state == States.MENU:
             if self.menu is None:
