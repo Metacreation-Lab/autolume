@@ -103,6 +103,8 @@ class ModelDownloadWidget:
         self.on_complete = on_complete
         self.catalog = load_catalog()
         self.show_browser = False
+        # Dropdown that opened the catalog, auto-selected when its download finishes.
+        self.requester = None
 
         self._state = 'idle'  # 'idle' | 'downloading' | 'error'
         self._bytes_done = 0
@@ -157,6 +159,10 @@ class ModelDownloadWidget:
         if self._finished_ok:
             self._finished_ok = False
             self._state = 'idle'
+            completed_path = os.path.join(self.models_dir, self._active_entry['filename'])
+            if self.requester is not None:
+                self.requester.notify_downloaded(completed_path)
+                self.requester = None
             if self.on_complete is not None:
                 self.on_complete()
 
@@ -263,11 +269,19 @@ class ModelDropdownButton:
         self.items_provider = items_provider
         self.models = []
         self._refocus = False
+        self._pending_pick = None
+
+    def notify_downloaded(self, pkl):
+        """Queue a just-downloaded model to be selected on the next frame."""
+        self._pending_pick = pkl
 
     @imgui_utils.scoped_by_object_id
     def __call__(self, width=0):
         """Draw the button and dropdown; return the picked model path, or None."""
         picked = None
+        if self._pending_pick is not None:
+            picked = self._pending_pick
+            self._pending_pick = None
         if imgui_utils.button(self.label, width=width):
             self.models = self.items_provider()
             imgui.open_popup('model_dropdown')
@@ -286,6 +300,7 @@ class ModelDropdownButton:
             clicked, _state = imgui.menu_item('Get Models...')
             if clicked:
                 self.downloader.show_browser = True
+                self.downloader.requester = self
             imgui.end_popup()
         return picked
 
