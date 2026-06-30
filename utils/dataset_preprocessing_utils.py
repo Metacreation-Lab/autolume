@@ -29,7 +29,7 @@ class DatasetPreprocessingUtils:
             "yFlip": False
         }
         self.folder_name = "training_dataset"
-        self.output_path = data_path("data")
+        self.output_path = data_path("datasets")
 
 
     def load_images(self, image_path):

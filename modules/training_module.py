@@ -32,7 +32,7 @@ BATCH_SIZE_CHOICES = [MBSTD_GROUP * x for x in range(1, 33)]
 class TrainingModule:
     def __init__(self, menu):
         self.save_path = str(data_path("training-runs"))
-        self.data_path = str(data_path("data"))
+        self.data_path = str(data_path("datasets"))
         # training-runs/ and data/ are created lazily when a training run or
         # dataset preprocessing actually writes to them, not on startup.
         self.app = menu.app

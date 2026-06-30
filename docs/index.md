@@ -22,8 +22,8 @@ Get the latest release from the official website: [Download at metacreation.net]
 
 ## Where Autolume stores your data
 
-Autolume keeps everything you generate or download — models, presets, recordings,
-screenshots, GANSpace features, training runs, and datasets — in a single
+Autolume keeps everything you generate or download — models, presets, captures,
+GANSpace features, training runs, and datasets — in a single
 **data folder**. By default this is `~/autolume` (i.e. `autolume/` inside your
 user home folder).
 
