@@ -22,7 +22,7 @@ class CompressModule:
         self.compress_pkl = ""
         self.save_path = str(data_path("distillation-runs"))
         self.save_path_distill = str(data_path("training-runs"))
-        self.data_path = str(data_path("data"))
+        self.data_path = str(data_path("datasets"))
         self.resume_pkl = ""
         self.teacher_pkl = ""
         self.compression_factor = 0.7

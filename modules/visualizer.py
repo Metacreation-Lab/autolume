@@ -608,14 +608,14 @@ class Visualizer:
         if imgui.button('Screen Capture'):
             now = datetime.datetime.now()
             current_time_str = now.strftime("%Y-%m-%d %H-%M-%S")
-            self.capture_screenshot(str(data_path('screenshots', f'{current_time_str}.png')))
+            self.capture_screenshot(str(data_path('captures', f'{current_time_str}.png')))
 
         imgui.same_line()
         if imgui.button(record_label):
             if not self.is_recording:
                 now = datetime.datetime.now()
                 current_time_str = now.strftime("%Y-%m-%d %H-%M-%S")
-                self.start_recording(str(data_path('recordings', f'{current_time_str}.mp4')))
+                self.start_recording(str(data_path('captures', f'{current_time_str}.mp4')))
             else:
                 self.stop_recording()
 

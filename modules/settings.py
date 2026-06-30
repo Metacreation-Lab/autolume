@@ -72,7 +72,7 @@ class Settings:
         if opened:
             imgui.text("Data folder")
             imgui.text_colored(
-                "Models, presets, recordings, screenshots and training runs are stored here.",
+                "Models, presets, captures, datasets and training runs are stored here.",
                 0.7, 0.7, 0.7)
             changed, self.pending_root = imgui_utils.input_text(
                 "##data_root", self.pending_root, 1024, imgui.INPUT_TEXT_ENTER_RETURNS_TRUE,
