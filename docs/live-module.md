@@ -20,7 +20,7 @@ This widget allows you to load models and explore their latent space, i.e. the i
 
 ### Model Loading
 
-Use Find to navigate to the location of a .pkl file or press Models to open a list of models in your models folder inside your autolumelive_colab directory (the installation directory). You can copy any .pkl file there for quick access inside Autolume-live, or use the Get Models... entry at the bottom of the Models dropdown to download curated pre-trained models directly from within Autolume.
+Use Find to navigate to the location of a .pkl file or press Models to open a list of models in your models folder (under your [data folder](index.md#where-autolume-stores-your-data), `~/autolume/models` by default). You can copy any .pkl file there for quick access inside Autolume-live, or use the Get Models... entry at the bottom of the Models dropdown to download curated pre-trained models directly from within Autolume.
 
 Loading a model for the first time can take a few seconds as we test if the computer is capable of running custom CUDA code that improves the performance. Afterward, models are stored in cache and loading should be much faster.
 

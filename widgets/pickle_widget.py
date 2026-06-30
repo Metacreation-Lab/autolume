@@ -100,21 +100,21 @@ class PickleWidget:
             self.set_params(pickle.load(f))
         if not os.path.exists(self.user_pkl):
             head, tail = os.path.split(self.user_pkl)
-            if os.path.exists(os.getcwd() + os.sep + 'models' + os.sep + tail):
-                self.user_pkl = os.getcwd() + os.sep + 'models' + os.sep + tail
+            if os.path.exists(os.path.join(models_dir(), tail)):
+                self.user_pkl = os.path.join(models_dir(), tail)
             else:
                 print('ERROR: Model does not exist in the model folder.')
         if not os.path.exists(self.cur_pkl):
             head, tail = os.path.split(self.cur_pkl)
-            if os.path.exists(os.getcwd() + os.sep + 'models' + os.sep + tail):
-                self.cur_pkl = os.getcwd() + os.sep + 'models' + os.sep + tail
+            if os.path.exists(os.path.join(models_dir(), tail)):
+                self.cur_pkl = os.path.join(models_dir(), tail)
             else:
                 print('ERROR: Model does not exist in the model folder.')
         for recent_pkl in self.recent_pkls:
             if not os.path.exists(self.recent_pkl):
                 head, tail = os.path.split(self.recent_pkl)
-                if os.path.exists(os.getcwd() + os.sep + 'models' + os.sep + tail):
-                    self.cur_pkl = os.getcwd() + os.sep + 'models' + os.sep + tail
+                if os.path.exists(os.path.join(models_dir(), tail)):
+                    self.cur_pkl = os.path.join(models_dir(), tail)
                 else:
                     print('ERROR: Model does not exist in the model folder.')
         

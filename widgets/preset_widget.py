@@ -218,6 +218,7 @@ import os
 import imgui
 import numpy as np
 from utils.gui_utils import imgui_utils
+from utils.user_data import data_path
 from widgets.browse_widget import BrowseWidget
 
 class PresetWidget:
@@ -229,7 +230,7 @@ class PresetWidget:
         self.dir_name = np.asarray([f"{i}" for i in range(self.num_presets)], dtype=object)
         self.scroll_index = 0  # 添加滚动索引
 
-        self.path = "presets"
+        self.path = str(data_path("presets"))
         # Presets are created lazily: the folder and its slots are materialised
         # when the first preset is saved (see save()/open_path()). Until then the
         # grid uses in-memory slot names and nothing touches the disk.

@@ -24,18 +24,10 @@ if IS_FROZEN:
             os.environ.setdefault("PYGLFW_LIBRARY", _glfw_cand)
             break
 
-    if sys.platform == "darwin":
-        # A double-clicked .app starts with cwd="/". Read-only resources are
-        # resolved from the bundle via utils.resource_paths, so move the working
-        # directory next to the .app; user data (models, presets, recordings,
-        # screenshots, training output) is then written there, outside the bundle.
-        # Those output folders are created lazily by their features, not here.
-        from pathlib import Path
-        os.chdir(Path(sys.executable).resolve().parents[3])
-
 import torch
 
 from modules.autolume_live import Autolume
+from utils.user_data import ensure_data_path
 
 
 def get_runtime_bin_dir():
@@ -57,6 +49,10 @@ os.environ["PATH"] = BIN_DIR + os.pathsep + os.environ.get("PATH", "")
 
 
 def main():
+    # Materialise the user data root so it is discoverable even before any
+    # feature writes to it. Category subfolders are still created lazily.
+    ensure_data_path()
+
     app = Autolume()
 
     while not app.should_close():

@@ -21,6 +21,7 @@ except ModuleNotFoundError:
 
 import dnnlib
 from utils.gui_utils import imgui_utils
+from utils.model_dir import models_dir
 from widgets import osc_menu, save_widget
 import imgui
 
@@ -265,8 +266,8 @@ class LatentWidget:
                 elif isinstance(value, str):
                     if os.path.exists(value):
                         target = value
-                    elif os.path.exists(os.path.join(os.getcwd(), 'models', value)):
-                        target = os.path.join(os.getcwd(), 'models', value)
+                    elif os.path.exists(os.path.join(models_dir(), value)):
+                        target = os.path.join(models_dir(), value)
                     else:
                         target = None
                         for path in pickle_widget.browse_cache:

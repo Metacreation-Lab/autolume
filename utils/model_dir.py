@@ -1,10 +1,12 @@
 """Helpers for the runtime models/ folder, which may not exist until first use."""
 import os
 
+from utils.user_data import data_path
+
 
 def models_dir():
-    """Absolute path of the models folder in the working directory."""
-    return os.path.join(os.getcwd(), "models")
+    """Absolute path of the models folder under the user data root."""
+    return str(data_path("models"))
 
 
 def ensure_models_dir():

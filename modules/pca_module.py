@@ -17,6 +17,7 @@ from widgets.model_download_widget import ModelDropdownButton
 from widgets.browse_widget import BrowseWidget
 from widgets.native_browser_widget import NativeBrowserWidget
 from widgets.help_icon_widget import HelpIconWidget
+from utils.user_data import data_path
 
 
 def _locate_results(pattern):
@@ -30,8 +31,7 @@ class PCA_Module:
     def __init__(self, menu):
         self.help_icon = HelpIconWidget()
         self.help_texts, self.help_urls = self.help_icon.load_help_texts("pca")
-        cwd = os.getcwd()
-        self.save_path = os.path.join(cwd,"ganspace_features")
+        self.save_path = str(data_path("ganspace_features"))
 
         self.menu = menu
         self.app = menu.app

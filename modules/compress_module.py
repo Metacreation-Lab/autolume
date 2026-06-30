@@ -1,5 +1,3 @@
-import os
-
 import imgui
 
 import dnnlib
@@ -9,6 +7,7 @@ from prune import main as prune_main
 from widgets.model_download_widget import ModelDropdownButton
 from train import main as train_main
 from utils import dataset_tool
+from utils.user_data import data_path
 
 augs = ["ADA", "DiffAUG"]
 ada_pipes = ['blit', 'geom', 'color', 'filter', 'noise', 'cutout', 'bg', 'bgc', 'bgcf', 'bgcfn', 'bgcfnc']
@@ -20,11 +19,10 @@ class CompressModule:
         self.img_factor = 4
         self.height_factor = 4
         self.square = True
-        cwd = os.getcwd()
         self.compress_pkl = ""
-        self.save_path = os.path.join(cwd, "distillation-runs")
-        self.save_path_distill = os.path.join(cwd, "training-runs")
-        self.data_path = os.path.join(cwd, "data")
+        self.save_path = str(data_path("distillation-runs"))
+        self.save_path_distill = str(data_path("training-runs"))
+        self.data_path = str(data_path("data"))
         self.resume_pkl = ""
         self.teacher_pkl = ""
         self.compression_factor = 0.7
