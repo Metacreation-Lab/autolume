@@ -17,7 +17,6 @@ from utils.gui_utils import imgui_window, gl_utils
 from utils.gui_utils import imgui_utils
 from modules.pca_module import PCA_Module
 from modules.training_module import TrainingModule
-from modules.compress_module import CompressModule
 from modules.network_surgery import SurgeryModule
 from modules.projection_module import ProjectionModule
 from modules.network_mixing import MixingModule
@@ -35,7 +34,6 @@ class Menu:
         self.model_downloader = ModelDownloadWidget(app, models_dir())
         self.pca = PCA_Module(self)
         self.training = TrainingModule(self)
-        self.compress = CompressModule(self)
         # self.network_surgery = SurgeryModule(self)
         self.projection = ProjectionModule(self)
         self.super_res = SuperResModule(self)
