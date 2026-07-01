@@ -33,8 +33,6 @@ class TrainingModule:
     def __init__(self, menu):
         self.save_path = str(data_path("training-runs"))
         self.data_path = str(data_path("datasets"))
-        # training-runs/ and data/ are created lazily when a training run or
-        # dataset preprocessing actually writes to them, not on startup.
         self.app = menu.app
         self.config = 1
         self.resume_pkl = ""

@@ -72,7 +72,8 @@ class Settings:
         if opened:
             imgui.text("Data folder")
             imgui.text_colored(
-                "Models, presets, captures, datasets and training runs are stored here.",
+                "Autolume stores your models, presets, captures, datasets, "
+                "GANSpace features and training runs in this folder.",
                 0.7, 0.7, 0.7)
             changed, self.pending_root = imgui_utils.input_text(
                 "##data_root", self.pending_root, 1024, imgui.INPUT_TEXT_ENTER_RETURNS_TRUE,
@@ -97,7 +98,8 @@ class Settings:
 
             imgui.spacing()
             imgui.text_colored(
-                "Changing the folder takes full effect when you return to the menu.",
+                "Model downloads and captures use the new folder right away; "
+                "the save-path fields in the other tools update after a restart.",
                 0.7, 0.7, 0.7)
             imgui.text_colored(f"Preferences file: {config_file()}", 0.5, 0.5, 0.5)
             if self.status:
