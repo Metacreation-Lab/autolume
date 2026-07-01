@@ -156,7 +156,7 @@ class AdjusterWidget:
                                                                 imgui.INPUT_TEXT_CHARS_NO_BLANK,
                                                                 width=self.viz.app.button_w, help_text="filepath")
                 if imgui_utils.button(f"Browse##vec{i}", self.viz.app.button_w):
-                    path = self.browser.select_vector_file()
+                    path = self.browser.select_vector_file(initial_dir=self.paths[i])
                     if path:
                         self.paths[i] = str(path)
                 if imgui_utils.button(f"Load Vec##{i}", (self.viz.app.button_w * (6 / 8) - (self.viz.app.spacing / 2))):
@@ -182,7 +182,7 @@ class AdjusterWidget:
             if imgui_utils.button(f"Randomize##all", self.viz.app.button_w):
                 self.dirs = torch.randn(self.dirs.shape)
             if imgui_utils.button(f"Browse##vecall", self.viz.app.button_w):
-                path = self.browser.select_vector_file()
+                path = self.browser.select_vector_file(initial_dir=self.all_dir)
                 if path:
                     self.all_dir = str(path)
             if imgui_utils.button(f"Load Vecs##all", self.viz.app.button_w):
