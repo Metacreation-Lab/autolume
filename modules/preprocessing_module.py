@@ -117,7 +117,7 @@ class DataPreprocessing:
         imgui.separator()
  
         if imgui.button("Import Images", width=parameter_column_width, height=30):
-            selected_images = self.data_browser.select_image_files()
+            selected_images = self.data_browser.select_images_from_folder()
             duplicates = self.check_for_duplicates(selected_images)
             if duplicates:
                 self.current_duplicates = duplicates  # Store duplicate filenames for popup

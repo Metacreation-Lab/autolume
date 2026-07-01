@@ -44,25 +44,11 @@ class NativeBrowserWidget:
             ('All files', '*.*')
         ]
 
-        self.all_media_extensions = [
-            ('Media files', '*.png *.jpg *.jpeg *.bmp *.tiff *.tif *.webp *.gif *.mp4 *.avi *.mov *.mkv *.webm'),
-            ('Image files', '*.png *.jpg *.jpeg *.bmp *.tiff *.tif *.webp *.gif'),
-            ('Video files', '*.mp4 *.avi *.mov *.mkv *.webm *.gif'),
-            ('All files', '*.*')
-        ]
-
         # Optimized extension sets for fast lookup
         self._image_extensions_set = self._build_extension_set(self.image_extensions)
         self._video_extensions_set = self._build_extension_set(self.video_extensions)
 
-        # Lazy loading state
-        self._current_directory = None
-        self._all_files = []
-        self._filtered_files = []
-        self._page_size = 500  # Load files in chunks of 500
-        self._current_page = 0
-
-    # --- Dialog primitives -------------------------------------------------
+    # --- Dialog primitives ---------------------------------------------------
 
     @staticmethod
     def _dialogs_available() -> bool:
@@ -136,21 +122,12 @@ class NativeBrowserWidget:
         return ext in self._video_extensions_set
 
     def _load_directory_files(self, directory: str) -> List[str]:
-        """Load all files from directory (still needed for lazy loading)."""
+        """Return filenames (non-recursive) in directory; skips subdirectories."""
         try:
             return [f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f))]
         except (OSError, PermissionError) as e:
             print(f"Error reading directory {directory}: {e}")
             return []
-
-    def _get_files_page(self, files: List[str], page: int = 0, page_size: Optional[int] = None) -> List[str]:
-        """Get a page of files for lazy loading."""
-        if page_size is None:
-            page_size = self._page_size
-
-        start_idx = page * page_size
-        end_idx = start_idx + page_size
-        return files[start_idx:end_idx]
 
     def _filter_files_by_type(self, files: List[str], file_type: str = "image") -> List[str]:
         """Filter files by type using optimized extension checking."""
@@ -163,102 +140,20 @@ class NativeBrowserWidget:
 
     # --- Public API ----------------------------------------------------------
 
-    def select_image_directory(self):
-        """Select a directory containing image files - returns directory path only for lazy loading."""
-        folder_path = self._open_directory("Select a folder containing image dataset")
-
+    def select_images_from_folder(self) -> List[str]:
+        """Open a native directory picker and return all image files (non-recursively)
+        in the chosen folder as full, sorted paths. Returns [] when cancelled."""
+        folder_path = self._open_directory("Select a folder containing images")
         if not folder_path:
-            return None
-
-        # Store directory for lazy loading
-        self._current_directory = folder_path
-        self._all_files = self._load_directory_files(folder_path)
-        self._filtered_files = self._filter_files_by_type(self._all_files, "image")
-        self._current_page = 0
-
-        return folder_path
-
-    def get_image_files_lazy(self, page: int = 0, page_size: Optional[int] = None) -> Tuple[List[str], bool]:
-        """
-        Get image files using lazy loading (like desktop file browser).
-        Returns (file_paths, has_more_pages)
-        """
-        if not self._current_directory or not self._filtered_files:
-            return [], False
-
-        if page_size is None:
-            page_size = self._page_size
-
-        page_files = self._get_files_page(self._filtered_files, page, page_size)
-        full_paths = [os.path.join(self._current_directory, f) for f in page_files]
-
-        has_more = (page + 1) * page_size < len(self._filtered_files)
-        return full_paths, has_more
-
-    def get_all_image_files(self) -> List[str]:
-        """
-        Get all image files from current directory (for backward compatibility).
-        Use this only when you need all files at once.
-        """
-        if not self._current_directory:
             return []
-
-        return [os.path.join(self._current_directory, f) for f in self._filtered_files]
-
-    def select_image_files_native(self):
-        """Select multiple image files using the native OS dialog."""
-        return self._open_files("Select Image Files", self.image_extensions[0][1])
-
-    def select_image_files(self):
-        """Select one or more image files using native OS dialog."""
-        return self.select_image_files_native()
+        files = self._load_directory_files(folder_path)
+        image_files = self._filter_files_by_type(files, "image")
+        full_paths = [os.path.join(folder_path, f) for f in image_files]
+        return sorted(full_paths)
 
     def select_video_files(self):
         """Select one or more video files using the native OS dialog."""
         return self._open_files("Select Video Files", self.video_extensions[0][1])
-
-    def select_video_directory(self):
-        """Select a directory containing video files - returns directory path only for lazy loading."""
-        folder_path = self._open_directory("Select a folder containing video dataset")
-
-        if not folder_path:
-            return None
-
-        # Store directory for lazy loading
-        self._current_directory = folder_path
-        self._all_files = self._load_directory_files(folder_path)
-        self._filtered_files = self._filter_files_by_type(self._all_files, "video")
-        self._current_page = 0
-
-        return folder_path
-
-    def get_video_files_lazy(self, page: int = 0, page_size: Optional[int] = None) -> Tuple[List[str], bool]:
-        """
-        Get video files using lazy loading (like desktop file browser).
-        Returns (file_paths, has_more_pages)
-        """
-        if not self._current_directory or not self._filtered_files:
-            return [], False
-
-        if page_size is None:
-            page_size = self._page_size
-
-        page_files = self._get_files_page(self._filtered_files, page, page_size)
-        full_paths = [os.path.join(self._current_directory, f) for f in page_files]
-
-        has_more = (page + 1) * page_size < len(self._filtered_files)
-        return full_paths, has_more
-
-    def get_directory_file_count(self) -> int:
-        """Get total number of files in current directory."""
-        return len(self._filtered_files) if self._filtered_files else 0
-
-    def reset_directory(self):
-        """Reset directory state for new selection."""
-        self._current_directory = None
-        self._all_files = []
-        self._filtered_files = []
-        self._current_page = 0
 
     def select_directory(self, title="Select Directory"):
         """
