@@ -13,8 +13,55 @@ from super_res.net_base import SRVGGNetPlus, SRVGGNetCompact, RRDBNet
 from utils.device_utils import get_device
 from utils import device_utils
 from utils.resource_paths import resource_path
+from utils.user_data import cache_path
+from utils.downloads import download_file
+import threading
 import time
 import gc
+
+# Downloadable Real-ESRGAN weights: display name -> (original filename, url).
+# "Fast" is omitted -- it is a small custom model bundled with the app.
+SR_WEIGHTS = {
+    "Quality": ("RealESRGAN_x4plus.pth",
+                "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth"),
+    "Balance": ("realesr-general-x4v3.pth",
+                "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-general-x4v3.pth"),
+}
+
+
+def sr_weight_path(model_type):
+    """Resolve the on-disk path for a super-res weight.
+
+    Fast loads from the bundle; Quality/Balance resolve to the user cache dir
+    (they may not exist yet -- see :func:`ensure_sr_weight`).
+    """
+    if model_type in SR_WEIGHTS:
+        filename, _ = SR_WEIGHTS[model_type]
+        return str(cache_path("real-esrgan", filename))
+    return str(resource_path("sr_models", "Fast.pt"))
+
+
+def ensure_sr_weight(model_type, progress_cb=None, cancel_event=None):
+    """Return the weight path, downloading Quality/Balance into the cache if missing.
+
+    Headless-safe: with no progress_cb it prints progress, so CLI callers work.
+    Returns None if the download was cancelled.
+    """
+    path = sr_weight_path(model_type)
+    if model_type in SR_WEIGHTS and not os.path.exists(path):
+        _, url = SR_WEIGHTS[model_type]
+        if progress_cb is None:
+            def progress_cb(done, total):
+                pct = f"{done / total:6.1%}" if total else f"{done} bytes"
+                print(f"\rDownloading {model_type} weights: {pct}", end="", flush=True)
+        if cancel_event is None:
+            cancel_event = threading.Event()
+        ok = download_file(url, path, cancel_event, progress_cb)
+        print()
+        if not ok:
+            return None
+    return path
+
 
 def load_model(choice,path):
   device = get_device()
@@ -128,12 +175,7 @@ def base_args():
 
 def process(args,file):
   print("Processing", args)
-  if args.model_type=="Quality":
-    model_path= str(resource_path("sr_models", "Quality.pth"))
-  elif args.model_type=="Balance":
-    model_path= str(resource_path("sr_models", "Balance.pth"))
-  elif args.model_type=="Fast":
-    model_path= str(resource_path("sr_models", "Fast.pt"))
+  model_path = ensure_sr_weight(args.model_type)
 
   upsampler=load_model(args.model_type,model_path)
   head, tail = os.path.split(file)
@@ -317,12 +359,7 @@ def run_super_res(queue, reply_queue):
     args = queue.get()
     while not queue.empty():
         args = queue.get()
-    if args.model_type == "Quality":
-        model_path = str(resource_path("sr_models", "Quality.pth"))
-    elif args.model_type == "Balance":
-        model_path = str(resource_path("sr_models", "Balance.pth"))
-    elif args.model_type == "Fast":
-        model_path = str(resource_path("sr_models", "Fast.pt"))
+    model_path = sr_weight_path(args.model_type)
     model = load_model(args.model_type, model_path)
     files = args.input_path
     for file_idx, file in enumerate(files):

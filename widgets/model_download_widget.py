@@ -1,96 +1,14 @@
-import csv
 import glob
-import html
 import math
 import os
-import re
 import threading
 import time
 
 import imgui
-import requests
 
+from utils.downloads import download_file, load_catalog
 from utils.gui_utils import imgui_utils
 from utils.model_dir import list_model_pkls
-from utils.resource_paths import resource_path
-
-#----------------------------------------------------------------------------
-# Download core. GUI-free so it can be exercised headless.
-
-CHUNK_SIZE = 1024 * 1024
-REQUIRED_COLUMNS = ('name', 'filename', 'resolution', 'author', 'license', 'url')
-
-
-def load_catalog():
-    """Parse the bundled models.csv into a list of catalog entries."""
-    csv_path = resource_path('models.csv')
-    try:
-        with open(csv_path, newline='', encoding='utf-8') as f:
-            rows = []
-            for row in csv.DictReader(f):
-                if all(row.get(col) for col in REQUIRED_COLUMNS):
-                    rows.append({col: row[col].strip() for col in REQUIRED_COLUMNS})
-                else:
-                    print(f'Skipping malformed models.csv row: {row}')
-            return rows
-    except OSError as e:
-        print(f'Could not load models.csv: {e}')
-        return []
-
-
-def _resolve_google_drive(session, response):
-    """Follow the Google Drive interstitial page to the actual file response."""
-    page = response.text
-    if 'Google Drive - Quota exceeded' in page:
-        raise IOError('Google Drive download quota exceeded -- please try again later')
-    # Modern interstitial: a form pointing at drive.usercontent.google.com with hidden params.
-    match = re.search(r'<form[^>]*id="download-form"[^>]*action="([^"]+)"', page)
-    if match:
-        action = html.unescape(match.group(1))
-        params = {name: html.unescape(value) for name, value in
-                  re.findall(r'<input type="hidden" name="([^"]+)" value="([^"]*)"', page)}
-        return session.get(action, params=params, stream=True, timeout=(10, 30))
-    # Legacy interstitial: scrape the export=download confirmation link.
-    links = [html.unescape(link) for link in page.split('"') if 'export=download' in link]
-    if len(links) == 1:
-        return session.get(requests.compat.urljoin(response.url, links[0]), stream=True, timeout=(10, 30))
-    raise IOError('Could not resolve Google Drive download link')
-
-
-def download_file(url, dest_path, cancel_event, progress_cb):
-    """Stream url into dest_path. Returns False if cancelled, raises on failure.
-
-    Data is written to dest_path + '.part' and atomically renamed on success,
-    so dest_path only ever exists as a complete file.
-    """
-    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-    part_path = dest_path + '.part'
-    try:
-        with requests.Session() as session:
-            response = session.get(url, stream=True, timeout=(10, 30))
-            response.raise_for_status()
-            if response.headers.get('Content-Type', '').startswith('text/html'):
-                response = _resolve_google_drive(session, response)
-                response.raise_for_status()
-                if response.headers.get('Content-Type', '').startswith('text/html'):
-                    raise IOError('Could not resolve download link (quota exceeded or page layout changed)')
-            total = int(response.headers.get('Content-Length', 0))
-            done = 0
-            with open(part_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=CHUNK_SIZE):
-                    if cancel_event.is_set():
-                        return False
-                    f.write(chunk)
-                    done += len(chunk)
-                    progress_cb(done, total)
-        os.replace(part_path, dest_path)
-        return True
-    finally:
-        if os.path.exists(part_path):
-            try:
-                os.remove(part_path)
-            except OSError:
-                pass
 
 #----------------------------------------------------------------------------
 

@@ -19,6 +19,8 @@ def Get_Parsing_Net(device):
         Obtain the network for parsing and its preprocess method
     '''
 
+    # Face-parsing (BiSeNet) weights, download manually into the path below:
+    # https://drive.google.com/uc?export=download&id=154JgKpzCPW82qINcVieuPH3fZ2e0P812
     PRETRAINED_FILE = (file_path / '''./face_parsing/pretrained_model/79999_iter.pth''').resolve()
 
     n_classes = 19

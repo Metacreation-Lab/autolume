@@ -1,4 +1,5 @@
 import os
+import threading
 import time
 
 import cv2
@@ -11,7 +12,7 @@ import numpy as np
 from utils import device_utils
 from utils.device_utils import get_device
 from utils.gui_utils import imgui_utils
-from super_res.super_res import main as super_res_main, load_model, get_resolution, check_width_height, get_audio, Reader, Writer, run_super_res
+from super_res.super_res import main as super_res_main, load_model, get_resolution, check_width_height, get_audio, Reader, Writer, run_super_res, sr_weight_path, ensure_sr_weight
 
 from dnnlib import EasyDict
 import multiprocessing as mp
@@ -62,6 +63,14 @@ class SuperResModule:
         self.video_height = 0
         self.help_icon = HelpIconWidget()
         self.help_texts, self.help_urls = self.help_icon.load_help_texts("super_res")
+        # First-run weight download state.
+        self.downloading = False
+        self.download_thread = None
+        self.download_cancel = None
+        self.download_status = None  # None while running, then "ok"/"cancelled"/"error: ..."
+        self.dl_done = 0
+        self.dl_total = 0
+        self.pending_start = False
 
 
     def display_progress(self):
@@ -203,8 +212,7 @@ class SuperResModule:
 
 
         try:
-            if imgui.button("Super Resolution", width=imgui.get_content_region_available_width()) and not self.running:
-                self.running = True
+            if imgui.button("Super Resolution", width=imgui.get_content_region_available_width()) and not self.running and not self.downloading:
                 print("Super Resolution")
                 args.result_path = self.result_path
                 args.input_path = self.input_path
@@ -215,12 +223,25 @@ class SuperResModule:
                 args.sharpen_scale = self.sharpen
                 args.scale_mode = self.scale_mode
                 self.args = args
-                print("Starting Super Resolution")
-                self.start_super_res()
-                imgui.open_popup("Super Resolution")
+                if os.path.exists(sr_weight_path(self.model_type)):
+                    self.running = True
+                    print("Starting Super Resolution")
+                    self.start_super_res()
+                    imgui.open_popup("Super Resolution")
+                else:
+                    self._begin_download(self.model_type)
+                    imgui.open_popup("Downloading Model")
 
         except Exception as e:
             print("SRR ERROR", e)
+
+        if imgui.begin_popup_modal("Downloading Model", flags=imgui.WINDOW_NO_SCROLLBAR | imgui.WINDOW_ALWAYS_AUTO_RESIZE)[0]:
+            self._display_download()
+            imgui.end_popup()
+
+        if self.pending_start:
+            self.pending_start = False
+            imgui.open_popup("Super Resolution")
 
         if imgui.begin_popup_modal("Super Resolution", flags=imgui.WINDOW_NO_SCROLLBAR | imgui.WINDOW_ALWAYS_AUTO_RESIZE)[0]:
             self.display_progress()
@@ -230,6 +251,71 @@ class SuperResModule:
 
 
 
+
+    def _begin_download(self, model_type):
+        self.download_cancel = threading.Event()
+        self.download_status = None
+        self.dl_done = 0
+        self.dl_total = 0
+        self.downloading = True
+        self.download_thread = threading.Thread(
+            target=self._download_weight, args=(model_type,), daemon=True)
+        self.download_thread.start()
+
+    def _download_weight(self, model_type):
+        def progress(done, total):
+            self.dl_done, self.dl_total = done, total
+        try:
+            result = ensure_sr_weight(model_type, progress_cb=progress,
+                                      cancel_event=self.download_cancel)
+            self.download_status = "ok" if result is not None else "cancelled"
+        except Exception as e:
+            self.download_status = f"error: {e}"
+
+    def _join_download_thread(self):
+        if self.download_thread is not None:
+            self.download_thread.join(timeout=1)
+            self.download_thread = None
+
+    def _display_download(self):
+        width = imgui.get_font_size() * 22
+        status = self.download_status
+
+        if isinstance(status, str) and status.startswith("error"):
+            imgui.text("Model download failed:")
+            imgui.text_wrapped(status[7:] if status.startswith("error: ") else status)
+            imgui.spacing()
+            if imgui.button("Close", width=width):
+                self.downloading = False
+                self._join_download_thread()
+                self.running = False
+                imgui.close_current_popup()
+            return
+
+        imgui.text(f"Downloading {self.model_type} model weights...")
+        if self.dl_total > 0:
+            fraction = min(self.dl_done / self.dl_total, 1.0)
+            label = f"{self.dl_done / (1024 * 1024):.1f} / {self.dl_total / (1024 * 1024):.1f} MB"
+            imgui.progress_bar(fraction, (width, 0.0), label)
+        else:
+            imgui.progress_bar(0.0, (width, 0.0), "connecting...")
+        imgui.spacing()
+
+        if status is None:
+            if imgui.button("Cancel", width=width):
+                self.download_cancel.set()
+            return
+
+        # Download finished: tear down and either launch or bail out.
+        self.downloading = False
+        self._join_download_thread()
+        imgui.close_current_popup()
+        if status == "ok":
+            self.running = True
+            self.start_super_res()
+            self.pending_start = True
+        else:  # cancelled
+            self.running = False
 
     def start_super_res(self):
         self.start_time = time.time()

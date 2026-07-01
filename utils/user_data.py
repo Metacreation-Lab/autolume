@@ -98,3 +98,13 @@ def ensure_data_path(*parts: str) -> Path:
     path = data_path(*parts)
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def cache_path(*parts: str) -> Path:
+    """Resolve a path under ``~/.cache/autolume`` (folder may not exist yet).
+
+    Honors ``XDG_CACHE_HOME``. Used for disposable, re-downloadable data
+    such as on-demand super-resolution weights.
+    """
+    base = os.environ.get("XDG_CACHE_HOME") or (Path.home() / ".cache")
+    return Path(base, "autolume", *parts)

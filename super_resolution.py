@@ -13,7 +13,7 @@ import torchvision.transforms.functional as F
 
 from utils import device_utils
 from utils.device_utils import get_device
-from utils.resource_paths import resource_path
+from super_res.super_res import ensure_sr_weight
 
 
 def get_audio(video_path):
@@ -140,12 +140,7 @@ def super_res_main(input_dir, output_dir, scale_mode, sharpening_factor, model, 
 
     print(msg)
 
-    if model == "Quality":
-        model_path = str(resource_path("sr_models", "Quality.pth"))
-    elif model == "Balance":
-        model_path = str(resource_path("sr_models", "Balance.pth"))
-    else:
-        model_path = str(resource_path("sr_models", "Fast.pt"))
+    model_path = ensure_sr_weight(model)
 
     print("Loading Model", model_path)
     super_res_model = load_model(model, model_path)
