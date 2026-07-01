@@ -93,7 +93,7 @@ class MixingWidget:
 
             imgui.same_line()
             if imgui_utils.button("Find##mixpkl", width=self.viz.app.button_w):
-                pkl = self.browser.select_model_file()
+                pkl = self.browser.select_model_file(initial_dir=self.model_pth)
                 if pkl:
                     print("SELECTED", pkl)
                     self.model_pth = resolve_pkl(str(pkl))

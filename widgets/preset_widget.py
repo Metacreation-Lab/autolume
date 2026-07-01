@@ -568,7 +568,7 @@ class PresetWidget:
                 imgui.input_text("##preset_path", self.tmp_path, 256, imgui.INPUT_TEXT_READ_ONLY)
             imgui.same_line()
             if imgui_utils.button("Preset Path##presetwidget", width=self.viz.app.button_w):
-                directory_path = self.browser.select_directory("Select Preset Path")
+                directory_path = self.browser.select_directory("Select Preset Path", initial_dir=self.tmp_path)
                 if directory_path:
                     self.tmp_path = str(directory_path)
 

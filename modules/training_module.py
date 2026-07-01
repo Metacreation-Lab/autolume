@@ -197,7 +197,7 @@ class TrainingModule:
                 
                 imgui.same_line()
                 if imgui.button("Browse##preprocessing_data", width=self.menu.app.button_w):
-                    directory_path, has_videos, video_files = self.preprocessing_data_browser.select_directory_with_video_check("Select Data Directory")
+                    directory_path, has_videos, video_files = self.preprocessing_data_browser.select_directory_with_video_check("Select Data Directory", initial_dir=self.preprocessing_data_path)
                     if directory_path:
                         self.preprocessing_data_path = directory_path
                         self.data_path_has_videos = has_videos  
@@ -275,7 +275,7 @@ class TrainingModule:
                 
                 imgui.same_line()
                 if imgui.button("Browse##preprocessing_save", width=self.menu.app.button_w):
-                    directory_path = self.preprocessing_save_browser.select_directory("Select Save Path")
+                    directory_path = self.preprocessing_save_browser.select_directory("Select Save Path", initial_dir=self.preprocessing_save_path)
                     if directory_path:
                         self.preprocessing_save_path = directory_path
                     else:
@@ -326,7 +326,7 @@ class TrainingModule:
             
             imgui.same_line()
             if imgui.button("Browse##main_save", width=self.menu.app.button_w):
-                directory_path = self.save_path_browser.select_directory("Select Training Results Save Path")
+                directory_path = self.save_path_browser.select_directory("Select Training Results Save Path", initial_dir=self.save_path)
                 if directory_path:
                     self.save_path = directory_path
                 else:
@@ -340,7 +340,7 @@ class TrainingModule:
             
             imgui.same_line()
             if imgui.button("Browse##main_data", width=self.menu.app.button_w):
-                directory_path = self.data_path_browser.select_directory("Select Training Dataset Directory")
+                directory_path = self.data_path_browser.select_directory("Select Training Dataset Directory", initial_dir=self.data_path)
                 if directory_path:
                     self.data_path = directory_path
 

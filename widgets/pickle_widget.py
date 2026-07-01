@@ -140,7 +140,7 @@ class PickleWidget:
                 imgui.open_popup('recent_pkls_popup')
             imgui.same_line()
             if imgui_utils.button("Find##pkl", width=self.viz.app.button_w):
-                pkl = self.browser.select_model_file()
+                pkl = self.browser.select_model_file(initial_dir=self.user_pkl)
                 if pkl:
                     print("SELECTED", pkl)
                     self.load_pkl(str(pkl), ignore_errors=True)

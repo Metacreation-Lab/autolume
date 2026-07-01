@@ -309,7 +309,7 @@ class LoopingWidget:
                                                           width=viz.app.font_size * 7, help_text="filepath")
         imgui.same_line()
         if imgui_utils.button(f"Browse##loop_{idx}", viz.app.button_w):
-            path = self.browser.select_vector_file()
+            path = self.browser.select_vector_file(initial_dir=self.paths[idx])
             if path:
                 self.paths[idx] = str(path)
         imgui.same_line()

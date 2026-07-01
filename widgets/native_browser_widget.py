@@ -79,13 +79,33 @@ class NativeBrowserWidget:
             return patterns
         return [patterns, '*']
 
-    def _open_files(self, title: str, patterns: str) -> List[str]:
+    @staticmethod
+    def _resolve_initial_dir(hint) -> str:
+        """Resolve the folder a dialog should open in. `hint` may be a file path,
+        a directory, an empty string, or a non-existent path. A file resolves to
+        its parent folder; a missing path falls back to the user's home directory.
+        `None` keeps the process working directory (the default when no path field
+        is associated with the dialog)."""
+        if hint is None:
+            return os.getcwd()
+        home = os.path.expanduser("~")
+        if not hint:
+            return home
+        hint = os.path.expanduser(str(hint))
+        if os.path.isdir(hint):
+            return hint
+        parent = os.path.dirname(hint)
+        if parent and os.path.isdir(parent):
+            return parent
+        return home
+
+    def _open_files(self, title: str, patterns: str, initial_dir=None) -> List[str]:
         """Open a native multi-file picker. Returns [] when cancelled."""
         if not self._dialogs_available():
             return []
         try:
             paths = filedialpy.openFiles(title=title, filter=self._filter_arg(patterns),
-                                         initial_dir=os.getcwd())
+                                         initial_dir=self._resolve_initial_dir(initial_dir))
         except Exception as e:
             print(f"Native file dialog failed: {e}")
             return []
@@ -95,12 +115,12 @@ class NativeBrowserWidget:
         # keeping only real files also drops that artifact.
         return [p for p in paths if p and os.path.isfile(p)]
 
-    def _open_directory(self, title: str) -> Optional[str]:
+    def _open_directory(self, title: str, initial_dir=None) -> Optional[str]:
         """Open a native directory picker. Returns None when cancelled."""
         if not self._dialogs_available():
             return None
         try:
-            path = filedialpy.openDir(title=title, initial_dir=os.getcwd())
+            path = filedialpy.openDir(title=title, initial_dir=self._resolve_initial_dir(initial_dir))
         except Exception as e:
             print(f"Native directory dialog failed: {e}")
             return None
@@ -112,13 +132,13 @@ class NativeBrowserWidget:
             return None
         return path
 
-    def _open_single_file(self, title: str, patterns: str) -> Optional[str]:
+    def _open_single_file(self, title: str, patterns: str, initial_dir=None) -> Optional[str]:
         """Open a native single-file picker. Returns None when cancelled."""
         if not self._dialogs_available():
             return None
         try:
             path = filedialpy.openFile(title=title, filter=self._filter_arg(patterns),
-                                       initial_dir=os.getcwd())
+                                       initial_dir=self._resolve_initial_dir(initial_dir))
         except Exception as e:
             print(f"Native file dialog failed: {e}")
             return None
@@ -127,14 +147,14 @@ class NativeBrowserWidget:
             return None
         return path
 
-    def _save_file(self, title: str, patterns: str, initial_file: str) -> Optional[str]:
+    def _save_file(self, title: str, patterns: str, initial_file: str, initial_dir=None) -> Optional[str]:
         """Open a native 'Save As' dialog. Returns the chosen path or None when
         cancelled. filedialpy performs its own overwrite confirmation."""
         if not self._dialogs_available():
             return None
         try:
             path = filedialpy.saveFile(title=title, filter=self._filter_arg(patterns),
-                                       initial_dir=os.getcwd(), initial_file=initial_file)
+                                       initial_dir=self._resolve_initial_dir(initial_dir), initial_file=initial_file)
         except Exception as e:
             print(f"Native save dialog failed: {e}")
             return None
@@ -197,24 +217,24 @@ class NativeBrowserWidget:
         """Select one or more video files using the native OS dialog."""
         return self._open_files("Select Video Files", self.video_extensions[0][1])
 
-    def select_media_files(self, title="Select Input Files"):
+    def select_media_files(self, title="Select Input Files", initial_dir=None):
         """Select one or more image or video files. Returns [] when cancelled."""
         patterns = self.image_extensions[0][1] + ' ' + self.video_extensions[0][1]
-        return self._open_files(title, patterns)
+        return self._open_files(title, patterns, initial_dir=initial_dir)
 
-    def select_directory(self, title="Select Directory"):
+    def select_directory(self, title="Select Directory", initial_dir=None):
         """
         Select a directory using native OS dialog.
         Returns the directory path or None if cancelled.
         """
-        return self._open_directory(title)
+        return self._open_directory(title, initial_dir=initial_dir)
 
-    def select_directory_with_video_check(self, title="Select Directory"):
+    def select_directory_with_video_check(self, title="Select Directory", initial_dir=None):
         """
         Select a directory and check if it contains video files.
         Returns (directory_path, has_video_files, video_files_list)
         """
-        directory_path = self._open_directory(title)
+        directory_path = self._open_directory(title, initial_dir=initial_dir)
         if not directory_path:
             return None, False, []
 
@@ -234,24 +254,24 @@ class NativeBrowserWidget:
 
         return directory_path, has_video_files, video_files
 
-    def select_vector_file(self, title="Select Vector"):
+    def select_vector_file(self, title="Select Vector", initial_dir=None):
         """Select a single latent vector file (.pt/.pth/.npy/.npz).
         Returns the path or None if cancelled."""
-        return self._open_single_file(title, self.vector_extensions[0][1])
+        return self._open_single_file(title, self.vector_extensions[0][1], initial_dir=initial_dir)
 
-    def select_model_file(self, title="Select Model"):
+    def select_model_file(self, title="Select Model", initial_dir=None):
         """Select a single pickled model file (.pkl).
         Returns the path or None if cancelled."""
-        return self._open_single_file(title, self.model_extensions[0][1])
+        return self._open_single_file(title, self.model_extensions[0][1], initial_dir=initial_dir)
 
-    def select_image_file(self, title="Select Image"):
+    def select_image_file(self, title="Select Image", initial_dir=None):
         """Select a single image file. Returns the path or None if cancelled."""
-        return self._open_single_file(title, self.image_extensions[0][1])
+        return self._open_single_file(title, self.image_extensions[0][1], initial_dir=initial_dir)
 
-    def save_vector_file(self, initial_file="vector.pt", title="Save Vector"):
+    def save_vector_file(self, initial_file="vector.pt", title="Save Vector", initial_dir=None):
         """Open a native 'Save As' dialog for a latent vector. Ensures a .pt
         extension. Returns the path or None if cancelled."""
-        path = self._save_file(title, self.vector_extensions[0][1], initial_file)
+        path = self._save_file(title, self.vector_extensions[0][1], initial_file, initial_dir=initial_dir)
         if path and not os.path.splitext(path)[1]:
             path += ".pt"
         return path

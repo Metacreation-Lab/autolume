@@ -469,7 +469,7 @@ class DataPreprocessing:
         
         imgui.same_line()
         if imgui.button("Browse##save_path", width=self.app.button_w, height=25):
-            directory_path = self.data_browser.select_directory("Select Save Path")
+            directory_path = self.data_browser.select_directory("Select Save Path", initial_dir=self.save_path)
             if directory_path:
                 self.save_path = directory_path.replace('\\', '/')
             else:

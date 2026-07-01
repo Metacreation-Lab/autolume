@@ -104,7 +104,7 @@ class ProjectionModule:
                                width=- (self.app.button_w + self.app.spacing) - 30, help_text="Input Files")
         imgui.same_line()
         if imgui.button("Target Image##projection", width=self.app.button_w):
-            target_pth = self.browser.select_image_file("Select Target Image")
+            target_pth = self.browser.select_image_file("Select Target Image", initial_dir=self.target_fname[0] if self.target_fname else "")
             if target_pth:
                 self.target_fname = [str(target_pth)]
         _changed, self.target_text = imgui_utils.input_text('Target Text##target_text', self.target_text, 1024,
@@ -114,7 +114,7 @@ class ProjectionModule:
         _changed, self.outdir = imgui_utils.input_text('##outdir', self.outdir, 1024, flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL, help_text='Directory to save results', width=-self.app.button_w - self.app.spacing - 30,)
         imgui.same_line()
         if imgui.button("Save Path##projection", width=self.app.button_w + 30):
-            save_path = self.browser.select_directory("Select Save Directory")
+            save_path = self.browser.select_directory("Select Save Directory", initial_dir=self.outdir)
             if save_path:
                 self.outdir = str(save_path)
                 print(self.outdir)

@@ -184,7 +184,7 @@ class LatentWidget:
             if os.path.exists(vec_path):
                 self.vec_path = vec_path
         if imgui_utils.button("Browse##vec", width=viz.app.button_w):
-            path = self.browser.select_vector_file()
+            path = self.browser.select_vector_file(initial_dir=self.vec_path)
             if path:
                 self.vec_path = str(path)
                 print("Selected vector at", self.vec_path)
@@ -209,7 +209,7 @@ class LatentWidget:
 
         imgui.same_line()
         if imgui_utils.button("Save##vecmode", width=viz.app.button_w):
-            fname = self.browser.save_vector_file()
+            fname = self.browser.save_vector_file(initial_dir=self.vec_save_path or self.vec_path)
             if fname:
                 self.vec_save_path = str(fname)
                 torch.save(self.latent.vec, self.vec_save_path)

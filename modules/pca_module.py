@@ -133,7 +133,7 @@ class PCA_Module:
         
         imgui.same_line()
         if imgui.button("Browse##pca_save_path", width=button_width):
-            directory_path = self.save_path_browser.select_directory("Select Save Directory")
+            directory_path = self.save_path_browser.select_directory("Select Save Directory", initial_dir=self.save_path)
             if directory_path:
                 self.save_path = directory_path.replace('\\', '/')
             else:

@@ -150,7 +150,7 @@ class SuperResModule:
         
         imgui.same_line()
         if imgui.button("Browse##super_res_input", width=button_width):
-            files = self.browser.select_media_files()
+            files = self.browser.select_media_files(initial_dir=self.input_path[0] if self.input_path else "")
             if files:
                 self.input_path = [str(f) for f in files]
                 print(self.input_path)
@@ -162,7 +162,7 @@ class SuperResModule:
         
         imgui.same_line()
         if imgui.button("Browse##super_res_result_path", width=button_width):
-            directory_path = self.browser.select_directory("Select Save Directory")
+            directory_path = self.browser.select_directory("Select Save Directory", initial_dir=self.result_path)
             if directory_path:
                 self.result_path = directory_path.replace('\\', '/')
             else:

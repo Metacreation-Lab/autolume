@@ -83,7 +83,7 @@ class Settings:
                 self._apply(self.pending_root)
 
             if imgui_utils.button("Browse...", width=self.app.font_size * 7):
-                chosen = self.browser.select_directory("Select Autolume Data Folder")
+                chosen = self.browser.select_directory("Select Autolume Data Folder", initial_dir=self.pending_root)
                 if chosen:
                     self._apply(chosen)
             imgui.same_line()
