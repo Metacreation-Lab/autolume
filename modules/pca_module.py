@@ -14,7 +14,6 @@ from utils import device_utils
 from utils.gui_utils import imgui_utils
 from ganspace.extract_pca import fit
 from widgets.model_download_widget import ModelDropdownButton
-from widgets.browse_widget import BrowseWidget
 from widgets.native_browser_widget import NativeBrowserWidget
 from widgets.help_icon_widget import HelpIconWidget
 from utils.user_data import data_path

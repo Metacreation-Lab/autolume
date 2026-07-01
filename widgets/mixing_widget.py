@@ -16,7 +16,7 @@ import glob
 import os
 import re
 
-from widgets import browse_widget
+from widgets.native_browser_widget import NativeBrowserWidget
 
 
 def _locate_results(pattern):
@@ -69,8 +69,7 @@ class MixingWidget:
         self.cached_layers = []
         self.mixing = False
 
-        self.browser = browse_widget.BrowseWidget(viz, "Find", ".", [".pkl"], width=self.viz.app.button_w,
-                                                  multiple=False, traverse_folders=False)
+        self.browser = NativeBrowserWidget()
 
         self.model_dropdown = ModelDropdownButton(viz.pickle_widget.model_downloader)
 
@@ -93,11 +92,12 @@ class MixingWidget:
                 model_changed = True
 
             imgui.same_line()
-            _clicked, pkl = self.browser()
-            if _clicked:
-                print("SELECTED", pkl)
-                self.model_pth = resolve_pkl(pkl[0])
-                model_changed = True
+            if imgui_utils.button("Find##mixpkl", width=self.viz.app.button_w):
+                pkl = self.browser.select_model_file()
+                if pkl:
+                    print("SELECTED", pkl)
+                    self.model_pth = resolve_pkl(str(pkl))
+                    model_changed = True
             
             imgui.same_line()
             with imgui_utils.item_width(self.viz.app.button_w):

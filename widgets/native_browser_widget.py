@@ -44,6 +44,18 @@ class NativeBrowserWidget:
             ('All files', '*.*')
         ]
 
+        # Vector file extensions (latent vectors saved by the app)
+        self.vector_extensions = [
+            ('Vector files', '*.pt *.pth *.npy *.npz'),
+            ('All files', '*.*')
+        ]
+
+        # Model file extensions (pickled StyleGAN checkpoints)
+        self.model_extensions = [
+            ('Model files', '*.pkl'),
+            ('All files', '*.*')
+        ]
+
         # Optimized extension sets for fast lookup
         self._image_extensions_set = self._build_extension_set(self.image_extensions)
         self._video_extensions_set = self._build_extension_set(self.video_extensions)
@@ -97,6 +109,36 @@ class NativeBrowserWidget:
         if sys.platform == 'darwin' and os.path.realpath(path) == os.path.realpath(''):
             # The macOS backend reports a cancelled dialog as the process
             # working directory; treat that as a cancel.
+            return None
+        return path
+
+    def _open_single_file(self, title: str, patterns: str) -> Optional[str]:
+        """Open a native single-file picker. Returns None when cancelled."""
+        if not self._dialogs_available():
+            return None
+        try:
+            path = filedialpy.openFile(title=title, filter=self._filter_arg(patterns),
+                                       initial_dir=os.getcwd())
+        except Exception as e:
+            print(f"Native file dialog failed: {e}")
+            return None
+        # The macOS backend maps a cancelled dialog to the current directory.
+        if not path or not os.path.isfile(path):
+            return None
+        return path
+
+    def _save_file(self, title: str, patterns: str, initial_file: str) -> Optional[str]:
+        """Open a native 'Save As' dialog. Returns the chosen path or None when
+        cancelled. filedialpy performs its own overwrite confirmation."""
+        if not self._dialogs_available():
+            return None
+        try:
+            path = filedialpy.saveFile(title=title, filter=self._filter_arg(patterns),
+                                       initial_dir=os.getcwd(), initial_file=initial_file)
+        except Exception as e:
+            print(f"Native save dialog failed: {e}")
+            return None
+        if not path:
             return None
         return path
 
@@ -155,6 +197,11 @@ class NativeBrowserWidget:
         """Select one or more video files using the native OS dialog."""
         return self._open_files("Select Video Files", self.video_extensions[0][1])
 
+    def select_media_files(self, title="Select Input Files"):
+        """Select one or more image or video files. Returns [] when cancelled."""
+        patterns = self.image_extensions[0][1] + ' ' + self.video_extensions[0][1]
+        return self._open_files(title, patterns)
+
     def select_directory(self, title="Select Directory"):
         """
         Select a directory using native OS dialog.
@@ -186,6 +233,28 @@ class NativeBrowserWidget:
             return directory_path, False, []
 
         return directory_path, has_video_files, video_files
+
+    def select_vector_file(self, title="Select Vector"):
+        """Select a single latent vector file (.pt/.pth/.npy/.npz).
+        Returns the path or None if cancelled."""
+        return self._open_single_file(title, self.vector_extensions[0][1])
+
+    def select_model_file(self, title="Select Model"):
+        """Select a single pickled model file (.pkl).
+        Returns the path or None if cancelled."""
+        return self._open_single_file(title, self.model_extensions[0][1])
+
+    def select_image_file(self, title="Select Image"):
+        """Select a single image file. Returns the path or None if cancelled."""
+        return self._open_single_file(title, self.image_extensions[0][1])
+
+    def save_vector_file(self, initial_file="vector.pt", title="Save Vector"):
+        """Open a native 'Save As' dialog for a latent vector. Ensures a .pt
+        extension. Returns the path or None if cancelled."""
+        path = self._save_file(title, self.vector_extensions[0][1], initial_file)
+        if path and not os.path.splitext(path)[1]:
+            path += ".pt"
+        return path
 
     def cleanup(self):
         """Kept for API compatibility; native dialogs hold no resources."""

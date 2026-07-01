@@ -20,7 +20,7 @@ import imgui
 import numpy as np
 from utils.gui_utils import imgui_utils
 from utils.model_dir import list_model_pkls, models_dir
-from widgets import browse_widget
+from widgets.native_browser_widget import NativeBrowserWidget
 from widgets.model_download_widget import ModelDownloadWidget, ModelDropdownButton
 
 from . import renderer
@@ -43,7 +43,7 @@ class PickleWidget:
         self.use_osc = False
         self.osc_addresses = ""
 
-        self.browser = browse_widget.BrowseWidget(viz, "Find", os.path.abspath("."), [".pkl"], width=self.viz.app.button_w, multiple=False, traverse_folders=False)
+        self.browser = NativeBrowserWidget()
 
         self.rescan_models()
         self.model_downloader = ModelDownloadWidget(viz.app, models_dir=models_dir(), on_complete=self.rescan_models)
@@ -139,10 +139,11 @@ class PickleWidget:
             if imgui_utils.button('Recent...', width=viz.app.button_w, enabled=(len(recent_pkls) != 0)):
                 imgui.open_popup('recent_pkls_popup')
             imgui.same_line()
-            _clicked, pkl = self.browser(self.viz.app.button_w)
-            if _clicked:
-                print("SELECTED", pkl)
-                self.load_pkl(pkl[0], ignore_errors=True)
+            if imgui_utils.button("Find##pkl", width=self.viz.app.button_w):
+                pkl = self.browser.select_model_file()
+                if pkl:
+                    print("SELECTED", pkl)
+                    self.load_pkl(str(pkl), ignore_errors=True)
             imgui.same_line()
             picked = self.model_dropdown(width=-1)
             if picked is not None:
