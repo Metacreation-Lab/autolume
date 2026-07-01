@@ -15,7 +15,7 @@ import dnnlib
 from utils import device_utils
 from utils.gui_utils import imgui_utils
 from widgets import osc_menu
-from widgets.browse_widget import BrowseWidget
+from widgets.native_browser_widget import NativeBrowserWidget
 
 from pythonosc.udp_client import SimpleUDPClient
 
@@ -110,11 +110,8 @@ class LoopingWidget:
         self.halt_update = 0
         self.perfect_loop = False
         self.looping_snaps = [{} for _ in range(self.params.num_keyframes)]
-        self.file_dialogs = [BrowseWidget(viz, f"Browse##vec{i}", os.path.abspath(os.getcwd()), ["*", ".pth", ".pt"],
-                                          width=self.viz.app.button_w, multiple=False, traverse_folders=False) for i in
-                             range(self.params.num_keyframes)]
+        self.browser = NativeBrowserWidget()
         self.open_keyframes = False
-        self.open_file_dialog = False
         self.osc_ip = "127.0.0.1"
         self.osc_port = 5005
         self.osc_client = SimpleUDPClient(self.osc_ip, self.osc_port)
@@ -311,9 +308,10 @@ class LoopingWidget:
                                                           imgui.INPUT_TEXT_CHARS_NO_BLANK,
                                                           width=viz.app.font_size * 7, help_text="filepath")
         imgui.same_line()
-        _clicked, path = self.file_dialogs[idx](self.viz.app.button_w)
-        if _clicked:
-            self.paths[idx] = path[0]
+        if imgui_utils.button(f"Browse##loop_{idx}", viz.app.button_w):
+            path = self.browser.select_vector_file()
+            if path:
+                self.paths[idx] = str(path)
         imgui.same_line()
         if imgui_utils.button(f"Load Vec##loop_{idx}", viz.app.button_w):
             self.open_vec(idx)
@@ -474,13 +472,6 @@ class LoopingWidget:
                     print(self.looping_snaps, looping_snaps)
                     print("Looping snaps add", len(self.looping_snaps), self.params.num_keyframes)
 
-                    file_dialogs = [
-                        BrowseWidget(viz, f"Vector##vec{i}", os.path.abspath(os.getcwd()), ["*", ".pth", ".pt"],
-                                     width=self.viz.app.button_w, multiple=False, traverse_folders=False) for i in
-                        range(new_keyframes)]
-                    file_dialogs[:min(new_keyframes, self.params.num_keyframes)] = self.file_dialogs[:min(new_keyframes,
-                                                                                                          self.params.num_keyframes)]
-                    self.file_dialogs = file_dialogs
                     self.params.num_keyframes = new_keyframes
 
                 imgui.same_line()
@@ -499,25 +490,13 @@ class LoopingWidget:
                             del self.modes[self.remove_entry]
                             del self.seeds[self.remove_entry]
                             del self.looping_snaps[self.remove_entry]
-                            del self.file_dialogs[self.remove_entry]
 
                             print("Looping snaps del", len(self.looping_snaps), self.params.num_keyframes)
                             self.params.num_keyframes -= 1
                             self.remove_entry = -1
 
-                    # check if any file dialogs are open
-                    open_dialog = False
-                    for file_dialog in self.file_dialogs:
-                        if file_dialog.open:
-                            open_dialog = True
-                            break
-                    if self.open_file_dialog == True and not open_dialog:
-                        self.open_file_dialog = False
-                        imgui.set_window_focus()
-
-                    self.open_file_dialog = open_dialog
-                    # check if current window focussed if not close it unless a file dialog is open
-                    if not imgui.is_window_focused() and not self.open_file_dialog:
+                    # close the window when it loses focus
+                    if not imgui.is_window_focused():
                         self.open_keyframes = False
                     imgui.end()
 

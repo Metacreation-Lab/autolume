@@ -1,7 +1,6 @@
 # import os
 # import imgui
 # from utils.gui_utils import imgui_utils
-# from widgets.browse_widget import BrowseWidget
 
 
 
@@ -32,7 +31,6 @@
 #         self.recent_paths = [self.path]
 #         self.use_osc = False
 #         self.osc_addresses = ""
-#         self.browser = BrowseWidget(self.viz, "Preset Path##presetwidget", os.path.abspath(os.getcwd()), [""], width=viz.app.font_size * 10, multiple=False, traverse_folders=False)
 
 
 
@@ -219,7 +217,7 @@ import imgui
 import numpy as np
 from utils.gui_utils import imgui_utils
 from utils.user_data import data_path
-from widgets.browse_widget import BrowseWidget
+from widgets.native_browser_widget import NativeBrowserWidget
 
 class PresetWidget:
     def __init__(self, viz):
@@ -250,7 +248,7 @@ class PresetWidget:
         self.recent_paths = [self.path]
         self.use_osc = False
         self.osc_addresses = ""
-        self.browser = BrowseWidget(self.viz, "Preset Path##presetwidget", os.path.abspath(os.getcwd()), [""], width=viz.app.font_size * 10, multiple=False, traverse_folders=False)
+        self.browser = NativeBrowserWidget()
 
     def _preset_dirs(self):
         """Existing preset folders on disk; empty until the first preset is saved."""
@@ -569,10 +567,10 @@ class PresetWidget:
             with imgui_utils.item_width(viz.app.button_w * 2), imgui_utils.grayed_out(True):
                 imgui.input_text("##preset_path", self.tmp_path, 256, imgui.INPUT_TEXT_READ_ONLY)
             imgui.same_line()
-            _clicked, file_out = self.browser(self.viz.app.button_w)
-
-            if _clicked:
-                self.tmp_path = file_out[0]
+            if imgui_utils.button("Preset Path##presetwidget", width=self.viz.app.button_w):
+                directory_path = self.browser.select_directory("Select Preset Path")
+                if directory_path:
+                    self.tmp_path = str(directory_path)
 
             imgui.same_line()
             if imgui_utils.button('Recent...##presets', width=viz.app.button_w, enabled=(len(self.recent_paths) != 0)):

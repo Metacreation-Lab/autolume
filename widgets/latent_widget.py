@@ -12,7 +12,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from widgets.browse_widget import BrowseWidget
+from widgets.native_browser_widget import NativeBrowserWidget
 
 try:
     import cPickle as pickle
@@ -22,7 +22,7 @@ except ModuleNotFoundError:
 import dnnlib
 from utils.gui_utils import imgui_utils
 from utils.model_dir import models_dir
-from widgets import osc_menu, save_widget
+from widgets import osc_menu
 import imgui
 
 
@@ -52,10 +52,7 @@ class LatentWidget:
         self.latent_def = dnnlib.EasyDict(self.latent)
         self.vec_path   = ""
         self.vec_save_path = ""
-        self.file_dialog = BrowseWidget(viz, "Browse", os.path.relpath(os.getcwd()),
-                                      ["*", ".pth", ".pt", ".npy", ".npz", ],
-                                      width=self.viz.app.button_w, multiple=False, traverse_folders=False)
-        self.pt_save_dialog = save_widget.SaveWidget(viz, "Save Vector", os.path.abspath(os.getcwd()), ".pt")
+        self.browser = NativeBrowserWidget()
 
 
     def save(self, path):
@@ -186,10 +183,11 @@ class LatentWidget:
             # if the file exists and is a valid vector, load it
             if os.path.exists(vec_path):
                 self.vec_path = vec_path
-        _clicked, paths = self.file_dialog()
-        if _clicked and len(paths) > 0:
-            self.vec_path = paths[0]
-            print("Selected vector at", self.vec_path)
+        if imgui_utils.button("Browse##vec", width=viz.app.button_w):
+            path = self.browser.select_vector_file()
+            if path:
+                self.vec_path = str(path)
+                print("Selected vector at", self.vec_path)
 
         imgui.same_line()
         if imgui_utils.button("Load##vecmode", width=viz.app.button_w, enabled=self.vec_path is not None and self.vec_path != ''):
@@ -210,10 +208,11 @@ class LatentWidget:
 
 
         imgui.same_line()
-        _changed, fname = self.pt_save_dialog()
-        if _changed:
-            self.vec_save_path = fname
-            torch.save(self.latent.vec, self.vec_save_path)
+        if imgui_utils.button("Save##vecmode", width=viz.app.button_w):
+            fname = self.browser.save_vector_file()
+            if fname:
+                self.vec_save_path = str(fname)
+                torch.save(self.latent.vec, self.vec_save_path)
 
     @imgui_utils.scoped_by_object_id
     def __call__(self, show=True):

@@ -19,7 +19,6 @@ import multiprocessing as mp
 
 import gc
 
-from widgets.browse_widget import BrowseWidget
 from widgets.native_browser_widget import NativeBrowserWidget
 from widgets.help_icon_widget import HelpIconWidget
 import pandas as pd
@@ -43,8 +42,7 @@ class SuperResModule:
         self.menu = menu
         self.app = menu.app
         # self.show_help = False  
-        self.file_dialog = BrowseWidget(self, "Browse", os.path.abspath(os.getcwd()), ["*", ".mp4", ".avi", ".jpg", ".png", ".jpeg", ".bmp"], traverse_folders=True, width=self.app.button_w)
-        self.save_path_browser = NativeBrowserWidget()
+        self.browser = NativeBrowserWidget()
         self.scale_mode = 0
         self.running = False
         self.writer = None
@@ -151,10 +149,11 @@ class SuperResModule:
                               help_text="Input Files")
         
         imgui.same_line()
-        _clicked, input = self.file_dialog(button_width)
-        if _clicked:
-            self.input_path = input
-            print(self.input_path)
+        if imgui.button("Browse##super_res_input", width=button_width):
+            files = self.browser.select_media_files()
+            if files:
+                self.input_path = [str(f) for f in files]
+                print(self.input_path)
 
         # Result path
         imgui.text("Save Path")
@@ -163,7 +162,7 @@ class SuperResModule:
         
         imgui.same_line()
         if imgui.button("Browse##super_res_result_path", width=button_width):
-            directory_path = self.save_path_browser.select_directory("Select Save Directory")
+            directory_path = self.browser.select_directory("Select Save Directory")
             if directory_path:
                 self.result_path = directory_path.replace('\\', '/')
             else:

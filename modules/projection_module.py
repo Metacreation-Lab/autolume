@@ -10,9 +10,8 @@ from PIL.Image import Image
 from utils.gui_utils import imgui_utils, gl_utils
 import multiprocessing as mp
 
-from modules.filedialog import FileDialog
 from projection.bayle_projection import run_projection
-from widgets.browse_widget import BrowseWidget
+from widgets.native_browser_widget import NativeBrowserWidget
 from widgets.help_icon_widget import HelpIconWidget
 from widgets.model_download_widget import ModelDropdownButton
 
@@ -23,8 +22,7 @@ class ProjectionModule:
         self.help_icon = HelpIconWidget()
         self.help_texts, self.help_urls = self.help_icon.load_help_texts("projection")
         
-        self.file_dialog = BrowseWidget(self, "Target Image", os.path.abspath(os.getcwd()), ["*", ".jpg", ".png", ".jpeg", ".bmp"], multiple=False,
-                                             traverse_folders=False, add_folder_button=False, width=self.app.button_w)
+        self.browser = NativeBrowserWidget()
 
         self.network_path = ""
         self._pkl_data = dict()
@@ -54,8 +52,6 @@ class ProjectionModule:
         self.target_texture = None
         self.projection_process = mp.Process(target=run_projection, args=(self.queue, self.reply),
                                        daemon=True)
-        self.save_path_dialog = BrowseWidget(self, "Save Path", os.path.abspath(os.getcwd()), [""], multiple=False,
-                                             traverse_folders=False, add_folder_button=True, width=self.app.button_w + 30)
         self.projected_texture = None
 
         self.model_dropdown = ModelDropdownButton(menu.model_downloader)
@@ -107,22 +103,22 @@ class ProjectionModule:
         imgui_utils.input_text("##projection_file", joined, 1024, flags=imgui.INPUT_TEXT_READ_ONLY,
                                width=- (self.app.button_w + self.app.spacing) - 30, help_text="Input Files")
         imgui.same_line()
-        _clicked, target_pth = self.file_dialog(self.app.button_w) # should have argument to only allow single file
-        if _clicked:
-            self.target_fname = target_pth
+        if imgui.button("Target Image##projection", width=self.app.button_w):
+            target_pth = self.browser.select_image_file("Select Target Image")
+            if target_pth:
+                self.target_fname = [str(target_pth)]
         _changed, self.target_text = imgui_utils.input_text('Target Text##target_text', self.target_text, 1024,
                                                         flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL,
                                                         help_text='Text to be projected',
                                                         width=-self.app.button_w - self.app.spacing - 30)
         _changed, self.outdir = imgui_utils.input_text('##outdir', self.outdir, 1024, flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL, help_text='Directory to save results', width=-self.app.button_w - self.app.spacing - 30,)
         imgui.same_line()
-        _clicked, save_path = self.save_path_dialog()
-        if _clicked:
-            if len(save_path) > 0:
-                self.outdir = save_path[0]
+        if imgui.button("Save Path##projection", width=self.app.button_w + 30):
+            save_path = self.browser.select_directory("Select Save Directory")
+            if save_path:
+                self.outdir = str(save_path)
                 print(self.outdir)
             else:
-                self.outdir = ""
                 print("No path selected")
 
         _changed, self.save_video = imgui.checkbox('Save Video##save_video', self.save_video)
