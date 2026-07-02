@@ -1,3 +1,4 @@
+import logging
 import datetime
 
 import torch
@@ -17,6 +18,9 @@ def sample_latent(n_latents, model, device, c=None, project=False):
         latent = model.mapping(latent, c)[:, 0]
     return latent
 
+logger = logging.getLogger(__name__)
+
+
 def get_max_batch_size(model, device):
     if torch.device(device).type != 'cuda':
         # CUDA memory statistics are unavailable; use the default cap.
@@ -33,7 +37,7 @@ def get_max_batch_size(model, device):
         maxmem = torch.cuda.max_memory_allocated(device)
         del z
         if maxmem > 0.5*total_mem:
-            print('Batch size {:d}: memory usage {:.0f}MB'.format(i, maxmem / 1e6))
+            logger.debug('Batch size %d: memory usage %.0fMB', i, maxmem / 1e6)
             return i
     return B_max
 
@@ -46,10 +50,10 @@ def fit(queue, reply):
 
     sample_shape = model.w_dim
     sample_dims = np.prod(sample_shape)
-    print('Feature shape:', sample_shape, sample_dims)
+    logger.debug('Feature shape: %s %s', sample_shape, sample_dims)
     input_shape = model.z_dim
     input_dims = np.prod(input_shape)
-    print('Input shape:', input_shape, input_dims)
+    logger.debug('Input shape: %s %s', input_shape, input_dims)
     reply.put(["Setting up estimator", (None, None), False])
     transformer = setup_estimator(name, num_features, alpha)
     reply.put(["Estimating Batch Size", (None, None), False])
@@ -62,8 +66,8 @@ def fit(queue, reply):
     feat_size_bytes = sample_dims * np.dtype('float64').itemsize
     N_limit_RAM = np.floor_divide(target_bytes, feat_size_bytes)
     if not transformer.batch_support and N > N_limit_RAM:
-        print('WARNING: estimator does not support batching, ' \
-              'given config will use {:.1f} GB memory.'.format(feat_size_bytes / 1_000_000_000 * N))
+        logger.warning('Estimator does not support batching, '
+                       'given config will use %.1f GB memory.', feat_size_bytes / 1_000_000_000 * N)
     reply.put(['B={}, N={}, dims={}, N/dims={:.1f}'.format(B, N, sample_dims, N / sample_dims), (None, None), False])
 
 

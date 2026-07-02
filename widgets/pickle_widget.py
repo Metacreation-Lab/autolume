@@ -7,6 +7,7 @@
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
 import glob
+import logging
 import os
 import re
 
@@ -24,6 +25,8 @@ from widgets.native_browser_widget import NativeBrowserWidget
 from widgets.model_download_widget import ModelDownloadWidget, ModelDropdownButton
 
 from . import renderer
+
+logger = logging.getLogger(__name__)
 
 #----------------------------------------------------------------------------
 
@@ -70,7 +73,6 @@ class PickleWidget:
     def load_pkl(self, pkl, ignore_errors=False):
         viz = self.viz
         viz.app.skip_frame() # The input field will change on next frame.
-        print(os.getcwd())
         try:
             resolved = self.resolve_pkl(pkl)
             name = resolved.replace('\\', '/').split('/')[-1]
@@ -103,20 +105,20 @@ class PickleWidget:
             if os.path.exists(os.path.join(models_dir(), tail)):
                 self.user_pkl = os.path.join(models_dir(), tail)
             else:
-                print('ERROR: Model does not exist in the model folder.')
+                logger.error("Model does not exist in the model folder")
         if not os.path.exists(self.cur_pkl):
             head, tail = os.path.split(self.cur_pkl)
             if os.path.exists(os.path.join(models_dir(), tail)):
                 self.cur_pkl = os.path.join(models_dir(), tail)
             else:
-                print('ERROR: Model does not exist in the model folder.')
+                logger.error("Model does not exist in the model folder")
         for recent_pkl in self.recent_pkls:
             if not os.path.exists(self.recent_pkl):
                 head, tail = os.path.split(self.recent_pkl)
                 if os.path.exists(os.path.join(models_dir(), tail)):
                     self.cur_pkl = os.path.join(models_dir(), tail)
                 else:
-                    print('ERROR: Model does not exist in the model folder.')
+                    logger.error("Model does not exist in the model folder")
         
 
 
@@ -142,7 +144,6 @@ class PickleWidget:
             if imgui_utils.button("Find##pkl", width=self.viz.app.button_w):
                 pkl = self.browser.select_model_file(initial_dir=self.user_pkl)
                 if pkl:
-                    print("SELECTED", pkl)
                     self.load_pkl(str(pkl), ignore_errors=True)
             imgui.same_line()
             picked = self.model_dropdown(width=-1)

@@ -5,6 +5,7 @@ worker process, CLI entry points) can fetch files without importing imgui.
 """
 import csv
 import html
+import logging
 import os
 import re
 
@@ -13,6 +14,8 @@ import requests
 from utils.resource_paths import resource_path
 
 CHUNK_SIZE = 1024 * 1024
+
+logger = logging.getLogger(__name__)
 REQUIRED_COLUMNS = ('name', 'filename', 'resolution', 'author', 'license', 'url')
 
 
@@ -26,10 +29,10 @@ def load_catalog():
                 if all(row.get(col) for col in REQUIRED_COLUMNS):
                     rows.append({col: row[col].strip() for col in REQUIRED_COLUMNS})
                 else:
-                    print(f'Skipping malformed models.csv row: {row}')
+                    logger.warning('Skipping malformed models.csv row: %s', row)
             return rows
     except OSError as e:
-        print(f'Could not load models.csv: {e}')
+        logger.error('Could not load models.csv: %s', e)
         return []
 
 

@@ -1,7 +1,11 @@
+import logging
+
 import pandas as pd
 import imgui
 import webbrowser
 from utils.resource_paths import get_version, resource_path
+
+logger = logging.getLogger(__name__)
 
 DOCS_BASE_URL = f"https://metacreation-lab.github.io/autolume/{get_version()}"
 
@@ -31,7 +35,7 @@ class HelpIconWidget:
                             raw_url = str(row['url']).strip()
                             help_urls[key] = self._resolve_docs_url(raw_url)
         except Exception as e:
-            print(f"Error loading help texts: {e}")
+            logger.warning("Error loading help texts: %s", e)
 
         return help_texts, help_urls
 

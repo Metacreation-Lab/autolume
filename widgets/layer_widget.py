@@ -11,6 +11,7 @@ except ModuleNotFoundError:
     import pickle
 
 import copy
+import logging
 import os
 import random
 
@@ -21,6 +22,8 @@ import yaml
 
 import dnnlib
 from utils.gui_utils import imgui_utils
+
+logger = logging.getLogger(__name__)
 
 # ----------------------------------------------------------------------------
 
@@ -46,7 +49,7 @@ def open_path(trans):
         else:
             trans.cluster_config = None
     except Exception as e:
-        print(e)
+        logger.warning("Failed to load cluster config: %s", e)
         trans.cluster_config = None
 
 
@@ -87,9 +90,8 @@ class LayerWidget:
                 try:
                     self.viz.osc_dispatcher.unmap(f"/{trans.osc_address[j]}",
                                                   self.transform_osc(trans, param_idx=j))
-                except Exception as e:
-                    print(e)
-                    print(f"{trans.osc_address[j]} is not mapped")
+                except Exception:
+                    logger.warning("OSC address %s is not mapped", trans.osc_address[j])
 
         self.cached_transforms = cached_transforms
         for i, trans in enumerate(self.cached_transforms):
@@ -102,9 +104,8 @@ class LayerWidget:
             try:
                 self.viz.osc_dispatcher.unmap(f"/{noise['osc_address']}",
                                               self.noise_osc(noise))
-            except Exception as e:
-                print(e)
-                print(f"{noise['osc_address']} is not mapped")
+            except Exception:
+                logger.warning("OSC address %s is not mapped", noise['osc_address'])
         self.noises = noises
         for _, noise in self.noises.items():
             if noise["use_osc"] and noise["osc_address"]:
@@ -392,12 +393,8 @@ class LayerWidget:
                                             try:
                                                 self.viz.osc_dispatcher.unmap(f"/{trans.osc_address[j]}",
                                                                               self.osc_funcs[trans.imgui_id][j])
-                                                print(f"Unmapped",trans.osc_address[j])
-                                                print(self.viz.osc_dispatcher.mappings)
-                                            except Exception as e:
-                                                print(f"{trans.osc_address[j]} is not mapped")
-                                                print(e)
-                                                print(self.viz.osc_dispatcher._map)
+                                            except Exception:
+                                                logger.warning("OSC address %s is not mapped", trans.osc_address[j])
                                             self.viz.osc_dispatcher.map(f"/{address}",
                                                                         self.osc_funcs[trans.imgui_id][j])
                                             trans.osc_address[j] = address
@@ -458,8 +455,8 @@ class LayerWidget:
                     if c_dict['cluster_index'] == int(trans.cluster_ID):
                         indices.append(c_dict['feature_index'])
                 if len(indices) == 0:
-                    print("No indicies found for clusterID: " + str(trans.cluster_ID) + " on layer: " + str(
-                        trans.layerID))
+                    logger.warning("No indices found for cluster %s on layer %s",
+                                   trans.cluster_ID, trans.layerID)
                 trans.indices = indices
         imgui.separator()
         imgui.end_group()
@@ -501,8 +498,8 @@ class LayerWidget:
                             try:
                                 self.viz.osc_dispatcher.unmap(f"/{noise['osc_address']}",
                                                               self.noise_osc(noise))
-                            except:
-                                print(f"{noise['osc_address']} is not mapped")
+                            except Exception:
+                                logger.warning("OSC address %s is not mapped", noise['osc_address'])
                             self.viz.osc_dispatcher.map(f"/{address}",
                                                         self.noise_osc(noise))
                             noise["osc_address"] = address

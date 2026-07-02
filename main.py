@@ -24,9 +24,6 @@ if IS_FROZEN:
             os.environ.setdefault("PYGLFW_LIBRARY", _glfw_cand)
             break
 
-import torch
-
-from modules.autolume_live import Autolume
 from utils.user_data import ensure_data_path
 
 
@@ -53,6 +50,8 @@ def main():
     # feature writes to it. Category subfolders are still created lazily.
     ensure_data_path()
 
+    from modules.autolume_live import Autolume
+
     app = Autolume()
 
     while not app.should_close():
@@ -62,9 +61,30 @@ def main():
 
 if __name__ == "__main__":
     multiprocessing.freeze_support()
-    torch.backends.cudnn.benchmark = True
-    torch.backends.cuda.matmul.allow_tf32 = True
-    torch.backends.cudnn.allow_tf32 = True
-    torch.set_grad_enabled(False)
     multiprocessing.set_start_method("spawn", force=True)
-    main()
+
+    from utils.app_logging import setup_main_logging, shutdown_logging
+    setup_main_logging()
+
+    import logging
+    logger = logging.getLogger("autolume")
+
+    try:
+        # Imported here (not at module level) so a failure in the heavy
+        # dependency stack is captured by the log instead of vanishing in
+        # windowed frozen builds.
+        import torch
+
+        torch.backends.cudnn.benchmark = True
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        torch.set_grad_enabled(False)
+
+        main()
+    except SystemExit:
+        raise
+    except BaseException:
+        logger.critical("Fatal error", exc_info=True)
+        raise
+    finally:
+        shutdown_logging()

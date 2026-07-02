@@ -1,3 +1,4 @@
+import logging
 import os
 import shutil
 import cv2
@@ -8,6 +9,14 @@ from pathlib import Path
 import multiprocessing as mp
 from functools import partial
 from tqdm import tqdm
+
+from utils.app_logging import get_log_queue, pool_worker_init
+
+logger = logging.getLogger(__name__)
+
+def _pool(num_workers):
+    return mp.Pool(num_workers, initializer=pool_worker_init,
+                   initargs=(get_log_queue(), "nonsquare"))
 
 def process_non_square_dataset(
     input_path,          # Path to input dataset
@@ -24,19 +33,11 @@ def process_non_square_dataset(
     if num_workers is None:
         num_workers = mp.cpu_count()
     
-    print(f'\n=== Starting non-square dataset processing ===')
-    print(f'Input path: {input_path}')
-    print(f'Output path: {output_path}')
-    print(f'Target ratio: {crop_ratio[0]}:{crop_ratio[1]}')
-    print(f'Padding color value: {padding_color} (type: {type(padding_color)})')
-    print(f'Resize mode: {resize_mode}')
-    print(f'Number of workers: {num_workers}')
+    logger.info('Starting non-square dataset processing: input=%s output=%s '
+                'ratio=%s:%s padding=%s resize_mode=%s workers=%d',
+                input_path, output_path, crop_ratio[0], crop_ratio[1],
+                padding_color, resize_mode, num_workers)
 
-    if padding_color == 2:
-        print(f'Padding mode: bleeding')
-    else:
-        print(f'Padding color: {"white" if padding_color == 1 else "black"}')
-    
     # Create output directory
     output_path.mkdir(parents=True, exist_ok=True)
     
@@ -56,14 +57,11 @@ def process_non_square_dataset(
     if len(files_to_process) == 0:
         raise IOError('No supported files found in the input path')
     
-    print(f'Found {len(files_to_process)} files to process')
-    
+    logger.info('Found %d files to process', len(files_to_process))
+
     # Process each file type
     target_ratio = float(crop_ratio[0]) / float(crop_ratio[1])
-    if padding_color != 2:
-        padding_value = 255 if padding_color == 1 else 0
-        print(f'Using padding value: {padding_value}')
-    
+
     frame_count = 0
     
     # Group files by type for batch processing
@@ -73,7 +71,7 @@ def process_non_square_dataset(
     
     # Process images in batches
     if image_files:
-        print(f'\nProcessing {len(image_files)} images in parallel...')
+        logger.info('Processing %d images in parallel', len(image_files))
         batch_size = max(1, len(image_files) // (num_workers * 4))
         image_batches = []
         total_processed = 0
@@ -93,10 +91,11 @@ def process_non_square_dataset(
             total=len(image_files),
             desc="Processing images",
             unit="images",
-            dynamic_ncols=True
+            dynamic_ncols=True,
+            disable=None
         )
-        
-        with mp.Pool(num_workers) as pool:
+
+        with _pool(num_workers) as pool:
             for count in pool.imap(process_images_batch, image_batches):
                 total_processed += count
                 progress_bar.update(count)
@@ -106,28 +105,28 @@ def process_non_square_dataset(
     
     # Process GIFs
     for gif_idx, fname in enumerate(gif_files):
-        print(f'\nProcessing GIF {gif_idx+1}/{len(gif_files)}: {fname}')
+        logger.info('Processing GIF %d/%d: %s', gif_idx + 1, len(gif_files), fname)
         try:
             frame_count += process_gif_parallel(
-                fname, output_path, target_ratio, padding_color, resize_mode, 
+                fname, output_path, target_ratio, padding_color, resize_mode,
                 num_workers, frame_count
             )
-        except Exception as e:
-            print(f'Error processing GIF {fname}: {e}')
+        except Exception:
+            logger.exception('Error processing GIF %s', fname)
             continue
-    
+
     # Process videos
     for video_idx, fname in enumerate(video_files):
-        print(f'\nProcessing video {video_idx+1}/{len(video_files)}: {fname}')
+        logger.info('Processing video %d/%d: %s', video_idx + 1, len(video_files), fname)
         try:
             frame_count += process_video_parallel(
                 fname, output_path, target_ratio, padding_color, resize_mode, num_workers
             )
-        except Exception as e:
-            print(f'Error processing video {fname}: {e}')
+        except Exception:
+            logger.exception('Error processing video %s', fname)
             continue
-    
-    print(f'\nDataset preprocessing completed. Total frames processed: {frame_count}')
+
+    logger.info('Dataset preprocessing completed. Total frames processed: %d', frame_count)
     return output_path
 
 def process_frame_crop(frame, target_ratio, padding_color):
@@ -238,8 +237,8 @@ def process_images_batch(args):
             processed_frame = process_frame(image, target_ratio, padding_color, resize_mode)
             save_frame(processed_frame, output_path, start_idx + i)
             count += 1
-        except Exception as e:
-            print(f'Error processing image {image_path}: {e}')
+        except Exception:
+            logger.exception('Error processing image %s', image_path)
     return count
 
 def process_video_parallel(video_path, output_path, target_ratio, padding_color, resize_mode, num_workers):
@@ -253,7 +252,7 @@ def process_video_parallel(video_path, output_path, target_ratio, padding_color,
     duration = float(video_info['duration'])
     total_frames = int(duration * fps)
     
-    print(f'Video info: {total_frames} frames @ {fps} fps')
+    logger.debug('Video info: %d frames @ %s fps', total_frames, fps)
     
     # Create temporary directory for frames
     temp_dir = os.path.join(output_path, 'temp_frames')
@@ -295,10 +294,11 @@ def process_video_parallel(video_path, output_path, target_ratio, padding_color,
             total=len(frame_files),
             desc="Processing video frames",
             unit="frames",
-            dynamic_ncols=True
+            dynamic_ncols=True,
+            disable=None
         )
-        
-        with mp.Pool(num_workers) as pool:
+
+        with _pool(num_workers) as pool:
             for count in pool.imap(process_frames_batch, batches):
                 total_processed += count
                 progress_bar.update(count)
@@ -315,7 +315,7 @@ def process_gif_parallel(gif_path, output_path, target_ratio, padding_color, res
     """Process GIF frames in parallel"""
     gif = PIL.Image.open(gif_path)
     total_frames = gif.n_frames
-    print(f'GIF info: {total_frames} frames')
+    logger.debug('GIF info: %d frames', total_frames)
     
     # Prepare batches
     batch_size = max(1, total_frames // (num_workers * 4))
@@ -354,10 +354,11 @@ def process_gif_parallel(gif_path, output_path, target_ratio, padding_color, res
         total=total_frames,
         desc="Processing GIF frames",
         unit="frames",
-        dynamic_ncols=True
+        dynamic_ncols=True,
+        disable=None
     )
-    
-    with mp.Pool(num_workers) as pool:
+
+    with _pool(num_workers) as pool:
         for count in pool.imap(process_frames_batch, batches):
             total_processed += count
             progress_bar.update(count)

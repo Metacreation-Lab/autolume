@@ -1,3 +1,4 @@
+import logging
 from utils.utils import Deque
 
 import pyaudio
@@ -5,6 +6,9 @@ import numpy as np
 import time
 from functools import partial
 
+
+
+logger = logging.getLogger(__name__)
 
 class AudioStreamError(Exception):
     """Base exception for audio stream failures."""
@@ -53,8 +57,7 @@ class AudioStream(object):
             stream_callback=partial(self.non_blocking_stream_read, self.callback)
         )
 
-        print("\n##################################################################################################")
-        print("\nDefaulted to using first working mic, Running on:")
+        logger.info("Defaulted to using first working mic")
         self.print_mic_info(self.device)
 
     def non_blocking_stream_read(self, func, in_data, frame_count, time_info, status):
@@ -71,12 +74,12 @@ class AudioStream(object):
 
         self.data_buffer = Deque(self.buffer_size, self.update_window_n_frames)
 
-        print("Starting live audio stream...")
+        logger.info("Starting live audio stream")
         self.stream.start_stream()
         self.stream_start_time = time.time()
 
     def terminate(self):
-        print("Sending stream termination command...")
+        logger.info("Stopping audio stream")
         self.stream.stop_stream()
         self.stream.close()
 
@@ -93,7 +96,7 @@ class AudioStream(object):
         if self.test_device(device, rate=default_rate):
             return default_rate
 
-        print("SOMETHING'S WRONG! I can't figure out a good sample-rate for DEVICE =>", device)
+        logger.warning("Could not determine a good sample rate for device %s", device)
         return default_rate
 
     def test_device(self, device, rate=None):
@@ -130,10 +133,10 @@ class AudioStream(object):
                 mics.append(device)
 
         if len(mics) == 0:
-            print("No working microphone devices found!")
+            logger.warning("No working microphone devices found")
             raise NoMicrophoneError("No working microphone devices found")
 
-        print("Found %d working microphone device(s): " % len(mics))
+        logger.info("Found %d working microphone device(s)", len(mics))
         for mic in mics:
             self.print_mic_info(mic)
 
@@ -141,6 +144,4 @@ class AudioStream(object):
 
     def print_mic_info(self, mic):
         mic_info = self.pa.get_device_info_by_index(mic)
-        print('\nMIC %s:' % (str(mic)))
-        for k, v in sorted(mic_info.items()):
-            print("%s: %s" % (k, v))
+        logger.debug('MIC %s: %s', mic, dict(sorted(mic_info.items())))

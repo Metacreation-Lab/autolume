@@ -1,3 +1,4 @@
+import logging
 import gc
 import os
 
@@ -15,6 +16,9 @@ from utils import device_utils
 from utils.device_utils import get_device
 from super_res.super_res import ensure_sr_weight
 
+
+
+logger = logging.getLogger(__name__)
 
 def get_audio(video_path):
     probe = ffmpeg.probe(video_path)
@@ -138,11 +142,11 @@ def super_res_main(input_dir, output_dir, scale_mode, sharpening_factor, model, 
 
     msg += " and sharpening factor " + str(sharpening_factor)
 
-    print(msg)
+    logger.info("%s", msg)
 
     model_path = ensure_sr_weight(model)
 
-    print("Loading Model", model_path)
+    logger.info("Loading model %s", model_path)
     super_res_model = load_model(model, model_path)
 
     # if output directory does not exist create it
@@ -158,8 +162,7 @@ def super_res_main(input_dir, output_dir, scale_mode, sharpening_factor, model, 
         else:
             low_res_files.append(f)
 
-    print("Found", len(low_res_files), "files to upscale:", low_res_files)
-    print("Starting Super Resolution")
+    logger.info("Found %d files to upscale", len(low_res_files))
     for file in tqdm(low_res_files, desc="Super Res", unit="files", position=0, leave=True,):
         # if file is an image perform super res on it
         if file.endswith(('.jpg', '.jpeg', '.png')):
@@ -252,7 +255,7 @@ def super_res_main(input_dir, output_dir, scale_mode, sharpening_factor, model, 
             device_utils.empty_cache()
             gc.collect()
         else:
-            print("File type not supported. \n Supported file types are: \n jpg, jpeg, png, mp4, avi, mov")
+            logger.warning("File type not supported: %s (supported: jpg, jpeg, png, mp4, avi, mov)", file)
 
 
 if __name__ == "__main__":

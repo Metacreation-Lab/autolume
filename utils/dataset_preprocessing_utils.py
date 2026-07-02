@@ -1,3 +1,4 @@
+import logging
 import os
 from pathlib import Path
 
@@ -9,6 +10,8 @@ import torchvision.transforms as transforms
 import ffmpeg
 
 from utils.user_data import data_path
+
+logger = logging.getLogger(__name__)
 
 
 class DatasetPreprocessingUtils:
@@ -160,7 +163,7 @@ class DatasetPreprocessingUtils:
                     pass
         
         if duration is None:
-            print(f"Warning: Could not determine duration for video {video_path}, using default estimate")
+            logger.warning("Could not determine duration for video %s, using default estimate", video_path)
             duration = 0
         
         expected_frames = int(duration * fps) if duration > 0 else 0
@@ -203,7 +206,7 @@ class DatasetPreprocessingUtils:
                 ffmpeg.input(video_path).output(output_pattern, vf=f"fps={fps}").run()
                 results.append(str(save_path))
             except ffmpeg.Error as e:
-                print(f"FFmpeg failed for {video_path}: {e}")
+                logger.error("FFmpeg failed for %s: %s", video_path, e)
                 continue
 
         queue_out.put({'type': 'completed', 'results': results})
@@ -317,19 +320,10 @@ class DatasetPreprocessingUtils:
         
         os.makedirs(output_path, exist_ok=True)
         
-        # Debug print settings
-        print("=== DATASET PREPROCESSING SETTINGS ===")
-        print(f"Images: {len(images)} files")
-        print(f"Resolution: {size}x{size}")
-        print(f"Resize Mode: {resizeMode}")
-        print(f"Non-square: {nonSquare}")
-        if nonSquare:
-            print(f"  Width Ratio: {nonSquareSettings['widthRatio']}")
-            print(f"  Height Ratio: {nonSquareSettings['heightRatio']}")
-            print(f"  Padding Mode: {nonSquareSettings['paddingMode']}")
-        print(f"X-Flip Augmentation: {augmentationSettings['xFlip']}")
-        print(f"Y-Flip Augmentation: {augmentationSettings['yFlip']}")
-        print("=====================================")
+        logger.info("Dataset preprocessing: %d images, resolution=%dx%d, resize_mode=%s, "
+                    "non_square=%s, xflip=%s, yflip=%s",
+                    len(images), size, size, resizeMode, nonSquare,
+                    augmentationSettings['xFlip'], augmentationSettings['yFlip'])
         
         processed_count = 0
         total_source_images = len(images)
@@ -346,7 +340,7 @@ class DatasetPreprocessingUtils:
                 if not queue.empty():
                     try:
                         if queue.get_nowait() == 'cancel':
-                            print("Batch preprocessing cancelled by user")
+                            logger.info("Batch preprocessing cancelled by user")
                             reply.put(['Batch preprocessing cancelled', True])
                             return None
                     except:
@@ -362,7 +356,7 @@ class DatasetPreprocessingUtils:
                     if not queue.empty():
                         try:
                             if queue.get_nowait() == 'cancel':
-                                print("Batch preprocessing cancelled by user")
+                                logger.info("Batch preprocessing cancelled by user")
                                 reply.put(['Batch preprocessing cancelled', True])
                                 return None
                         except:
@@ -384,11 +378,11 @@ class DatasetPreprocessingUtils:
                             'current_file': Path(image_path).name
                         })
                     
-            except Exception as e:
-                print(f"Error processing image {i}: {str(e)}")
+            except Exception:
+                logger.exception("Error processing image %d", i)
                 continue
         
-        print(f"Dataset processing completed. {processed_count} images processed and saved to {output_path}")
+        logger.info("Dataset processing completed: %d images saved to %s", processed_count, output_path)
 
         completion_data = {
             'type': 'completed',

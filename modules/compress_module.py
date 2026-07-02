@@ -1,3 +1,5 @@
+import logging
+
 import imgui
 
 import dnnlib
@@ -14,6 +16,9 @@ ada_pipes = ['blit', 'geom', 'color', 'filter', 'noise', 'cutout', 'bg', 'bgc', 
 diffaug_pipes = ['color, translation, cutoff', 'color, translation', 'color, cutoff', 'color',
                  'translation', 'cutoff', 'translation', 'cutoff']
 sizes = ["64", "128", "256", "512", "1024"]
+
+logger = logging.getLogger(__name__)
+
 class CompressModule:
     def __init__(self, menu):
         self.img_factor = 4
@@ -64,8 +69,7 @@ class CompressModule:
         _, self.noise_prob = imgui.input_float("Noise Probability", self.noise_prob)
 
         if imgui_utils.button('Compress', enabled=len(self.compress_pkl) > 0, width=-1):
-            print("Compressing")
-            print(self.compress_pkl)
+            logger.info("Compressing model %s", self.compress_pkl)
             prune_main(self.compress_pkl, self.save_path, n_samples=self.n_samples, batch_size=self.batch_size_compress,
                        noise_prob=self.noise_prob, remove_ratio=self.compression_factor)
 

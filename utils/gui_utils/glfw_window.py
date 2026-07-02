@@ -6,6 +6,7 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
+import logging
 import os
 import sys
 import time
@@ -14,6 +15,9 @@ import OpenGL.GL as gl
 import PIL.Image
 from . import gl_utils
 from utils.resource_paths import resource_path
+
+
+logger = logging.getLogger(__name__)
 
 def _wayland_session():
     return sys.platform == 'linux' and bool(os.environ.get('WAYLAND_DISPLAY'))
@@ -66,7 +70,7 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
             image = PIL.Image.open(resource_path('assets', 'metacreation-logo.png')).convert('RGBA')
             glfw.set_window_icon(self._glfw_window, 1, [image])
         except Exception as err: # pylint: disable=broad-except
-            print(f'Warning: failed to set window icon: {err}', file=sys.stderr)
+            logger.warning('Failed to set window icon: %s', err)
 
     def close(self):
         if self._drawing_frame:

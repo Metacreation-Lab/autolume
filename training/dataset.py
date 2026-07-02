@@ -20,7 +20,9 @@ import torchvision.transforms
 import json
 import torch
 import dnnlib
-import traceback
+import logging
+
+logger = logging.getLogger(__name__)
 
 try:
     import pyspng
@@ -445,9 +447,8 @@ class ImageFolderDataset(Dataset):
                     else:
                         print(f"Failed to extract frames from {video_path}, ffmpeg returned {result}")
                         
-                except Exception as e:
-                    print(f"Error processing video {video_path}: {str(e)}")
-                    traceback.print_exc()
+                except Exception:
+                    logger.exception("Error processing video %s", video_path)
                 finally:
                     if self._type == 'zip' and 'temp_dir' in locals():
                         import shutil

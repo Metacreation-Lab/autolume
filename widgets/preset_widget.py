@@ -212,12 +212,15 @@
 #         self.load(self.paths[np.where(self.active)].item())
 
 
+import logging
 import os
 import imgui
 import numpy as np
 from utils.gui_utils import imgui_utils
 from utils.user_data import data_path
 from widgets.native_browser_widget import NativeBrowserWidget
+
+logger = logging.getLogger(__name__)
 
 class PresetWidget:
     def __init__(self, viz):
@@ -243,7 +246,6 @@ class PresetWidget:
                 self.active[i] = False
         self.tmp_path = self.path
         self.paths = np.asarray([f"{self.path}/{i}" for i in range(self.num_presets)], dtype=object)
-        print(self.dir_name)
         self.check_presets()
         self.recent_paths = [self.path]
         self.use_osc = False
@@ -292,10 +294,10 @@ class PresetWidget:
             self.active = np.append(self.active, False)
             self.paths = np.append(self.paths, new_folder_path)
             self.assigned = np.append(self.assigned, 1)
-            print(f"创建新文件夹: {new_folder_path}")
+            logger.info("Created preset folder %s", new_folder_path)
             self.check_presets()
         except Exception as e:
-            print(f"创建新文件夹时出错: {e}")
+            logger.error("Failed to create preset folder: %s", e)
 
     # def open_path(self, path):
     #     try:
@@ -346,13 +348,12 @@ class PresetWidget:
                         os.makedirs(os.path.join(path, self.dir_name[i]), exist_ok=True)
             
             self.paths = np.asarray([os.path.join(path, self.dir_name[i]) for i in range(self.num_presets)], dtype=object)
-            print('paths: ' + str(self.paths))
             self.path = path
             self.tmp_path = path
             self.check_presets()
             self.scroll_index = 0  # 重置滚动索引
-        except Exception as e:
-            print(f"Error in open_path: {e}")
+        except Exception:
+            logger.exception("Failed to open preset path %s", path)
 
 
     def save(self, path):
@@ -377,8 +378,8 @@ class PresetWidget:
             self.viz.collapsed_widget.save(os.path.join(path, "collap.pkl"))
             self.viz.mixing_widget.save(os.path.join(path, "mix.pkl"))
             self.assigned[np.where(self.active)] = 0
-        except Exception as e:
-            print(e)
+        except Exception:
+            logger.exception("Failed to save preset to %s", path)
 
     def load(self, path):
         try:
@@ -399,12 +400,12 @@ class PresetWidget:
             try: 
                 self.viz.pickle_widget.load(os.path.join(path, "pickle.pkl"))
             except Exception as e:
-                print(f"Ignored error while loading pickle.pkl: {e}")
+                logger.warning("Ignored error while loading pickle.pkl: %s", e)
             self.viz.collapsed_widget.load(f"{path}/collap.pkl")
             self.viz.mixing_widget.load(os.path.join(path, "mix.pkl"))
             self.viz.app.skip_frame()
-        except Exception as e:
-            print(e)
+        except Exception:
+            logger.exception("Failed to load preset from %s", path)
 
     @imgui_utils.scoped_by_object_id
     def preset_checkbox(self, i):
@@ -602,8 +603,8 @@ class PresetWidget:
                     try:
                         viz.osc_dispatcher.unmap(f"/{self.osc_addresses}", self.osc_handler)
                         self.osc_addresses = osc_address
-                    except:
-                        print(f"{self.osc_addresses} is not mapped")
+                    except Exception:
+                        logger.warning("OSC address %s is not mapped", self.osc_addresses)
                     viz.osc_dispatcher.map(f"/{self.osc_addresses}", self.osc_handler)
 
     def osc_handler(self, address, *args):

@@ -13,10 +13,13 @@ Layout:
   subfolders of the data root.
 """
 import json
+import logging
 import os
 from pathlib import Path
 
 PREFS_VERSION = 1
+
+logger = logging.getLogger(__name__)
 
 _prefs = None
 _data_root = None
@@ -78,6 +81,7 @@ def set_data_root(path) -> None:
     prefs = load_prefs()
     prefs["data_root"] = _data_root
     save_prefs(prefs)
+    logger.info("Data root set to %s; logs move to the new location after restart", _data_root)
 
 
 def data_path(*parts: str) -> Path:

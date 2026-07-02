@@ -7,6 +7,7 @@
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
 import array
+import logging
 import threading
 
 import numpy as np
@@ -17,6 +18,8 @@ from utils import device_utils
 from utils.gui_utils import imgui_utils
 from pythonosc.osc_server import BlockingOSCUDPServer
 from pythonosc.udp_client import SimpleUDPClient
+
+logger = logging.getLogger(__name__)
 try:
     import NDIlib as ndi
 except ImportError:
@@ -50,9 +53,9 @@ class PerformanceWidget:
             self.viz.server_thread = threading.Thread(target=self.viz.server.serve_forever, daemon=True)
             self.viz.server_thread.start()
             self.viz.osc_client = SimpleUDPClient(self.viz.in_ip, self.viz.in_port)
-            print(f"OSC server started on {self.viz.in_ip}:{self.viz.in_port}")
+            logger.info("OSC server started on %s:%s", self.viz.in_ip, self.viz.in_port)
         except Exception as e:
-            print(f"Failed to start OSC server: {e}")
+            logger.error("Failed to start OSC server: %s", e)
 
 
     @imgui_utils.scoped_by_object_id
@@ -126,9 +129,9 @@ class PerformanceWidget:
                 self.viz.server_thread.join()
                 try:
                     self.viz.server = BlockingOSCUDPServer((self.viz.in_ip, self.viz.in_port), self.viz.osc_dispatcher)
-                except:
-                    print("Please input a valid ip address")
-                print("new server", self.viz.in_ip, self.viz.in_port)
+                except Exception:
+                    logger.error("Invalid OSC server address %s:%s", self.viz.in_ip, self.viz.in_port)
+                logger.info("OSC server restarted on %s:%s", self.viz.in_ip, self.viz.in_port)
                 self.viz.server_thread = threading.Thread(target=self.viz.server.serve_forever, daemon=True)
                 self.viz.server_thread.start()
                 self.viz.osc_client = SimpleUDPClient(self.viz.in_ip, self.viz.in_port)

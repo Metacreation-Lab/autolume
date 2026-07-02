@@ -1,3 +1,4 @@
+import logging
 import os
 import math
 import collections
@@ -12,6 +13,8 @@ import PIL.Image
 import PIL.ImageOps
 
 from utils.gui_utils import gl_utils
+
+logger = logging.getLogger(__name__)
 from utils.dataset_preprocessing_utils import DatasetPreprocessingUtils
 
 # Threading and caching parameters
@@ -70,7 +73,7 @@ def _render_thumbnail(file_path, size, padding):
         canvas[y:y + h, x:x + w] = img
         return cv2.resize(canvas, (size, size), interpolation=cv2.INTER_AREA)
     except Exception as e:
-        print(f"Error rendering thumbnail for {file_path}: {e}")
+        logger.warning("Error rendering thumbnail for %s: %s", file_path, e)
         return None
 
 
@@ -324,7 +327,7 @@ class ThumbnailWidget:
             return gl_utils.Texture(image=data, width=data.shape[1],
                                     height=data.shape[0], channels=channels)
         except Exception as e:
-            print(f"Error creating thumbnail texture: {e}")
+            logger.warning("Error creating thumbnail texture: %s", e)
             return None
 
     def _evict(self):

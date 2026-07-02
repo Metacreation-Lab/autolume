@@ -11,6 +11,7 @@ import pandas as pd
 import dnnlib
 from torch_utils import legacy
 from utils import device_utils
+from utils.app_logging import LoggedProcess
 from utils.gui_utils import imgui_utils
 from ganspace.extract_pca import fit
 from widgets.model_download_widget import ModelDropdownButton
@@ -43,8 +44,8 @@ class PCA_Module:
         self.queue = mp.Queue()
         self.reply = mp.Queue()
         self.message = ""
-        self.pca_process = mp.Process(target=fit, args=(self.queue, self.reply),
-                                      daemon=True)
+        self.pca_process = LoggedProcess(target=fit, args=(self.queue, self.reply),
+                                         daemon=True, name='ganspace-pca')
 
         self.save_path_browser = NativeBrowserWidget()
         self.X_comp, self.Z_comp = None, None
@@ -136,8 +137,6 @@ class PCA_Module:
             directory_path = self.save_path_browser.select_directory("Select Save Directory", initial_dir=self.save_path)
             if directory_path:
                 self.save_path = directory_path.replace('\\', '/')
-            else:
-                print("No save path selected")
 
         if imgui_utils.button("Get Salient Features", width=imgui.get_content_region_available_width(), enabled=self.G is not None):
             imgui.open_popup("PCA-popup")

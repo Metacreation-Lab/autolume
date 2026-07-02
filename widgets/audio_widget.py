@@ -1,5 +1,6 @@
 import imgui
 import librosa
+import logging
 import numpy as np
 import torch
 from pythonosc.udp_client import SimpleUDPClient
@@ -8,6 +9,8 @@ import dnnlib
 from assets import ACTIVE_RED
 from audio import audio_stream
 from utils.gui_utils import imgui_utils
+
+logger = logging.getLogger(__name__)
 
 chromas = ["C", "C/D", "D", "D/E", "E", "E/F", "F", "F/G" "G", "G/A", "A", "A/B", "B"]
 
@@ -82,7 +85,7 @@ class AudioWidget:
                 viz.osc_client.send_message(f"/{self.osc_addresses[key]}", [f(signal).tolist()])
                 #print(f"/{self.osc_addresses[key]}", f(signal).tolist())
             except Exception as e:
-                print(f"Error sending OSC for {key}: {e}")
+                logger.warning("Error sending OSC for %s: %s", key, e)
     @staticmethod
     def osc_process(signal_queue):
         ip, port = "127.0.0.1", 1337
@@ -95,9 +98,8 @@ class AudioWidget:
                 if use_osc:
                     f = lambda x: eval(mapping)
                     osc_client.send_message(address, [f(signal).tolist()])
-                    print(address, f(signal).tolist())
             except Exception as e:
-                print(e)
+                logger.warning("OSC process send failed: %s", e)
 
     @imgui_utils.scoped_by_object_id
     def __call__(self, show=True):
@@ -118,7 +120,7 @@ class AudioWidget:
                                          graph_size=(width * 24, height * 1.5))
                     imgui.text("Percussive Signal")
                 except Exception as e:
-                    print(e, "Audio Decomp")
+                    logger.warning("Audio decomposition plot failed: %s", e)
                 imgui.end_group()
             elif not (self.fft.data is None):
                 try:
@@ -128,7 +130,7 @@ class AudioWidget:
                     imgui.plot_histogram("##AudioSignal", plot_values, graph_size=(width * 24, height * 3),
                                          scale_min=self.fft.min, scale_max=self.fft.max)
                 except Exception as e:
-                    print(e, "AUDIO")
+                    logger.warning("Audio plot failed: %s", e)
 
             imgui.same_line()
             imgui.begin_group()
@@ -153,6 +155,6 @@ class AudioWidget:
             try:
                 self.audio_stream.terminate()
             except Exception as exc:
-                print(f"Error terminating audio stream: {exc}")
+                logger.warning("Error terminating audio stream: %s", exc)
             finally:
                 self.audio_stream = None
