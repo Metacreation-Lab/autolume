@@ -104,7 +104,7 @@ class Autolume(imgui_window.ImguiWindow):
         self.splash_texture = gl_utils.Texture(image=self.splash, width=self.splash.shape[1],
                                                height=self.splash.shape[0], channels=self.splash.shape[2])
 
-        self.logo = cv2.imread(str(resource_path("assets", "Autolume-logo.png")), cv2.IMREAD_UNCHANGED)
+        self.logo = cv2.imread(str(resource_path("assets", "autolume-logo.png")), cv2.IMREAD_UNCHANGED)
         self.logo_texture = gl_utils.Texture(image=self.logo, width=self.logo.shape[1],
                                              height=self.logo.shape[0], channels=self.logo.shape[2])
 
