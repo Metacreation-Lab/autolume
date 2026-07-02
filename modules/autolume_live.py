@@ -27,9 +27,11 @@ class States(IntEnum):
     TOOLS = 6
 
 
-def draw_icon_text_button(app, icon_texture, label, width, height):
-    """Self-drawn button: icon on the left + text label, with a hover
-    background. Returns True when clicked. Mirrors the navbar styling."""
+def draw_icon_button(icon_texture, label, icon_size, pad, height):
+    """Self-drawn icon button styled exactly like the navbar items (full-height
+    hover background, same idle/hover alphas), with a tooltip naming the
+    action. Returns True when clicked."""
+    width = icon_size + 2 * pad
     pos = imgui.get_cursor_screen_pos()
     clicked = imgui.invisible_button(f"##{label}_btn", width, height)
     hovered = imgui.is_item_hovered()
@@ -38,20 +40,15 @@ def draw_icon_text_button(app, icon_texture, label, width, height):
         draw_list.add_rect_filled(
             pos[0], pos[1], pos[0] + width, pos[1] + height,
             imgui.get_color_u32_rgba(*HOVERGREEN))
-    icon_size = int(app.font_size * 0.8)
-    pad_x = app.font_size * 0.4
-    gap = app.font_size * 0.35
+        imgui.set_tooltip(label)
+    icon_x = pos[0] + pad
     icon_y = pos[1] + (height - icon_size) / 2
-    icon_x = pos[0] + pad_x
+    alpha = 0.9 if hovered else 0.6
     draw_list.add_image(
         icon_texture.gl_id,
         (icon_x, icon_y),
         (icon_x + icon_size, icon_y + icon_size),
-        col=imgui.get_color_u32_rgba(1, 1, 1, 1))
-    text_x = icon_x + icon_size + gap
-    text_y = pos[1] + (height - app.font_size) / 2
-    draw_list.add_text(
-        text_x, text_y, imgui.get_color_u32_rgba(1, 1, 1, 1), label)
+        col=imgui.get_color_u32_rgba(1, 1, 1, alpha))
     return clicked
 
 
@@ -77,6 +74,9 @@ class Autolume(imgui_window.ImguiWindow):
     # scale 1 (Windows/non-retina) -> 23 (clamps to the max key);
     # scale 2 (retina)             -> 11.5 -> snaps to the min key 14.
     BASE_FONT_SIZE = 23
+
+    # Navbar text, icons, and height are drawn this much larger than the base UI font.
+    NAVBAR_SCALE = 1.25
 
     def __init__(self):
         super().__init__(title=f'Autolume-Live v{get_version()}', window_width=3840, window_height=2160)
@@ -108,28 +108,15 @@ class Autolume(imgui_window.ImguiWindow):
         self.logo_texture = gl_utils.Texture(image=self.logo, width=self.logo.shape[1],
                                              height=self.logo.shape[0], channels=self.logo.shape[2])
 
-        self.metacreation = cv2.imread(str(resource_path("assets", "metalogo.png")), cv2.IMREAD_UNCHANGED)
-        self.metacreation_texture = gl_utils.Texture(image=self.metacreation, width=self.metacreation.shape[1],
-                                                     height=self.metacreation.shape[0],
-                                                     channels=self.metacreation.shape[2])
-
         self.cog = cv2.imread(str(resource_path("assets", "cog.png")), cv2.IMREAD_UNCHANGED)
         self.cog_texture = gl_utils.Texture(image=self.cog, width=self.cog.shape[1],
                                             height=self.cog.shape[0], channels=self.cog.shape[2])
 
-        self.web = cv2.imread(str(resource_path("assets", "web.png")), cv2.IMREAD_UNCHANGED)
-        self.web_texture = gl_utils.Texture(image=self.web, width=self.web.shape[1],
-                                            height=self.web.shape[0], channels=self.web.shape[2])
+        self.book = cv2.imread(str(resource_path("assets", "book.png")), cv2.IMREAD_UNCHANGED)
+        self.book_texture = gl_utils.Texture(image=self.book, width=self.book.shape[1],
+                                             height=self.book.shape[0], channels=self.book.shape[2])
 
-        self.nav_icons = {}
-        for icon_name, icon_state in [("prepare", States.PREPROCESSING), ("train", States.TRAINING),
-                                      ("perform", States.LIVE), ("tools", States.TOOLS)]:
-            icon_img = cv2.cvtColor(cv2.imread(str(resource_path("assets", f"{icon_name}.png")),
-                                               cv2.IMREAD_UNCHANGED), cv2.COLOR_BGRA2RGBA)
-            self.nav_icons[icon_state] = gl_utils.Texture(image=icon_img, width=icon_img.shape[1],
-                                                          height=icon_img.shape[0], channels=icon_img.shape[2])
-
-        self.navbar_height = round(self.BASE_FONT_SIZE * 2.2)
+        self.navbar_height = round(self.BASE_FONT_SIZE * self.NAVBAR_SCALE * 2.2)
 
         # Initialize window.
         self.set_fps_limit(self.DEFAULT_FPS_LIMIT)
@@ -242,8 +229,9 @@ class Autolume(imgui_window.ImguiWindow):
         self.settings_open = False
 
     def draw_navbar(self):
-        # Scale with the UI font, calibrated to 50px at font 23.
-        self.navbar_height = round(self.font_size * 2.2)
+        # Scale with the UI font, calibrated to 50px at font 23 before NAVBAR_SCALE.
+        nav_font = self.font_size * self.NAVBAR_SCALE
+        self.navbar_height = round(nav_font * 2.2)
         training_active = self._is_training_active()
 
         imgui.set_next_window_position(0, 0)
@@ -256,19 +244,24 @@ class Autolume(imgui_window.ImguiWindow):
             imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS |
             imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_SCROLLBAR))
         imgui.pop_style_var(2)
+        # Enlarge text drawn in this window (and calc_text_size) to match the bar.
+        imgui.set_window_font_scale(self.NAVBAR_SCALE)
 
-        imgui.get_window_draw_list().add_rect_filled(
+        draw_list = imgui.get_window_draw_list()
+        draw_list.add_rect_filled(
             0, 0, self.content_width, self.navbar_height,
-            imgui.get_color_u32_rgba(*RED))
+            imgui.get_color_u32_rgba(*OPAQUEGREEN))
+        # Hairline separator so the bar reads as chrome against the content below.
+        draw_list.add_line(
+            0, self.navbar_height - 1, self.content_width, self.navbar_height - 1,
+            imgui.get_color_u32_rgba(1, 1, 1, 0.08))
 
+        logo_x = round(nav_font * 0.9)
         logo_height = int(self.navbar_height * 0.6)
         logo_width = int(logo_height * (self.logo.shape[1] / self.logo.shape[0]))
         imgui.set_cursor_pos_y((self.navbar_height - logo_height) / 2)
-        imgui.set_cursor_pos_x(20)
+        imgui.set_cursor_pos_x(logo_x)
         imgui.image(self.logo_texture.gl_id, logo_width, logo_height)
-
-        nav_button_height = int(self.navbar_height * 0.6)
-        nav_button_y = (self.navbar_height - nav_button_height) / 2
 
         nav_items = [
             ("Prepare", States.PREPROCESSING),
@@ -277,78 +270,68 @@ class Autolume(imgui_window.ImguiWindow):
             ("Tools", States.TOOLS),
         ]
 
-        nav_icon_size = int(nav_button_height * 0.85)
-        nav_icon_text_gap = 8
-        nav_item_spacing = 28
-        draw_list = imgui.get_window_draw_list()
+        item_pad = round(nav_font * 0.6)
+        item_spacing = round(nav_font * 0.35)
+        underline_height = max(2, round(nav_font * 0.15))
 
-        imgui.same_line(20 + logo_width + 30)
+        imgui.same_line(logo_x + logo_width + round(nav_font * 1.3))
 
         for i, (label, target_state) in enumerate(nav_items):
             if i > 0:
-                imgui.same_line(0, nav_item_spacing)
+                imgui.same_line(0, item_spacing)
 
             is_active = (self.state == target_state)
             nav_disabled = training_active and target_state != States.TRAINING
 
             text_size = imgui.calc_text_size(label)
-            item_width = nav_icon_size + nav_icon_text_gap + text_size.x
-            item_height = nav_button_height
+            item_width = text_size.x + 2 * item_pad
 
-            imgui.set_cursor_pos_y(nav_button_y)
+            imgui.set_cursor_pos_y(0)
             pos = imgui.get_cursor_screen_pos()
-            clicked = imgui.invisible_button(f"##nav_{i}", item_width, item_height)
-            hovered = imgui.is_item_hovered()
+            clicked = imgui.invisible_button(f"##nav_{i}", item_width, self.navbar_height)
+            hovered = imgui.is_item_hovered() and not nav_disabled
+
+            if hovered:
+                draw_list.add_rect_filled(
+                    pos.x, pos.y, pos.x + item_width, pos.y + self.navbar_height,
+                    imgui.get_color_u32_rgba(*HOVERGREEN))
 
             if nav_disabled:
                 alpha = 0.3
-            elif is_active or hovered:
+            elif is_active:
                 alpha = 1.0
+            elif hovered:
+                alpha = 0.9
             else:
-                alpha = 0.5
+                alpha = 0.6
             color = imgui.get_color_u32_rgba(1.0, 1.0, 1.0, alpha)
 
-            icon_x = pos.x
-            icon_y = pos.y + (item_height - nav_icon_size) / 2
-            draw_list.add_image(self.nav_icons[target_state].gl_id,
-                                (icon_x, icon_y), (icon_x + nav_icon_size, icon_y + nav_icon_size),
-                                (0, 0), (1, 1), color)
-
-            text_x = icon_x + nav_icon_size + nav_icon_text_gap
-            text_y = pos.y + (item_height - text_size.y) / 2
+            text_x = pos.x + item_pad
+            text_y = pos.y + (self.navbar_height - text_size.y) / 2
             draw_list.add_text(text_x, text_y, color, label)
+
+            if is_active:
+                draw_list.add_rect_filled(
+                    pos.x, pos.y + self.navbar_height - underline_height,
+                    pos.x + item_width, pos.y + self.navbar_height,
+                    imgui.get_color_u32_rgba(*RED))
 
             if clicked and not nav_disabled:
                 self.navigate_to(target_state)
 
-        metacreation_height = logo_height
-        metacreation_width = int(metacreation_height * (self.metacreation.shape[1] / self.metacreation.shape[0]))
+        icon_size = round(nav_font * 0.9)
+        button_width = icon_size + 2 * item_pad
+        edge_pad = round(nav_font * 0.9)
 
-        button_height = int(self.navbar_height * 0.6)
-        button_y = (self.navbar_height - button_height) / 2
-        pad_x = self.font_size * 0.4
-
-        def icon_text_width(label):
-            icon_size = int(self.font_size * 0.8)
-            gap = self.font_size * 0.35
-            return pad_x + icon_size + gap + imgui.calc_text_size(label).x + pad_x
-
-        doc_button_width = icon_text_width("Documentation")
-        settings_button_width = icon_text_width("Settings")
-        settings_button_x = self.content_width - (metacreation_width + doc_button_width + settings_button_width + 60)
-        imgui.same_line(settings_button_x)
-        imgui.set_cursor_pos_y(button_y)
-        if draw_icon_text_button(self, self.cog_texture, "Settings", settings_button_width, button_height):
+        imgui.same_line(self.content_width - (edge_pad + 2 * button_width + item_spacing))
+        imgui.set_cursor_pos_y(0)
+        if draw_icon_button(self.cog_texture, "Settings", icon_size, item_pad, self.navbar_height):
             self.open_settings()
 
-        imgui.same_line(self.content_width - (metacreation_width + doc_button_width + 40))
-        imgui.set_cursor_pos_y(button_y)
-        if draw_icon_text_button(self, self.web_texture, "Documentation", doc_button_width, button_height):
+        imgui.same_line(self.content_width - (edge_pad + button_width))
+        imgui.set_cursor_pos_y(0)
+        if draw_icon_button(self.book_texture, "Documentation", icon_size, item_pad, self.navbar_height):
             webbrowser.open(DOCS_BASE_URL)
-
-        imgui.same_line(self.content_width - (metacreation_width + 20))
-        imgui.set_cursor_pos_y((self.navbar_height - metacreation_height) / 2)
-        imgui.image(self.metacreation_texture.gl_id, metacreation_width, metacreation_height)
 
         imgui.end()
 
