@@ -135,7 +135,10 @@ class Visualizer:
         self.window_created = False
 
         self.fit_screen = False
-    
+
+        # reset scroll position on initialization
+        self.reset_scroll = True
+
     def enable_audio_widget(self):
         if self.audio_widget_enabled:
             return
@@ -546,6 +549,9 @@ class Visualizer:
         imgui.set_next_window_position(0, navbar_h)
         imgui.set_next_window_size(self.pane_w, self.app.content_height - navbar_h)
         imgui.begin('##control_pane', closable=False, flags=(imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE))
+        if self.reset_scroll:
+            imgui.set_scroll_y(0)
+            self.reset_scroll = False
         # Scale with the UI font, calibrated to 36px at font 14.
         toolbar_height = round(self.app.font_size * 36 / 14)
 
