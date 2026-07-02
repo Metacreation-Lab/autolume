@@ -129,10 +129,6 @@ class NativeBrowserWidget:
             return None
         if not path or not os.path.isdir(path):
             return None
-        if sys.platform == 'darwin' and os.path.realpath(path) == os.path.realpath(''):
-            # The macOS backend reports a cancelled dialog as the process
-            # working directory; treat that as a cancel.
-            return None
         return path
 
     def _open_single_file(self, title: str, patterns: str, initial_dir=None) -> Optional[str]:
