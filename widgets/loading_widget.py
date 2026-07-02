@@ -89,7 +89,7 @@ class LoadingOverlayManager:
                 imgui.spacing()
                 
                 # Display progress text
-                imgui.text(f"Processing: {self.progress_current}/{self.progress_total} videos")
+                imgui.text(f"Processing video {min(self.progress_current + 1, self.progress_total)} of {self.progress_total}")
                 if self.current_file:
                     imgui.text(f"Current file: {self.current_file}")
                 
