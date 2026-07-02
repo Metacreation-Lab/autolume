@@ -230,9 +230,6 @@ class Autolume(imgui_window.ImguiWindow):
         from modules.preprocessing_module import DataPreprocessing
         self.data_preprocessing = DataPreprocessing(self)
 
-    def start_preprocessing(self):
-        self.navigate_to(States.PREPROCESSING)
-
     # Settings modal (drawn as an overlay over the current screen, not its own state)
     def open_settings(self):
         from modules.settings import Settings
