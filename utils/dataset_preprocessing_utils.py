@@ -188,7 +188,8 @@ class DatasetPreprocessingUtils:
                 expected_per_video.append(
                     DatasetPreprocessingUtils.calculate_expected_video_frames(video_path, fps)
                 )
-            except Exception:
+            except Exception as e:
+                logger.warning("Could not estimate frame count for %s: %s", video_path, e)
                 expected_per_video.append(0)
         total_expected = sum(expected_per_video)
         frames_done_prior = 0
@@ -219,55 +220,54 @@ class DatasetPreprocessingUtils:
                 'percentage': start_pct,
             })
 
-            try:
-                process = (
-                    ffmpeg
-                    .input(video_path)
-                    .output(output_pattern, vf=f"fps={fps}")
-                    .global_args('-progress', 'pipe:1', '-nostats')
-                    .run_async(pipe_stdout=True)
-                )
+            process = (
+                ffmpeg
+                .input(video_path)
+                .output(output_pattern, vf=f"fps={fps}")
+                .global_args('-progress', 'pipe:1', '-nostats')
+                .run_async(pipe_stdout=True)
+            )
 
-                cancelled = False
-                while True:
-                    line = process.stdout.readline()
-                    if not line:
-                        break
-                    line = line.decode('utf-8', errors='ignore').strip()
-                    if line.startswith('frame='):
-                        try:
-                            cur_frame = int(line.split('=', 1)[1])
-                        except ValueError:
-                            cur_frame = 0
-                        if total_expected > 0:
-                            done = frames_done_prior + min(cur_frame, expected_per_video[i])
-                            pct = min(done / total_expected * 100.0, 99.0)
-                        else:
-                            pct = (i / total_videos * 100.0) if total_videos > 0 else 0.0
-                        queue_out.put({
-                            'type': 'progress',
-                            'current': i,
-                            'total': total_videos,
-                            'current_file': video_path_obj.name,
-                            'percentage': pct,
-                        })
+            cancelled = False
+            while True:
+                line = process.stdout.readline()
+                if not line:
+                    break
+                line = line.decode('utf-8', errors='ignore').strip()
+                if line.startswith('frame='):
+                    try:
+                        cur_frame = int(line.split('=', 1)[1])
+                    except ValueError:
+                        cur_frame = 0
+                    if total_expected > 0:
+                        done = frames_done_prior + min(cur_frame, expected_per_video[i])
+                        pct = min(done / total_expected * 100.0, 99.0)
+                    else:
+                        pct = (i / total_videos * 100.0) if total_videos > 0 else 0.0
+                    queue_out.put({
+                        'type': 'progress',
+                        'current': i,
+                        'total': total_videos,
+                        'current_file': video_path_obj.name,
+                        'percentage': pct,
+                    })
 
-                    if not queue_in.empty() and queue_in.get() == "cancel":
-                        process.terminate()
-                        cancelled = True
-                        break
+                if not queue_in.empty() and queue_in.get() == "cancel":
+                    process.terminate()
+                    cancelled = True
+                    break
 
-                if cancelled:
-                    return
+            if cancelled:
+                return
 
-                process.wait()
-                results.append(str(save_path))
-                frames_done_prior += expected_per_video[i]
-            except ffmpeg.Error as e:
-                logger.error("FFmpeg failed for %s: %s", video_path, e)
+            retcode = process.wait()
+            frames_done_prior += expected_per_video[i]
+            if retcode != 0:
+                logger.error("FFmpeg failed for %s (exit code %s)", video_path, retcode)
                 continue
+            results.append(str(save_path))
 
-        queue_out.put({'type': 'completed', 'results': results, 'percentage': 100})
+        queue_out.put({'type': 'completed', 'results': results})
     
     @staticmethod
     def resize_image_np(image: np.ndarray, settings):
