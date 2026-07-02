@@ -1,7 +1,6 @@
 # import os
 # import imgui
 # from utils.gui_utils import imgui_utils
-# from widgets.browse_widget import BrowseWidget
 
 
 
@@ -32,7 +31,6 @@
 #         self.recent_paths = [self.path]
 #         self.use_osc = False
 #         self.osc_addresses = ""
-#         self.browser = BrowseWidget(self.viz, "Preset Path##presetwidget", os.path.abspath(os.getcwd()), [""], width=viz.app.font_size * 10, multiple=False, traverse_folders=False)
 
 
 
@@ -214,11 +212,15 @@
 #         self.load(self.paths[np.where(self.active)].item())
 
 
+import logging
 import os
 import imgui
 import numpy as np
 from utils.gui_utils import imgui_utils
-from widgets.browse_widget import BrowseWidget
+from utils.user_data import data_path
+from widgets.native_browser_widget import NativeBrowserWidget
+
+logger = logging.getLogger(__name__)
 
 class PresetWidget:
     def __init__(self, viz):
@@ -229,36 +231,33 @@ class PresetWidget:
         self.dir_name = np.asarray([f"{i}" for i in range(self.num_presets)], dtype=object)
         self.scroll_index = 0  # 添加滚动索引
 
-        self.path = "presets"
-        if not os.path.isdir(self.path):
-            os.mkdir(self.path)
-        if len(os.listdir(self.path)) == 0:
-            for i in range(self.num_presets):
-                os.makedirs(self.path + '/' + str(i))
-        else:
-            print(self.path)
-            for i, dir in enumerate(os.listdir(self.path)):
-                if i < self.num_presets:
-                    self.dir_name[i] = dir
-                else:
-                    self.num_presets = i + 1
-                    self.dir_name = np.resize(self.dir_name, self.num_presets)
-                    self.dir_name[i] = dir
-                    self.active = np.resize(self.active, self.num_presets)
-                    self.active[i] = False
+        self.path = str(data_path("presets"))
+        # Presets are created lazily: the folder and its slots are materialised
+        # when the first preset is saved (see save()/open_path()). Until then the
+        # grid uses in-memory slot names and nothing touches the disk.
+        for i, dir in enumerate(self._preset_dirs()):
+            if i < self.num_presets:
+                self.dir_name[i] = dir
+            else:
+                self.num_presets = i + 1
+                self.dir_name = np.resize(self.dir_name, self.num_presets)
+                self.dir_name[i] = dir
+                self.active = np.resize(self.active, self.num_presets)
+                self.active[i] = False
         self.tmp_path = self.path
         self.paths = np.asarray([f"{self.path}/{i}" for i in range(self.num_presets)], dtype=object)
-        print(self.dir_name)
         self.check_presets()
         self.recent_paths = [self.path]
         self.use_osc = False
         self.osc_addresses = ""
-        self.browser = BrowseWidget(self.viz, "Preset Path##presetwidget", os.path.abspath(os.getcwd()), [""], width=viz.app.font_size * 10, multiple=False, traverse_folders=False)
+        self.browser = NativeBrowserWidget()
+
+    def _preset_dirs(self):
+        """Existing preset folders on disk; empty until the first preset is saved."""
+        return os.listdir(self.path) if os.path.isdir(self.path) else []
 
     def check_presets(self):
-        if not os.path.exists(self.path):
-            os.makedirs(self.path)
-        dirs = os.listdir(self.path)
+        dirs = self._preset_dirs()
         self.num_presets = max(12, len(dirs))
         self.active = np.resize(self.active, self.num_presets)
         self.dir_name = np.resize(self.dir_name, self.num_presets)
@@ -276,7 +275,7 @@ class PresetWidget:
     def create_new_folder(self):
         try:
             # 确保 self.num_presets 至少等于当前文件夹数量
-            current_folders = len([name for name in os.listdir(self.path) if os.path.isdir(os.path.join(self.path, name))])
+            current_folders = len([name for name in self._preset_dirs() if os.path.isdir(os.path.join(self.path, name))])
             self.num_presets = max(self.num_presets, current_folders)
 
             new_folder_index = self.num_presets
@@ -295,10 +294,10 @@ class PresetWidget:
             self.active = np.append(self.active, False)
             self.paths = np.append(self.paths, new_folder_path)
             self.assigned = np.append(self.assigned, 1)
-            print(f"创建新文件夹: {new_folder_path}")
+            logger.info("Created preset folder %s", new_folder_path)
             self.check_presets()
         except Exception as e:
-            print(f"创建新文件夹时出错: {e}")
+            logger.error("Failed to create preset folder: %s", e)
 
     # def open_path(self, path):
     #     try:
@@ -349,13 +348,12 @@ class PresetWidget:
                         os.makedirs(os.path.join(path, self.dir_name[i]), exist_ok=True)
             
             self.paths = np.asarray([os.path.join(path, self.dir_name[i]) for i in range(self.num_presets)], dtype=object)
-            print('paths: ' + str(self.paths))
             self.path = path
             self.tmp_path = path
             self.check_presets()
             self.scroll_index = 0  # 重置滚动索引
-        except Exception as e:
-            print(f"Error in open_path: {e}")
+        except Exception:
+            logger.exception("Failed to open preset path %s", path)
 
 
     def save(self, path):
@@ -380,8 +378,8 @@ class PresetWidget:
             self.viz.collapsed_widget.save(os.path.join(path, "collap.pkl"))
             self.viz.mixing_widget.save(os.path.join(path, "mix.pkl"))
             self.assigned[np.where(self.active)] = 0
-        except Exception as e:
-            print(e)
+        except Exception:
+            logger.exception("Failed to save preset to %s", path)
 
     def load(self, path):
         try:
@@ -402,12 +400,12 @@ class PresetWidget:
             try: 
                 self.viz.pickle_widget.load(os.path.join(path, "pickle.pkl"))
             except Exception as e:
-                print(f"Ignored error while loading pickle.pkl: {e}")
+                logger.warning("Ignored error while loading pickle.pkl: %s", e)
             self.viz.collapsed_widget.load(f"{path}/collap.pkl")
             self.viz.mixing_widget.load(os.path.join(path, "mix.pkl"))
             self.viz.app.skip_frame()
-        except Exception as e:
-            print(e)
+        except Exception:
+            logger.exception("Failed to load preset from %s", path)
 
     @imgui_utils.scoped_by_object_id
     def preset_checkbox(self, i):
@@ -524,8 +522,8 @@ class PresetWidget:
 
         if show:
             # 检查是否需要更新预设列表
-            current_dirs = set(os.listdir(self.path))
-            if set(self.dir_name) != current_dirs:
+            current_dirs = set(self._preset_dirs())
+            if current_dirs and set(self.dir_name) != current_dirs:
                 self.open_path(self.path)  # 重新加载当前路径
             
             # 创建一个水平布局
@@ -544,7 +542,7 @@ class PresetWidget:
                     if _changed:
                         self.dir_name[i] = str(dir_name)
                         self.paths[i] = str(self.tmp_path + '/' + self.dir_name[i])
-                        if dir_name_copy in os.listdir(self.path):
+                        if dir_name_copy in self._preset_dirs():
                             os.rename(self.tmp_path + '/' + dir_name_copy,  self.paths[i])
                 imgui.end_group()
             
@@ -570,10 +568,10 @@ class PresetWidget:
             with imgui_utils.item_width(viz.app.button_w * 2), imgui_utils.grayed_out(True):
                 imgui.input_text("##preset_path", self.tmp_path, 256, imgui.INPUT_TEXT_READ_ONLY)
             imgui.same_line()
-            _clicked, file_out = self.browser(self.viz.app.button_w)
-
-            if _clicked:
-                self.tmp_path = file_out[0]
+            if imgui_utils.button("Preset Path##presetwidget", width=self.viz.app.button_w):
+                directory_path = self.browser.select_directory("Select Preset Path", initial_dir=self.tmp_path)
+                if directory_path:
+                    self.tmp_path = str(directory_path)
 
             imgui.same_line()
             if imgui_utils.button('Recent...##presets', width=viz.app.button_w, enabled=(len(self.recent_paths) != 0)):
@@ -605,8 +603,8 @@ class PresetWidget:
                     try:
                         viz.osc_dispatcher.unmap(f"/{self.osc_addresses}", self.osc_handler)
                         self.osc_addresses = osc_address
-                    except:
-                        print(f"{self.osc_addresses} is not mapped")
+                    except Exception:
+                        logger.warning("OSC address %s is not mapped", self.osc_addresses)
                     viz.osc_dispatcher.map(f"/{self.osc_addresses}", self.osc_handler)
 
     def osc_handler(self, address, *args):

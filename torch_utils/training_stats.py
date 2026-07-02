@@ -90,6 +90,9 @@ def report(name, value):
         elems.square().sum(),
     ])
     assert moments.ndim == 1 and moments.shape[0] == _num_moments
+    if moments.device.type == 'mps':
+        # MPS cannot represent float64; accumulate the counters on the CPU.
+        moments = moments.cpu()
     moments = moments.to(_counter_dtype)
 
     device = moments.device

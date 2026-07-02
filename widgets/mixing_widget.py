@@ -5,6 +5,7 @@ import numpy as np
 
 import dnnlib
 from utils.gui_utils import imgui_utils
+from widgets.model_download_widget import ModelDropdownButton
 
 try:
     import cPickle as pickle
@@ -15,7 +16,7 @@ import glob
 import os
 import re
 
-from widgets import browse_widget
+from widgets.native_browser_widget import NativeBrowserWidget
 
 
 def _locate_results(pattern):
@@ -30,7 +31,6 @@ def extract_mapping_names(model):
     return model_names
 
 def resolve_pkl(pattern):
-        print("RESOLVE", pattern)
         assert isinstance(pattern, str)
         assert pattern != ''
 
@@ -58,24 +58,19 @@ class MixingWidget:
         self.output_name = ""
         self.model_pth = ""
         self.main_model = ""
-        self.browse_refocus = False
         self.layer1 = []
         self.layer2 = []
         self.output_name = ""
         self._save = False
 
-        self.models = []
         self.combined_layers = []
         self.collapsed = []
         self.cached_layers = []
         self.mixing = False
 
-        self.browser = browse_widget.BrowseWidget(viz, "Find", ".", [".pkl"], width=self.viz.app.button_w,
-                                                  multiple=False, traverse_folders=False)
+        self.browser = NativeBrowserWidget()
 
-        for pkl in os.listdir("./models"):
-            if pkl.endswith(".pkl"):
-                self.models.append(os.path.join(os.getcwd(),"models",pkl))
+        self.model_dropdown = ModelDropdownButton(viz.pickle_widget.model_downloader)
 
     @imgui_utils.scoped_by_object_id
     def __call__(self, show):
@@ -90,28 +85,17 @@ class MixingWidget:
 
 
             imgui.same_line()
-            if imgui_utils.button(f'Models##mixingWidget', enabled=len(self.models) > 0):
-                imgui.open_popup(f'browse_pkls_popup##mixingWidget')
-                self.browse_refocus = True
-
-            imgui.same_line()
-            _clicked, pkl = self.browser()
-            if _clicked:
-                print("SELECTED", pkl)
-                self.model_pth = resolve_pkl(pkl[0])
+            picked = self.model_dropdown()
+            if picked is not None:
+                self.model_pth = resolve_pkl(picked)
                 model_changed = True
 
-            if imgui.begin_popup(f'browse_pkls_popup##mixingWidget'):
-                for pkl in self.models:
-                    clicked, _state = imgui.menu_item(pkl)
-                    if clicked:
-                        self.model_pth = resolve_pkl(pkl)
-                        model_changed = True
-                if self.browse_refocus:
-                    imgui.set_scroll_here()
-                    self.browse_refocus = False
-
-                imgui.end_popup()
+            imgui.same_line()
+            if imgui_utils.button("Find##mixpkl", width=self.viz.app.button_w):
+                pkl = self.browser.select_model_file(initial_dir=self.model_pth)
+                if pkl:
+                    self.model_pth = resolve_pkl(str(pkl))
+                    model_changed = True
             
             imgui.same_line()
             with imgui_utils.item_width(self.viz.app.button_w):
@@ -121,7 +105,6 @@ class MixingWidget:
             imgui.text(".pkl")
             imgui.same_line()
             if imgui_utils.button("Save##mixing widget", enabled=self.output_name != ""):
-                print("saving at", self.output_name)
                 self._save = True
             
             imgui.separator()
@@ -132,7 +115,6 @@ class MixingWidget:
                 if self.viz.args.pkl != self.main_model or model_changed or layers1 != self.layer1 or layers2 != self.layer2:
                     self.layer1 = layers1
                     self.layer2 = layers2
-                    print("reinitatilzation")
                     self.main_model = self.viz.args.pkl
                     self.combined_layers = ["A"] * len(layers1)
                     if len(layers2) > len(layers1):
@@ -219,7 +201,6 @@ class MixingWidget:
                     with imgui_utils.grayed_out(l1 == '' or ckb_display == "X"):
                         clicked, _ = imgui.checkbox(f"##layer1{i}", (ckb_display == "A" or ckb_display == "Mixed") and layer1[i] != '')
                     if clicked and layer1[i] != '' and ckb_display != "X":
-                        print("clicked1")
                         self.combined_layers[i] = "A"
                         for j in range(i + 1, len(self.combined_layers)):
                             if layer1[j]:
@@ -230,7 +211,6 @@ class MixingWidget:
                     with imgui_utils.grayed_out(l2=='' or ckb_display == "X"):
                         clicked, _ = imgui.checkbox(f"##layer2{i}", ckb_display == "B" or ckb_display == "Mixed" and layer2[i] != '')
                     if clicked and layer2[i] != ''and ckb_display != "X":
-                        print("clicked2")
                         self.combined_layers[i] = "B"
                         for j in range(i + 1, len(self.combined_layers)):
                             if layer2[j]:
@@ -295,14 +275,12 @@ class MixingWidget:
                             with imgui_utils.grayed_out(l1t == '' or self.combined_layers[it]=="X"):
                                 clicked, _ = imgui.checkbox(f"##layer1{i}{it}", self.combined_layers[it] == "A")
                             if clicked and l1t != '' and not(self.combined_layers[it]=="X"):
-                                print("clicked1")
-                                self.combined_layers[it] = "A"
+                                        self.combined_layers[it] = "A"
                             imgui.same_line((imgui.get_content_region_available_width() // 3 * 2) + imgui.get_style().scrollbar_size - imgui.get_style().item_spacing[0])
                             with imgui_utils.grayed_out(l2t == '' or self.combined_layers[it]=="X"):
                                 clicked, _ = imgui.checkbox(f"##layer2{i}{it}", self.combined_layers[it]=="B")
                             if clicked and l2t != '' and not(self.combined_layers[it]=="X"):
-                                print("clicked2")
-                                self.combined_layers[it] = "B"
+                                        self.combined_layers[it] = "B"
 
                 imgui.end_child()
                 res_exp += 1

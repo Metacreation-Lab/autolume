@@ -8,6 +8,7 @@
 
 """Main training loop."""
 
+import logging
 import os
 import time
 import copy
@@ -17,14 +18,16 @@ import psutil
 import PIL.Image
 import numpy as np
 import torch
-import traceback
 import dnnlib as dnnlib
 from torch_utils import misc, training_stats, legacy as legacy
 from torch_utils.ops import conv2d_gradfix, grid_sample_gradfix
+from utils import device_utils
 from queue import Empty
 
 from metrics import metric_main
 from codecarbon import EmissionsTracker
+
+logger = logging.getLogger(__name__)
 
 #----------------------------------------------------------------------------
 
@@ -129,7 +132,10 @@ def training_loop(
     try:
         # Initialize.
         start_time = time.time()
-        device = torch.device('cuda', rank)
+        if num_gpus == 1:
+            device = device_utils.get_device()
+        else:
+            device = torch.device('cuda', rank)
         np.random.seed(random_seed * num_gpus + rank)
         torch.manual_seed(random_seed * num_gpus + rank)
         torch.backends.cudnn.benchmark = cudnn_benchmark    # Improves training speed.
@@ -147,6 +153,9 @@ def training_loop(
             reply.put(['Loading training set...', False])
         training_set = dnnlib.util.construct_class_by_name(**training_set_kwargs) # subclass of training.dataset.Dataset
         training_set_sampler = misc.InfiniteSampler(dataset=training_set, rank=rank, num_replicas=num_gpus, seed=random_seed)
+        if device.type != 'cuda' and data_loader_kwargs.get('pin_memory'):
+            # Pinned host memory is a CUDA concept; skip it on MPS/CPU.
+            data_loader_kwargs = dict(data_loader_kwargs, pin_memory=False)
         training_set_iterator = iter(torch.utils.data.DataLoader(dataset=training_set, sampler=training_set_sampler, batch_size=batch_size//num_gpus, **data_loader_kwargs))
         if rank == 0:
             print()
@@ -158,11 +167,8 @@ def training_loop(
             training_set.save_resized(run_dir)
             training_set.copy_frames_folders(run_dir)
             print()
-    except Exception as e:
-        print(f"Caught an exception of type: {type(e).__name__}")
-        print(f"Exception message: {str(e)}")
-        print("Traceback3:")
-        traceback.print_exc()
+    except Exception:
+        logger.exception("Failed to load training set")
         reply.put(['Exception occured during Loading of Training Set..', True])
 
     # Construct networks.
@@ -180,10 +186,9 @@ def training_loop(
 
         G.update_epochs(float(100 * nimg / (total_kimg * 1000)))  # 100 total top k "epochs" in total_kimg
         print('starting G epochs: ', G.epochs)
-    except:
+    except Exception:
+        logger.exception("Failed to construct networks")
         reply.put(['Exception occured during Network Construction..', True])
-        traceback.print_exc()  # Prints the full traceback for better debugging
-        reply.put(['Exception occurred during Network Construction..', True])
 
     # Resume from existing pickle.
     try:
@@ -213,7 +218,6 @@ def training_loop(
         c = torch.empty([batch_gpu, G.c_dim], device=device)
         # img, _ = misc.print_module_summary(G, [z, c])
         output = misc.print_module_summary(G, [z, c])
-        print(output)
         if len(output) == 1:
             misc.print_module_summary(D, [output, c])
         else:
@@ -262,7 +266,7 @@ def training_loop(
     for phase in phases:
         phase.start_event = None
         phase.end_event = None
-        if rank == 0:
+        if rank == 0 and device.type == 'cuda':
             phase.start_event = torch.cuda.Event(enable_timing=True)
             phase.end_event = torch.cuda.Event(enable_timing=True)
 
@@ -294,11 +298,8 @@ def training_loop(
 
             save_image_grid(images, os.path.join(run_dir, 'fakes_init.png'), drange=[-1,1], grid_size=grid_size)
             reply.put([str(os.path.join(run_dir, 'fakes_init.png')), False])
-    except Exception as e:
-        print(f"Caught an exception of type: {type(e).__name__}")
-        print(f"Exception message: {str(e)}")
-        print("Traceback4:")
-        traceback.print_exc()
+    except Exception:
+        logger.exception("Failed to export sample images")
         reply.put(['Exception occured during Exporting of Sample Images..', True])
 
     # Initialize logs.
@@ -316,9 +317,10 @@ def training_loop(
         except ImportError as err:
             print('Skipping tfevents export:', err)
 
-    # Initialize emissions tracker.
+    # Initialize emissions tracker. Disabled on macOS: codecarbon shells out to
+    # powermetrics there, which prompts for a sudo password mid-run.
     tracker = None
-    if rank == 0:
+    if rank == 0 and not device_utils.is_macos():
         tracker = EmissionsTracker(
             output_dir=run_dir,
             output_file="emissions.csv",
@@ -352,7 +354,10 @@ def training_loop(
             all_gen_z = torch.randn([len(phases) * batch_size, G.z_dim], device=device)
             all_gen_z = [phase_gen_z.split(batch_gpu) for phase_gen_z in all_gen_z.split(batch_size)]
             all_gen_c = [training_set.get_label(np.random.randint(len(training_set))) for _ in range(len(phases) * batch_size)]
-            all_gen_c = torch.from_numpy(np.stack(all_gen_c)).pin_memory().to(device)
+            all_gen_c = torch.from_numpy(np.stack(all_gen_c))
+            if device.type == 'cuda':
+                all_gen_c = all_gen_c.pin_memory()
+            all_gen_c = all_gen_c.to(device)
             all_gen_c = [phase_gen_c.split(batch_gpu) for phase_gen_c in all_gen_c.split(batch_size)]
 
         # Execute training phases.
@@ -434,9 +439,12 @@ def training_loop(
         fields += [f"sec/kimg {training_stats.report0('Timing/sec_per_kimg', (tick_end_time - tick_start_time) / (cur_nimg - tick_start_nimg) * 1e3):<7.2f}"]
         fields += [f"maintenance {training_stats.report0('Timing/maintenance_sec', maintenance_time):<6.1f}"]
         fields += [f"cpumem {training_stats.report0('Resources/cpu_mem_gb', psutil.Process(os.getpid()).memory_info().rss / 2 ** 30):<6.2f}"]
-        fields += [f"gpumem {training_stats.report0('Resources/peak_gpu_mem_gb', torch.cuda.max_memory_allocated(device) / 2 ** 30):<6.2f}"]
-        fields += [f"reserved {training_stats.report0('Resources/peak_gpu_mem_reserved_gb', torch.cuda.max_memory_reserved(device) / 2 ** 30):<6.2f}"]
-        torch.cuda.reset_peak_memory_stats()
+        if device.type == 'cuda':
+            fields += [f"gpumem {training_stats.report0('Resources/peak_gpu_mem_gb', torch.cuda.max_memory_allocated(device) / 2 ** 30):<6.2f}"]
+            fields += [f"reserved {training_stats.report0('Resources/peak_gpu_mem_reserved_gb', torch.cuda.max_memory_reserved(device) / 2 ** 30):<6.2f}"]
+            torch.cuda.reset_peak_memory_stats()
+        elif device.type == 'mps':
+            fields += [f"gpumem {training_stats.report0('Resources/gpu_mem_gb', torch.mps.current_allocated_memory() / 2 ** 30):<6.2f}"]
         fields += [f"augment {training_stats.report0('Progress/augment', float(augment_pipe.p.cpu()) if augment_pipe is not None else 0):.3f}"]
         training_stats.report0('Timing/total_hours', (tick_end_time - start_time) / (60 * 60))
         training_stats.report0('Timing/total_days', (tick_end_time - start_time) / (24 * 60 * 60))

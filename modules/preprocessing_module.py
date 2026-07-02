@@ -1,9 +1,11 @@
+import logging
 from pathlib import Path
 import pandas as pd
 import imgui
 from utils.gui_utils import imgui_utils
 import multiprocessing as mp
 
+from utils.app_logging import LoggedProcess
 from widgets.native_browser_widget import NativeBrowserWidget
 from widgets.thumbnail_widget import ThumbnailWidget
 from widgets.image_preview_widget import ImagePreviewWidget
@@ -14,6 +16,8 @@ from utils.dataset_preprocessing_utils import DatasetPreprocessingUtils
 resize_mode = ['stretch','center crop']
 padding_color = ['black', 'white', 'bleeding']
 
+logger = logging.getLogger(__name__)
+
 class DataPreprocessing:
     """Data Preprocessing UI"""
     def __init__(self, app):
@@ -22,25 +26,10 @@ class DataPreprocessing:
         self.settings = DatasetPreprocessingUtils()
 
         self.data_browser = NativeBrowserWidget()
-        self.thumbnail_widget = ThumbnailWidget() # Imported image thumbnails
-        self.video_thumbnail_widget = ThumbnailWidget()  # Video popup thumbnails
-        self.video_thumbnail_widget.generate_thumbnails = True  # Always render video thumbnails
+        self.thumbnail_widget = ThumbnailWidget(padding_value=26)  # Imported image thumbnails
+        self.video_thumbnail_widget = ThumbnailWidget()  # Video popup thumbnails (black padding)
         self.image_preview_widget = ImagePreviewWidget()
         self.loading_widget = LoadingOverlayManager(app)  # Enhanced loading overlay manager
-        
-        # Background thumbnail processing
-        self.thumbnail_queue = mp.Queue()
-        self.thumbnail_reply = mp.Queue()
-        self.thumbnail_process = None
-        self.is_processing_thumbnails = False
-        self.thumbnail_process_started = False
-        self._requested_thumbnail_paths = set()
-        
-        # Video thumbnail processing
-        self.video_thumbnail_queue = mp.Queue()
-        self.video_thumbnail_reply = mp.Queue()
-        self.video_thumbnail_process = None
-        self.is_processing_video_thumbnails = False 
 
         self.imported_files = [] 
         self.selected_video_files = [] 
@@ -70,7 +59,7 @@ class DataPreprocessing:
         self.processing_queue = mp.Queue()
         self.processing_reply = mp.Queue()
         self.cancel_processing = False
-        self.processing_process = mp.Process(target=DatasetPreprocessingUtils.create_training_dataset, args=(self.processing_queue, self.processing_reply))
+        self.processing_process = LoggedProcess(target=DatasetPreprocessingUtils.create_training_dataset, args=(self.processing_queue, self.processing_reply), name='dataset-build')
         
         # Processing popup control
         self.is_processing_dataset = False
@@ -133,7 +122,7 @@ class DataPreprocessing:
         imgui.separator()
  
         if imgui.button("Import Images", width=parameter_column_width, height=30):
-            selected_images = self.data_browser.select_image_files()
+            selected_images = self.data_browser.select_images_from_folder()
             duplicates = self.check_for_duplicates(selected_images)
             if duplicates:
                 self.current_duplicates = duplicates  # Store duplicate filenames for popup
@@ -142,10 +131,6 @@ class DataPreprocessing:
             else:
                 self.imported_files.extend(selected_images)
                 self.thumbnail_widget.update_thumbnails(self.imported_files)
-                
-                if self.thumbnail_widget.generate_thumbnails and self.imported_files:
-                    self._start_background_thumbnail_generation()
-                
                 self.last_selected_file = None
 
         imgui.set_next_window_size(self.app.content_width // 2.5, self.app.content_height // 2.5, imgui.ONCE)
@@ -198,8 +183,6 @@ class DataPreprocessing:
                 if hasattr(self, 'last_expected_frames'):
                     delattr(self, 'last_expected_frames')
                 self.video_durations = {}
-                # Start background thumbnail generation for video thumbnails
-                self._start_video_thumbnail_generation()
                 imgui.open_popup("Video Frame Extraction")
 
         # Video Frame Extraction Popup
@@ -244,9 +227,10 @@ class DataPreprocessing:
                     self.is_processing_video = True
                     self.loading_widget.show_simple("Extracting frames...", show_progress=True)
                     self.loading_widget.update_progress(0, len(self.selected_video_files))
-                    mp.Process(
+                    LoggedProcess(
                         target=DatasetPreprocessingUtils.extract_videos,
-                        args=(self.selected_video_files, self.fps, self.video_extraction_queue, self.video_extraction_reply)
+                        args=(self.selected_video_files, self.fps, self.video_extraction_queue, self.video_extraction_reply),
+                        name='video-extract'
                     ).start()
             else:
                 self.loading_widget.render()
@@ -274,10 +258,7 @@ class DataPreprocessing:
                                 self.imported_files.extend(frame_files)
 
                             self.thumbnail_widget.update_thumbnails(self.imported_files)
-                            
-                            if self.thumbnail_widget.generate_thumbnails and self.imported_files:
-                                self._start_background_thumbnail_generation()
-                            
+
                             # Reset variables
                             self.selected_video_files = [] 
                             self.is_processing_video = False
@@ -300,8 +281,7 @@ class DataPreprocessing:
             imgui.spacing()
 
             if imgui_utils.button("Back to Main Menu", width=left_popup_width - 10, enabled=True):
-                self.selected_video_files = []  
-                self._stop_video_thumbnail_generation()
+                self.selected_video_files = []
                 # Reset cache variables when closing popup
                 if hasattr(self, 'last_video_count'):
                     delattr(self, 'last_video_count')
@@ -333,8 +313,8 @@ class DataPreprocessing:
                     self.video_thumbnail_widget.update_thumbnails(self.selected_video_files)
                     self.last_video_count = len(self.selected_video_files)
 
-                self._check_video_thumbnail_results() 
-                
+                self.video_thumbnail_widget.poll()
+
                 self.video_thumbnail_widget.render_thumbnails(video_available_width, video_available_height)
             else:
                 imgui.text("No videos selected.")
@@ -508,17 +488,15 @@ class DataPreprocessing:
         
         imgui.same_line()
         if imgui.button("Browse##save_path", width=self.app.button_w, height=25):
-            directory_path = self.data_browser.select_directory("Select Save Path")
+            directory_path = self.data_browser.select_directory("Select Save Path", initial_dir=self.save_path)
             if directory_path:
                 self.save_path = directory_path.replace('\\', '/')
-            else:
-                print("No save path selected")
         
         imgui.spacing()
         
         if imgui.button("Process & Save Data", width=parameter_column_width, height=30):
             if not self.imported_files:
-                print("No images to process.")
+                logger.warning("No images to process")
             else:
                 self.settings.images = self.imported_files
 
@@ -704,25 +682,10 @@ class DataPreprocessing:
         imgui.same_line()
         imgui.text(f"({len(self.imported_files)} images)")
         
-        imgui.same_line(position=imgui.get_window_width() - imgui.calc_text_size("Render Thumbnail")[0] - imgui.calc_text_size("Select All")[0] - 70)
+        imgui.same_line(position=imgui.get_window_width() - imgui.calc_text_size("Select All")[0] - 50)
 
-        prev_thumbnail_mode = self.thumbnail_widget.generate_thumbnails
-        generate_thumbnails_clicked, self.thumbnail_widget.generate_thumbnails = imgui.checkbox(
-            "Render Thumbnail", self.thumbnail_widget.generate_thumbnails
-        )
-
-        imgui.same_line()
-        
-        if imgui.button("Select All"):
+        if imgui.button("Select All", width=self.app.button_w):
             self.thumbnail_widget.select_all()
-        
-        if generate_thumbnails_clicked:
-            new_thumbnail_mode = self.thumbnail_widget.generate_thumbnails
-            self.thumbnail_widget.set_thumbnail_mode(new_thumbnail_mode, prev_thumbnail_mode)
-            if new_thumbnail_mode and self.imported_files:
-                self._start_background_thumbnail_generation()
-            else:
-                self._stop_background_thumbnail_generation()
 
         imgui.separator()
 
@@ -734,15 +697,12 @@ class DataPreprocessing:
         available_height = scroll_height
         self.thumbnail_widget.render_thumbnails(available_width, available_height)
 
-        imgui.end_child()  
+        imgui.end_child()
         # End Thumbnails Scroll
-        
-        self._check_background_thumbnail_results()
 
-        if self.thumbnail_widget.generate_thumbnails:
-            self._request_visible_thumbnails()
+        self.thumbnail_widget.poll()
 
-        remove_selected = imgui.button("Remove Selected Images", width=available_width, height=30)
+        remove_selected = imgui.button("Remove Selected Images", width=available_width + 18, height=30)
         remove_selected = remove_selected or self.thumbnail_widget.is_delete_pressed()
         
         if remove_selected:
@@ -754,7 +714,6 @@ class DataPreprocessing:
 
             self.thumbnail_widget.update_thumbnails(self.imported_files)
             self.thumbnail_widget.clear_selected()
-            self._requested_thumbnail_paths = set()
             self.last_selected_file = None
 
         imgui.end() 
@@ -768,7 +727,7 @@ class DataPreprocessing:
         
         imgui.text("Image Preview")
 
-        imgui.same_line(position=imgui.get_window_width() - imgui.calc_text_size("Preview Original")[0] - 50)
+        imgui.same_line(position=imgui.get_window_width() - imgui.calc_text_size("Preview Original")[0] - 55)
         # Preview Original button
         preview_original_clicked, preview_original_new = imgui.checkbox("Preview Original", self.preview_original)
         if preview_original_clicked:
@@ -876,193 +835,9 @@ class DataPreprocessing:
             self.imported_files.extend(files_to_add)
         
         self.thumbnail_widget.update_thumbnails(self.imported_files)
-        
-        if self.thumbnail_widget.generate_thumbnails and self.imported_files:
-            self._start_background_thumbnail_generation()
-        
         self.last_selected_file = None
     # ------------------------------
 
-     # --- Background Thumbnail Generation Helper Functions ---
-    def _start_background_thumbnail_generation(self):
-        """Ensure the background thumbnail process is running. Actual file
-        requests are sent lazily each frame by _request_visible_thumbnails()."""
-        if not self.thumbnail_process_started or (self.thumbnail_process is not None and not self.thumbnail_process.is_alive()):
-            self.thumbnail_process = mp.Process(
-                target=ThumbnailWidget.process_thumbnails_background,
-                args=(self.thumbnail_queue, self.thumbnail_reply)
-            )
-            self.thumbnail_process.start()
-            self.thumbnail_process_started = True
-
-        self.is_processing_thumbnails = True
-        self._requested_thumbnail_paths = set()
-
-    def _request_visible_thumbnails(self):
-        """Send generation requests for visible files that haven't been requested yet."""
-        if not self.thumbnail_process_started:
-            return
-
-        pending = self.thumbnail_widget.get_pending_render_paths()
-        new_paths = [fp for fp in pending if fp not in self._requested_thumbnail_paths]
-        if not new_paths:
-            return
-
-        request = {
-            'type': 'generate_thumbnails',
-            'file_paths': new_paths,
-            'thumbnail_size': self.thumbnail_widget.thumbnail_size
-        }
-        self.thumbnail_queue.put(request)
-        self._requested_thumbnail_paths.update(new_paths)
-        self.is_processing_thumbnails = True
-    
-    def _start_video_thumbnail_generation(self):
-        """Start background thumbnail generation process for video thumbnails"""
-        if self.is_processing_video_thumbnails:
-            return  
-        
-        # Start process if not started or if it died
-        if self.video_thumbnail_process is None or not self.video_thumbnail_process.is_alive():
-            self.video_thumbnail_process = mp.Process(
-                target=ThumbnailWidget.process_thumbnails_background,
-                args=(self.video_thumbnail_queue, self.video_thumbnail_reply)
-            )
-            self.video_thumbnail_process.start()
-        
-        # Send thumbnail generation request
-        self.is_processing_video_thumbnails = True
-        
-        # Send request with file paths and thumbnail size
-        request = {
-            'type': 'generate_thumbnails',
-            'file_paths': self.selected_video_files,
-            'thumbnail_size': self.video_thumbnail_widget.thumbnail_size
-        }
-        self.video_thumbnail_queue.put(request)
-    
-    def _stop_background_thumbnail_generation(self):
-        """Stop background thumbnail generation process"""
-        if self.thumbnail_process is not None and self.thumbnail_process.is_alive():
-            try:
-                # Send shutdown signal
-                self.thumbnail_queue.put({'type': 'shutdown'})
-                
-                self.thumbnail_process.join(timeout=1.0)
-                
-                if self.thumbnail_process.is_alive():
-                    self.thumbnail_process.terminate()
-                    self.thumbnail_process.join(timeout=1.0)
-                    
-                    if self.thumbnail_process.is_alive():
-                        self.thumbnail_process.kill()
-                        self.thumbnail_process.join()
-                        
-            except Exception as e:
-                print(f"Error stopping thumbnail process: {e}")
-            finally:
-                self.thumbnail_process = None
-        
-        try:
-            while not self.thumbnail_queue.empty():
-                self.thumbnail_queue.get_nowait()
-        except:
-            pass
-            
-        try:
-            while not self.thumbnail_reply.empty():
-                self.thumbnail_reply.get_nowait()
-        except:
-            pass
-        
-        # Reset processing state
-        self.is_processing_thumbnails = False
-        self.thumbnail_process_started = False
-        self._requested_thumbnail_paths = set()
-    
-    def _check_background_thumbnail_results(self):
-        """Check for background thumbnail generation results"""
-        if not self.is_processing_thumbnails or self.thumbnail_reply.empty():
-            return
-        
-        try:
-            while not self.thumbnail_reply.empty():
-                result = self.thumbnail_reply.get_nowait()
-                
-                if result['type'] == 'thumbnail':
-                    file_path = result['file_path']
-                    thumbnail_data = result['thumbnail_data']
-                    self.thumbnail_widget.update_thumbnail_from_data(file_path, thumbnail_data)
-                    self._requested_thumbnail_paths.discard(file_path)
-                elif result['type'] == 'completed':
-                    if self.thumbnail_queue.empty():
-                        self.is_processing_thumbnails = False
-                    
-        except Exception as e:
-            print(f"Error processing background thumbnail results: {e}")
-    
-    def _check_video_thumbnail_results(self):
-        """Check for video thumbnail generation results"""
-        if not self.is_processing_video_thumbnails or self.video_thumbnail_reply.empty():
-            return
-        
-        try:
-            while not self.video_thumbnail_reply.empty():
-                result = self.video_thumbnail_reply.get_nowait()
-                
-                if result['type'] == 'thumbnail':
-                    # Update video thumbnail widget with processed data
-                    file_path = result['file_path']
-                    thumbnail_data = result['thumbnail_data']
-                    self.video_thumbnail_widget.update_thumbnail_from_data(file_path, thumbnail_data)
-                elif result['type'] == 'completed':
-                    self.is_processing_video_thumbnails = False
-                    
-        except Exception as e:
-            print(f"Error processing video thumbnail results: {e}")
-    
-    def _stop_video_thumbnail_generation(self):
-        """Stop background video thumbnail generation process"""
-        if self.video_thumbnail_process is not None and self.video_thumbnail_process.is_alive():
-            try:
-                # Send shutdown signal
-                self.video_thumbnail_queue.put({'type': 'shutdown'})
-                
-                # Wait for graceful shutdown
-                self.video_thumbnail_process.join(timeout=1.0)
-                
-                # Force terminate if still alive
-                if self.video_thumbnail_process.is_alive():
-                    self.video_thumbnail_process.terminate()
-                    self.video_thumbnail_process.join(timeout=1.0)
-                    
-                    # Kill if still alive
-                    if self.video_thumbnail_process.is_alive():
-                        self.video_thumbnail_process.kill()
-                        self.video_thumbnail_process.join()
-                        
-            except Exception as e:
-                print(f"Error stopping video thumbnail process: {e}")
-            finally:
-                self.video_thumbnail_process = None
-        
-        # Clear queues
-        try:
-            while not self.video_thumbnail_queue.empty():
-                self.video_thumbnail_queue.get_nowait()
-        except:
-            pass
-            
-        try:
-            while not self.video_thumbnail_reply.empty():
-                self.video_thumbnail_reply.get_nowait()
-        except:
-            pass
-        
-        # Reset processing state
-        self.is_processing_video_thumbnails = False
-    # ------------------------------
-    
     # ---Helper functions for preview updates
     def _get_settings_hash(self):
         """Create a hash of current settings for change detection."""
@@ -1114,9 +889,10 @@ class DataPreprocessing:
 
         self.processing_queue.put(self.settings)
         
-        self.processing_process = mp.Process(
+        self.processing_process = LoggedProcess(
             target=DatasetPreprocessingUtils.create_training_dataset,
-            args=(self.processing_queue, self.processing_reply))
+            args=(self.processing_queue, self.processing_reply),
+            name='dataset-build')
         self.processing_process.start()
     # ------------------------------
 
@@ -1124,9 +900,6 @@ class DataPreprocessing:
     def cleanup(self):
         """Clean up multiprocessing resources before destroying the object"""
         try:
-            self._stop_background_thumbnail_generation()
-            self._stop_video_thumbnail_generation()
-            
             self.reset_progress_variables()
 
             if hasattr(self, 'thumbnail_widget') and self.thumbnail_widget is not None:
@@ -1143,7 +916,7 @@ class DataPreprocessing:
                 self.help_icon.cleanup()
                 
         except Exception as e:
-            print(f"Warning: Error during cleanup: {e}")
+            logger.warning("Error during cleanup: %s", e)
 
     def reset_progress_variables(self):
         """Reset progress tracking variables to default values"""

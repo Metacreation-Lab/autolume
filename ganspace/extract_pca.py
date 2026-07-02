@@ -1,3 +1,4 @@
+import logging
 import datetime
 
 import torch
@@ -5,6 +6,7 @@ import numpy as np
 from tqdm import trange
 
 from ganspace import estimators
+from utils import device_utils
 
 
 def setup_estimator(name, num_features, alpha):
@@ -16,7 +18,13 @@ def sample_latent(n_latents, model, device, c=None, project=False):
         latent = model.mapping(latent, c)[:, 0]
     return latent
 
+logger = logging.getLogger(__name__)
+
+
 def get_max_batch_size(model, device):
+    if torch.device(device).type != 'cuda':
+        # CUDA memory statistics are unavailable; use the default cap.
+        return 20
     # Reset statistics
     torch.cuda.reset_max_memory_cached(device)
     torch.cuda.reset_max_memory_allocated(device)
@@ -29,22 +37,23 @@ def get_max_batch_size(model, device):
         maxmem = torch.cuda.max_memory_allocated(device)
         del z
         if maxmem > 0.5*total_mem:
-            print('Batch size {:d}: memory usage {:.0f}MB'.format(i, maxmem / 1e6))
+            logger.debug('Batch size %d: memory usage %.0fMB', i, maxmem / 1e6)
             return i
     return B_max
 
 def fit(queue, reply):
     name, num_features, model, device, project, alpha = queue.get()
-    while queue.qsize() > 0:
+    while not queue.empty():
         name, num_features, model, device, project, alpha = queue.get()
 
+    model = model.to(device)
 
     sample_shape = model.w_dim
     sample_dims = np.prod(sample_shape)
-    print('Feature shape:', sample_shape, sample_dims)
+    logger.debug('Feature shape: %s %s', sample_shape, sample_dims)
     input_shape = model.z_dim
     input_dims = np.prod(input_shape)
-    print('Input shape:', input_shape, input_dims)
+    logger.debug('Input shape: %s %s', input_shape, input_dims)
     reply.put(["Setting up estimator", (None, None), False])
     transformer = setup_estimator(name, num_features, alpha)
     reply.put(["Estimating Batch Size", (None, None), False])
@@ -57,8 +66,8 @@ def fit(queue, reply):
     feat_size_bytes = sample_dims * np.dtype('float64').itemsize
     N_limit_RAM = np.floor_divide(target_bytes, feat_size_bytes)
     if not transformer.batch_support and N > N_limit_RAM:
-        print('WARNING: estimator does not support batching, ' \
-              'given config will use {:.1f} GB memory.'.format(feat_size_bytes / 1_000_000_000 * N))
+        logger.warning('Estimator does not support batching, '
+                       'given config will use %.1f GB memory.', feat_size_bytes / 1_000_000_000 * N)
     reply.put(['B={}, N={}, dims={}, N/dims={:.1f}'.format(B, N, sample_dims, N / sample_dims), (None, None), False])
 
 
@@ -127,7 +136,7 @@ def fit(queue, reply):
     # Normalize
     Z_comp /= np.linalg.norm(Z_comp, axis=-1, keepdims=True)
 
-    torch.cuda.empty_cache()
+    device_utils.empty_cache(device)
     reply.put(("", (X_comp, Z_comp), True))
 
 

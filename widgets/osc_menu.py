@@ -1,9 +1,12 @@
 import contextlib
 
+import logging
 import imgui
 
 import dnnlib
 from utils.gui_utils import imgui_utils
+
+logger = logging.getLogger(__name__)
 import numpy as np
 import math
 import torch
@@ -50,7 +53,7 @@ class OscMenu:
                 try:
                     func(*args, **kwargs)
                 except Exception as e:
-                    print(e)
+                    logger.warning("OSC handler failed: %s", e)
 
         return wrapper
 
@@ -60,7 +63,7 @@ class OscMenu:
                 f = lambda x: eval(self.mappings[key])
                 func(args[0], f(args[-1]))
             except Exception as e:
-                print(e)
+                logger.warning("OSC mapping failed, forwarding raw args: %s", e)
                 func(*args)
 
         return wrapper
@@ -79,8 +82,8 @@ class OscMenu:
                 viz.osc_dispatcher.map(f"/{self.osc_addresses[key]}", self.wrapped_funcs[key])
                 try:
                     viz.osc_dispatcher.unmap(f"/{self.cached_osc_addresses[key]}", self.wrapped_funcs[key])
-                except:
-                    print(self.cached_osc_addresses[key], "is not mapped")
+                except Exception:
+                    logger.warning("OSC address %s is not mapped", self.cached_osc_addresses[key])
                 self.cached_osc_addresses[key] = self.osc_addresses[key]
             if self.use_map.get(key, False):
                 changed, self.mappings[key] = imgui.input_text(f"##Mappings_{self.label}_{key}",
@@ -91,8 +94,8 @@ class OscMenu:
                 if changed:
                     try:
                         viz.osc_dispatcher.unmap(f"/{self.osc_addresses[key]}", self.wrapped_funcs[key])
-                    except:
-                        print(self.cached_osc_addresses[key], "is not mapped")
+                    except Exception:
+                        logger.warning("OSC address %s is not mapped", self.cached_osc_addresses[key])
                     self.wrapped_funcs[key] = self.map_func(self.funcs[key], key)
                     viz.osc_dispatcher.map(f"/{self.osc_addresses[key]}", self.wrapped_funcs[key])
 

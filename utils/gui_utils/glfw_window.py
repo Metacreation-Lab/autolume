@@ -6,10 +6,21 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
+import logging
+import os
+import sys
 import time
 import glfw
 import OpenGL.GL as gl
+import PIL.Image
 from . import gl_utils
+from utils.resource_paths import resource_path
+
+
+logger = logging.getLogger(__name__)
+
+def _wayland_session():
+    return sys.platform == 'linux' and bool(os.environ.get('WAYLAND_DISPLAY'))
 
 #----------------------------------------------------------------------------
 
@@ -33,7 +44,12 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
         # Create window.
         glfw.init()
         glfw.window_hint(glfw.VISIBLE, False)
+        # XWayland: force an EGL context so PyOpenGL's EGL platform (not the
+        # buggy GLX one) picks it up.
+        if _wayland_session():
+            glfw.window_hint(glfw.CONTEXT_CREATION_API, glfw.EGL_CONTEXT_API)
         self._glfw_window = glfw.create_window(width=window_width, height=window_height, title=title, monitor=None, share=None)
+        self._set_window_icon()
         self._attach_glfw_callbacks()
         self.make_context_current()
 
@@ -44,6 +60,17 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
             glfw.show_window(self._glfw_window)
 
 
+
+    def _set_window_icon(self):
+        # macOS and Wayland don't support per-window icons.
+        if sys.platform == 'darwin' or glfw.get_platform() == glfw.PLATFORM_WAYLAND:
+            return
+        # GLFW needs raw RGBA pixels, so load the PNG rather than the .exe .ico.
+        try:
+            image = PIL.Image.open(resource_path('assets', 'metacreation-logo.png')).convert('RGBA')
+            glfw.set_window_icon(self._glfw_window, 1, [image])
+        except Exception as err: # pylint: disable=broad-except
+            logger.warning('Failed to set window icon: %s', err)
 
     def close(self):
         if self._drawing_frame:
@@ -59,6 +86,18 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
         except:
             pass
 
+    def _content_scale(self):
+        # macOS/native Wayland return logical pixels from get_window_size; no correction needed.
+        # XWayland returns physical pixels (fb == win), so read the OS content scale instead.
+        if sys.platform != 'linux':
+            return 1.0
+        fb_w, _ = glfw.get_framebuffer_size(self._glfw_window)
+        win_w, _ = glfw.get_window_size(self._glfw_window)
+        if fb_w == win_w:
+            xscale, _ = glfw.get_window_content_scale(self._glfw_window)
+            return max(1.0, xscale)
+        return 1.0
+
     @property
     def window_width(self):
         return self.content_width
@@ -69,28 +108,40 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
 
     @property
     def content_width(self):
-        width, _height = glfw.get_window_size(self._glfw_window)
-        return width
+        width, _ = glfw.get_window_size(self._glfw_window)
+        return round(width / self._content_scale())
 
     @property
     def content_height(self):
-        _width, height = glfw.get_window_size(self._glfw_window)
-        return height
+        _, height = glfw.get_window_size(self._glfw_window)
+        return round(height / self._content_scale())
 
     @property
     def title_bar_height(self):
         _left, top, _right, _bottom = glfw.get_window_frame_size(self._glfw_window)
-        return top
+        return round(top / self._content_scale())
+
+    def _get_work_area(self):
+        monitor = glfw.get_primary_monitor()
+        # get_monitor_workarea can crash on macOS; use it elsewhere only.
+        # A zero-sized result falls through to the always-valid video mode.
+        if sys.platform != 'darwin':
+            area_x, area_y, area_width, area_height = glfw.get_monitor_workarea(monitor)
+            if area_width > 0 and area_height > 0:
+                return area_x, area_y, area_width, area_height
+        area_x, area_y = glfw.get_monitor_pos(monitor)
+        mode = glfw.get_video_mode(monitor)
+        return area_x, area_y, mode.size.width, mode.size.height
 
     @property
     def monitor_width(self):
-        _, _, width, _height = glfw.get_monitor_workarea(glfw.get_primary_monitor())
-        return width
+        _, _, width, _ = self._get_work_area()
+        return round(width / self._content_scale())
 
     @property
     def monitor_height(self):
-        _, _, _width, height = glfw.get_monitor_workarea(glfw.get_primary_monitor())
-        return height
+        _, _, _, height = self._get_work_area()
+        return round(height / self._content_scale())
 
     @property
     def frame_delta(self):
@@ -102,7 +153,12 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
     def set_window_size(self, width, height):
         width = min(width, self.monitor_width)
         height = min(height, self.monitor_height)
-        glfw.set_window_size(self._glfw_window, width, max(height - self.title_bar_height, 0))
+        scale = self._content_scale()
+        tbh = round(self.title_bar_height * scale)  # physical title-bar height
+        glfw.restore_window(self._glfw_window)
+        glfw.set_window_size(self._glfw_window,
+                             round(width * scale),
+                             max(round(height * scale) - tbh, 0))
         if width == self.monitor_width and height == self.monitor_height:
             self.maximize()
 
@@ -110,10 +166,34 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
         self.set_window_size(width, height + self.title_bar_height)
 
     def maximize(self):
-        glfw.maximize_window(self._glfw_window)
+        area_x, area_y, area_width, area_height = self._get_work_area()
+        tbh = round(self.title_bar_height * self._content_scale())  # logical → OS units
+        if sys.platform == 'darwin':
+            # maximize_window animates via NSWindow zoom and misbehaves on
+            # undecorated windows; set the frame directly instead.
+            glfw.set_window_pos(self._glfw_window, area_x, area_y + tbh)
+            glfw.set_window_size(self._glfw_window, area_width, max(area_height - tbh, 1))
+        elif _wayland_session():
+            # XWayland: maximize_window unreliable; fill work area explicitly.
+            glfw.restore_window(self._glfw_window)
+            glfw.set_window_size(self._glfw_window, area_width, max(area_height - tbh, 1))
+        else:
+            # Clear stale maximized state and anchor at the work area origin
+            # (selects the right monitor) before maximizing.
+            glfw.restore_window(self._glfw_window)
+            glfw.set_window_pos(self._glfw_window, area_x, area_y + tbh)
+            glfw.maximize_window(self._glfw_window)
 
     def set_position(self, x, y):
-        glfw.set_window_pos(self._glfw_window, x, y + self.title_bar_height)
+        # Wayland: compositor owns window position.
+        if glfw.get_platform() == glfw.PLATFORM_WAYLAND:
+            return
+        # Offset by the work-area origin (e.g. macOS menu bar).
+        area_x, area_y, _, _ = self._get_work_area()
+        scale = self._content_scale()
+        glfw.set_window_pos(self._glfw_window,
+                            area_x + round(x * scale),
+                            area_y + round((y + self.title_bar_height) * scale))
 
     def center(self):
         self.set_position((self.monitor_width - self.window_width) // 2, (self.monitor_height - self.window_height) // 2)
@@ -192,8 +272,11 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
         self._drawing_frame = True
         self.make_context_current()
 
-        # Initialize GL state.
-        gl.glViewport(0, 0, self.content_width, self.content_height)
+        # Initialize GL state. The viewport covers the framebuffer, which is larger
+        # than the window on scaled (retina) displays; the projection below keeps
+        # all drawing in window coordinates.
+        fb_width, fb_height = glfw.get_framebuffer_size(self._glfw_window)
+        gl.glViewport(0, 0, fb_width, fb_height)
         gl.glMatrixMode(gl.GL_PROJECTION)
         gl.glLoadIdentity()
         gl.glTranslate(-1, 1, 0)
@@ -218,7 +301,7 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
 
         # Capture frame if requested.
         if self._capture_next_frame:
-            self._captured_frame = gl_utils.read_pixels(self.content_width, self.content_height)
+            self._captured_frame = gl_utils.read_pixels(*glfw.get_framebuffer_size(self._glfw_window))
             self._capture_next_frame = False
 
         # Update window.

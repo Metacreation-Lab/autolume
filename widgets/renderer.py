@@ -7,6 +7,8 @@
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
 import sys
+import contextlib
+import logging
 import copy
 import time
 import traceback
@@ -17,17 +19,22 @@ import torch.fft
 import torch.nn
 import matplotlib.cm
 import dnnlib
+from utils import device_utils
+from utils.resource_paths import resource_path
 from bending.transform_layers import ManipulationLayer
 from torch_utils.ops import upfirdn2d, params
 from torch_utils import legacy
 from architectures import custom_stylegan2
 from super_res.net_base import SRVGGNetPlus
 from modules.network_mixing import extract_conv_names, extract_mapping_names
+from utils.model_dir import ensure_models_dir
 import os
 import pickle
 
-super_res = SRVGGNetPlus(num_in_ch=3, num_out_ch=3, num_feat=48, upscale=4, act_type='prelu').eval().to("cuda" if torch.cuda.is_available() else "cpu")
-model_sd=torch.load('./sr_models/Fast.pt', map_location=torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+logger = logging.getLogger(__name__)
+
+super_res = SRVGGNetPlus(num_in_ch=3, num_out_ch=3, num_feat=48, upscale=4, act_type='prelu').eval().to(device_utils.get_device())
+model_sd=torch.load(str(resource_path('sr_models', 'Fast.pt')), map_location=device_utils.get_device())
 super_res.load_state_dict(model_sd)
 
 # ----------------------------------------------------------------------------
@@ -220,8 +227,8 @@ def slerp(t, v0, v1, DOT_THRESHOLD=0.9995):
 class Renderer:
     def __init__(self):
         self.step_y = 100
-        self._device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-        self.kernel_type = "cuda" if torch.cuda.is_available() else "cpu"
+        self._device = device_utils.get_device()
+        self.kernel_type = self._device.type
         self._pkl_data = dict()  # {pkl: dict | CapturedException, ...}
         self._networks = dict()  # {cache_key: torch.nn.Module, ...}
         self._pinned_bufs = dict()  # {(shape, dtype): torch.Tensor, ...}
@@ -259,6 +266,7 @@ class Renderer:
         if self._device.type == 'cuda':
             self._end_event.record()
         else:
+            device_utils.synchronize(self._device)
             self._end_event = time.time()
         if 'image' in res:
             res.image = self.to_cpu(res.image).numpy()
@@ -278,17 +286,17 @@ class Renderer:
     def get_network(self, pkl, key, **tweak_kwargs):
         data = self._pkl_data.get(pkl, None)
         if data is None:
-            print(f'Loading "{pkl}"... ', end='', flush=True)
-            if not self.checked_custom_kernel:
-                print("Trying to compile custom cuda kernel, this can take a while...", flush=True)
+            logger.info('Loading network pickle "%s"', pkl)
+            if not self.checked_custom_kernel and torch.cuda.is_available():
+                logger.info("Trying to compile custom cuda kernel, this can take a while...")
             try:
                 with dnnlib.util.open_url(pkl, verbose=False) as f:
                     data = legacy.load_network_pkl(f, custom=True)
                     self.checked_custom_kernel = True
-                print('Done.')
+                logger.info('Loaded network pickle "%s"', pkl)
             except:
                 data = CapturedException()
-                print('Failed!')
+                logger.exception('Failed to load network pickle "%s"', pkl)
             self._pkl_data[pkl] = data
             self._ignore_timing()
         if isinstance(data, CapturedException):
@@ -298,7 +306,7 @@ class Renderer:
         cache_key = (orig_net, self._device, self.kernel_type, tuple(sorted(tweak_kwargs.items())))
         net = self._networks.get(cache_key, None)
         if net is None:
-            print(f'Initializing network "{cache_key}"... ', end='', flush=True)
+            logger.debug('Initializing network "%s"', cache_key)
             try:
                 net = copy.deepcopy(orig_net)
                 net = net.to(self._device).eval().requires_grad_(False)
@@ -306,8 +314,6 @@ class Renderer:
                 net = CapturedException()
             self._networks[cache_key] = net
             self._ignore_timing()
-        else:
-            print(f'Network "{cache_key}" already initialized, reusing... ', end='', flush=True)
         if isinstance(net, CapturedException):
             raise net
         return net
@@ -418,8 +424,10 @@ class Renderer:
                      save_model = False,
                      save_path = "",
                      snapped=None,
-                     device="cuda"
+                     device=None
                      ):
+        if device is None:
+            device = device_utils.get_device().type
         res.has_custom = params.has_custom
         if self.checked_custom_kernel:
             if device == "custom":
@@ -480,7 +488,7 @@ class Renderer:
                 data['G_ema'] = self.G_mixed
                 data['G'] = self.G_mixed
 
-                with open(os.path.join(os.getcwd(),"models",save_path+".pkl"), 'wb') as f:
+                with open(os.path.join(ensure_models_dir(), save_path+".pkl"), 'wb') as f:
                     pickle.dump(data, f)
 
             if mixing and not (self.G_mixed is None):
@@ -560,7 +568,7 @@ class Renderer:
                             if project:
                                 w = mapping_net(z=w, c=all_cs, truncation_psi=trunc_psi, truncation_cutoff=trunc_cutoff)
                         except Exception as e:
-                            print(e)
+                            logger.warning("Latent mapping failed: %s", e)
                     else:
                         w = self.to_device(vec.unsqueeze(0))
 
@@ -681,10 +689,6 @@ class Renderer:
                 use_G1 = False
             else:
                 raise ValueError("Last entry should be either A or B but is: ", last_entry)
-            print("CHANNELS", self.G.synthesis.channels_dict, self.G2.synthesis.channels_dict)
-            print("compare", len(self.combined_layers), len(self.G.synthesis.channels_dict), len(self.G2.synthesis.channels_dict))
-            print("layer1", layer1)
-            print("layer2", layer2)
 
             # create a new channel dict that takes the entrance of self.G.synthesis.channels_dict and self.G2.synthesis.channels_dict based on whether combined_layers is A or B
             new_channels_dict = {}
@@ -699,7 +703,6 @@ class Renderer:
                     pass
                 else:
                     raise ValueError("Entry should be either A or B but is: ", entry)
-            print("new_channels_dict", new_channels_dict)
 
             model_out = custom_stylegan2.Generator(z_dim=self.G.z_dim, w_dim=self.G.w_dim, c_dim=self.G.c_dim, img_channels=self.G.img_channels,
                                        img_resolution=img_resolution, synthesis_kwargs = {"channels_dict":new_channels_dict})
@@ -771,7 +774,7 @@ class Renderer:
                         try:
                             outputs = [self.manipulation(outputs[0], transform)]
                         except Exception as e:
-                            print(e)
+                            logger.warning("Network bending transform failed: %s", e)
 
             for idx, out in enumerate(outputs):
                 if out.ndim == 5:  # G-CNN => remove group dimension.
@@ -800,7 +803,13 @@ class Renderer:
                 if isinstance(out, tuple):
                     out = out[0]
                 if use_superres:
-                    with torch.autocast("cuda" if self._device.type == "cuda" else "cpu"):
+                    if self._device.type == "mps":
+                        # MPS has no autocast support; CPU autocast would corrupt
+                        # dtypes of operators that fall back to CPU.
+                        autocast_ctx = contextlib.nullcontext()
+                    else:
+                        autocast_ctx = torch.autocast("cuda" if self._device.type == "cuda" else "cpu")
+                    with autocast_ctx:
                         out = super_res(out)
         except CaptureSuccess as e:
             out = e.out
@@ -812,11 +821,6 @@ class Renderer:
     def process_loop(self, G, looping_list, looping_index, alpha, trunc_psi, trunc_cutoff):
         v0 = self.evaluate(G, looping_list[looping_index-1], trunc_psi, trunc_cutoff)
         v1 = self.evaluate(G, looping_list[looping_index], trunc_psi, trunc_cutoff)
-        print("v0", v0.shape, "v1", v1.shape)
-        print(v0)
-        print("v0 unique", torch.unique(v0))
-        print(v1)
-        print("v1 unique", torch.unique(v1))
         return slerp(alpha, v0, v1)
 
     def evaluate(self, G, keyframe, trunc_psi, trunc_cutoff):
@@ -830,14 +834,12 @@ class Renderer:
     def process_vec(self, G, latent, project, trunc_psi, trunc_cutoff):
         mapping_net = G.mapping
         latent = self.to_device(latent[None, ...])
-        print("WE ARE HERE", latent.shape)
         if project and len(latent.shape) == 2:
             all_cs = np.zeros([len(latent), G.c_dim], dtype=np.float32)
             latent = mapping_net(latent, all_cs, truncation_psi=trunc_psi,
                                truncation_cutoff=trunc_cutoff)
 
         if len(latent.shape) == 2:
-            print("TRYING TO REPEAT")
             latent = latent.repeat(G.num_ws, 1).unsqueeze(0)
 
         # if the latent isnt the right size i.e. in its second position it doesnt have the right number of ws either cut of the last ws or repeat the last ws

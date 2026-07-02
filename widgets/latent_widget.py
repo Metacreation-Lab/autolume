@@ -8,11 +8,14 @@
 import copy
 import os
 
+import logging
 import numpy as np
 import torch
 import torch.nn.functional as F
 
-from widgets.browse_widget import BrowseWidget
+from widgets.native_browser_widget import NativeBrowserWidget
+
+logger = logging.getLogger(__name__)
 
 try:
     import cPickle as pickle
@@ -21,7 +24,8 @@ except ModuleNotFoundError:
 
 import dnnlib
 from utils.gui_utils import imgui_utils
-from widgets import osc_menu, save_widget
+from utils.model_dir import models_dir
+from widgets import osc_menu
 import imgui
 
 
@@ -51,15 +55,11 @@ class LatentWidget:
         self.latent_def = dnnlib.EasyDict(self.latent)
         self.vec_path   = ""
         self.vec_save_path = ""
-        self.file_dialog = BrowseWidget(viz, "Browse", os.path.relpath(os.getcwd()),
-                                      ["*", ".pth", ".pt", ".npy", ".npz", ],
-                                      width=self.viz.app.button_w, multiple=False, traverse_folders=False)
-        self.pt_save_dialog = save_widget.SaveWidget(viz, "Save Vector", os.path.abspath(os.getcwd()), ".pt")
+        self.browser = NativeBrowserWidget()
 
 
     def save(self, path):
         with open(path, "wb") as f:
-            print(self.get_params())
             pickle.dump(self.get_params(), f)
 
     def load(self, path):
@@ -77,7 +77,7 @@ class LatentWidget:
         self.viz.args.mode = self.latent.mode
         self.viz.args.project = self.latent.project
         self.viz.args.seed = [self.latent.x, self.latent.y]  # [[seed, weight], ...]
-        self.viz.args.vec = self.latent.vec.pin_memory() if torch.cuda.is_available else self.latent.vec
+        self.viz.args.vec = self.latent.vec.pin_memory() if torch.cuda.is_available() else self.latent.vec
 
     def drag(self, dx, dy):
         viz = self.viz
@@ -185,14 +185,14 @@ class LatentWidget:
             # if the file exists and is a valid vector, load it
             if os.path.exists(vec_path):
                 self.vec_path = vec_path
-        _clicked, paths = self.file_dialog()
-        if _clicked and len(paths) > 0:
-            self.vec_path = paths[0]
-            print("Selected vector at", self.vec_path)
+        if imgui_utils.button("Browse##vec", width=viz.app.button_w):
+            path = self.browser.select_vector_file(initial_dir=self.vec_path)
+            if path:
+                self.vec_path = str(path)
 
         imgui.same_line()
         if imgui_utils.button("Load##vecmode", width=viz.app.button_w, enabled=self.vec_path is not None and self.vec_path != ''):
-            print("Loading vector from", self.vec_path)
+            logger.info("Loading vector from %s", self.vec_path)
             if self.vec_path:
                 if self.vec_path.endswith('.npy'):
                     self.latent.vec = torch.from_numpy(np.load(self.vec_path))
@@ -203,16 +203,17 @@ class LatentWidget:
                     if len(self.latent.vec.shape) == 1:
                         self.latent.vec = self.latent.vec.unsqueeze(0)
                 else:
-                    print("Unsupported file format")
-                print("Loaded vector of shape", self.latent.vec.shape)
+                    logger.warning("Unsupported vector file format: %s", self.vec_path)
+                logger.debug("Loaded vector of shape %s", self.latent.vec.shape)
                 self.latent.next = torch.randn(self.latent.next.shape)
 
 
         imgui.same_line()
-        _changed, fname = self.pt_save_dialog()
-        if _changed:
-            self.vec_save_path = fname
-            torch.save(self.latent.vec, self.vec_save_path)
+        if imgui_utils.button("Save##vecmode", width=viz.app.button_w):
+            fname = self.browser.save_vector_file(initial_dir=self.vec_save_path or self.vec_path)
+            if fname:
+                self.vec_save_path = str(fname)
+                torch.save(self.latent.vec, self.vec_save_path)
 
     @imgui_utils.scoped_by_object_id
     def __call__(self, show=True):
@@ -259,14 +260,14 @@ class LatentWidget:
                 if isinstance(value, (int, float)):
                     index = round(value)
                     if index < 0 or index >= len(pickle_widget.browse_cache):
-                        print(f"OSC model: index {index} out of range (0-{len(pickle_widget.browse_cache) - 1})")
+                        logger.warning("OSC model: index %d out of range (0-%d)", index, len(pickle_widget.browse_cache) - 1)
                         return
                     target = pickle_widget.browse_cache[index]
                 elif isinstance(value, str):
                     if os.path.exists(value):
                         target = value
-                    elif os.path.exists(os.path.join(os.getcwd(), 'models', value)):
-                        target = os.path.join(os.getcwd(), 'models', value)
+                    elif os.path.exists(os.path.join(models_dir(), value)):
+                        target = os.path.join(models_dir(), value)
                     else:
                         target = None
                         for path in pickle_widget.browse_cache:
@@ -274,7 +275,7 @@ class LatentWidget:
                                 target = path
                                 break
                     if target is None:
-                        print(f"OSC model: no model matching '{value}' found")
+                        logger.warning("OSC model: no model matching '%s' found", value)
                         return
                 else:
                     return

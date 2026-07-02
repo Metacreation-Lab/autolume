@@ -6,11 +6,14 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
+import logging
 import imgui
 
 import dnnlib
 from utils.gui_utils import imgui_utils
 from widgets import osc_menu
+
+logger = logging.getLogger(__name__)
 
 try:
     import cPickle as pickle
@@ -37,7 +40,7 @@ class TruncationNoiseWidget:
                 nec_type = type(self.params[param])
                 self.params[param] = nec_type(args[-1])
             except Exception as e:
-                print(e)
+                logger.warning("OSC handler failed: %s", e)
         return func
 
     def get_params(self):

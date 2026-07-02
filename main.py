@@ -2,15 +2,36 @@ import multiprocessing
 import os
 import sys
 
-import torch
+IS_FROZEN = getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS")
 
-from modules.autolume_live import Autolume
+if sys.platform == 'darwin':
+    # Must be set before torch is imported.
+    os.environ.setdefault('PYTORCH_ENABLE_MPS_FALLBACK', '1')
+
+if sys.platform == 'linux' and os.environ.get('WAYLAND_DISPLAY'):
+    # Use X11 GLFW (XWayland) so GNOME decorates the window; native Wayland
+    # requires libdecor-gtk which is unavailable or crashes on some systems.
+    os.environ.setdefault('PYGLFW_LIBRARY_VARIANT', 'x11')
+
+
+if IS_FROZEN:
+    # pyglfw loads its native library through ctypes at runtime; its frozen-mode
+    # search does not include the bundle root where the lib is packed, so point
+    # it at the bundled copy explicitly (checked before any other search path).
+    for _glfw_lib in ("libglfw.3.dylib", "glfw3.dll", "libglfw.so.3", "libglfw.so"):
+        _glfw_cand = os.path.join(sys._MEIPASS, _glfw_lib)
+        if os.path.exists(_glfw_cand):
+            os.environ.setdefault("PYGLFW_LIBRARY", _glfw_cand)
+            break
+
+from utils.user_data import ensure_data_path
 
 
 def get_runtime_bin_dir():
-    # PyInstaller frozen app
-    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-        return sys._MEIPASS
+    # PyInstaller frozen app: bundled ffmpeg/ffprobe/ninja live in _MEIPASS/bin
+    # (a subdir, to avoid colliding with same-named Python packages at the root).
+    if IS_FROZEN:
+        return os.path.join(sys._MEIPASS, "bin")
 
     # Development mode
     base = os.path.dirname(os.path.abspath(__file__))
@@ -25,6 +46,12 @@ os.environ["PATH"] = BIN_DIR + os.pathsep + os.environ.get("PATH", "")
 
 
 def main():
+    # Materialise the user data root so it is discoverable even before any
+    # feature writes to it. Category subfolders are still created lazily.
+    ensure_data_path()
+
+    from modules.autolume_live import Autolume
+
     app = Autolume()
 
     while not app.should_close():
@@ -34,9 +61,30 @@ def main():
 
 if __name__ == "__main__":
     multiprocessing.freeze_support()
-    torch.backends.cudnn.benchmark = True
-    torch.backends.cuda.matmul.allow_tf32 = True
-    torch.backends.cudnn.allow_tf32 = True
-    torch.set_grad_enabled(False)
     multiprocessing.set_start_method("spawn", force=True)
-    main()
+
+    from utils.app_logging import setup_main_logging, shutdown_logging
+    setup_main_logging()
+
+    import logging
+    logger = logging.getLogger("autolume")
+
+    try:
+        # Imported here (not at module level) so a failure in the heavy
+        # dependency stack is captured by the log instead of vanishing in
+        # windowed frozen builds.
+        import torch
+
+        torch.backends.cudnn.benchmark = True
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        torch.set_grad_enabled(False)
+
+        main()
+    except SystemExit:
+        raise
+    except BaseException:
+        logger.critical("Fatal error", exc_info=True)
+        raise
+    finally:
+        shutdown_logging()

@@ -1,31 +1,29 @@
-import tkinter as tk
-from tkinter import filedialog
+"""Native OS file dialogs backed by filedialpy.
+
+filedialpy opens the real platform dialog: NSOpenPanel via AppleScript on
+macOS (out of process, so it cannot conflict with the GLFW run loop),
+pywin32 on Windows, zenity/kdialog on Linux. tkinter is not used; Tk cannot
+run inside this process on macOS because GLFW owns the NSApplication.
+"""
+
+import logging
 import os
+import sys
 from typing import List, Optional, Tuple
+
+try:
+    import filedialpy
+except ImportError:
+    # On Linux without zenity/kdialog, filedialpy falls back to tkinter at
+    # import time, which may be unavailable. Degrade to no-op dialogs.
+    filedialpy = None
+
+logger = logging.getLogger(__name__)
+
 
 class NativeBrowserWidget:
     def __init__(self):
-        # Hide main tkinter window
-        self.root = tk.Tk()
-        self.root.withdraw()
-        
-        # Configure tkinter for better performance with large directories
-        self.root.option_add('*Dialog.msg.font', 'TkDefaultFont')
-        self.root.option_add('*Dialog.msg.wrapLength', '3i')
-        
-        # Set tkinter options to improve performance with large directories
-        self.root.tk.call('tk', 'scaling', 1.0)  # Disable DPI scaling issues
-        
-        # Optimize for large file lists
-        self.root.option_add('*Listbox.font', 'TkDefaultFont')
-        self.root.option_add('*Listbox.selectBackground', 'lightblue')
-        self.root.option_add('*Listbox.selectForeground', 'black')
-        
-        # Reduce visual effects for better performance
-        self.root.option_add('*Button.relief', 'flat')
-        self.root.option_add('*Button.borderWidth', '1')
-        
-        # Image extensions 
+        # Image extensions
         self.image_extensions = [
             ('Image files', '*.png *.jpg *.jpeg *.bmp *.tiff *.tif *.webp *.gif'),
             ('PNG files', '*.png'),
@@ -36,7 +34,7 @@ class NativeBrowserWidget:
             ('GIF files', '*.gif'),
             ('All files', '*.*')
         ]
-        
+
         # Video file extensions
         self.video_extensions = [
             ('Video files', '*.mp4 *.avi *.mov *.mkv *.webm *.gif'),
@@ -48,25 +46,127 @@ class NativeBrowserWidget:
             ('GIF files', '*.gif'),
             ('All files', '*.*')
         ]
-        
-        self.all_media_extensions = [
-            ('Media files', '*.png *.jpg *.jpeg *.bmp *.tiff *.tif *.webp *.gif *.mp4 *.avi *.mov *.mkv *.webm'),
-            ('Image files', '*.png *.jpg *.jpeg *.bmp *.tiff *.tif *.webp *.gif'),
-            ('Video files', '*.mp4 *.avi *.mov *.mkv *.webm *.gif'),
+
+        # Vector file extensions (latent vectors saved by the app)
+        self.vector_extensions = [
+            ('Vector files', '*.pt *.pth *.npy *.npz'),
             ('All files', '*.*')
         ]
-        
+
+        # Model file extensions (pickled StyleGAN checkpoints)
+        self.model_extensions = [
+            ('Model files', '*.pkl'),
+            ('All files', '*.*')
+        ]
+
         # Optimized extension sets for fast lookup
         self._image_extensions_set = self._build_extension_set(self.image_extensions)
         self._video_extensions_set = self._build_extension_set(self.video_extensions)
-        
-        # Lazy loading state
-        self._current_directory = None
-        self._all_files = []
-        self._filtered_files = []
-        self._page_size = 500  # Load files in chunks of 500
-        self._current_page = 0
-    
+
+    # --- Dialog primitives ---------------------------------------------------
+
+    @staticmethod
+    def _dialogs_available() -> bool:
+        if filedialpy is None:
+            logger.warning("Native file dialogs unavailable: filedialpy could not be imported "
+                           "(on Linux, install zenity or kdialog)")
+            return False
+        return True
+
+    @staticmethod
+    def _filter_arg(patterns: str):
+        # filedialpy's macOS backend only accepts a single space-separated
+        # string (a list crashes it), while the Windows backend needs a list
+        # to turn the patterns into valid ';'-separated Win32 filters.
+        if sys.platform == 'darwin':
+            return patterns
+        return [patterns, '*']
+
+    @staticmethod
+    def _resolve_initial_dir(hint) -> str:
+        """Resolve the folder a dialog should open in. `hint` may be a file path,
+        a directory, an empty string, or a non-existent path. A file resolves to
+        its parent folder; a missing path falls back to the user's home directory.
+        `None` keeps the process working directory (the default when no path field
+        is associated with the dialog)."""
+        if hint is None:
+            return os.getcwd()
+        home = os.path.expanduser("~")
+        if not hint:
+            return home
+        hint = os.path.expanduser(str(hint))
+        if os.path.isdir(hint):
+            return hint
+        parent = os.path.dirname(hint)
+        if parent and os.path.isdir(parent):
+            return parent
+        return home
+
+    def _open_files(self, title: str, patterns: str, initial_dir=None) -> List[str]:
+        """Open a native multi-file picker. Returns [] when cancelled."""
+        if not self._dialogs_available():
+            return []
+        try:
+            paths = filedialpy.openFiles(title=title, filter=self._filter_arg(patterns),
+                                         initial_dir=self._resolve_initial_dir(initial_dir))
+        except Exception as e:
+            logger.error("Native file dialog failed: %s", e)
+            return []
+        if isinstance(paths, str):
+            paths = [paths] if paths else []
+        # The macOS backend maps a cancelled dialog to the current directory;
+        # keeping only real files also drops that artifact.
+        return [p for p in paths if p and os.path.isfile(p)]
+
+    def _open_directory(self, title: str, initial_dir=None) -> Optional[str]:
+        """Open a native directory picker. Returns None when cancelled."""
+        if not self._dialogs_available():
+            return None
+        try:
+            path = filedialpy.openDir(title=title, initial_dir=self._resolve_initial_dir(initial_dir))
+        except Exception as e:
+            logger.error("Native directory dialog failed: %s", e)
+            return None
+        if not path or not os.path.isdir(path):
+            return None
+        if sys.platform == 'darwin' and os.path.realpath(path) == os.path.realpath(''):
+            # The macOS backend reports a cancelled dialog as the process
+            # working directory; treat that as a cancel.
+            return None
+        return path
+
+    def _open_single_file(self, title: str, patterns: str, initial_dir=None) -> Optional[str]:
+        """Open a native single-file picker. Returns None when cancelled."""
+        if not self._dialogs_available():
+            return None
+        try:
+            path = filedialpy.openFile(title=title, filter=self._filter_arg(patterns),
+                                       initial_dir=self._resolve_initial_dir(initial_dir))
+        except Exception as e:
+            logger.error("Native file dialog failed: %s", e)
+            return None
+        # The macOS backend maps a cancelled dialog to the current directory.
+        if not path or not os.path.isfile(path):
+            return None
+        return path
+
+    def _save_file(self, title: str, patterns: str, initial_file: str, initial_dir=None) -> Optional[str]:
+        """Open a native 'Save As' dialog. Returns the chosen path or None when
+        cancelled. filedialpy performs its own overwrite confirmation."""
+        if not self._dialogs_available():
+            return None
+        try:
+            path = filedialpy.saveFile(title=title, filter=self._filter_arg(patterns),
+                                       initial_dir=self._resolve_initial_dir(initial_dir), initial_file=initial_file)
+        except Exception as e:
+            logger.error("Native save dialog failed: %s", e)
+            return None
+        if not path:
+            return None
+        return path
+
+    # --- Helpers ------------------------------------------------------------
+
     def _build_extension_set(self, extensions_list: List[Tuple[str, str]]) -> set:
         """Build a set of extensions for O(1) lookup instead of nested loops."""
         ext_set = set()
@@ -75,34 +175,25 @@ class NativeBrowserWidget:
                 if pattern.startswith('*.'):
                     ext_set.add(pattern[1:].lower())  # Remove '*' and convert to lowercase
         return ext_set
-    
+
     def _is_image_file(self, filename: str) -> bool:
         """Fast extension check using set lookup."""
         ext = os.path.splitext(filename)[1].lower()
         return ext in self._image_extensions_set
-    
+
     def _is_video_file(self, filename: str) -> bool:
         """Fast extension check using set lookup."""
         ext = os.path.splitext(filename)[1].lower()
         return ext in self._video_extensions_set
-    
+
     def _load_directory_files(self, directory: str) -> List[str]:
-        """Load all files from directory (still needed for lazy loading)."""
+        """Return filenames (non-recursive) in directory; skips subdirectories."""
         try:
             return [f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f))]
         except (OSError, PermissionError) as e:
-            print(f"Error reading directory {directory}: {e}")
+            logger.warning("Error reading directory %s: %s", directory, e)
             return []
-    
-    def _get_files_page(self, files: List[str], page: int = 0, page_size: Optional[int] = None) -> List[str]:
-        """Get a page of files for lazy loading."""
-        if page_size is None:
-            page_size = self._page_size
-        
-        start_idx = page * page_size
-        end_idx = start_idx + page_size
-        return files[start_idx:end_idx]
-    
+
     def _filter_files_by_type(self, files: List[str], file_type: str = "image") -> List[str]:
         """Filter files by type using optimized extension checking."""
         if file_type == "image":
@@ -111,213 +202,83 @@ class NativeBrowserWidget:
             return [f for f in files if self._is_video_file(f)]
         else:
             return files
-    
-    def select_image_directory(self):
-        """Select a directory containing image files - returns directory path only for lazy loading."""
-        folder_path = filedialog.askdirectory(
-            title="Select a folder containing image dataset"
-        )
-        
-        if not folder_path:
-            return None
-        
-        # Store directory for lazy loading
-        self._current_directory = folder_path
-        self._all_files = self._load_directory_files(folder_path)
-        self._filtered_files = self._filter_files_by_type(self._all_files, "image")
-        self._current_page = 0
-        
-        return folder_path
-    
-    def get_image_files_lazy(self, page: int = 0, page_size: Optional[int] = None) -> Tuple[List[str], bool]:
-        """
-        Get image files using lazy loading (like desktop file browser).
-        Returns (file_paths, has_more_pages)
-        """
-        if not self._current_directory or not self._filtered_files:
-            return [], False
-        
-        if page_size is None:
-            page_size = self._page_size
-        
-        page_files = self._get_files_page(self._filtered_files, page, page_size)
-        full_paths = [os.path.join(self._current_directory, f) for f in page_files]
-        
-        has_more = (page + 1) * page_size < len(self._filtered_files)
-        return full_paths, has_more
-    
-    def get_all_image_files(self) -> List[str]:
-        """
-        Get all image files from current directory (for backward compatibility).
-        Use this only when you need all files at once.
-        """
-        if not self._current_directory:
-            return []
-        
-        return [os.path.join(self._current_directory, f) for f in self._filtered_files]
-    
-    def select_image_files_native(self):
-        """Select multiple image files using native OS dialog with enhanced performance."""
-        try:
-            # Configure tkinter for better performance with large directories
-            self.root.update_idletasks()
-            
-            # Set tkinter options for better performance with large directories
-            self.root.tk.call('tk', 'appname', 'ImageSelector')
-            
-            # Use native dialog with performance optimizations
-            # Set initial directory to avoid scanning huge directories by default
-            initial_dir = os.getcwd()
-            
-            image_files = filedialog.askopenfilenames(
-                title="Select Image Files",
-                filetypes=self.image_extensions,
-                initialdir=initial_dir
-            )
-            return list(image_files)
-            
-        except Exception as e:
-            print(f"Native dialog failed: {e}")
-            return []
-    
 
-    def select_image_files(self):
-        """Select one or more image files using native OS dialog."""
-        return self.select_image_files_native()
+    # --- Public API ----------------------------------------------------------
+
+    def select_images_from_folder(self) -> List[str]:
+        """Open a native directory picker and return all image files (non-recursively)
+        in the chosen folder as full, sorted paths. Returns [] when cancelled."""
+        folder_path = self._open_directory("Select a folder containing images")
+        if not folder_path:
+            return []
+        files = self._load_directory_files(folder_path)
+        image_files = self._filter_files_by_type(files, "image")
+        full_paths = [os.path.join(folder_path, f) for f in image_files]
+        return sorted(full_paths)
 
     def select_video_files(self):
-        """Select one or more video files using native OS dialog with enhanced performance."""
-        try:
-            # Configure tkinter for better performance with large directories
-            self.root.update_idletasks()
-            
-            # Set tkinter options for better performance with large directories
-            self.root.tk.call('tk', 'appname', 'VideoSelector')
-            
-            # Use native dialog with performance optimizations
-            # Set initial directory to avoid scanning huge directories by default
-            initial_dir = os.getcwd()
-            
-            video_files = filedialog.askopenfilenames(
-                title="Select Video Files",
-                filetypes=self.video_extensions,
-                initialdir=initial_dir
-            )
-            return list(video_files)
-            
-        except Exception as e:
-            print(f"Native video dialog failed: {e}")
-            return []
-    
-    def select_video_directory(self):
-        """Select a directory containing video files - returns directory path only for lazy loading."""
-        folder_path = filedialog.askdirectory(
-            title="Select a folder containing video dataset"
-        )
-        
-        if not folder_path:
-            return None
-        
-        # Store directory for lazy loading
-        self._current_directory = folder_path
-        self._all_files = self._load_directory_files(folder_path)
-        self._filtered_files = self._filter_files_by_type(self._all_files, "video")
-        self._current_page = 0
-        
-        return folder_path
-    
-    def get_video_files_lazy(self, page: int = 0, page_size: Optional[int] = None) -> Tuple[List[str], bool]:
-        """
-        Get video files using lazy loading (like desktop file browser).
-        Returns (file_paths, has_more_pages)
-        """
-        if not self._current_directory or not self._filtered_files:
-            return [], False
-        
-        if page_size is None:
-            page_size = self._page_size
-        
-        page_files = self._get_files_page(self._filtered_files, page, page_size)
-        full_paths = [os.path.join(self._current_directory, f) for f in page_files]
-        
-        has_more = (page + 1) * page_size < len(self._filtered_files)
-        return full_paths, has_more
-    
-    def get_directory_file_count(self) -> int:
-        """Get total number of files in current directory."""
-        return len(self._filtered_files) if self._filtered_files else 0
-    
-    def reset_directory(self):
-        """Reset directory state for new selection."""
-        self._current_directory = None
-        self._all_files = []
-        self._filtered_files = []
-        self._current_page = 0
+        """Select one or more video files using the native OS dialog."""
+        return self._open_files("Select Video Files", self.video_extensions[0][1])
 
-    def select_directory(self, title="Select Directory"):
+    def select_media_files(self, title="Select Input Files", initial_dir=None):
+        """Select one or more image or video files. Returns [] when cancelled."""
+        patterns = self.image_extensions[0][1] + ' ' + self.video_extensions[0][1]
+        return self._open_files(title, patterns, initial_dir=initial_dir)
+
+    def select_directory(self, title="Select Directory", initial_dir=None):
         """
         Select a directory using native OS dialog.
         Returns the directory path or None if cancelled.
         """
-        try:
-            # Configure tkinter for better performance
-            self.root.update_idletasks()
-            self.root.tk.call('tk', 'appname', 'DirectorySelector')
-            
-            # Use askdirectory to select a directory
-            directory_path = filedialog.askdirectory(
-                title=title,
-                initialdir=os.getcwd()
-            )
-            
-            return directory_path if directory_path else None
-            
-        except Exception as e:
-            print(f"Error in select_directory: {e}")
-            return None
-    
-    def select_directory_with_video_check(self, title="Select Directory"):
+        return self._open_directory(title, initial_dir=initial_dir)
+
+    def select_directory_with_video_check(self, title="Select Directory", initial_dir=None):
         """
         Select a directory and check if it contains video files.
         Returns (directory_path, has_video_files, video_files_list)
         """
-        try:
-            # Configure tkinter for better performance
-            self.root.update_idletasks()
-            self.root.tk.call('tk', 'appname', 'DirectorySelector')
-            
-            # Use askdirectory to select a directory
-            directory_path = filedialog.askdirectory(
-                title=title,
-                initialdir=os.getcwd()
-            )
-            
-            if not directory_path:
-                return None, False, []
-            
-            # Check for video files in the directory
-            video_files = []
-            has_video_files = False
-            
-            try:
-                for root, dirs, files in os.walk(directory_path):
-                    for file in files:
-                        if self._is_video_file(file):
-                            video_files.append(os.path.join(root, file))
-                            has_video_files = True
-            except (OSError, PermissionError) as e:
-                print(f"Error scanning directory {directory_path}: {e}")
-                return directory_path, False, []
-            
-            return directory_path, has_video_files, video_files
-            
-        except Exception as e:
-            print(f"Error in select_directory_with_video_check: {e}")
+        directory_path = self._open_directory(title, initial_dir=initial_dir)
+        if not directory_path:
             return None, False, []
 
-    def cleanup(self):
-        """Clean up the tkinter root window."""
+        # Check for video files in the directory
+        video_files = []
+        has_video_files = False
+
         try:
-            self.root.destroy()
-        except:
-            pass 
+            for root, dirs, files in os.walk(directory_path):
+                for file in files:
+                    if self._is_video_file(file):
+                        video_files.append(os.path.join(root, file))
+                        has_video_files = True
+        except (OSError, PermissionError) as e:
+            logger.warning("Error scanning directory %s: %s", directory_path, e)
+            return directory_path, False, []
+
+        return directory_path, has_video_files, video_files
+
+    def select_vector_file(self, title="Select Vector", initial_dir=None):
+        """Select a single latent vector file (.pt/.pth/.npy/.npz).
+        Returns the path or None if cancelled."""
+        return self._open_single_file(title, self.vector_extensions[0][1], initial_dir=initial_dir)
+
+    def select_model_file(self, title="Select Model", initial_dir=None):
+        """Select a single pickled model file (.pkl).
+        Returns the path or None if cancelled."""
+        return self._open_single_file(title, self.model_extensions[0][1], initial_dir=initial_dir)
+
+    def select_image_file(self, title="Select Image", initial_dir=None):
+        """Select a single image file. Returns the path or None if cancelled."""
+        return self._open_single_file(title, self.image_extensions[0][1], initial_dir=initial_dir)
+
+    def save_vector_file(self, initial_file="vector.pt", title="Save Vector", initial_dir=None):
+        """Open a native 'Save As' dialog for a latent vector. Ensures a .pt
+        extension. Returns the path or None if cancelled."""
+        path = self._save_file(title, self.vector_extensions[0][1], initial_file, initial_dir=initial_dir)
+        if path and not os.path.splitext(path)[1]:
+            path += ".pt"
+        return path
+
+    def cleanup(self):
+        """Kept for API compatibility; native dialogs hold no resources."""
+        pass

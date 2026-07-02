@@ -3,6 +3,8 @@ import multiprocessing
 import torch
 
 import dnnlib
+from utils import device_utils
+from utils.app_logging import LoggedProcess
 from widgets import renderer
 
 def compare_args(args, cur_args):
@@ -34,8 +36,8 @@ class AsyncRenderer:
         self._cur_stamp     = 0
         self._args_queue = multiprocessing.Queue()
         self._result_queue = multiprocessing.Queue()
-        self._process = multiprocessing.Process(target=self._process_fn, args=(self._args_queue, self._result_queue),
-                                                daemon=True)
+        self._process = LoggedProcess(target=self._process_fn, args=(self._args_queue, self._result_queue),
+                                      daemon=True, name='renderer')
         self._process.start()
 
     def close(self):
@@ -56,7 +58,7 @@ class AsyncRenderer:
 
     def set_args(self, **args):
         if not self._closed:
-            if self._args_queue.qsize() == 0:
+            if self._args_queue.empty():
                 if not compare_args(args, self._cur_args):
                     self._args_queue.put([args, self._cur_stamp])
                 self._cur_args = args
@@ -64,9 +66,9 @@ class AsyncRenderer:
     def get_result(self):
         if not self._closed:
             if self._result_queue is not None:
-                if self._result_queue.qsize() > 0:
+                if not self._result_queue.empty():
                     result, stamp = self._result_queue.get()
-                    while self._result_queue.qsize() > 0:
+                    while not self._result_queue.empty():
                         result, stamp = self._result_queue.get()
                     self._cur_result = result
             return self._cur_result
@@ -87,9 +89,11 @@ class AsyncRenderer:
         args = None
         stamp = 0
         new_arg = False
+        is_mps = device_utils.get_device().type == 'mps'
+        renders_since_flush = 0
         with torch.inference_mode():
             while True:
-                if args_queue.qsize() > 0:
+                if not args_queue.empty():
                     args, stamp = args_queue.get()
                     new_arg = True
                 if new_arg:
@@ -100,7 +104,16 @@ class AsyncRenderer:
                     result_queue.put([result, stamp])
                     del result
                     new_arg = False
+                    renders_since_flush += 1
                 # gc.collect() # Putting a garbage collect here stabilizes the memory usage, but slows down the rendering
                                # Torch seems to store values in the background even with nograd that slow down StyleGAN2 over time
                                # This is a workaround to keep the memory usage stable, but conflicts with imgui causing drops in GUI performance
-                torch.cuda.empty_cache()
+                if is_mps:
+                    # torch.mps.empty_cache() synchronizes the GPU; flushing every
+                    # iteration costs more than the memory it returns, so flush
+                    # periodically instead.
+                    if renders_since_flush >= 120:
+                        device_utils.empty_cache()
+                        renders_since_flush = 0
+                else:
+                    device_utils.empty_cache()

@@ -10,11 +10,14 @@ import pandas as pd
 
 import dnnlib
 from torch_utils import legacy
+from utils import device_utils
+from utils.app_logging import LoggedProcess
 from utils.gui_utils import imgui_utils
 from ganspace.extract_pca import fit
-from widgets.browse_widget import BrowseWidget
+from widgets.model_download_widget import ModelDropdownButton
 from widgets.native_browser_widget import NativeBrowserWidget
 from widgets.help_icon_widget import HelpIconWidget
+from utils.user_data import data_path
 
 
 def _locate_results(pattern):
@@ -28,8 +31,7 @@ class PCA_Module:
     def __init__(self, menu):
         self.help_icon = HelpIconWidget()
         self.help_texts, self.help_urls = self.help_icon.load_help_texts("pca")
-        cwd = os.getcwd()
-        self.save_path = os.path.join(cwd,"ganspace_features")
+        self.save_path = str(data_path("ganspace_features"))
 
         self.menu = menu
         self.app = menu.app
@@ -38,21 +40,17 @@ class PCA_Module:
         self.pca_mode = 0
         self.num_features = 0
         self.alpha = 1
-        self.browse_cache = []
         self.running = False
         self.queue = mp.Queue()
         self.reply = mp.Queue()
         self.message = ""
-        self.pca_process = mp.Process(target=fit, args=(self.queue, self.reply),
-                                      daemon=True)
+        self.pca_process = LoggedProcess(target=fit, args=(self.queue, self.reply),
+                                         daemon=True, name='ganspace-pca')
 
         self.save_path_browser = NativeBrowserWidget()
         self.X_comp, self.Z_comp = None, None
         self.done = False
-        for pkl in os.listdir("./models"):
-            if pkl.endswith(".pkl"):
-                print(pkl, os.path.join(os.getcwd(), "models", pkl))
-                self.browse_cache.append(os.path.join(os.getcwd(), "models", pkl))
+        self.model_dropdown = ModelDropdownButton(menu.model_downloader)
 
     @imgui_utils.scoped_by_object_id
     def __call__(self):
@@ -78,9 +76,9 @@ class PCA_Module:
 
         imgui.separator()
 
-        if self.reply.qsize() > 0:
+        if not self.reply.empty():
             self.message, (self.X_comp, self.Z_comp), self.done = self.reply.get()
-            while self.reply.qsize() > 0:
+            while not self.reply.empty():
                 self.message, (self.X_comp, self.Z_comp), self.done = self.reply.get()
 
         if self.done:
@@ -98,22 +96,10 @@ class PCA_Module:
             self.load(self.user_pkl)
 
         imgui.same_line()
-        if imgui_utils.button('Models', enabled=len(self.browse_cache) > 0, width=button_width):
-            imgui.open_popup('browse_pkls_popup')
-            self.browse_refocus = True
-
-        if imgui.begin_popup('browse_pkls_popup'):
-            for pkl in self.browse_cache:
-                clicked, _state = imgui.menu_item(pkl)
-                if clicked:
-                    self.user_pkl = pkl
-                    self.load(pkl)
-
-            if self.browse_refocus:
-                imgui.set_scroll_here()
-                self.menu.app.skip_frame()  # Focus will change on next frame.
-                self.browse_refocus = False
-            imgui.end_popup()
+        picked = self.model_dropdown(width=button_width)
+        if picked is not None:
+            self.user_pkl = picked
+            self.load(picked)
 
         help_width = imgui.calc_text_size("(?)").x + 10
         input_width = -(self.app.button_w + self.app.spacing + help_width)
@@ -148,18 +134,20 @@ class PCA_Module:
         
         imgui.same_line()
         if imgui.button("Browse##pca_save_path", width=button_width):
-            directory_path = self.save_path_browser.select_directory("Select Save Directory")
+            directory_path = self.save_path_browser.select_directory("Select Save Directory", initial_dir=self.save_path)
             if directory_path:
                 self.save_path = directory_path.replace('\\', '/')
-            else:
-                print("No save path selected")
 
         if imgui_utils.button("Get Salient Features", width=imgui.get_content_region_available_width(), enabled=self.G is not None):
             imgui.open_popup("PCA-popup")
             self.running = True
             self.X_comp, self.Z_comp = None, None
             os.makedirs(self.save_path, exist_ok=True)
-            self.queue.put((pca_modes[self.pca_mode], self.num_features, self.G, "cuda" if torch.cuda.is_available() else "cpu", True, self.alpha))
+            device = device_utils.get_device()
+            # MPS tensors cannot be sent across processes; ship the model on CPU
+            # and let the worker move it to the device.
+            G = self.G.cpu() if device.type == 'mps' else self.G
+            self.queue.put((pca_modes[self.pca_mode], self.num_features, G, device.type, True, self.alpha))
             self.pca_process.start()
 
 
@@ -203,4 +191,4 @@ class PCA_Module:
         path = self.resolve_pkl(user_pkl)
         with dnnlib.util.open_url(path, verbose=False) as f:
             data = legacy.load_network_pkl(f, custom=True)
-        self.G = data["G"].to("cuda" if torch.cuda.is_available() else "cpu")
+        self.G = data["G"].to(device_utils.get_device())

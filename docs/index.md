@@ -6,12 +6,29 @@ Explore features and published artworks on the [Autolume website](https://www.me
 
 ## Platform support
 
-Autolume is currently supported on Windows 10 and 11 with experimental support on Ubuntu 24.04.
+Autolume is supported on Windows 10 and 11, Ubuntu 24.04, and macOS on Apple Silicon.
 
 For best performance, an Nvidia GPU is required (RTX 2070 or higher recommended).
 
 Windows users **must follow** the [Windows requirements guide](windows-requirements.md) for proper training performance.
 
+### Apple Silicon limitations (macOS / MPS)
+
+On Apple Silicon, training is expected to be extremely slow — roughly 17× slower on an M1 Max than on a laptop RTX 4090 at 64×64 — and impractical above that resolution.
+
 ## Downloading Autolume
 
 Get the latest release from the official website: [Download at metacreation.net](https://www.metacreation.net/autolume#:~:text=Run%20Autolume)
+
+## Where Autolume stores your data
+
+Autolume keeps everything you generate or download — models, presets, captures,
+GANSpace features, training runs, and datasets — in a single
+**data folder**. By default this is `~/autolume` (i.e. `autolume/` inside your
+user home folder).
+
+The preferences file that records your data folder lives at
+`~/.config/autolume/config.json`.
+
+Open **Settings** from the top banner in the menu to point Autolume at a
+different folder, open it in your file manager, or reset it to the default.

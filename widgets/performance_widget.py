@@ -7,16 +7,23 @@
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
 import array
+import logging
 import threading
 
 import numpy as np
 import imgui
 import torch.cuda
 
+from utils import device_utils
 from utils.gui_utils import imgui_utils
 from pythonosc.osc_server import BlockingOSCUDPServer
 from pythonosc.udp_client import SimpleUDPClient
-import NDIlib as ndi
+
+logger = logging.getLogger(__name__)
+try:
+    import NDIlib as ndi
+except ImportError:
+    ndi = None  # NDIlib is optional; NDI streaming is disabled when it isn't installed.
 
 # ----------------------------------------------------------------------------
 class PerformanceWidget:
@@ -29,7 +36,7 @@ class PerformanceWidget:
         self.force_fp32 = False
         self.use_superres = False
         self.scale_factor = 0
-        self.device = "cuda" if torch.cuda.is_available() else 'cpu'
+        self.device = device_utils.get_device().type
         self.custom_kernel_available = False
     
 
@@ -46,9 +53,9 @@ class PerformanceWidget:
             self.viz.server_thread = threading.Thread(target=self.viz.server.serve_forever, daemon=True)
             self.viz.server_thread.start()
             self.viz.osc_client = SimpleUDPClient(self.viz.in_ip, self.viz.in_port)
-            print(f"OSC server started on {self.viz.in_ip}:{self.viz.in_port}")
+            logger.info("OSC server started on %s:%s", self.viz.in_ip, self.viz.in_port)
         except Exception as e:
-            print(f"Failed to start OSC server: {e}")
+            logger.error("Failed to start OSC server: %s", e)
 
 
     @imgui_utils.scoped_by_object_id
@@ -112,8 +119,9 @@ class PerformanceWidget:
 
                 imgui.same_line()
                 # NDI parameters
-                changed_ndi, self.viz.ndi_name = imgui.input_text(f"NDI Name", self.viz.ndi_name,
-                                                                  256, imgui.INPUT_TEXT_CHARS_NO_BLANK | imgui.INPUT_TEXT_ENTER_RETURNS_TRUE)
+                with imgui_utils.grayed_out(ndi is None):
+                    changed_ndi, self.viz.ndi_name = imgui.input_text(f"NDI Name", self.viz.ndi_name,
+                                                                      256, imgui.INPUT_TEXT_CHARS_NO_BLANK | imgui.INPUT_TEXT_ENTER_RETURNS_TRUE)
 
             if changed_port or changed_ip:
                 self.viz.server.shutdown()
@@ -121,14 +129,14 @@ class PerformanceWidget:
                 self.viz.server_thread.join()
                 try:
                     self.viz.server = BlockingOSCUDPServer((self.viz.in_ip, self.viz.in_port), self.viz.osc_dispatcher)
-                except:
-                    print("Please input a valid ip address")
-                print("new server", self.viz.in_ip, self.viz.in_port)
+                except Exception:
+                    logger.error("Invalid OSC server address %s:%s", self.viz.in_ip, self.viz.in_port)
+                logger.info("OSC server restarted on %s:%s", self.viz.in_ip, self.viz.in_port)
                 self.viz.server_thread = threading.Thread(target=self.viz.server.serve_forever, daemon=True)
                 self.viz.server_thread.start()
                 self.viz.osc_client = SimpleUDPClient(self.viz.in_ip, self.viz.in_port)
 
-            if changed_ndi:
+            if changed_ndi and ndi is not None:
                         send_settings = ndi.SendCreate()
                         send_settings.ndi_name = self.viz.ndi_name
                         ndi.send_destroy(self.viz.ndi_send)
@@ -138,10 +146,11 @@ class PerformanceWidget:
                 self.device = "cpu"
 
             imgui.same_line()
-            with imgui_utils.grayed_out(not torch.cuda.is_available()):
-                if imgui.checkbox("GPU", self.device == "cuda")[0]:
-                    if torch.cuda.is_available():
-                        self.device = "cuda"
+            accel_type = device_utils.get_device().type
+            with imgui_utils.grayed_out(accel_type == 'cpu'):
+                if imgui.checkbox("GPU", self.device in ("cuda", "mps"))[0]:
+                    if accel_type != 'cpu':
+                        self.device = accel_type
 
             imgui.same_line()
 

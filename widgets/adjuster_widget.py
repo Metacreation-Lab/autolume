@@ -1,3 +1,4 @@
+import logging
 import os
 
 import imgui
@@ -13,7 +14,9 @@ except ModuleNotFoundError:
     import pickle
 import dnnlib
 from utils.gui_utils import imgui_utils
-from widgets.browse_widget import BrowseWidget
+from widgets.native_browser_widget import NativeBrowserWidget
+
+logger = logging.getLogger(__name__)
 
 class AdjusterWidget:
 
@@ -26,8 +29,7 @@ class AdjusterWidget:
         self.vslide_use_osc = [False] * len(self.weights)
         self.vslide_address = [""] * len(self.weights)
         self.vslide_mappings = ["x"] * len(self.weights)
-        self.file_dialogs = [BrowseWidget(viz, f"Browse##vec{i}", os.path.abspath(os.getcwd()), ["*",".pth", ".pt"], width=self.viz.app.button_w, multiple=False, traverse_folders=False) for i in range(len(self.weights))]
-        self.all_dialog = BrowseWidget(viz, f"Browse##vecalldialog", os.path.abspath(os.getcwd()), ["*",".pth", ".pt"], width=self.viz.app.button_w, multiple=False, traverse_folders=False)
+        self.browser = NativeBrowserWidget()
 
     def save(self, path):
         with open(path, "wb") as f:
@@ -46,32 +48,28 @@ class AdjusterWidget:
             try:
                 self.viz.osc_dispatcher.unmap(f"/{old_address}",
                                                 self.vec_handler(i))
-            except:
-                print(f"{old_address} is not mapped")
+            except Exception:
+                logger.warning("OSC address %s is not mapped", old_address)
         for i, new_address in enumerate(new_addresses):
             if self.vslide_use_osc[i] and new_address and new_address != "...":
                 self.viz.osc_dispatcher.map(f"/{new_address}",
                                               self.vec_handler(i))
         self.vslide_address = new_addresses
-        self.file_dialogs = [BrowseWidget(self.viz, f"Vector##vec{i}", os.path.abspath(os.getcwd()), ["*",".pth", ".pt"], width=self.viz.app.button_w, multiple=False, traverse_folders=False) for i in range(len(self.weights))]
 
 
 
     def vec_handler(self, idx):
         def func(address, *args):
             try:
-                print(self.weights[idx], args[-1])
                 if self.vslide_use_osc[idx]:
-                    print("in")
                     f = lambda x: eval(self.vslide_mappings[idx])
                     out = f(args[-1])
                     if isinstance(out, (int, float)):
                         self.weights[idx] = f(args[-1])
-                    print("assigned")
             except Exception as e:
                 if type(args[-1]) is type(self.weights[idx]):
                     self.weights[idx] = f(args[-1])
-                print(e)
+                logger.warning("OSC vector handler failed: %s", e)
                 #self.viz.print_error(e)
 
         return func
@@ -91,10 +89,9 @@ class AdjusterWidget:
             self.vslide_use_osc = [False] * len(self.weights)
             self.vslide_address = [""] * len(self.weights)
             self.vslide_mappings = ["x"] * len(self.weights)
-            self.file_dialogs = [BrowseWidget(self.viz, f"Vector##vec{i}", os.path.abspath(os.getcwd()), ["*",".pth", ".pt"], width=self.viz.app.button_w, multiple=False, traverse_folders=False) for i in range(len(self.weights))]
 
-        except Exception as e:
-            print(e)
+        except Exception:
+            logger.exception("Failed to set adjuster params")
 
     def open_vec(self, idx):
         try:
@@ -102,8 +99,8 @@ class AdjusterWidget:
 
             assert vec.shape == self.dirs[idx].shape, f"The Tensor you are loading has a different shape, Loaded Shape {vec.shape} != Target Shape {self.dirs[idx].shape}"
             self.dirs[idx] = vec
-        except Exception as e:
-            print(e)
+        except Exception:
+            logger.exception("Failed to load vector")
 
     @imgui_utils.scoped_by_object_id
     def __call__(self, show=True):
@@ -143,8 +140,8 @@ class AdjusterWidget:
                         try:
                             self.viz.osc_dispatcher.unmap(f"/{self.vslide_address[i]}",
                                                             self.vec_handler(i))
-                        except:
-                            print(f"{self.vslide_address[i]} is not mapped")
+                        except Exception:
+                            logger.warning("OSC address %s is not mapped", self.vslide_address[i])
 
                         self.vslide_address[i] = new_address
                     changed, self.vslide_mappings[i] = imgui_utils.input_text(f"##vslide_mapping{i}",
@@ -158,9 +155,10 @@ class AdjusterWidget:
                 changed, self.paths[i] = imgui_utils.input_text(f"##vec_path{i}", self.paths[i], 256,
                                                                 imgui.INPUT_TEXT_CHARS_NO_BLANK,
                                                                 width=self.viz.app.button_w, help_text="filepath")
-                _clicked, files = self.file_dialogs[i](self.viz.app.button_w)
-                if _clicked:
-                    self.paths[i] = files[0]
+                if imgui_utils.button(f"Browse##vec{i}", self.viz.app.button_w):
+                    path = self.browser.select_vector_file(initial_dir=self.paths[i])
+                    if path:
+                        self.paths[i] = str(path)
                 if imgui_utils.button(f"Load Vec##{i}", (self.viz.app.button_w * (6 / 8) - (self.viz.app.spacing / 2))):
                     self.open_vec(i)
                 imgui.same_line()
@@ -181,12 +179,12 @@ class AdjusterWidget:
                 self.vslide_use_osc.append(False)
                 self.vslide_address.append("")
                 self.vslide_mappings.append("x")
-                self.file_dialogs.append(BrowseWidget(self.viz, f"Vector##vec{len(self.weights)-1}", os.path.abspath(os.getcwd()), ["*",".pth", ".pt"], width=self.viz.app.button_w, multiple=False, traverse_folders=False))
             if imgui_utils.button(f"Randomize##all", self.viz.app.button_w):
                 self.dirs = torch.randn(self.dirs.shape)
-            _clicked, files = self.all_dialog()
-            if _clicked:
-                    self.all_dir = files[0]
+            if imgui_utils.button(f"Browse##vecall", self.viz.app.button_w):
+                path = self.browser.select_vector_file(initial_dir=self.all_dir)
+                if path:
+                    self.all_dir = str(path)
             if imgui_utils.button(f"Load Vecs##all", self.viz.app.button_w):
                 self.open_vecs()
             imgui.end_group()

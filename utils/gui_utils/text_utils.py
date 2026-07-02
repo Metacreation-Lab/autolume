@@ -9,19 +9,19 @@
 import functools
 from typing import Optional
 
-import dnnlib
 import numpy as np
 import PIL.Image
 import PIL.ImageFont
 import scipy.ndimage
 
+from utils.resource_paths import resource_path
 from . import gl_utils
 
 #----------------------------------------------------------------------------
 
 def get_default_font():
-    url = 'http://fonts.gstatic.com/s/opensans/v17/mem8YaGs126MiZpBA-U1UpcaXcl0Aw.ttf' # Open Sans regular
-    return dnnlib.util.open_url(url, return_filename=True)
+    # Open Sans regular, bundled under assets/ so the app works offline and in the PyInstaller build.
+    return str(resource_path('assets', 'OpenSans-Regular.ttf'))
 
 #----------------------------------------------------------------------------
 

@@ -1,31 +1,35 @@
-import os
+import logging
 
 import imgui
 
 import dnnlib
+from utils import device_utils
 from utils.gui_utils import imgui_utils
 from prune import main as prune_main
+from widgets.model_download_widget import ModelDropdownButton
 from train import main as train_main
 from utils import dataset_tool
+from utils.user_data import data_path
 
 augs = ["ADA", "DiffAUG"]
 ada_pipes = ['blit', 'geom', 'color', 'filter', 'noise', 'cutout', 'bg', 'bgc', 'bgcf', 'bgcfn', 'bgcfnc']
 diffaug_pipes = ['color, translation, cutoff', 'color, translation', 'color, cutoff', 'color',
                  'translation', 'cutoff', 'translation', 'cutoff']
 sizes = ["64", "128", "256", "512", "1024"]
+
+logger = logging.getLogger(__name__)
+
 class CompressModule:
     def __init__(self, menu):
         self.img_factor = 4
         self.height_factor = 4
         self.square = True
-        cwd = os.getcwd()
         self.compress_pkl = ""
-        self.save_path = os.path.join(cwd, "distillation-runs")
-        self.save_path_distill = os.path.join(cwd, "training-runs")
-        self.data_path = os.path.join(cwd, "data")
+        self.save_path = str(data_path("distillation-runs"))
+        self.save_path_distill = str(data_path("training-runs"))
+        self.data_path = str(data_path("datasets"))
         self.resume_pkl = ""
         self.teacher_pkl = ""
-        self.browse_cache = []
         self.compression_factor = 0.7
         self.n_samples = 400
         self.batch_size_compress = 10
@@ -36,27 +40,27 @@ class CompressModule:
         self.img_size = 2 ** self.img_factor
         self.height = 2 ** self.height_factor
         self.batch_size = 8
-        for pkl in os.listdir("./models"):
-            if pkl.endswith(".pkl"):
-                print(pkl, os.path.join(os.getcwd(),"models",pkl))
-                self.browse_cache.append(os.path.join(os.getcwd(),"models",pkl))
+        self.compress_dropdown = ModelDropdownButton(menu.model_downloader, label='Browse...')
+        self.learner_dropdown = ModelDropdownButton(menu.model_downloader, label='Browse...')
+        self.teacher_dropdown = ModelDropdownButton(menu.model_downloader, label='Browse...')
 
         self.menu = menu
 
     @imgui_utils.scoped_by_object_id
     def __call__(self):
+        if device_utils.is_macos():
+            with imgui_utils.grayed_out():
+                imgui.text("Model compression requires an NVIDIA GPU (CUDA)")
+                imgui.text("and is not available on macOS.")
+            return
+
         imgui.text("Prune unnecessary layers from a network")
         _, self.save_path = imgui.input_text("Save Path", self.save_path, 1024)
         _, self.compress_pkl = imgui.input_text("Learner Pkl", self.compress_pkl, 1024)
         imgui.same_line()
-        if imgui_utils.button('Browse...##compress', enabled=len(self.browse_cache) > 0, width=-1):
-            imgui.open_popup('browse_pkls_popup_compress')
-        if imgui.begin_popup('browse_pkls_popup_compress'):
-            for pkl in self.browse_cache:
-                clicked, _state = imgui.menu_item(pkl)
-                if clicked:
-                    self.compress_pkl = pkl
-            imgui.end_popup()
+        picked = self.compress_dropdown(width=-1)
+        if picked is not None:
+            self.compress_pkl = picked
         _, self.compression_factor = imgui.input_float("Compression Factor", self.compression_factor)
         _, self.n_samples = imgui.input_int("Number of Samples", self.n_samples)
         _, self.batch_size_compress = imgui.input_int("Batch Size", self.batch_size_compress)
@@ -65,8 +69,7 @@ class CompressModule:
         _, self.noise_prob = imgui.input_float("Noise Probability", self.noise_prob)
 
         if imgui_utils.button('Compress', enabled=len(self.compress_pkl) > 0, width=-1):
-            print("Compressing")
-            print(self.compress_pkl)
+            logger.info("Compressing model %s", self.compress_pkl)
             prune_main(self.compress_pkl, self.save_path, n_samples=self.n_samples, batch_size=self.batch_size_compress,
                        noise_prob=self.noise_prob, remove_ratio=self.compression_factor)
 
@@ -76,25 +79,14 @@ class CompressModule:
         _, self.data_path = imgui.input_text("Data Path", self.data_path, 1024)
         _, self.resume_pkl = imgui.input_text("Learner Pkl", self.resume_pkl, 1024)
         imgui.same_line()
-        if imgui_utils.button('Browse...##learner', enabled=len(self.browse_cache) > 0, width=-1):
-            imgui.open_popup('browse_pkls_popup_learner')
-        if imgui.begin_popup('browse_pkls_popup_learner'):
-            for pkl in self.browse_cache:
-                clicked, _state = imgui.menu_item(pkl)
-                if clicked:
-                    self.resume_pkl = pkl
-            imgui.end_popup()
+        picked = self.learner_dropdown(width=-1)
+        if picked is not None:
+            self.resume_pkl = picked
         _, self.teacher_pkl = imgui.input_text("Teacher Pkl", self.teacher_pkl, 1024)
         imgui.same_line()
-        if imgui_utils.button('Browse...##teacher', enabled=len(self.browse_cache) > 0, width=-1):
-            imgui.open_popup('browse_pkls_popup_teacher')
-
-        if imgui.begin_popup('browse_pkls_popup_teacher'):
-            for pkl in self.browse_cache:
-                clicked, _state = imgui.menu_item(pkl)
-                if clicked:
-                    self.teacher_pkl = pkl
-            imgui.end_popup()
+        picked = self.teacher_dropdown(width=-1)
+        if picked is not None:
+            self.teacher_pkl = picked
 
         _, self.aug = imgui.combo("Augmentation", self.aug, augs)
         if self.aug == 0:

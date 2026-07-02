@@ -79,6 +79,8 @@ def _activate_msvc_env():
 #----------------------------------------------------------------------------
 
 def _get_mangled_gpu_name():
+    if not torch.cuda.is_available():
+        return 'cpu'
     name = torch.cuda.get_device_name().lower()
     out = []
     for c in name:

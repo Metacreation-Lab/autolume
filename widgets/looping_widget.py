@@ -1,4 +1,5 @@
 import copy
+import logging
 import os
 
 import imgui
@@ -12,13 +13,17 @@ except ModuleNotFoundError:
     import pickle
 
 import dnnlib
+from utils import device_utils
+from utils.app_logging import LoggedProcess
 from utils.gui_utils import imgui_utils
 from widgets import osc_menu
-from widgets.browse_widget import BrowseWidget
+from widgets.native_browser_widget import NativeBrowserWidget
 
 from pythonosc.udp_client import SimpleUDPClient
 
 import multiprocessing as mp
+
+logger = logging.getLogger(__name__)
 
 
 def valmap(value, istart, istop, ostart, ostop):
@@ -84,7 +89,7 @@ labels = ["Seed", "Vector", "Keyframe"]
 def noise_loop(args_queue, results_queue):
     while True:
         args = args_queue.get()
-        while args_queue.qsize() > 0:
+        while not args_queue.empty():
             args = args_queue.get()
         seed, radius = args
         feats = [OSN(seed + i, radius) for i in range(512)]
@@ -109,11 +114,8 @@ class LoopingWidget:
         self.halt_update = 0
         self.perfect_loop = False
         self.looping_snaps = [{} for _ in range(self.params.num_keyframes)]
-        self.file_dialogs = [BrowseWidget(viz, f"Browse##vec{i}", os.path.abspath(os.getcwd()), ["*", ".pth", ".pt"],
-                                          width=self.viz.app.button_w, multiple=False, traverse_folders=False) for i in
-                             range(self.params.num_keyframes)]
+        self.browser = NativeBrowserWidget()
         self.open_keyframes = False
-        self.open_file_dialog = False
         self.osc_ip = "127.0.0.1"
         self.osc_port = 5005
         self.osc_client = SimpleUDPClient(self.osc_ip, self.osc_port)
@@ -126,7 +128,7 @@ class LoopingWidget:
         self.noise_loop_feats = [OSN(self.noise_seed + i, self.radius) for i in range(512)]
         self.args_queue = mp.Queue()
         self.results_queue = mp.Queue()
-        self.noise_loop_process = mp.Process(target=noise_loop, args=(self.args_queue, self.results_queue), daemon=True)
+        self.noise_loop_process = LoggedProcess(target=noise_loop, args=(self.args_queue, self.results_queue), daemon=True, name='noise-loop')
         self.noise_loop_process.start()
 
         # flag that tells us we need to stop loop necessary for reverse looping
@@ -167,7 +169,6 @@ class LoopingWidget:
                 assert (type(args[-1]) is type(
                     self.alpha)), f"OSC Message and Parameter type must align [OSC] {type(args[-1])} != [Param] {type(self.alpha)}"
                 self.alpha = args[-1]
-                print(self.alpha, args[-1])
                 self.update_alpha()
 
             except Exception as e:
@@ -211,7 +212,9 @@ class LoopingWidget:
         key = (tuple(ref.shape), ref.dtype)
         buf = self._pinned_bufs.get(key, None)
         if buf is None:
-            buf = torch.empty(ref.shape, dtype=ref.dtype).pin_memory()
+            buf = torch.empty(ref.shape, dtype=ref.dtype)
+            if torch.cuda.is_available():
+                buf = buf.pin_memory()
             self._pinned_bufs[key] = buf
         return buf
 
@@ -233,7 +236,6 @@ class LoopingWidget:
 
         if self.alpha >= 1:
             if self.halt_update < 0:
-                print(self.params.index, self.params.num_keyframes, self.loop_type)
                 if self.params.index == (self.params.num_keyframes - 1) or self.loop_type is False:
                     self.looped = 1
                     if self.perfect_loop:
@@ -286,7 +288,6 @@ class LoopingWidget:
 
     def open_vec(self, idx):
         try:
-            print(self.paths[idx])
             # if file ends with pt or pth, load as torch tensor else if ends with npy, load as numpy array and convert to torch tensor
             if self.paths[idx].endswith(".pt") or self.paths[idx].endswith(".pth"):
                 vec = torch.load(self.paths[idx]).squeeze()
@@ -297,10 +298,9 @@ class LoopingWidget:
                     "Filetype not supported, please use .pt, .pth or .npy files for loading vectors, if you are using a .npy file, please ensure that it is a numpy array")
             assert vec.shape[-1] == self.keyframes[
                 idx].shape[-1], f"The Tensor you are loading has a different shape, Loaded Shape {vec.shape} != Target Shape {self.keyframes[idx].shape}"
-            print("LOADed VEC", vec.shape, torch.unique(vec))
             self.keyframes[idx] = vec
-        except Exception as e:
-            print(e)
+        except Exception:
+            logger.exception("Failed to load vector %s", self.paths[idx])
 
     def vec_viz(self, idx):
         viz = self.viz
@@ -308,9 +308,10 @@ class LoopingWidget:
                                                           imgui.INPUT_TEXT_CHARS_NO_BLANK,
                                                           width=viz.app.font_size * 7, help_text="filepath")
         imgui.same_line()
-        _clicked, path = self.file_dialogs[idx](self.viz.app.button_w)
-        if _clicked:
-            self.paths[idx] = path[0]
+        if imgui_utils.button(f"Browse##loop_{idx}", viz.app.button_w):
+            path = self.browser.select_vector_file(initial_dir=self.paths[idx])
+            if path:
+                self.paths[idx] = str(path)
         imgui.same_line()
         if imgui_utils.button(f"Load Vec##loop_{idx}", viz.app.button_w):
             self.open_vec(idx)
@@ -328,8 +329,6 @@ class LoopingWidget:
                 elif snapped["mode"] == 2:
                     self.looping_snaps[idx] = snapped["snap"]
                     self.modes[idx] = snapped["mode"]
-                    print(self.looping_snaps[idx])
-                    print(self.modes[idx])
 
         imgui.same_line()
         if imgui_utils.button(f"Randomize##vecmode{idx}", width=viz.app.button_w):
@@ -367,37 +366,31 @@ class LoopingWidget:
         imgui.same_line()
         if imgui_utils.button(f"Snap##seed{idx}", viz.app.button_w):
             snapped = self.snap()
-            print("snapped", snapped, "-----------------------")
 
             if not (snapped is None):
                 if snapped["mode"] == 0:
-                    print("SEED")
                     self.seeds[idx] = snapped["snap"]  # [snapped["snap"]["x"],snapped["snap"]["y"]]
                     self.modes[idx] = snapped["mode"]
                 elif snapped["mode"] == 1:
-                    print("VECTOR")
                     self.keyframes[idx] = snapped["snap"]
                     self.modes[idx] = snapped["mode"]
                 elif snapped["mode"] == 2:
-                    print("getting LOOP")
                     self.looping_snaps[idx] = snapped["snap"]
                     self.modes[idx] = snapped["mode"]
-                    print(self.looping_snaps[idx])
-                    print(self.modes[idx])
         imgui.same_line()
         if imgui_utils.button(f"Remove##vecmode{idx}", width=viz.app.button_w):
             self.remove_entry = idx
 
     @imgui_utils.scoped_by_object_id
     def __call__(self, show=True):
-        if self.results_queue.qsize() > 0:
+        if not self.results_queue.empty():
             self.noise_loop_feats = self.results_queue.get()
 
         if self.osc_address != "":
             try:
                 self.osc_client.send_message(self.osc_address, self.looped)
             except Exception as e:
-                print(e)
+                logger.warning("OSC send failed: %s", e)
         viz = self.viz
         # viz.args.looping = self.params.anim
 
@@ -439,7 +432,7 @@ class LoopingWidget:
                 with imgui_utils.item_width(viz.app.font_size * 5):
                     changed, new_keyframes = imgui.input_int("# of Keyframes", self.params.num_keyframes)
                 if changed and new_keyframes > 0:
-                    vecs = [torch.randn(1, 512).cuda() for _ in range(new_keyframes)]
+                    vecs = [torch.randn(1, 512).to(device_utils.get_device()) for _ in range(new_keyframes)]
                     vecs[:min(new_keyframes, self.params.num_keyframes)] = self.keyframes[:min(new_keyframes,
                                                                                                self.params.num_keyframes)]
                     self.keyframes = vecs
@@ -462,22 +455,11 @@ class LoopingWidget:
                                                                                                 self.params.num_keyframes)]
                     self.project = project
                     looping_snaps = [{} for _ in range(new_keyframes)]
-                    print("empty looping_snaps", len(looping_snaps))
                     looping_snaps[:min(new_keyframes, self.params.num_keyframes)] = self.looping_snaps[
                                                                                     :min(new_keyframes,
                                                                                          self.params.num_keyframes)]
-                    print(looping_snaps)
                     self.looping_snaps = looping_snaps
-                    print(self.looping_snaps, looping_snaps)
-                    print("Looping snaps add", len(self.looping_snaps), self.params.num_keyframes)
 
-                    file_dialogs = [
-                        BrowseWidget(viz, f"Vector##vec{i}", os.path.abspath(os.getcwd()), ["*", ".pth", ".pt"],
-                                     width=self.viz.app.button_w, multiple=False, traverse_folders=False) for i in
-                        range(new_keyframes)]
-                    file_dialogs[:min(new_keyframes, self.params.num_keyframes)] = self.file_dialogs[:min(new_keyframes,
-                                                                                                          self.params.num_keyframes)]
-                    self.file_dialogs = file_dialogs
                     self.params.num_keyframes = new_keyframes
 
                 imgui.same_line()
@@ -496,25 +478,12 @@ class LoopingWidget:
                             del self.modes[self.remove_entry]
                             del self.seeds[self.remove_entry]
                             del self.looping_snaps[self.remove_entry]
-                            del self.file_dialogs[self.remove_entry]
 
-                            print("Looping snaps del", len(self.looping_snaps), self.params.num_keyframes)
                             self.params.num_keyframes -= 1
                             self.remove_entry = -1
 
-                    # check if any file dialogs are open
-                    open_dialog = False
-                    for file_dialog in self.file_dialogs:
-                        if file_dialog.open:
-                            open_dialog = True
-                            break
-                    if self.open_file_dialog == True and not open_dialog:
-                        self.open_file_dialog = False
-                        imgui.set_window_focus()
-
-                    self.open_file_dialog = open_dialog
-                    # check if current window focussed if not close it unless a file dialog is open
-                    if not imgui.is_window_focused() and not self.open_file_dialog:
+                    # close the window when it loses focus
+                    if not imgui.is_window_focused():
                         self.open_keyframes = False
                     imgui.end()
 
@@ -577,7 +546,6 @@ class LoopingWidget:
                         elif mode == 1:
                             l_list.append({"mode": "vec", "latent": self.keyframes[i], "project": self.project[i]})
                         elif mode == 2:
-                            print("adding loop", self.looping_snaps[i])
                             l_list.append({"mode": "loop", "looping_list": self.looping_snaps[i]["looping_list"],
                                            "looping_index": self.looping_snaps[i]["index"],
                                            "alpha": self.looping_snaps[i]["alpha"]})

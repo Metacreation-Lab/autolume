@@ -5,6 +5,7 @@
 # and any modifications thereto.  Any use, reproduction, disclosure or
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
+import logging
 import threading
 import numpy as np
 import queue
@@ -18,6 +19,8 @@ from assets import GRAY, DARKGRAY, LIGHTGRAY
 from utils.gui_utils import imgui_utils
 from utils.gui_utils import gl_utils
 from utils.gui_utils import text_utils
+from utils.resource_paths import resource_path
+from utils.user_data import data_path
 from widgets import pickle_widget
 from widgets import latent_widget
 from widgets import trunc_noise_widget
@@ -35,13 +38,20 @@ from audio.audio_stream import NoMicrophoneError
 from pythonosc.osc_server import BlockingOSCUDPServer
 from pythonosc.dispatcher import Dispatcher
 from pythonosc.udp_client import SimpleUDPClient
-import NDIlib as ndi
+try:
+    import NDIlib as ndi
+except ImportError:
+    ndi = None  # NDIlib is optional; NDI streaming is disabled when it isn't installed.
+
+from utils import device_utils
 
 import glfw
 from OpenGL import GL as gl
 import ctypes
 import pandas as pd
 import os
+
+logger = logging.getLogger(__name__)
 
 #----------------------------------------------------------------------------
 class Visualizer:
@@ -55,13 +65,11 @@ class Visualizer:
         self.pa = None
         # check if microphone is available
         try:
-            print("checking for microphone")
             self.pa = pyaudio.PyAudio()
-            print(self.pa)
-            print(self.pa.get_default_input_device_info())
+            logger.debug("Default input device: %s", self.pa.get_default_input_device_info())
             self.has_microphone = True
         except Exception as exc:
-            print(f"except no microphone found: {exc}")
+            logger.warning("No microphone found: %s", exc)
         self.in_ip = "127.0.0.1"
         self.in_port = 1338
         self.out_ip = "127.0.0.1"
@@ -77,10 +85,13 @@ class Visualizer:
 
         # NDI parameters
         self.ndi_name = 'Autolume Live'
-        send_settings = ndi.SendCreate()
-        send_settings.ndi_name = self.ndi_name
-        self.ndi_send = ndi.send_create(send_settings)
-        self.video_frame = ndi.VideoFrameV2()
+        self.ndi_send = None
+        self.video_frame = None
+        if ndi is not None:
+            send_settings = ndi.SendCreate()
+            send_settings.ndi_name = self.ndi_name
+            self.ndi_send = ndi.send_create(send_settings)
+            self.video_frame = ndi.VideoFrameV2()
 
         # Internals.
 
@@ -110,11 +121,11 @@ class Visualizer:
         self.audio_widget_enabled = False
         self.audio_widget_error = None
 
-        self.logo = cv2.imread("assets/Autolume-logo.png", cv2.IMREAD_UNCHANGED)
+        self.logo = cv2.imread(str(resource_path("assets", "Autolume-logo.png")), cv2.IMREAD_UNCHANGED)
         self.logo_texture = gl_utils.Texture(image=self.logo, width=self.logo.shape[1], height=self.logo.shape[0],
                                              channels=self.logo.shape[2])
 
-        self.metacreation = cv2.imread("assets/metalogo.png", cv2.IMREAD_UNCHANGED)
+        self.metacreation = cv2.imread(str(resource_path("assets", "metalogo.png")), cv2.IMREAD_UNCHANGED)
         self.metacreation_texture = gl_utils.Texture(image=self.metacreation, width=self.metacreation.shape[1],
                                                      height=self.metacreation.shape[0],
                                                      channels=self.metacreation.shape[2])
@@ -134,8 +145,7 @@ class Visualizer:
         self.fullscreen_vbo = None
         self.window_created = False
 
-        self.fit_screen = False  
-        self.show_help = False  # 添加显示帮助的状态标志
+        self.fit_screen = False
     
     def enable_audio_widget(self):
         if self.audio_widget_enabled:
@@ -147,7 +157,7 @@ class Visualizer:
             return
 
         try:
-            print("Setting up audio widget")
+            logger.info("Setting up audio widget")
             self.audio_widget = audio_widget.AudioWidget(self)
             self.audio_widget_enabled = True
         except NoMicrophoneError:
@@ -165,7 +175,7 @@ class Visualizer:
             try:
                 self.audio_widget.close()
             except Exception as exc:
-                print(f"Error closing audio widget: {exc}")
+                logger.warning("Error closing audio widget: %s", exc)
 
         self.audio_widget = None
         self.audio_widget_enabled = False
@@ -224,9 +234,8 @@ class Visualizer:
             
             return program
             
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
+        except Exception:
+            logger.exception("Failed to compile shader program")
             return None
 
     def create_fullscreen_window(self):
@@ -369,7 +378,7 @@ class Visualizer:
             return None
             
         except Exception as e:
-            print(f"Error creating window: {e}")
+            logger.error("Error creating fullscreen window: %s", e)
             if 'window' in locals() and window:
                 glfw.destroy_window(window)
             return None
@@ -440,7 +449,7 @@ class Visualizer:
             glfw.make_context_current(self.main_window_context)
             
         except Exception as e:
-            print(f"渲染时出错: {e}")
+            logger.error("Fullscreen render failed: %s", e)
 
     def start_recording(self, file_path):
         self.is_recording = True
@@ -463,6 +472,7 @@ class Visualizer:
                 frame = self.frame_queue.get()
                 if out is None:
                     height, width, channels = frame.shape
+                    os.makedirs(os.path.dirname(self.recording_file_path), exist_ok=True)
                     out = cv2.VideoWriter(self.recording_file_path, fourcc, 30.0, (width, height))
                 out.write(frame)
         if out is not None:
@@ -476,12 +486,13 @@ class Visualizer:
             image_data = cv2.cvtColor(image_data, cv2.COLOR_RGB2BGRA)
 
             # Save the image using OpenCV
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
             cv2.imwrite(file_path, image_data)
         else:
-            print("No render result available to capture.")
+            logger.warning("No render result available to capture")
 
     def osc_message_handler(self, address, *args):
-        print(f"[DEBUG] OSC message received at {address} with arguments: {args}")
+        logger.debug("OSC message received at %s with arguments: %s", address, args)
 
 
 
@@ -496,7 +507,7 @@ class Visualizer:
             self.server.shutdown()
             self.server = None
 
-        if self.ndi_send is not None:
+        if ndi is not None and self.ndi_send is not None:
             ndi.send_destroy(self.ndi_send)
             self.ndi_send = None
 
@@ -510,7 +521,7 @@ class Visualizer:
     def print_error(self, error):
         error = str(error)
         if error != self._last_error_print:
-            print('\n' + error + '\n')
+            logger.error("%s", error)
             self._last_error_print = error
 
     def defer_rendering(self, num_frames=1):
@@ -544,56 +555,72 @@ class Visualizer:
         imgui.set_next_window_position(0, 0)
         imgui.set_next_window_size(self.pane_w, self.app.content_height)
         imgui.begin('##control_pane', closable=False, flags=(imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE))
+        # Scale with the UI font, calibrated to 36px at font 14.
+        toolbar_height = round(self.app.font_size * 36 / 14)
+        logo_height = toolbar_height / 2
+
         # set red background
-        imgui.get_window_draw_list().add_rect_filled(0, 0, self.pane_w, 36,
+        imgui.get_window_draw_list().add_rect_filled(0, 0, self.pane_w, toolbar_height,
                                                      imgui.get_color_u32_rgba(*DARKGRAY))
         # draw gray line
-        imgui.get_window_draw_list().add_line(0, 36, self.pane_w, 36, imgui.get_color_u32_rgba(*LIGHTGRAY), 1)
+        imgui.get_window_draw_list().add_line(0, toolbar_height, self.pane_w, toolbar_height, imgui.get_color_u32_rgba(*LIGHTGRAY), 1)
 
         # calculate logo shape ratio
         logo_ratio = self.logo.shape[1] / self.logo.shape[0]
-        # logo with height of 30px centered in y axis
-        imgui.set_cursor_pos_y(18 - (18 / 2))
+        imgui.set_cursor_pos_y((toolbar_height - logo_height) / 2)
         imgui.set_cursor_pos_x(self.app.spacing * 2)
-        imgui.image(self.logo_texture.gl_id, 18 * logo_ratio, 18, tint_color=(1, 1, 1, 0.5))
+        imgui.image(self.logo_texture.gl_id, logo_height * logo_ratio, logo_height, tint_color=(1, 1, 1, 0.5))
 
-        # Position the button in the middle
-        imgui.same_line(self.app.spacing * 44)  
-        if imgui_utils.button("Help On" if not self.show_help else "Help Off", width=80):
-            self.show_help = not self.show_help
+        # The fullscreen display uses a core-profile GL 3.3 context that shares
+        # textures with the main legacy context; macOS cannot share across those
+        # profiles, so the button is omitted there.
+        show_fullscreen = not device_utils.is_macos()
+        fullscreen_label = "Full Screen Display" if not self.is_fullscreen_display else "Exit Full Screen"
+        fit_label = "Fit Screen" if not self.fit_screen else "Raw Scale"
+        record_label = 'Start Recording' if not self.is_recording else 'Stop Recording'
 
+        # Right-align the toolbar so its last button lines up with the section
+        # buttons below, by anchoring the group at right_edge minus its width.
+        labels = ([fullscreen_label] if show_fullscreen else []) + [fit_label, 'Screen Capture', record_label]
+        style = imgui.get_style()
+        button_padding = style.frame_padding[0] * 2
+        gap = style.item_spacing[0]
+        total_width = sum(imgui.calc_text_size(label)[0] + button_padding for label in labels) + gap * (len(labels) - 1)
+        imgui.same_line(imgui.get_window_content_region_max()[0] - total_width)
 
-        imgui.same_line(self.app.spacing * 54)
-        
-        if imgui.button("Full Screen Display" if not self.is_fullscreen_display else "Exit Full Screen"):
-            if self.is_fullscreen_display:
-                self.is_fullscreen_display = False
-                if self.fullscreen_window:
-                    glfw.destroy_window(self.fullscreen_window)
-                    self.fullscreen_window = None
+        if show_fullscreen:
+            if imgui.button(fullscreen_label):
+                if self.is_fullscreen_display:
+                    self.is_fullscreen_display = False
+                    if self.fullscreen_window:
+                        glfw.destroy_window(self.fullscreen_window)
+                        self.fullscreen_window = None
+                        self.window_created = False
+                else:
+                    self.is_fullscreen_display = True
                     self.window_created = False
-            else:
-                self.is_fullscreen_display = True
-                self.window_created = False
+            imgui.same_line()
 
-        imgui.same_line(self.app.spacing * 72)
-        if imgui.button("Fit Screen" if not self.fit_screen else "Raw Scale"):
+        if imgui.button(fit_label):
             self.fit_screen = not self.fit_screen
 
-        imgui.same_line(self.app.spacing * 82)
+        imgui.same_line()
         if imgui.button('Screen Capture'):
             now = datetime.datetime.now()
             current_time_str = now.strftime("%Y-%m-%d %H-%M-%S")
-            self.capture_screenshot(f'screenshots/{current_time_str}.png')
+            self.capture_screenshot(str(data_path('captures', f'{current_time_str}.png')))
 
-        imgui.same_line(self.app.spacing * 97) 
-        if imgui.button('Start Recording' if not self.is_recording else 'Stop Recording'):
+        imgui.same_line()
+        if imgui.button(record_label):
             if not self.is_recording:
                 now = datetime.datetime.now()
                 current_time_str = now.strftime("%Y-%m-%d %H-%M-%S")
-                self.start_recording(f'recordings/{current_time_str}.mp4')
+                self.start_recording(str(data_path('captures', f'{current_time_str}.mp4')))
             else:
                 self.stop_recording()
+
+        # Start the widgets below the bar (the row above may be shorter than it).
+        imgui.set_cursor_pos_y(toolbar_height + self.app.spacing)
 
         # # calculate metacreation shape ratio
         # metacreation_ratio = self.metacreation.shape[1] / self.metacreation.shape[0]
@@ -714,7 +741,10 @@ class Visualizer:
         if 'image' in self.result:
             if self._tex_img is not self.result.image:
                 self._tex_img = self.result.image
-                img = cv2.cvtColor(self._tex_img, cv2.COLOR_RGB2BGRA)
+                send_ndi = ndi is not None and self.ndi_send is not None
+                # The BGRA copy is only needed for NDI and recording; skip the
+                # per-frame conversion otherwise.
+                img = cv2.cvtColor(self._tex_img, cv2.COLOR_RGB2BGRA) if (self.is_recording or send_ndi) else None
                 
                 # Recording 逻辑保持不变
                 if self.is_recording:
@@ -723,13 +753,14 @@ class Visualizer:
                         self.frame_queue.put(frame_to_record)
                         self.frames_captured += 1
                         if self.frames_captured % 30 == 0:  
-                            print(f"Captured {self.frames_captured} frames")
+                            logger.debug("Captured %d frames", self.frames_captured)
                     except Exception:
                         pass
                 
-                self.video_frame.data = img
-                self.video_frame.FourCC = ndi.FOURCC_VIDEO_TYPE_BGRX
-                ndi.send_send_video_v2(self.ndi_send, self.video_frame)
+                if send_ndi:
+                    self.video_frame.data = img
+                    self.video_frame.FourCC = ndi.FOURCC_VIDEO_TYPE_BGRX
+                    ndi.send_send_video_v2(self.ndi_send, self.video_frame)
                 if self._tex_obj is None or not self._tex_obj.is_compatible(image=self._tex_img):
                     self._tex_obj = gl_utils.Texture(image=self._tex_img, bilinear=False, mipmap=False)
                 else:

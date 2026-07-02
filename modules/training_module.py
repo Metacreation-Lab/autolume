@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 from re import S
 import zipfile
@@ -7,11 +8,15 @@ import multiprocessing as mp
 import psutil
 
 import dnnlib
+from utils.app_logging import LoggedProcess
 from utils.gui_utils import imgui_utils
 from train import main as train_main
 from widgets.native_browser_widget import NativeBrowserWidget
 from utils.dataset_preprocessing_utils import DatasetPreprocessingUtils
+from utils.model_dir import list_model_pkls
+from utils.user_data import data_path
 from widgets.help_icon_widget import HelpIconWidget
+from widgets.model_download_widget import ModelDropdownButton
 
 import cv2
 from utils.gui_utils import gl_utils
@@ -26,15 +31,12 @@ resize_mode = ['stretch','center crop']
 MBSTD_GROUP = 2
 BATCH_SIZE_CHOICES = [MBSTD_GROUP * x for x in range(1, 33)]
 
+logger = logging.getLogger(__name__)
+
 class TrainingModule:
     def __init__(self, menu):
-        cwd = Path.cwd()
-        self.save_path = str(cwd / "training-runs")
-        self.data_path = str(cwd / "data")
-        # create data folder if not exists
-        data_dir = (cwd / "data").resolve()
-        if not data_dir.exists():
-            data_dir.mkdir(parents=True, exist_ok=True)
+        self.save_path = str(data_path("training-runs"))
+        self.data_path = str(data_path("datasets"))
         self.app = menu.app
         self.config = 1
         self.resume_pkl = ""
@@ -50,12 +52,10 @@ class TrainingModule:
         self.data_path_browser = NativeBrowserWidget()
         self.save_path_browser = NativeBrowserWidget()
 
-        models_dir = Path.cwd() / "models"
-        for pkl in models_dir.iterdir() if models_dir.exists() else []:
-            if pkl.suffix == ".pkl":
-                pkl_path = str(pkl)
-                print(pkl.name, pkl_path)
-                self.browse_cache.append(pkl_path)
+        # browse_cache holds extra pkls found in the selected data directory; the
+        # dropdown merges them with a fresh scan of the models folder on open.
+        self.model_dropdown = ModelDropdownButton(menu.model_downloader, label='Browse',
+                                                  items_provider=lambda: list_model_pkls() + self.browse_cache)
 
         self.menu = menu
         
@@ -66,7 +66,7 @@ class TrainingModule:
         self.reply = mp.Queue()
         self.message = ""
         self.done = False
-        self.training_process = mp.Process(target=train_main, args=(self.queue, self.reply), name='TrainingProcess')
+        self.training_process = LoggedProcess(target=train_main, args=(self.queue, self.reply), name='training')
         self.found_video = False
         self._zipfile = None
         self.gamma = 10
@@ -139,15 +139,14 @@ class TrainingModule:
 
     @imgui_utils.scoped_by_object_id
     def __call__(self):
-
-        if self.reply.qsize() > 0:
+        if not self.reply.empty():
             self.message, self.done = self.reply.get()
-            while self.reply.qsize() > 0:
+            while not self.reply.empty():
                 self.message, self.done = self.reply.get()
 
             # avoid re-printing stats lines
             if not self.message.strip().startswith('tick '):
-                print(self.message)
+                logger.debug("Training update: %s", self.message)
 
         # Create fixed regions to seperate training and preprocessing regions.
         # Max 94% height, or scroll bar would show up
@@ -202,20 +201,13 @@ class TrainingModule:
                 
                 imgui.same_line()
                 if imgui.button("Browse##preprocessing_data", width=self.menu.app.button_w):
-                    directory_path, has_videos, video_files = self.preprocessing_data_browser.select_directory_with_video_check("Select Data Directory")
+                    directory_path, has_videos, video_files = self.preprocessing_data_browser.select_directory_with_video_check("Select Data Directory", initial_dir=self.preprocessing_data_path)
                     if directory_path:
                         self.preprocessing_data_path = directory_path
                         self.data_path_has_videos = has_videos  
                         self.video_files_list = video_files  
-                        print(f"Data path selected: {self.preprocessing_data_path}")
-                        if has_videos:
-                            print(f"Found {len(video_files)} video files in directory")
-                            for video in video_files:
-                                print(f"  - {video}")
-                        else:
-                            print("No video files found in directory")
-                    else:
-                        print("No data path selected")
+                        logger.debug("Preprocessing data path selected: %s (%d videos)",
+                                     self.preprocessing_data_path, len(video_files))
 
                 imgui.spacing()
                 
@@ -280,17 +272,15 @@ class TrainingModule:
                 
                 imgui.same_line()
                 if imgui.button("Browse##preprocessing_save", width=self.menu.app.button_w):
-                    directory_path = self.preprocessing_save_browser.select_directory("Select Save Path")
+                    directory_path = self.preprocessing_save_browser.select_directory("Select Save Path", initial_dir=self.preprocessing_save_path)
                     if directory_path:
                         self.preprocessing_save_path = directory_path
-                    else:
-                        print("No save path selected")
 
                 imgui.spacing()
 
                 if imgui.button("Process & Save Data", width=-3):
                     if not self.preprocessing_save_path or not self.preprocessing_folder_name:
-                        print("Please specify both parent directory and folder name")
+                        logger.warning("Dataset creation needs both a parent directory and a folder name")
                     else:
                         self.create_preprocessing_dataset()
         imgui.end_child()
@@ -331,11 +321,9 @@ class TrainingModule:
             
             imgui.same_line()
             if imgui.button("Browse##main_save", width=self.menu.app.button_w):
-                directory_path = self.save_path_browser.select_directory("Select Training Results Save Path")
+                directory_path = self.save_path_browser.select_directory("Select Training Results Save Path", initial_dir=self.save_path)
                 if directory_path:
                     self.save_path = directory_path
-                else:
-                    print("No save path selected")
 
             imgui.text("Dataset Path")
             current_y = imgui.get_cursor_pos_y()
@@ -345,7 +333,7 @@ class TrainingModule:
             
             imgui.same_line()
             if imgui.button("Browse##main_data", width=self.menu.app.button_w):
-                directory_path = self.data_path_browser.select_directory("Select Training Dataset Directory")
+                directory_path = self.data_path_browser.select_directory("Select Training Dataset Directory", initial_dir=self.data_path)
                 if directory_path:
                     self.data_path = directory_path
 
@@ -361,13 +349,7 @@ class TrainingModule:
                                     self.browse_cache.append(pkl_path_str)
                     
                     if pkl_files:
-                        print(f"Found {len(pkl_files)} PKL files in directory:")
-                        for pkl in pkl_files:
-                            print(f"  - {pkl}")
-                    else:
-                        print("No PKL files found in directory")
-                else:
-                    print("No data path selected")
+                        logger.debug("Found %d PKL files in directory", len(pkl_files))
                 
             imgui.text("Resume Pkl")
             current_y = imgui.get_cursor_pos_y()
@@ -376,15 +358,9 @@ class TrainingModule:
             width=imgui.get_window_width() - imgui.calc_text_size("Browse##Resume Pkl")[0])
             
             imgui.same_line()
-            if imgui_utils.button('Browse##Resume Pkl', enabled=len(self.browse_cache) > 0, width=self.menu.app.button_w):
-                imgui.open_popup('browse_pkls_popup_training')
-
-            if imgui.begin_popup('browse_pkls_popup_training'):
-                for pkl in self.browse_cache:
-                    clicked, _state = imgui.menu_item(pkl)
-                    if clicked:
-                        self.resume_pkl = pkl
-                imgui.end_popup()
+            picked = self.model_dropdown(width=self.menu.app.button_w)
+            if picked is not None:
+                self.resume_pkl = picked
 
             imgui.text("Training Augmentation")
             imgui.same_line()
@@ -450,7 +426,6 @@ class TrainingModule:
 
             if imgui.button("Train", width=-1):
                 self._open_training_popup = True
-                print("training")
                 
                 target_data_path = self.data_path
 
@@ -467,7 +442,7 @@ class TrainingModule:
                         if img is not None:
                             height, width = img.shape[:2]
                             detected_resolution = (width, height)
-                            print(f"Detected image resolution from dataset: {detected_resolution}")
+                            logger.debug("Detected image resolution from dataset: %s", detected_resolution)
 
                 kwargs = dnnlib.EasyDict(
                     outdir=self.save_path,
@@ -523,7 +498,7 @@ class TrainingModule:
                 if self.training_process.pid is not None:
                     self.queue = mp.Queue()
                     self.reply = mp.Queue()
-                    self.training_process = mp.Process(target=train_main, args=(self.queue, self.reply), name='TrainingProcess')
+                    self.training_process = LoggedProcess(target=train_main, args=(self.queue, self.reply), name='training')
                 self.done = False
                 self.queue.put(kwargs)
                 self.training_process.start()
@@ -619,7 +594,7 @@ class TrainingModule:
                         self.dataset_done = True
                         self.is_creating_dataset = False
                         self.dataset_processed_count = completion_data.get('processed_count', 0)
-                        print(f"Dataset created! Processed {self.dataset_processed_count} images")
+                        logger.info("Dataset created: processed %d images", self.dataset_processed_count)
                         if hasattr(self, 'dataset_output_path'):
                             self.data_path = self.dataset_output_path
                         if hasattr(self, 'dataset_process') and self.dataset_process and self.dataset_process.is_alive():
@@ -672,7 +647,7 @@ class TrainingModule:
                 
                 if imgui_utils.button("Cancel", width=progress_width):
                     self.dataset_queue.put('cancel')
-                    print("Dataset creation cancelled by user")
+                    logger.info("Dataset creation cancelled by user")
                     self.cleanup_dataset_process()
                     self.folder_exists_warning = False
                     self.video_extraction_in_progress = False
@@ -741,7 +716,16 @@ class TrainingModule:
 
         if imgui.begin_popup_modal("Training")[0]:
             imgui.text("Training...")
-            if Path(self.message).exists() and self.image_path != self.message:
+            # Replies are either progress text or the path of a snapshot grid.
+            # Only stat plausible paths: arbitrary text (e.g. the multi-line
+            # config JSON) raises ENAMETOOLONG from Path.exists() on macOS.
+            message_is_image = False
+            if self.message and '\n' not in self.message and self.message.lower().endswith('.png'):
+                try:
+                    message_is_image = Path(self.message).exists()
+                except OSError:
+                    message_is_image = False
+            if message_is_image and self.image_path != self.message:
                 self.image_path = self.message
                 self.grid = cv2.imread(self.image_path, cv2.IMREAD_UNCHANGED)
                 self.grid = cv2.cvtColor(self.grid, cv2.COLOR_BGRA2RGBA)
@@ -788,7 +772,7 @@ class TrainingModule:
         """Start the preprocessing dataset creation process"""
         # Validate paths
         if not Path(self.preprocessing_data_path).exists():
-            print(f"Error: Data path does not exist: {self.preprocessing_data_path}")
+            logger.error("Data path does not exist: %s", self.preprocessing_data_path)
             self.dataset_message = f"Data path does not exist:\n{self.preprocessing_data_path}"
             return
         
@@ -796,7 +780,7 @@ class TrainingModule:
         image_files = self.collect_image_files(self.preprocessing_data_path)
         
         if not image_files and not self.video_files_list:
-            print("Error: No images or videos found in directory")
+            logger.error("No images or videos found in directory %s", self.preprocessing_data_path)
             self.dataset_message = "No images or videos found in the selected directory"
             return
         
@@ -835,16 +819,17 @@ class TrainingModule:
                 break
         
         if self.video_files_list:
-            print(f"Extracting frames from {len(self.video_files_list)} video(s)...")
+            logger.info("Extracting frames from %d video(s)", len(self.video_files_list))
             self.video_extraction_in_progress = True
             self.video_extraction_current = 0
             self.video_extraction_total = len(self.video_files_list)
             self.video_extraction_file = ""
             self.dataset_message = "Extracting video frames..."
             
-            video_process = mp.Process(
+            video_process = LoggedProcess(
                 target=DatasetPreprocessingUtils.extract_videos,
-                args=(self.video_files_list, self.fps, self.dataset_queue, self.dataset_reply)
+                args=(self.video_files_list, self.fps, self.dataset_queue, self.dataset_reply),
+                name='video-extract'
             )
             video_process.start()
             self.dataset_process = video_process
@@ -863,7 +848,7 @@ class TrainingModule:
                 frames = [str(f) for f in frame_path.iterdir() 
                          if f.is_file() and f.suffix.lower() in ('.jpg', '.jpeg', '.png')]
                 all_images.extend(frames)
-                print(f"Added {len(frames)} frames from {frame_path.name}")
+                logger.debug("Added %d frames from %s", len(frames), frame_path.name)
         
         # Prepare settings with all collected images
         settings = DatasetPreprocessingUtils()
@@ -873,7 +858,7 @@ class TrainingModule:
         settings.fps = self.fps
         settings.output_path = self.dataset_output_path
         
-        print(f"Processing {len(all_images)} images...")
+        logger.info("Processing %d images", len(all_images))
         self.dataset_message = f"Processing {len(all_images)} images..."
         
         # Clear queues before starting
@@ -889,9 +874,10 @@ class TrainingModule:
                 break
         
         self.dataset_queue.put(settings)
-        self.dataset_process = mp.Process(
+        self.dataset_process = LoggedProcess(
             target=DatasetPreprocessingUtils.create_training_dataset,
-            args=(self.dataset_queue, self.dataset_reply)
+            args=(self.dataset_queue, self.dataset_reply),
+            name='dataset-build'
         )
         self.dataset_process.start()
         self.video_extraction_in_progress = False
@@ -909,16 +895,16 @@ class TrainingModule:
         """Clean up dataset creation process"""
         if self.dataset_process and self.dataset_process.is_alive():
             try:
-                print("Terminating dataset creation process...")
+                logger.info("Terminating dataset creation process")
                 self.dataset_process.terminate()
                 self.dataset_process.join(timeout=2)
                 
                 if self.dataset_process.is_alive():
-                    print("Force killing dataset creation process...")
+                    logger.warning("Force killing dataset creation process")
                     self.dataset_process.kill()
                     self.dataset_process.join()
             except Exception as e:
-                print(f"Error cleaning up dataset process: {e}")
+                logger.warning("Error cleaning up dataset process: %s", e)
             finally:
                 self.dataset_process = None
         

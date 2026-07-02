@@ -7,13 +7,14 @@ import torch
 from PIL import ImageFilter
 from PIL.Image import Image
 
+from utils.app_logging import LoggedProcess
 from utils.gui_utils import imgui_utils, gl_utils
 import multiprocessing as mp
 
-from modules.filedialog import FileDialog
 from projection.bayle_projection import run_projection
-from widgets.browse_widget import BrowseWidget
+from widgets.native_browser_widget import NativeBrowserWidget
 from widgets.help_icon_widget import HelpIconWidget
+from widgets.model_download_widget import ModelDropdownButton
 
 class ProjectionModule:
     def __init__(self, menu):
@@ -22,13 +23,11 @@ class ProjectionModule:
         self.help_icon = HelpIconWidget()
         self.help_texts, self.help_urls = self.help_icon.load_help_texts("projection")
         
-        self.file_dialog = BrowseWidget(self, "Target Image", os.path.abspath(os.getcwd()), ["*", ".jpg", ".png", ".jpeg", ".bmp"], multiple=False,
-                                             traverse_folders=False, add_folder_button=False, width=self.app.button_w)
+        self.browser = NativeBrowserWidget()
 
         self.network_path = ""
         self._pkl_data = dict()
         self._networks = dict()
-        self.models = []
         self.target_fname = ""
         self.target_text = ""
         self.initial_latent = None
@@ -52,23 +51,17 @@ class ProjectionModule:
         self.done_projecting = False
         self.target_image = None
         self.target_texture = None
-        self.projection_process = mp.Process(target=run_projection, args=(self.queue, self.reply),
-                                       daemon=True)
-        self.save_path_dialog = BrowseWidget(self, "Save Path", os.path.abspath(os.getcwd()), [""], multiple=False,
-                                             traverse_folders=False, add_folder_button=True, width=self.app.button_w + 30)
+        self.projection_process = LoggedProcess(target=run_projection, args=(self.queue, self.reply),
+                                                daemon=True, name='projection')
         self.projected_texture = None
 
-
-
-        for pkl in os.listdir("./models"):
-            if pkl.endswith(".pkl"):
-                self.models.append(os.path.join(os.getcwd(),"models",pkl))
+        self.model_dropdown = ModelDropdownButton(menu.model_downloader)
 
     @imgui_utils.scoped_by_object_id
     def __call__(self):
-        if self.reply.qsize() > 0:
+        if not self.reply.empty():
             self.message, projected_img, self.done_projecting, self.done_recording = self.reply.get()
-            while self.reply.qsize() > 0:
+            while not self.reply.empty():
                 self.message, projected_img, self.done_projecting, self.done_recording = self.reply.get()
 
             if projected_img is not None:
@@ -102,43 +95,29 @@ class ProjectionModule:
                                                         width=-self.app.button_w - self.app.spacing - 30,
                                                         help_text='<PATH> | <URL> | <RUN_DIR> | <RUN_ID> | <RUN_ID>/<KIMG>.pkl')
         imgui.same_line()
-        if imgui_utils.button(f'Models ##projection', enabled=len(self.models) > 0, width = self.app.button_w):
-            imgui.open_popup(f'browse_pkls_popup##projection')
-            self.browse_refocus = True
-
-        if imgui.begin_popup(f'browse_pkls_popup##projection'):
-            for pkl in self.models:
-                clicked, _state = imgui.menu_item(pkl)
-                if clicked:
-                    self.network_path = pkl
-            if self.browse_refocus:
-                imgui.set_scroll_here()
-                self.browse_refocus = False
-
-            imgui.end_popup()
+        picked = self.model_dropdown(width=self.app.button_w)
+        if picked is not None:
+            self.network_path = picked
 
 
         joined = '\n'.join(self.target_fname)
         imgui_utils.input_text("##projection_file", joined, 1024, flags=imgui.INPUT_TEXT_READ_ONLY,
                                width=- (self.app.button_w + self.app.spacing) - 30, help_text="Input Files")
         imgui.same_line()
-        _clicked, target_pth = self.file_dialog(self.app.button_w) # should have argument to only allow single file
-        if _clicked:
-            self.target_fname = target_pth
+        if imgui.button("Target Image##projection", width=self.app.button_w):
+            target_pth = self.browser.select_image_file("Select Target Image", initial_dir=self.target_fname[0] if self.target_fname else "")
+            if target_pth:
+                self.target_fname = [str(target_pth)]
         _changed, self.target_text = imgui_utils.input_text('Target Text##target_text', self.target_text, 1024,
                                                         flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL,
                                                         help_text='Text to be projected',
                                                         width=-self.app.button_w - self.app.spacing - 30)
         _changed, self.outdir = imgui_utils.input_text('##outdir', self.outdir, 1024, flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL, help_text='Directory to save results', width=-self.app.button_w - self.app.spacing - 30,)
         imgui.same_line()
-        _clicked, save_path = self.save_path_dialog()
-        if _clicked:
-            if len(save_path) > 0:
-                self.outdir = save_path[0]
-                print(self.outdir)
-            else:
-                self.outdir = ""
-                print("No path selected")
+        if imgui.button("Save Path##projection", width=self.app.button_w + 30):
+            save_path = self.browser.select_directory("Select Save Directory", initial_dir=self.outdir)
+            if save_path:
+                self.outdir = str(save_path)
 
         _changed, self.save_video = imgui.checkbox('Save Video##save_video', self.save_video)
         
@@ -181,8 +160,8 @@ class ProjectionModule:
             self.queue = mp.Queue()
             self.reply = mp.Queue()
 
-            self.projection_process = mp.Process(target=run_projection, args=(self.queue, self.reply),
-                                                 daemon=True)
+            self.projection_process = LoggedProcess(target=run_projection, args=(self.queue, self.reply),
+                                                    daemon=True, name='projection')
             self.projection_process.start()
             self.queue.put([self.network_path, self.target_fname[0] if self.target_fname != "" else None, self.target_text if self.target_text != "" else None, self.initial_latent, self.outdir, self.save_video, self.seed, self.lr, self.steps, self.use_vgg, self.use_clip, self.use_pixel, self.use_penalty, self.use_center, self.use_kmeans])
 

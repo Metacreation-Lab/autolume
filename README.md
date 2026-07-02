@@ -1,6 +1,6 @@
 # Autolume
 
-Autolume-Live is a tool for real-time visual performances using StyleGAN.
+Autolume-Live is a cross-platform tool for real-time visual performances using StyleGAN.
 
 For detailed documentation and demos look at the [Metacreation Lab Website](https://www.metacreation.net/autolume).
 
@@ -17,22 +17,28 @@ For examples of artworks created with Autolume see: https://www.metacreation.net
 
 ## Development instructions
 
+We recommend `uv` for managing python venv ([installation link](https://docs.astral.sh/uv/#installation))
+
 ### Dependencies
 
-- CUDA 12.8 ([download link](https://developer.nvidia.com/cuda-12-8-0-download-archive))
+#### Windows
+
+- CUDA ([download link](https://developer.nvidia.com/cuda-downloads))
   - Minimum components: CUDA Development + CUDA Runtime
-- [uv](https://docs.astral.sh/uv/#installation)
-
-#### Windows only
-
 - Microsoft C++ Build Tools ([download link](https://download.visualstudio.microsoft.com/download/pr/13907dbe-8bb3-4cfe-b0ae-147e70f8b2f3/a3193e6e6135ef7f598d6a9e429b010d77260dba33dddbee343a47494b5335a3/vs_BuildTools.exe))
   - Minimum components: Desktop development with C++
+- FFmpeg: `winget install Gyan.FFmpeg`
 
-#### Linux only
+#### Linux (Ubuntu 24+)
 
-```bash
-sudo apt install portaudio19-dev ffmpeg
-```
+- CUDA ([download link](https://developer.nvidia.com/cuda-downloads))
+  - Minimum components: CUDA Development + CUDA Runtime
+- FFmpeg and PortAudio: `sudo apt install portaudio19-dev ffmpeg`
+
+#### macOS
+
+- FFmpeg and PortAudio: `brew install portaudio ffmpeg`
+- Command Line Tools for Xcode: `xcode-select --install`
 
 ### Initial setup
 
@@ -42,34 +48,6 @@ Create the Python environment:
 uv sync
 ```
 
-#### Download pre-trained models
-
-Download pre-trained models from [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) and [face-parsing.PyTorch](https://github.com/zllrunning/face-parsing.PyTorch):
-
-```bash
-curl -L 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth' -o 'sr_models/Quality.pth'
-curl -L 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-general-x4v3.pth' -o 'sr_models/Balance.pth'
-mkdir -p training/distillation/Util/face_parsing/pretrained_model
-curl -L 'https://drive.google.com/uc?export=download&id=154JgKpzCPW82qINcVieuPH3fZ2e0P812' -o 'training/distillation/Util/face_parsing/pretrained_model/79999_iter.pth'
-```
-
-#### Download FFmpeg binaries (Windows only)
-
-```bash
-mkdir bin
-uv run ffdl download 7.1.1@full -d bin -y
-tar -xf bin\ffmpeg-7.1.1-full_build.zip -C bin
-```
-
-On Linux, FFmpeg is installed via `apt` (see [Linux dependencies](#linux-only-ubuntu-2404) above).
-
-#### Download default FFHQ model
-
-```bash
-mkdir -p models
-curl -L 'https://api.ngc.nvidia.com/v2/models/org/nvidia/team/research/stylegan2/1/files?redirect=true&path=stylegan2-ffhq-512x512.pkl' -o 'models/stylegan2-ffhq-512x512.pkl'
-```
-
 ### Running the program
 
 Start the program
@@ -77,14 +55,20 @@ Start the program
 uv run main.py
 ```
 
-### Create release for Windows
+### Create a release
 
-Run the release script
+Run the cross-platform release script on the OS you want to build for (PyInstaller
+cannot cross-compile — a Windows build must run on Windows, etc.):
 ```bash
-release.bat
+uv run release.py
 ```
 
-The release will be output to `dist/Autolume`
+ffmpeg/ffprobe are downloaded and bundled into the release automatically via
+`ffmpeg-downloader`.
+
+- **Windows / Linux:** output is the `dist/Autolume/` folder.
+- **macOS:** output is `dist/Autolume.app`. It is unsigned, so the first launch
+  needs right-click → Open.
 
 ### Building documentation
 
