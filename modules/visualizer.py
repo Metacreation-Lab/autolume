@@ -15,7 +15,6 @@ import cv2
 import pyaudio
 
 import dnnlib
-from assets import GRAY, DARKGRAY, LIGHTGRAY
 from utils.gui_utils import imgui_utils
 from utils.gui_utils import gl_utils
 from utils.gui_utils import text_utils
@@ -549,12 +548,6 @@ class Visualizer:
         imgui.begin('##control_pane', closable=False, flags=(imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE))
         # Scale with the UI font, calibrated to 36px at font 14.
         toolbar_height = round(self.app.font_size * 36 / 14)
-
-        # set red background (draw list coords are in screen space, below the navbar)
-        imgui.get_window_draw_list().add_rect_filled(0, navbar_h, self.pane_w, navbar_h + toolbar_height,
-                                                     imgui.get_color_u32_rgba(*DARKGRAY))
-        # draw gray line
-        imgui.get_window_draw_list().add_line(0, navbar_h + toolbar_height, self.pane_w, navbar_h + toolbar_height, imgui.get_color_u32_rgba(*LIGHTGRAY), 1)
 
         # Anchor the toolbar row (the logo used to do this) so the right-aligned
         # button group below lands on the same baseline.
