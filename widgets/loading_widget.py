@@ -44,11 +44,14 @@ class LoadingOverlayManager:
         self.message = ""
         self.reset_progress()
     
-    def update_progress(self, current, total, current_file=""):
+    def update_progress(self, current, total, current_file="", percentage=None):
         """Update progress information"""
         self.progress_current = current
         self.progress_total = total
-        self.progress_percentage = (current / total * 100) if total > 0 else 0
+        if percentage is not None:
+            self.progress_percentage = percentage
+        else:
+            self.progress_percentage = (current / total * 100) if total > 0 else 0
         self.current_file = current_file
     
     def reset_progress(self):
@@ -86,7 +89,7 @@ class LoadingOverlayManager:
                 imgui.spacing()
                 
                 # Display progress text
-                imgui.text(f"Processing: {self.progress_current}/{self.progress_total} videos")
+                imgui.text(f"Processing video {min(self.progress_current + 1, self.progress_total)} of {self.progress_total}")
                 if self.current_file:
                     imgui.text(f"Current file: {self.current_file}")
                 

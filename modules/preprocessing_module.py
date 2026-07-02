@@ -40,6 +40,7 @@ class DataPreprocessing:
 
         # Video frame extraction
         self.fps = self.settings.fps
+        self.video_durations = {}
         self.video_extraction_queue = mp.Queue()
         self.video_extraction_reply = mp.Queue()
         self.is_processing_video = False
@@ -181,6 +182,7 @@ class DataPreprocessing:
                     delattr(self, 'last_fps')
                 if hasattr(self, 'last_expected_frames'):
                     delattr(self, 'last_expected_frames')
+                self.video_durations = {}
                 imgui.open_popup("Video Frame Extraction")
 
         # Video Frame Extraction Popup
@@ -243,7 +245,8 @@ class DataPreprocessing:
                             current = progress_data.get('current', 0)
                             total = progress_data.get('total', 0)
                             current_file = progress_data.get('current_file', '')
-                            self.loading_widget.update_progress(current, total, current_file)
+                            percentage = progress_data.get('percentage', None)
+                            self.loading_widget.update_progress(current, total, current_file, percentage=percentage)
                             
                         elif progress_data.get('type') == 'completed':
                             # Extraction completed
@@ -286,6 +289,7 @@ class DataPreprocessing:
                     delattr(self, 'last_fps')
                 if hasattr(self, 'last_expected_frames'):
                     delattr(self, 'last_expected_frames')
+                self.video_durations = {}
                 imgui.close_current_popup()
             imgui.end_child()
 
@@ -322,7 +326,10 @@ class DataPreprocessing:
                 not hasattr(self, 'last_video_count') or len(self.selected_video_files) != self.last_video_count):
                 expected_frames = 0
                 for video_path in self.selected_video_files:
-                    expected_frames = expected_frames + DatasetPreprocessingUtils.calculate_expected_video_frames(video_path, self.fps)
+                    if video_path not in self.video_durations:
+                        self.video_durations[video_path] = DatasetPreprocessingUtils.calculate_video_duration(video_path)
+                    duration = self.video_durations[video_path]
+                    expected_frames += int(duration * self.fps) if duration > 0 else 0
                 self.last_expected_frames = expected_frames
                 self.last_fps = self.fps
                 self.last_video_count = len(self.selected_video_files)
@@ -335,10 +342,17 @@ class DataPreprocessing:
 
                 for idx in sorted(selected_videos, reverse=True):
                     if 0 <= idx < len(self.selected_video_files):
+                        removed_path = self.selected_video_files[idx]
+                        self.video_durations.pop(removed_path, None)
                         del self.selected_video_files[idx]
 
                 self.video_thumbnail_widget.update_thumbnails(self.selected_video_files)
                 self.video_thumbnail_widget.clear_selected()
+
+                if hasattr(self, 'last_fps'):
+                    delattr(self, 'last_fps')
+                if hasattr(self, 'last_expected_frames'):
+                    delattr(self, 'last_expected_frames')
 
             imgui.end_child() # Video popup right
 
