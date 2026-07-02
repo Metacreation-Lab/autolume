@@ -19,7 +19,6 @@ from assets import GRAY, DARKGRAY, LIGHTGRAY
 from utils.gui_utils import imgui_utils
 from utils.gui_utils import gl_utils
 from utils.gui_utils import text_utils
-from utils.resource_paths import resource_path
 from utils.user_data import data_path
 from widgets import pickle_widget
 from widgets import latent_widget
@@ -121,15 +120,6 @@ class Visualizer:
         self.audio_widget_enabled = False
         self.audio_widget_error = None
 
-        self.logo = cv2.imread(str(resource_path("assets", "Autolume-logo.png")), cv2.IMREAD_UNCHANGED)
-        self.logo_texture = gl_utils.Texture(image=self.logo, width=self.logo.shape[1], height=self.logo.shape[0],
-                                             channels=self.logo.shape[2])
-
-        self.metacreation = cv2.imread(str(resource_path("assets", "metalogo.png")), cv2.IMREAD_UNCHANGED)
-        self.metacreation_texture = gl_utils.Texture(image=self.metacreation, width=self.metacreation.shape[1],
-                                                     height=self.metacreation.shape[0],
-                                                     channels=self.metacreation.shape[2])
-    
     #Screen capture and screen recording
         self.is_recording = False
         self.frame_queue = queue.Queue()
@@ -547,29 +537,29 @@ class Visualizer:
         self.pane_w = self.app.font_size * 45
         self.args = dnnlib.EasyDict()
 
+        navbar_h = self.app.navbar_height
+
         # Detect mouse dragging in the result area.
-        dragging, dx, dy = imgui_utils.drag_hidden_window('##result_area', x=self.pane_w, y=0, width=self.app.content_width-self.pane_w, height=self.app.content_height)
+        dragging, dx, dy = imgui_utils.drag_hidden_window('##result_area', x=self.pane_w, y=navbar_h, width=self.app.content_width-self.pane_w, height=self.app.content_height - navbar_h)
         if dragging:
             self.latent_widget.drag(dx, dy)
 
-        imgui.set_next_window_position(0, 0)
-        imgui.set_next_window_size(self.pane_w, self.app.content_height)
+        imgui.set_next_window_position(0, navbar_h)
+        imgui.set_next_window_size(self.pane_w, self.app.content_height - navbar_h)
         imgui.begin('##control_pane', closable=False, flags=(imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE))
         # Scale with the UI font, calibrated to 36px at font 14.
         toolbar_height = round(self.app.font_size * 36 / 14)
-        logo_height = toolbar_height / 2
 
-        # set red background
-        imgui.get_window_draw_list().add_rect_filled(0, 0, self.pane_w, toolbar_height,
+        # set red background (draw list coords are in screen space, below the navbar)
+        imgui.get_window_draw_list().add_rect_filled(0, navbar_h, self.pane_w, navbar_h + toolbar_height,
                                                      imgui.get_color_u32_rgba(*DARKGRAY))
         # draw gray line
-        imgui.get_window_draw_list().add_line(0, toolbar_height, self.pane_w, toolbar_height, imgui.get_color_u32_rgba(*LIGHTGRAY), 1)
+        imgui.get_window_draw_list().add_line(0, navbar_h + toolbar_height, self.pane_w, navbar_h + toolbar_height, imgui.get_color_u32_rgba(*LIGHTGRAY), 1)
 
-        # calculate logo shape ratio
-        logo_ratio = self.logo.shape[1] / self.logo.shape[0]
-        imgui.set_cursor_pos_y((toolbar_height - logo_height) / 2)
-        imgui.set_cursor_pos_x(self.app.spacing * 2)
-        imgui.image(self.logo_texture.gl_id, logo_height * logo_ratio, logo_height, tint_color=(1, 1, 1, 0.5))
+        # Anchor the toolbar row (the logo used to do this) so the right-aligned
+        # button group below lands on the same baseline.
+        imgui.set_cursor_pos_y(toolbar_height / 4)
+        imgui.dummy(0, 0)
 
         # The fullscreen display uses a core-profile GL 3.3 context that shares
         # textures with the main legacy context; macOS cannot share across those
@@ -622,38 +612,6 @@ class Visualizer:
         # Start the widgets below the bar (the row above may be shorter than it).
         imgui.set_cursor_pos_y(toolbar_height + self.app.spacing)
 
-        # # calculate metacreation shape ratio
-        # metacreation_ratio = self.metacreation.shape[1] / self.metacreation.shape[0]
-        # # metacreation with height of 30px centered in y axis
-        # imgui.same_line(self.pane_w - ((18 * metacreation_ratio) + (self.app.spacing * 6)))
-        # imgui.set_cursor_pos_y(18 - (18 / 2))
-        # imgui.image(self.metacreation_texture.gl_id, 18 * metacreation_ratio, 18, tint_color=(1, 1, 1, 0.5))
-        # imgui.set_cursor_pos_y(36 + self.app.spacing)
-        # Widgets.
-        # expanded, _visible = imgui_utils.collapsing_header('Network & latent', default=True)
-        # self.pickle_widget(expanded)
-        # self.latent_widget(expanded)
-        # expanded, _visible = imgui_utils.collapsing_header('Diversity & Noise', default=True)
-        # self.trunc_noise_widget(expanded)
-        # expanded, _visible = imgui_utils.collapsing_header('Looping', default=True)
-        # self.looping_widget(expanded)
-        # expanded, _visible = imgui_utils.collapsing_header('Performance & OSC', default=True)
-        # self.perf_widget(expanded)
-        # expanded, _visible = imgui_utils.collapsing_header('Adjust Input', default=True)
-        # self.adjuster_widget(expanded)
-        # expanded, _visible = imgui_utils.collapsing_header('Layer Transformations', default=True)
-        # self.collapsed_widget(expanded)
-        # expanded, _visible = imgui_utils.collapsing_header('Model Mixing', default=True)
-        # self.mixing_widget(expanded)
-        # expanded, _visible = imgui_utils.collapsing_header('Presets', default=True)
-        # self.preset_widget(expanded)
-
-        # expanded, _visible = imgui_utils.collapsing_header('Audio Module', default=True)
-        # if self.has_microphone:
-        #     self.audio_widget(expanded)
-        # else:
-        #     if expanded:
-        #         imgui.text('No microphone detected')
         # Network & Latent
         header_opened = imgui_utils.collapsing_header('Network & Latent', default=True)[0]
         self._header_help_icon('Network & Latent', 'network_latent')
@@ -716,13 +674,6 @@ class Visualizer:
         if self.audio_widget_enabled and self.audio_widget is not None:
             self.audio_widget(header_opened)
 
-
-        # go back to menu
-        imgui.separator()
-        if imgui.button('Back to menu'):
-            self.defer_rendering(10)
-            self.app.set_visible_menu()
-
         # Render.
         if self.app.is_skipping_frames():
             pass
@@ -736,8 +687,8 @@ class Visualizer:
 
         # Display.
         max_w = self.app.content_width - self.pane_w
-        max_h = self.app.content_height
-        pos = np.array([self.pane_w + max_w / 2, max_h / 2])
+        max_h = self.app.content_height - navbar_h
+        pos = np.array([self.pane_w + max_w / 2, navbar_h + max_h / 2])
         if 'image' in self.result:
             if self._tex_img is not self.result.image:
                 self._tex_img = self.result.image
