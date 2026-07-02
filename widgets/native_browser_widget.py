@@ -6,6 +6,7 @@ pywin32 on Windows, zenity/kdialog on Linux. tkinter is not used; Tk cannot
 run inside this process on macOS because GLFW owns the NSApplication.
 """
 
+import logging
 import os
 import sys
 from typing import List, Optional, Tuple
@@ -16,6 +17,8 @@ except ImportError:
     # On Linux without zenity/kdialog, filedialpy falls back to tkinter at
     # import time, which may be unavailable. Degrade to no-op dialogs.
     filedialpy = None
+
+logger = logging.getLogger(__name__)
 
 
 class NativeBrowserWidget:
@@ -65,8 +68,8 @@ class NativeBrowserWidget:
     @staticmethod
     def _dialogs_available() -> bool:
         if filedialpy is None:
-            print("Native file dialogs unavailable: filedialpy could not be imported "
-                  "(on Linux, install zenity or kdialog)")
+            logger.warning("Native file dialogs unavailable: filedialpy could not be imported "
+                           "(on Linux, install zenity or kdialog)")
             return False
         return True
 
@@ -107,7 +110,7 @@ class NativeBrowserWidget:
             paths = filedialpy.openFiles(title=title, filter=self._filter_arg(patterns),
                                          initial_dir=self._resolve_initial_dir(initial_dir))
         except Exception as e:
-            print(f"Native file dialog failed: {e}")
+            logger.error("Native file dialog failed: %s", e)
             return []
         if isinstance(paths, str):
             paths = [paths] if paths else []
@@ -122,7 +125,7 @@ class NativeBrowserWidget:
         try:
             path = filedialpy.openDir(title=title, initial_dir=self._resolve_initial_dir(initial_dir))
         except Exception as e:
-            print(f"Native directory dialog failed: {e}")
+            logger.error("Native directory dialog failed: %s", e)
             return None
         if not path or not os.path.isdir(path):
             return None
@@ -140,7 +143,7 @@ class NativeBrowserWidget:
             path = filedialpy.openFile(title=title, filter=self._filter_arg(patterns),
                                        initial_dir=self._resolve_initial_dir(initial_dir))
         except Exception as e:
-            print(f"Native file dialog failed: {e}")
+            logger.error("Native file dialog failed: %s", e)
             return None
         # The macOS backend maps a cancelled dialog to the current directory.
         if not path or not os.path.isfile(path):
@@ -156,7 +159,7 @@ class NativeBrowserWidget:
             path = filedialpy.saveFile(title=title, filter=self._filter_arg(patterns),
                                        initial_dir=self._resolve_initial_dir(initial_dir), initial_file=initial_file)
         except Exception as e:
-            print(f"Native save dialog failed: {e}")
+            logger.error("Native save dialog failed: %s", e)
             return None
         if not path:
             return None
@@ -188,7 +191,7 @@ class NativeBrowserWidget:
         try:
             return [f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f))]
         except (OSError, PermissionError) as e:
-            print(f"Error reading directory {directory}: {e}")
+            logger.warning("Error reading directory %s: %s", directory, e)
             return []
 
     def _filter_files_by_type(self, files: List[str], file_type: str = "image") -> List[str]:
@@ -249,7 +252,7 @@ class NativeBrowserWidget:
                         video_files.append(os.path.join(root, file))
                         has_video_files = True
         except (OSError, PermissionError) as e:
-            print(f"Error scanning directory {directory_path}: {e}")
+            logger.warning("Error scanning directory %s: %s", directory_path, e)
             return directory_path, False, []
 
         return directory_path, has_video_files, video_files

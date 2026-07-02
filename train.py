@@ -9,6 +9,7 @@
 """Train a GAN using the techniques described in the paper
 "Alias-Free Generative Adversarial Networks"."""
 
+import logging
 import os
 import click
 import re
@@ -22,7 +23,6 @@ if sys.platform == 'darwin':
     os.environ.setdefault('PYTORCH_ENABLE_MPS_FALLBACK', '1')
 
 import torch
-import traceback
 
 import dnnlib as dnnlib
 from training import training_loop
@@ -30,11 +30,13 @@ from metrics import metric_main
 from torch_utils import training_stats, custom_ops
 from queue import Empty
 
+logger = logging.getLogger(__name__)
+
 
 #----------------------------------------------------------------------------
 
 def subprocess_fn(rank, c, temp_dir, queue, reply):
-    print(f"Rank: {rank}, Configuration (c): {c}")
+    logger.debug("Training subprocess rank=%d config=%s", rank, c)
     dnnlib.util.Logger(file_name=os.path.join(c.run_dir, 'log.txt'), file_mode='a', should_flush=True)
 
     try:
@@ -53,23 +55,18 @@ def subprocess_fn(rank, c, temp_dir, queue, reply):
         # Init torch_utils.
         sync_device = torch.device('cuda', rank) if c.num_gpus > 1 else None
         training_stats.init_multiprocessing(rank=rank, sync_device=sync_device)
-        print(rank)
         if rank != 0:
             custom_ops.verbosity = 'none'
 
         # Execute training loop.
         training_loop.training_loop(rank=rank, **c, queue=queue, reply=reply)
-    except Exception as e:
-        print(f"Caught an exception of type: {type(e).__name__}")
-        print(f"Exception message: {str(e)}")
-        print("Traceback1:")
-        traceback.print_exc()
+    except Exception:
+        logger.exception("Training subprocess failed")
         reply.put(['Exception occured in subprocess_fn...', True])
 
 #----------------------------------------------------------------------------
 
 def launch_training(c, desc, outdir, dry_run, queue, reply):
-    dnnlib.util.Logger(should_flush=True)
     # Pick output directory.
     prev_run_dirs = []
     if os.path.isdir(outdir):
@@ -80,50 +77,38 @@ def launch_training(c, desc, outdir, dry_run, queue, reply):
     c.run_dir = os.path.join(outdir, f'{cur_run_id:05d}-{desc}')
     assert not os.path.exists(c.run_dir)
 
-    # Print options.
-    print()
-    print('Training options:')
     reply.put(['Training options:' + json.dumps(c, indent=2), False])
-    print(json.dumps(c, indent=2))
-    print()
-    print(f'Output directory:    {c.run_dir}')
-    print(f'Number of GPUs:      {c.num_gpus}')
-    print(f'Batch size:          {c.batch_size} images')
-    print(f'Training duration:   {c.total_kimg} kimg')
-    print(f'Dataset path:        {c.training_set_kwargs.path}')
-    print(f'Dataset size:        {c.training_set_kwargs.max_size} images')
-    print(f'Dataset resolution:  {c.training_set_kwargs.resolution}')
-    print(f'Dataset Height and width:  {c.training_set_kwargs.height} {c.training_set_kwargs.width}')
-    print(f'Dataset labels:      {c.training_set_kwargs.use_labels}')
-    print(f'Dataset x-flips:     {c.training_set_kwargs.xflip}')
-    print()
+    logger.debug('Training options: %s', json.dumps(c, indent=2))
+    logger.info('Starting training run: run_dir=%s gpus=%d batch=%d kimg=%d '
+                'dataset=%s resolution=%s',
+                c.run_dir, c.num_gpus, c.batch_size, c.total_kimg,
+                c.training_set_kwargs.path, c.training_set_kwargs.resolution)
 
     # Dry run?
     if dry_run:
-        print('Dry run; exiting.')
+        logger.info('Dry run; exiting.')
         return
 
     # Create output directory.
-    print('Creating output directory...')
     os.makedirs(c.run_dir)
     with open(os.path.join(c.run_dir, 'training_options.json'), 'wt') as f:
         json.dump(c, f, indent=2)
 
     # Launch processes.
-    print('Launching processes...')
     try:
         torch.multiprocessing.set_start_method('spawn', force=True)
         with tempfile.TemporaryDirectory() as temp_dir:
             subprocess_fn(rank=0, c=c, temp_dir=temp_dir, queue=queue, reply=reply)
-    except:
+    except Exception:
+        logger.exception('launch_training failed')
         reply.put(['Exception occured in launch_training...', True])
 
 #----------------------------------------------------------------------------
 
 def init_dataset_kwargs(data, resolution=None, height = None, width = None, fps=10, resize_mode='stretch', skip_preprocessing=True):
     try:
-        print("RESOLUTION: ", resolution, height, width)
-        print("SKIP_PREPROCESSING: ", skip_preprocessing)
+        logger.debug("Dataset kwargs: resolution=%s height=%s width=%s skip_preprocessing=%s",
+                     resolution, height, width, skip_preprocessing)
         dataset_kwargs = dnnlib.EasyDict(
             class_name='training.dataset.ImageFolderDataset', 
             path=data, 
@@ -247,7 +232,7 @@ def main(queue, reply):
 
         # Initialize config.
         kwargs = queue.get()
-        print("kwargs", kwargs)
+        logger.debug("Training kwargs: %s", kwargs)
 
         opts = dnnlib.EasyDict(**kwargs) # Command line arguments.
         c = dnnlib.EasyDict() # Main config dict.
@@ -323,7 +308,7 @@ def main(queue, reply):
 
 
         if list(init_res) != [4, 4]:
-            print(' custom init resolution', init_res)
+            logger.debug('Custom init resolution: %s', init_res)
             c.G_kwargs.init_res = c.D_kwargs.init_res = list(init_res)
 
         # Sanity checks.
@@ -358,7 +343,6 @@ def main(queue, reply):
                 c.loss_kwargs.blur_fade_kimg = c.batch_size * 200 / 32 # Fade out the blur during the first N kimg.
 
         if opts.topk is not None:
-            print("topking-------")
             assert isinstance(opts.topk, float)
             c.loss_kwargs.G_top_k = True
             c.loss_kwargs.G_top_k_gamma = opts.topk
@@ -435,11 +419,8 @@ def main(queue, reply):
             if queue.get(block=False) == 'done':
                 reply.put(['Training Process Aborted... Please close this window.', True])
         launch_training(c=c, desc=desc, outdir=opts.outdir, dry_run=opts.dry_run, queue=queue, reply=reply)
-    except Exception as e:
-        print(f"Caught an exception of type: {type(e).__name__}")
-        print(f"Exception message: {str(e)}")
-        print("Traceback2:")
-        traceback.print_exc()
+    except Exception:
+        logger.exception("Training process could not start")
         reply.put(['Training Process Could not Start... Please close this window.', True])
 
 #----------------------------------------------------------------------------

@@ -1,3 +1,4 @@
+import logging
 import torch
 from torch import nn
 from tqdm import tqdm
@@ -18,6 +19,8 @@ from utils.downloads import download_file
 import threading
 import time
 import gc
+
+logger = logging.getLogger(__name__)
 
 # Downloadable Real-ESRGAN weights: display name -> (original filename, url).
 # "Fast" is omitted -- it is a small custom model bundled with the app.
@@ -51,13 +54,12 @@ def ensure_sr_weight(model_type, progress_cb=None, cancel_event=None):
     if model_type in SR_WEIGHTS and not os.path.exists(path):
         _, url = SR_WEIGHTS[model_type]
         if progress_cb is None:
+            logger.info("Downloading %s super-resolution weights from %s", model_type, url)
             def progress_cb(done, total):
-                pct = f"{done / total:6.1%}" if total else f"{done} bytes"
-                print(f"\rDownloading {model_type} weights: {pct}", end="", flush=True)
+                pass
         if cancel_event is None:
             cancel_event = threading.Event()
         ok = download_file(url, path, cancel_event, progress_cb)
-        print()
         if not ok:
             return None
     return path
@@ -119,7 +121,7 @@ class Reader:
 class Writer:
 
     def __init__(self, args, audio, height, width, video_save_path, fps):
-        print("SAVING VIDEO TO: ", video_save_path)
+        logger.info("Saving video to %s", video_save_path)
         if args.scale_mode:
           out_width, out_height = int(width * args.outscale), int(height * args.outscale)
         else:
@@ -174,7 +176,7 @@ def base_args():
 
 
 def process(args,file):
-  print("Processing", args)
+  logger.debug("Processing %s with args %s", file, args)
   model_path = ensure_sr_weight(args.model_type)
 
   upsampler=load_model(args.model_type,model_path)
@@ -183,7 +185,7 @@ def process(args,file):
     width, height = get_resolution(file)
 
     if args.outscale > 4 or (check_width_height(args) and (args.out_width > 4*width or args.out_height > 4*height)):
-      print('warning: Any super-res scale larger than x4 required non-model inference with interpolation and can be slower')
+      logger.warning('Super-res scale larger than x4 requires non-model inference with interpolation and can be slower')
 
 
     audio = get_audio(file)
@@ -196,8 +198,8 @@ def process(args,file):
 
     cap = cv2.VideoCapture(file)
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    print("Framecount",frame_count)
-    pbar = tqdm(total=frame_count, unit='frame', desc='inference')
+    logger.debug("Frame count: %d", frame_count)
+    pbar = tqdm(total=frame_count, unit='frame', desc='inference', disable=None)
 
     fps = cap.get(cv2.CAP_PROP_FPS)
 
@@ -237,7 +239,6 @@ def process(args,file):
         ret, img = cap.read()
 
       else:
-        print('break')
         break
 
     writer.close()
@@ -246,13 +247,11 @@ def process(args,file):
     data_transformer = transforms.Compose([transforms.ToTensor()])
     image = cv2.imread(file)
     input_width, input_height = image.shape[0], image.shape[1]
-    print("INPUT DIMENSIONS", input_width, input_height, image.shape)
     image = data_transformer(image).to(get_device())
     input = torch.unsqueeze(image, 0)
 
     with torch.inference_mode():
           output = upsampler(input)
-          print("OUTPUT DIMENSIONS", output.shape)
           output = F.adjust_sharpness(output, args.sharpen_scale) * 255
 
           output = output[0].permute(1, 2, 0).cpu().numpy().astype(np.uint8)
@@ -273,7 +272,6 @@ def process(args,file):
                   ), interpolation=cv2.INTER_LINEAR)
 
     if args.scale_mode:
-      print("USING these params", input_width, input_height, args.outscale)
       path = os.path.join(args.result_path,
                             tail[
                             :-4] + f'_result_{args.model_type}_{int(input_width * args.outscale)}x{int(input_height * args.outscale)}_Sharpness{args.sharpen_scale}.jpg')
@@ -283,7 +281,7 @@ def process(args,file):
                           tail[
                           :-4] + f'_result_{args.model_type}_{int(args.out_width)}x{int(args.out_height)}_Sharpness{args.sharpen_scale}.jpg')
 
-    print("Saving image to {}".format(path))
+    logger.info("Saving image to %s", path)
     cv2.imwrite(path, output)
 
 
@@ -291,7 +289,7 @@ def process(args,file):
 
 def _sr_image(model, args, file, tail, file_idx, reply_queue):
     reply_queue.put([file_idx, 0, 1, -1, False])
-    print(f"Super-res image: {file}")
+    logger.info("Super-res image: %s", file)
     data_transformer = transforms.Compose([transforms.ToTensor()])
     image = cv2.imread(file)
     input_height, input_width = image.shape[0], image.shape[1]
@@ -308,7 +306,7 @@ def _sr_image(model, args, file, tail, file_idx, reply_queue):
             output = cv2.resize(output, (int(args.out_width), int(args.out_height)), interpolation=cv2.INTER_LINEAR)
         path = os.path.join(args.result_path, tail[:-4] + f'_result_{args.model_type}_{int(input_width * args.outscale)}x{int(input_height * args.outscale)}_Sharpness{args.sharpen_scale}.jpg')
         cv2.imwrite(path, output)
-    print(f"Saved {path}")
+    logger.info("Saved %s", path)
     reply_queue.put([file_idx, 1, 1, -1, False])
 
 
@@ -324,7 +322,7 @@ def _sr_video(model, args, file, tail, file_idx, reply_queue):
         video_save_path = os.path.join(args.result_path, tail[:-4] + f'_result_{args.model_type}_{int(video_width * args.outscale)}x{int(video_height * args.outscale)}_Sharpness{args.sharpen_scale}.mp4')
     else:
         video_save_path = os.path.join(args.result_path, tail[:-4] + f'_result_{args.model_type}_{int(args.out_width)}x{int(args.out_height)}_Sharpness{args.sharpen_scale}.mp4')
-    print(f"Saving video to {video_save_path}")
+    logger.info("Saving video to %s", video_save_path)
     writer = Writer(args, audio, video_height, video_width, video_save_path=video_save_path, fps=fps)
     reader = Reader(video_width, video_height, file)
     start_time = time.time()
@@ -346,7 +344,6 @@ def _sr_video(model, args, file, tail, file_idx, reply_queue):
                 sr_output = cv2.resize(sr_output, (int(args.out_width), int(args.out_height)), interpolation=cv2.INTER_LINEAR)
             writer.write_frame(sr_output)
         super_res_idx += 1
-        print(f"Processing frame {super_res_idx}/{total_frames}")
         now = time.time()
         if now - last_put >= 0.15 or super_res_idx >= total_frames:
             eta = (now - start_time) / super_res_idx * max(total_frames - super_res_idx, 0)
@@ -380,15 +377,14 @@ def main(args):
   if not os.path.exists(args.result_path):
     os.makedirs(args.result_path)
 
-  print(list_file)
+  logger.debug("Files to process: %s", list_file)
   for file in list_file:
-    print(f'working on {file}')
+    logger.info('Super resolution: working on %s', file)
     if file[-3:] == 'jpg' or file[-3:] == 'png':
       process(args,file)
     if file[-3:] == 'mp4' or file[-3:] == 'avi' or args.input_path[-3:] == 'mov':
-      print(f'working on {file}')
       process(args,file)
-  print('Done')
+  logger.info('Super resolution done')
 
 if __name__ == '__main__':
     parser = base_args()

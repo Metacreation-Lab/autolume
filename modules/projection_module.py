@@ -7,6 +7,7 @@ import torch
 from PIL import ImageFilter
 from PIL.Image import Image
 
+from utils.app_logging import LoggedProcess
 from utils.gui_utils import imgui_utils, gl_utils
 import multiprocessing as mp
 
@@ -50,8 +51,8 @@ class ProjectionModule:
         self.done_projecting = False
         self.target_image = None
         self.target_texture = None
-        self.projection_process = mp.Process(target=run_projection, args=(self.queue, self.reply),
-                                       daemon=True)
+        self.projection_process = LoggedProcess(target=run_projection, args=(self.queue, self.reply),
+                                                daemon=True, name='projection')
         self.projected_texture = None
 
         self.model_dropdown = ModelDropdownButton(menu.model_downloader)
@@ -117,9 +118,6 @@ class ProjectionModule:
             save_path = self.browser.select_directory("Select Save Directory", initial_dir=self.outdir)
             if save_path:
                 self.outdir = str(save_path)
-                print(self.outdir)
-            else:
-                print("No path selected")
 
         _changed, self.save_video = imgui.checkbox('Save Video##save_video', self.save_video)
         
@@ -162,8 +160,8 @@ class ProjectionModule:
             self.queue = mp.Queue()
             self.reply = mp.Queue()
 
-            self.projection_process = mp.Process(target=run_projection, args=(self.queue, self.reply),
-                                                 daemon=True)
+            self.projection_process = LoggedProcess(target=run_projection, args=(self.queue, self.reply),
+                                                    daemon=True, name='projection')
             self.projection_process.start()
             self.queue.put([self.network_path, self.target_fname[0] if self.target_fname != "" else None, self.target_text if self.target_text != "" else None, self.initial_latent, self.outdir, self.save_video, self.seed, self.lr, self.steps, self.use_vgg, self.use_clip, self.use_pixel, self.use_penalty, self.use_center, self.use_kmeans])
 

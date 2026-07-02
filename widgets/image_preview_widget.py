@@ -1,7 +1,10 @@
 import os
 import cv2
+import logging
 import numpy as np
 from utils.gui_utils import gl_utils
+
+logger = logging.getLogger(__name__)
 import imgui
 
 from utils.dataset_preprocessing_utils import DatasetPreprocessingUtils
@@ -42,7 +45,7 @@ class ImagePreviewWidget:
                 self._update_texture(img)
                 
         except Exception as e:
-            print(f"Error processing image for preview: {e}")
+            logger.warning("Error processing image for preview: %s", e)
             return
     
     def _update_texture(self, img):
@@ -101,4 +104,4 @@ class ImagePreviewWidget:
             self.image_shape = None
             
         except Exception as e:
-            print(f"Warning: Error during image preview widget cleanup: {e}")
+            logger.warning("Error during image preview widget cleanup: %s", e)

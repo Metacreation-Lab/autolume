@@ -5,6 +5,7 @@
 # and any modifications thereto.  Any use, reproduction, disclosure or
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
+import logging
 import threading
 import numpy as np
 import queue
@@ -50,6 +51,8 @@ import ctypes
 import pandas as pd
 import os
 
+logger = logging.getLogger(__name__)
+
 #----------------------------------------------------------------------------
 class Visualizer:
     def __init__(self, app, renderer):
@@ -62,13 +65,11 @@ class Visualizer:
         self.pa = None
         # check if microphone is available
         try:
-            print("checking for microphone")
             self.pa = pyaudio.PyAudio()
-            print(self.pa)
-            print(self.pa.get_default_input_device_info())
+            logger.debug("Default input device: %s", self.pa.get_default_input_device_info())
             self.has_microphone = True
         except Exception as exc:
-            print(f"except no microphone found: {exc}")
+            logger.warning("No microphone found: %s", exc)
         self.in_ip = "127.0.0.1"
         self.in_port = 1338
         self.out_ip = "127.0.0.1"
@@ -156,7 +157,7 @@ class Visualizer:
             return
 
         try:
-            print("Setting up audio widget")
+            logger.info("Setting up audio widget")
             self.audio_widget = audio_widget.AudioWidget(self)
             self.audio_widget_enabled = True
         except NoMicrophoneError:
@@ -174,7 +175,7 @@ class Visualizer:
             try:
                 self.audio_widget.close()
             except Exception as exc:
-                print(f"Error closing audio widget: {exc}")
+                logger.warning("Error closing audio widget: %s", exc)
 
         self.audio_widget = None
         self.audio_widget_enabled = False
@@ -233,9 +234,8 @@ class Visualizer:
             
             return program
             
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
+        except Exception:
+            logger.exception("Failed to compile shader program")
             return None
 
     def create_fullscreen_window(self):
@@ -378,7 +378,7 @@ class Visualizer:
             return None
             
         except Exception as e:
-            print(f"Error creating window: {e}")
+            logger.error("Error creating fullscreen window: %s", e)
             if 'window' in locals() and window:
                 glfw.destroy_window(window)
             return None
@@ -449,7 +449,7 @@ class Visualizer:
             glfw.make_context_current(self.main_window_context)
             
         except Exception as e:
-            print(f"渲染时出错: {e}")
+            logger.error("Fullscreen render failed: %s", e)
 
     def start_recording(self, file_path):
         self.is_recording = True
@@ -489,10 +489,10 @@ class Visualizer:
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
             cv2.imwrite(file_path, image_data)
         else:
-            print("No render result available to capture.")
+            logger.warning("No render result available to capture")
 
     def osc_message_handler(self, address, *args):
-        print(f"[DEBUG] OSC message received at {address} with arguments: {args}")
+        logger.debug("OSC message received at %s with arguments: %s", address, args)
 
 
 
@@ -521,7 +521,7 @@ class Visualizer:
     def print_error(self, error):
         error = str(error)
         if error != self._last_error_print:
-            print('\n' + error + '\n')
+            logger.error("%s", error)
             self._last_error_print = error
 
     def defer_rendering(self, num_frames=1):
@@ -753,7 +753,7 @@ class Visualizer:
                         self.frame_queue.put(frame_to_record)
                         self.frames_captured += 1
                         if self.frames_captured % 30 == 0:  
-                            print(f"Captured {self.frames_captured} frames")
+                            logger.debug("Captured %d frames", self.frames_captured)
                     except Exception:
                         pass
                 

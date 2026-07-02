@@ -1,3 +1,4 @@
+import logging
 import os
 import sys
 
@@ -9,6 +10,9 @@ import gc
 from utils.gui_utils import imgui_window, gl_utils
 from utils.resource_paths import get_version, resource_path
 from enum import IntEnum
+
+logger = logging.getLogger(__name__)
+
 class States(IntEnum):
     ERROR = -2
     CLOSE = -1
@@ -78,7 +82,7 @@ class Autolume(imgui_window.ImguiWindow):
 
     def open_menu(self):
         from modules.menu import Menu
-        print("opening Menu")
+        logger.info("Opening menu")
         # Initialize window.
         self.menu = Menu(self)
 
@@ -100,7 +104,7 @@ class Autolume(imgui_window.ImguiWindow):
 
     def set_visible_menu(self):
         from modules.menu import Menu
-        print("setting visible menu ------------------------")
+        logger.info("Returning to menu")
         self.state = States.MENU
         self.set_fps_limit(self.DEFAULT_FPS_LIMIT)
         if self.viz is not None:

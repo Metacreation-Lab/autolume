@@ -1,4 +1,5 @@
 import copy
+import logging
 
 import imgui
 import numpy as np
@@ -16,6 +17,9 @@ import os
 import re
 import pandas as pd
 from widgets.help_icon_widget import HelpIconWidget
+
+logger = logging.getLogger(__name__)
+
 
 def _locate_results(pattern):
     return pattern
@@ -56,7 +60,6 @@ class MixingModule:
         self.model_dropdowns = {m: ModelDropdownButton(menu.model_downloader, label='Browse...') for m in (1, 2)}
 
     def load_pkl(self, pkl, m, ignore_errors=False):
-        print("loading---------")
         menu = self.menu
         try:
             resolved = self.resolve_pkl(pkl)
@@ -66,7 +69,7 @@ class MixingModule:
             else:
                 self.model2 = resolved
         except Exception as e:
-            print("error", e)
+            logger.error("Failed to resolve network pickle %s: %s", pkl, e)
             self.cur_pkl = None
             self.user_pkl = pkl
             if pkl != '':
@@ -86,19 +89,17 @@ class MixingModule:
                     flags=imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_COLLAPSE)
         imgui.text(f"Loading model...{name}")
         imgui.end()
-        print("loading model starting get function, should be showing a window", name)
         net, data = self.get_network(resolved, 'G_ema')
 
         # if net is an exception then show a popup with the error
         if isinstance(net, Exception):
             imgui.open_popup('Error##pkl')
-            print("error", net)
+            logger.error("Failed to load network pickle: %s", net)
             if imgui.begin_popup('Error##pkl'):
                 imgui.text(f'Failed to load network pickle because of the following error: {net}')
                 imgui.end_popup()
             return
 
-        print("Net is:", net)
         if m == 1:
             self.pkl1 = net
             self.data1 = data
@@ -137,7 +138,7 @@ class MixingModule:
     def get_network(self, pkl, key, **tweak_kwargs):
         data = self._pkl_data.get(pkl, None)
         if data is None:
-            print(f'Loading "{pkl}"... ', end='', flush=True)
+            logger.info('Loading network pickle "%s"', pkl)
             try:
                 with dnnlib.util.open_url(pkl, verbose=False) as f:
                     data = legacy.load_network_pkl(f, custom=True)
@@ -421,12 +422,10 @@ class MixingModule:
         dict_dest = model_out.state_dict()
         # depending on what model is used in the first entry extract the mapping layers from the corresponding model and copy them to the new model
         if self.combined_layers[0] == "A":
-            print("MAPPING A")
             mapping_names = extract_mapping_names(self.pkl1)
             for name in mapping_names:
                 dict_dest[name] = self.pkl1.state_dict()[name]
         elif self.combined_layers[0] == "B":
-            print("MAPPING B")
             mapping_names = extract_mapping_names(self.pkl2)
             for name in mapping_names:
                 dict_dest[name] = self.pkl2.state_dict()[name]
@@ -434,16 +433,14 @@ class MixingModule:
         # iterate over self.combine_channels and copy weights from self.pkl1 or self.pkl2 depending on the value
         for i, entry in enumerate(self.combined_layers):
             if entry == "A":
-                print("A")
                 dict_dest[layer1[i]] = self.pkl1.state_dict()[layer1[i]]
             elif entry == "B":
-                print("B")
                 dict_dest[layer2[i]] = self.pkl2.state_dict()[layer2[i]]
 
         model_out_dict = model_out.state_dict()
         model_out_dict.update(dict_dest)
         model_out.load_state_dict(dict_dest)
-        print("Saving model...")
+        logger.info("Saving mixed model %s", self.output_name)
         data = dict([('G', None), ('D', None), ('G_ema', None)])
 
         with open(os.path.join(ensure_models_dir(), self.output_name + ".pkl"), 'wb') as f:

@@ -1,3 +1,4 @@
+import logging
 import torch
 from torch import nn
 from torch.nn import init
@@ -8,6 +9,9 @@ import torchvision
 import random
 import os
 import kornia
+
+
+logger = logging.getLogger(__name__)
 
 class Sobel(nn.Module):
     def __init__(self):
@@ -25,7 +29,6 @@ class Canny(nn.Module): #find a way to make faster
         super().__init__()
     
     def forward(self, x, params, indices):
-        print(x.shape)
         if params[0]:
                 # raise ValueError
             _, tf = kornia.filters.canny(x.permute(1,0,2,3)[indices])
@@ -38,9 +41,7 @@ class Erode(nn.Module):
     
     def forward(self, x, params, indices):
         if(not isinstance(params[0], int) or params[0] < 0):
-            print('Erosion parameter must be a positive integer')
-            # raise ValueError
-        print(params)
+            logger.warning('Erosion parameter must be a positive integer')
         x[:, indices] = kornia.morphology.erosion(x[:, indices], torch.ones((params[0],params[0]), device=x.device).to(x.dtype), engine="convolution")
         return x
 
@@ -50,7 +51,7 @@ class Dilate(nn.Module):
     
     def forward(self, x, params, indices):
         if(not isinstance(params[0], int) or params[0] < 0):
-            print('Dilation parameter must be a positive integer')
+            logger.warning('Dilation parameter must be a positive integer')
             # raise ValueError
         x[:, indices] = kornia.morphology.dilation(x[:, indices], torch.ones((params[0],params[0]), device=x.device).to(x.dtype), engine="convolution")
         return x
@@ -129,7 +130,7 @@ class BinaryThreshold(nn.Module):
     
     def forward(self, x, params, indices):
         if(not isinstance(params[0], float) or params[0] < -1 or params[0] > 1):
-            print('Binary threshold parameter should be a float between -1 and 1.')
+            logger.warning('Binary threshold parameter should be a float between -1 and 1.')
             # raise ValueError
         x[:, indices] = (x[:, indices] > params[0]).to(x.dtype)
         return x
@@ -140,7 +141,7 @@ class ScalarMultiply(nn.Module):
     
     def forward(self, x, params, indices):
         if(not isinstance(params[0], float)):
-            print('Scalar multiply parameter should be a float')
+            logger.warning('Scalar multiply parameter should be a float')
             # raise ValueError
         x[:, indices] *= params[0]
         return x

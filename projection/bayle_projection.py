@@ -12,12 +12,15 @@
 """Project given image to the latent space of pretrained network pickle."""
 
 import copy
+import logging
 import os
 from time import perf_counter
 
 import multiprocessing as mp
 import clip
 import imageio
+
+logger = logging.getLogger(__name__)
 import numpy as np
 import PIL.Image
 from PIL import ImageFilter
@@ -109,7 +112,7 @@ def project(
     verbose                    = False,
     device: torch.device
 ):
-    print("target text", target_text, target_text == None, target_text == "")
+    logger.debug("Projection target text: %r", target_text)
     curr_img = None
     if target_image is not None:
         assert target_image.shape == (G.img_channels, G.img_resolution, G.img_resolution)
@@ -433,7 +436,7 @@ def run_projection(
 
     # Render debug output: optional video and projected image and W vector.
     if save_video:
-        print('Generating optimization progress video...')
+        logger.info('Generating optimization progress video...')
 
         video = imageio.get_writer(f'{save_path}/proj.mp4', mode='I', fps=10, codec='libx264', bitrate='16M')
         reply_queue.put([f'Saving optimization progress video "{save_path}/proj.mp4"', None, True, False])

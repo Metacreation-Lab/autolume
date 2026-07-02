@@ -4,6 +4,7 @@ import torch
 
 import dnnlib
 from utils import device_utils
+from utils.app_logging import LoggedProcess
 from widgets import renderer
 
 def compare_args(args, cur_args):
@@ -35,8 +36,8 @@ class AsyncRenderer:
         self._cur_stamp     = 0
         self._args_queue = multiprocessing.Queue()
         self._result_queue = multiprocessing.Queue()
-        self._process = multiprocessing.Process(target=self._process_fn, args=(self._args_queue, self._result_queue),
-                                                daemon=True)
+        self._process = LoggedProcess(target=self._process_fn, args=(self._args_queue, self._result_queue),
+                                      daemon=True, name='renderer')
         self._process.start()
 
     def close(self):

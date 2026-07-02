@@ -17,7 +17,6 @@ class Welcome:
     def __init__(self, app):
         self.app = app
         self.splash = cv2.imread("assets/splashscreen.jpg")
-        print(self.splash.shape)
         self.splash = cv2.cvtColor(self.splash, cv2.COLOR_BGR2RGB)
         self.splash_texture = gl_utils.Texture(image=self.splash, width=self.splash.shape[1], height=self.splash.shape[0], channels=self.splash.shape[2])
 

@@ -1,3 +1,4 @@
+import logging
 from torch import nn
 from torch.nn import init
 from torch.nn import functional as F
@@ -15,13 +16,16 @@ torch.ops.load_library("bending/transforms/rotate/build/librotate.so")
 torch.ops.load_library("bending/transforms/translate/build/libtranslate.so")
 
 
+
+logger = logging.getLogger(__name__)
+
 class Erode(nn.Module):
     def __init__(self):
         super().__init__()
 
     def forward(self, x, params, indicies):
         if (not isinstance(params[0], int) or params[0] < 0):
-            print('Erosion parameter must be a positive integer')
+            logger.warning('Erosion parameter must be a positive integer')
             # raise ValueError
 
         x_array = list(torch.split(x, 1, 1))
@@ -40,7 +44,7 @@ class Dilate(nn.Module):
 
     def forward(self, x, params, indicies):
         if (not isinstance(params[0], int) or params[0] < 0):
-            print('Dilation parameter must be a positive integer')
+            logger.warning('Dilation parameter must be a positive integer')
             # raise ValueError
 
         x_array = list(torch.split(x, 1, 1))
@@ -78,14 +82,12 @@ class Resize(nn.Module):
 
     def forward(self, x, params, indicies):
         if not isinstance(params[0], float) or not isinstance(params[1], float):
-            print('Resize must have two parameters, which should be positive floats.')
+            logger.warning('Resize must have two parameters, which should be positive floats.')
             # raise ValueError
         x_array = list(torch.split(x, 1, 1))
         for i, dim in enumerate(x_array):
             d_ = torch.squeeze(dim)
-            print(d_.size())
             tf = torch.ops.my_ops.resize(d_, params[0], params[1])
-            print(tf.size())
             tf = torch.unsqueeze(torch.unsqueeze(tf, 0), 0)
             x_array[i] = tf
         return torch.cat(x_array, 1)
@@ -97,7 +99,7 @@ class Scale(nn.Module):
 
     def forward(self, x, params, indicies):
         if (not isinstance(params[0], float)):
-            print('Scale parameter should be a float.')
+            logger.warning('Scale parameter should be a float.')
             # raise ValueError
         x_array = list(torch.split(x, 1, 1))
         for i, dim in enumerate(x_array):
@@ -115,7 +117,7 @@ class Rotate(nn.Module):
 
     def forward(self, x, params, indicies):
         if (not isinstance(params[0], float) or params[0] < 0 or params[0] > 360):
-            print('Rotation parameter should be a float between 0 and 360 degrees.')
+            logger.warning('Rotation parameter should be a float between 0 and 360 degrees.')
             # raise ValueError
         x_array = list(torch.split(x, 1, 1))
         for i, dim in enumerate(x_array):
@@ -179,7 +181,7 @@ class BinaryThreshold(nn.Module):
 
     def forward(self, x, params, indicies):
         if (not isinstance(params[0], float) or params[0] < -1 or params[0] > 1):
-            print('Binary threshold parameter should be a float between -1 and 1.')
+            logger.warning('Binary threshold parameter should be a float between -1 and 1.')
             # raise ValueError
 
         x_array = list(torch.split(x, 1, 1))
@@ -200,7 +202,7 @@ class ScalarMultiply(nn.Module):
 
     def forward(self, x, params, indicies):
         if (not isinstance(params[0], float)):
-            print('Scalar multiply parameter should be a float')
+            logger.warning('Scalar multiply parameter should be a float')
             # raise ValueError
 
         x_array = list(torch.split(x, 1, 1))
@@ -284,7 +286,6 @@ class ManipulationLayer(nn.Module):
                 self.save_activations(input, transform_dict['index'], transform_dict['params'][0],
                                       transform_dict['params'][1])
             if transform_dict['layerID'] == self.layerID:
-                print("indices",transform_dict.get('indices', [0]))
                 out = self.layer_options[transform_dict['transformID']](out, transform_dict['params'],
                                                                         transform_dict.get('indices', [0]))
         return out

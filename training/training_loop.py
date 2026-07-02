@@ -8,6 +8,7 @@
 
 """Main training loop."""
 
+import logging
 import os
 import time
 import copy
@@ -17,7 +18,6 @@ import psutil
 import PIL.Image
 import numpy as np
 import torch
-import traceback
 import dnnlib as dnnlib
 from torch_utils import misc, training_stats, legacy as legacy
 from torch_utils.ops import conv2d_gradfix, grid_sample_gradfix
@@ -26,6 +26,8 @@ from queue import Empty
 
 from metrics import metric_main
 from codecarbon import EmissionsTracker
+
+logger = logging.getLogger(__name__)
 
 #----------------------------------------------------------------------------
 
@@ -165,11 +167,8 @@ def training_loop(
             training_set.save_resized(run_dir)
             training_set.copy_frames_folders(run_dir)
             print()
-    except Exception as e:
-        print(f"Caught an exception of type: {type(e).__name__}")
-        print(f"Exception message: {str(e)}")
-        print("Traceback3:")
-        traceback.print_exc()
+    except Exception:
+        logger.exception("Failed to load training set")
         reply.put(['Exception occured during Loading of Training Set..', True])
 
     # Construct networks.
@@ -187,10 +186,9 @@ def training_loop(
 
         G.update_epochs(float(100 * nimg / (total_kimg * 1000)))  # 100 total top k "epochs" in total_kimg
         print('starting G epochs: ', G.epochs)
-    except:
+    except Exception:
+        logger.exception("Failed to construct networks")
         reply.put(['Exception occured during Network Construction..', True])
-        traceback.print_exc()  # Prints the full traceback for better debugging
-        reply.put(['Exception occurred during Network Construction..', True])
 
     # Resume from existing pickle.
     try:
@@ -220,7 +218,6 @@ def training_loop(
         c = torch.empty([batch_gpu, G.c_dim], device=device)
         # img, _ = misc.print_module_summary(G, [z, c])
         output = misc.print_module_summary(G, [z, c])
-        print(output)
         if len(output) == 1:
             misc.print_module_summary(D, [output, c])
         else:
@@ -301,11 +298,8 @@ def training_loop(
 
             save_image_grid(images, os.path.join(run_dir, 'fakes_init.png'), drange=[-1,1], grid_size=grid_size)
             reply.put([str(os.path.join(run_dir, 'fakes_init.png')), False])
-    except Exception as e:
-        print(f"Caught an exception of type: {type(e).__name__}")
-        print(f"Exception message: {str(e)}")
-        print("Traceback4:")
-        traceback.print_exc()
+    except Exception:
+        logger.exception("Failed to export sample images")
         reply.put(['Exception occured during Exporting of Sample Images..', True])
 
     # Initialize logs.

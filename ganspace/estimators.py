@@ -8,6 +8,7 @@
 # OF ANY KIND, either express or implied. See the License for the specific language
 # governing permissions and limitations under the License.
 
+import logging
 from sklearn.decomposition import FastICA, PCA, IncrementalPCA, MiniBatchSparsePCA, SparsePCA, KernelPCA
 import fbpca
 import numpy as np
@@ -16,6 +17,9 @@ from types import SimpleNamespace
 
 
 # ICA
+
+logger = logging.getLogger(__name__)
+
 class ICAEstimator():
     def __init__(self, n_components):
         self.n_components = n_components
@@ -74,7 +78,7 @@ class IPCAEstimator():
                 self.transformer.n_samples_seen_.astype(np.int64)  # avoid overflow
             return True
         except ValueError as e:
-            print(f'\nIPCA error:', e)
+            logger.error('IPCA error: %s', e)
             return False
 
     def get_components(self):
@@ -112,7 +116,7 @@ class PCAEstimator():
         dotps = [np.dot(*self.transformer.components_[[i, j]])
                  for (i, j) in itertools.combinations(range(self.n_components), 2)]
         if not np.allclose(dotps, 0, atol=1e-4):
-            print('IPCA components not orghogonal, max dot', np.abs(dotps).max())
+            logger.warning('IPCA components not orthogonal, max dot %s', np.abs(dotps).max())
 
         self.transformer.mean_ = X.mean(axis=0, keepdims=True)
 
@@ -155,7 +159,7 @@ class FacebookPCAEstimator():
         dotps = [np.dot(*self.transformer.components_[[i, j]])
                  for (i, j) in itertools.combinations(range(self.n_components), 2)]
         if not np.allclose(dotps, 0, atol=1e-4):
-            print('FBPCA components not orghogonal, max dot', np.abs(dotps).max())
+            logger.warning('FBPCA components not orthogonal, max dot %s', np.abs(dotps).max())
 
         self.transformer.mean_ = X.mean(axis=0, keepdims=True)
 
@@ -203,7 +207,7 @@ class SPCAEstimator():
         dotps = [np.dot(*self.transformer.components_[[i, j]])
                  for (i, j) in itertools.combinations(range(self.n_components), 2)]
         if not np.allclose(dotps, 0, atol=1e-4):
-            print('SPCA components not orghogonal, max dot', np.abs(dotps).max())
+            logger.warning('SPCA components not orthogonal, max dot %s', np.abs(dotps).max())
 
     def get_components(self):
         var_ratio = self.stdev ** 2 / self.total_var

@@ -6,6 +6,7 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 import contextlib
+import logging
 import re
 
 import cv2
@@ -28,6 +29,8 @@ import dnnlib
 from utils.gui_utils import imgui_utils, gl_utils
 from utils.resource_paths import resource_path
 from widgets import osc_menu
+
+logger = logging.getLogger(__name__)
 from assets.colors import *
 
 # ----------------------------------------------------------------------------
@@ -54,7 +57,7 @@ def open_path(trans):
         else:
             trans.cluster_config = None
     except Exception as e:
-        print(e)
+        logger.warning("Failed to load cluster config: %s", e)
         trans.cluster_config = None
 
 
@@ -107,7 +110,6 @@ class LayerWidget:
 
         self.transform_img = cv2.imread(str(resource_path("assets", "transformation.png")))
         self.transform_img = cv2.cvtColor(self.transform_img, cv2.COLOR_BGR2RGBA)
-        print("UNIQUES", np.unique(self.transform_img))
 
         self.transform_img[:, :, 3] = np.where(self.transform_img[:, :, 0] == 255, 255, 0)
         self.transform_texture = gl_utils.Texture(image=self.transform_img, width=self.transform_img.shape[1],
@@ -126,33 +128,22 @@ class LayerWidget:
             self.tab, self.img_scale_db, self.img_normalize
 
     def set_params(self, param):
-        print(1)
         self.mode = param[0]
-        print(2)
         self.names = param[2]
-        print(3)
         self.ratios = param[6]
-        print(4)
         self.capture_layer = param[9]
-        print(5)
         self.capture_channels = param[10]
-        print(6)
         self.tab = param[11]
-        print(7)
         self.img_scale_db = param[12]
-        print(8)
         self.img_normalize = param[13]
-        print(9)
         self.mode, cached_transforms, self.names, self.has_transforms, cached_adjustments, noises, self.ratios, self.paths, self.imgui_ids, self.capture_layer, self.capture_channels, self.tab, self.img_scale_db, self.img_normalize = param
-        print("success")
         for i, trans in enumerate(self.cached_transforms):
             for j in range(len(trans.params)):
                 try:
                     self.viz.osc_dispatcher.unmap(f"/{trans.osc_address[j]}",
                                                   self.transform_osc(trans, param_idx=j))
-                except Exception as e:
-                    print(e)
-                    print(f"{trans.osc_address[j]} is not mapped")
+                except Exception:
+                    logger.warning("OSC address %s is not mapped", trans.osc_address[j])
 
         self.cached_transforms = cached_transforms
         for i, trans in enumerate(self.cached_transforms):
@@ -165,9 +156,8 @@ class LayerWidget:
             try:
                 self.viz.osc_dispatcher.unmap(f"/{noise['osc_address']}",
                                               self.noise_osc(noise))
-            except Exception as e:
-                print(e)
-                print(f"{noise['osc_address']} is not mapped")
+            except Exception:
+                logger.warning("OSC address %s is not mapped", noise['osc_address'])
         self.noises = noises
         for _, noise in self.noises.items():
             if noise["use_osc"] and noise["osc_address"]:
@@ -369,7 +359,6 @@ class LayerWidget:
 
                         self.has_transforms[layer.name] = False
             else:
-                print([layer.name for layer in layers])
                 for layer in layers:
                     if 'conv' in layer.name or "torgb" in layer.name:
                         draw_list.channels_split(2)
@@ -722,12 +711,8 @@ class LayerWidget:
                                             try:
                                                 self.viz.osc_dispatcher.unmap(f"/{trans.osc_address[j]}",
                                                                               self.osc_funcs[trans.imgui_id][j])
-                                                print(f"Unmapped", trans.osc_address[j])
-                                                print(self.viz.osc_dispatcher.mappings)
-                                            except Exception as e:
-                                                print(f"{trans.osc_address[j]} is not mapped")
-                                                print(e)
-                                                print(self.viz.osc_dispatcher._map)
+                                            except Exception:
+                                                logger.warning("OSC address %s is not mapped", trans.osc_address[j])
                                             self.viz.osc_dispatcher.map(f"/{address}",
                                                                         self.osc_funcs[trans.imgui_id][j])
                                             trans.osc_address[j] = address
@@ -779,8 +764,8 @@ class LayerWidget:
                     if c_dict['cluster_index'] == int(trans.cluster_ID):
                         indices.append(c_dict['feature_index'])
                 if len(indices) == 0:
-                    print("No indicies found for clusterID: " + str(trans.cluster_ID) + " on layer: " + str(
-                        trans.layerID))
+                    logger.warning("No indices found for cluster %s on layer %s",
+                                   trans.cluster_ID, trans.layerID)
                 trans.indices = indices
         imgui.separator()
         imgui.end_group()
@@ -823,8 +808,8 @@ class LayerWidget:
                             try:
                                 self.viz.osc_dispatcher.unmap(f"/{noise['osc_address']}",
                                                               self.noise_osc(noise))
-                            except:
-                                print(f"{noise['osc_address']} is not mapped")
+                            except Exception:
+                                logger.warning("OSC address %s is not mapped", noise['osc_address'])
                             self.viz.osc_dispatcher.map(f"/{address}",
                                                         self.noise_osc(noise))
                             noise["osc_address"] = address

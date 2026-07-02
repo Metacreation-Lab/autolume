@@ -1,3 +1,4 @@
+import logging
 import copy
 import os
 import pickle
@@ -16,6 +17,8 @@ from training.distillation.Util.mask_util import Mask_the_Generator
 from training.distillation.Util.network_util import Get_Network_Shape
 from training.distillation.Util.pruning_util import Get_Uniform_RmveList, Generate_Prune_Mask_List
 
+logger = logging.getLogger(__name__)
+
 
 @click.command()
 @click.argument('pkl', metavar='PATH', nargs=-1)
@@ -31,7 +34,6 @@ def clickmain(pkl, outdir, n_samples, batch_size, noise_prob, remove_ratio, cust
 
 def main(pkl, outdir, n_samples, batch_size, noise_prob, remove_ratio, custom=True, info_print=False):
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print("CUSTOM", custom)
     # Generator Loading
 
     with dnnlib.util.open_url(pkl, verbose=False) as f:
@@ -51,7 +53,7 @@ def main(pkl, outdir, n_samples, batch_size, noise_prob, remove_ratio, custom=Tr
 
     end_time = time.time()
 
-    print('The content-aware metric scoring takes: ' + str(round(end_time - start_time, 4)) + ' seconds')
+    logger.info('Content-aware metric scoring took %s seconds', round(end_time - start_time, 4))
 
     # Generator Pruning
     net_shape = Get_Network_Shape(g_ema)

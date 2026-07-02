@@ -1,3 +1,4 @@
+import logging
 import os
 import imgui
 import cv2
@@ -6,6 +7,9 @@ import pandas as pd
 from PIL import Image
 import imageio
 from . import gl_utils
+
+
+logger = logging.getLogger(__name__)
 
 class HelperWindow:
     """Helper window component that supports displaying text descriptions, images, GIFs and videos"""
@@ -43,7 +47,7 @@ class HelperWindow:
                 self._load_media(key)
                 
         except Exception as e:
-            print(f"Error loading help contents: {str(e)}")
+            logger.warning("Error loading help contents: %s", e)
 
     def _load_media(self, key):
         """Load media files"""
@@ -65,7 +69,7 @@ class HelperWindow:
                         channels=img.shape[2]
                     )
             except Exception as e:
-                print(f"Failed to load image {content['image_path']}: {str(e)}")
+                logger.warning("Failed to load image %s: %s", content['image_path'], e)
 
         # Load GIF
         if content['gif_path'] and os.path.exists(content['gif_path']):
@@ -90,7 +94,7 @@ class HelperWindow:
                     channels=first_frame.shape[2]
                 )
             except Exception as e:
-                print(f"Failed to load GIF {content['gif_path']}: {str(e)}")
+                logger.warning("Failed to load GIF %s: %s", content['gif_path'], e)
 
         # Load video first frame
         if content['video_path'] and os.path.exists(content['video_path']):
@@ -107,7 +111,7 @@ class HelperWindow:
                     )
                 cap.release()
             except Exception as e:
-                print(f"Failed to load video {content['video_path']}: {str(e)}")
+                logger.warning("Failed to load video %s: %s", content['video_path'], e)
 
     def update_gif_frame(self, key):
         """Update GIF frame"""
@@ -132,7 +136,7 @@ class HelperWindow:
                     self.last_update_time[key] = current_time
                     
             except Exception as e:
-                print(f"Error updating GIF frame: {str(e)}")
+                logger.warning("Error updating GIF frame: %s", e)
 
     def show_help_marker(self, key, width=200, height=200):
         """Display help marker and popup window

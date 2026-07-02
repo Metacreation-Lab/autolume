@@ -10,6 +10,7 @@
 
 import functools
 import gzip
+import logging
 import io
 import json
 import os
@@ -26,10 +27,12 @@ import numpy as np
 import PIL.Image
 from tqdm import tqdm
 
+logger = logging.getLogger(__name__)
+
 #----------------------------------------------------------------------------
 
 def error(msg):
-    print('Error: ' + msg)
+    logger.error('%s', msg)
     sys.exit(1)
 
 #----------------------------------------------------------------------------
@@ -144,8 +147,8 @@ def open_lmdb(lmdb_dir: str, *, max_images: Optional[int]):
                     yield dict(img=img, label=None)
                     if idx >= max_idx-1:
                         break
-                except:
-                    print(sys.exc_info()[1])
+                except Exception:
+                    logger.warning("Failed to read image: %s", sys.exc_info()[1])
 
     return max_idx, iterate_images()
 

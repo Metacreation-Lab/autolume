@@ -8,11 +8,14 @@
 import copy
 import os
 
+import logging
 import numpy as np
 import torch
 import torch.nn.functional as F
 
 from widgets.native_browser_widget import NativeBrowserWidget
+
+logger = logging.getLogger(__name__)
 
 try:
     import cPickle as pickle
@@ -57,7 +60,6 @@ class LatentWidget:
 
     def save(self, path):
         with open(path, "wb") as f:
-            print(self.get_params())
             pickle.dump(self.get_params(), f)
 
     def load(self, path):
@@ -187,11 +189,10 @@ class LatentWidget:
             path = self.browser.select_vector_file(initial_dir=self.vec_path)
             if path:
                 self.vec_path = str(path)
-                print("Selected vector at", self.vec_path)
 
         imgui.same_line()
         if imgui_utils.button("Load##vecmode", width=viz.app.button_w, enabled=self.vec_path is not None and self.vec_path != ''):
-            print("Loading vector from", self.vec_path)
+            logger.info("Loading vector from %s", self.vec_path)
             if self.vec_path:
                 if self.vec_path.endswith('.npy'):
                     self.latent.vec = torch.from_numpy(np.load(self.vec_path))
@@ -202,8 +203,8 @@ class LatentWidget:
                     if len(self.latent.vec.shape) == 1:
                         self.latent.vec = self.latent.vec.unsqueeze(0)
                 else:
-                    print("Unsupported file format")
-                print("Loaded vector of shape", self.latent.vec.shape)
+                    logger.warning("Unsupported vector file format: %s", self.vec_path)
+                logger.debug("Loaded vector of shape %s", self.latent.vec.shape)
                 self.latent.next = torch.randn(self.latent.next.shape)
 
 
@@ -259,7 +260,7 @@ class LatentWidget:
                 if isinstance(value, (int, float)):
                     index = round(value)
                     if index < 0 or index >= len(pickle_widget.browse_cache):
-                        print(f"OSC model: index {index} out of range (0-{len(pickle_widget.browse_cache) - 1})")
+                        logger.warning("OSC model: index %d out of range (0-%d)", index, len(pickle_widget.browse_cache) - 1)
                         return
                     target = pickle_widget.browse_cache[index]
                 elif isinstance(value, str):
@@ -274,7 +275,7 @@ class LatentWidget:
                                 target = path
                                 break
                     if target is None:
-                        print(f"OSC model: no model matching '{value}' found")
+                        logger.warning("OSC model: no model matching '%s' found", value)
                         return
                 else:
                     return

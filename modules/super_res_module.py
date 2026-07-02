@@ -1,3 +1,4 @@
+import logging
 import os
 import threading
 import time
@@ -10,6 +11,7 @@ import torchvision.transforms.functional as F
 import numpy as np
 
 from utils import device_utils
+from utils.app_logging import LoggedProcess
 from utils.device_utils import get_device
 from utils.gui_utils import imgui_utils
 from super_res.super_res import main as super_res_main, load_model, get_resolution, check_width_height, get_audio, Reader, Writer, run_super_res, sr_weight_path, ensure_sr_weight
@@ -26,6 +28,8 @@ import pandas as pd
 args = EasyDict(result_path="", input_path=[""], model_type="Balance",
                 outscale=3, width=4096, height=4096, sharpen_scale=1, scale_mode=0)
 scale_factor = ['1', '2', '3', '4', '5', '6', '7', '8']
+
+logger = logging.getLogger(__name__)
 
 
 class SuperResModule:
@@ -153,7 +157,6 @@ class SuperResModule:
             files = self.browser.select_media_files(initial_dir=self.input_path[0] if self.input_path else "")
             if files:
                 self.input_path = [str(f) for f in files]
-                print(self.input_path)
 
         # Result path
         imgui.text("Save Path")
@@ -165,8 +168,6 @@ class SuperResModule:
             directory_path = self.browser.select_directory("Select Save Directory", initial_dir=self.result_path)
             if directory_path:
                 self.result_path = directory_path.replace('\\', '/')
-            else:
-                print("No save path selected")
         self.models = ['Quality','Balance','Fast']
         if len(self.models) > 0:
             # Model selection
@@ -181,8 +182,6 @@ class SuperResModule:
         imgui.same_line()
         with imgui_utils.item_width(input_width):
             clicked, self.scale_mode = imgui.combo("##scale_mode", self.scale_mode, ["Custom", "Scale"])
-        if clicked:
-            print(self.scale_mode)
 
         # Scale factor or custom resolution
         if self.scale_mode:
@@ -212,7 +211,6 @@ class SuperResModule:
 
         try:
             if imgui.button("Super Resolution", width=imgui.get_content_region_available_width()) and not self.running and not self.downloading:
-                print("Super Resolution")
                 args.result_path = self.result_path
                 args.input_path = self.input_path
                 args.model_type = self.model_type
@@ -224,15 +222,16 @@ class SuperResModule:
                 self.args = args
                 if os.path.exists(sr_weight_path(self.model_type)):
                     self.running = True
-                    print("Starting Super Resolution")
+                    logger.info("Starting super resolution: input=%s output=%s model=%s",
+                                self.input_path, self.result_path, self.model_type)
                     self.start_super_res()
                     imgui.open_popup("Super Resolution")
                 else:
                     self._begin_download(self.model_type)
                     imgui.open_popup("Downloading Model")
 
-        except Exception as e:
-            print("SRR ERROR", e)
+        except Exception:
+            logger.exception("Super resolution failed to start")
 
         if imgui.begin_popup_modal("Downloading Model", flags=imgui.WINDOW_NO_SCROLLBAR | imgui.WINDOW_ALWAYS_AUTO_RESIZE)[0]:
             self._display_download()
@@ -335,6 +334,6 @@ class SuperResModule:
         # Run upscaling in a separate process so it gets the GPU at full speed and the UI stays responsive
         self.queue = mp.Queue()
         self.reply = mp.Queue()
-        self.sr_process = mp.Process(target=run_super_res, args=(self.queue, self.reply), daemon=True)
+        self.sr_process = LoggedProcess(target=run_super_res, args=(self.queue, self.reply), daemon=True, name='super-res')
         self.sr_process.start()
         self.queue.put(self.args)

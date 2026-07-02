@@ -1,9 +1,11 @@
+import logging
 from pathlib import Path
 import pandas as pd
 import imgui
 from utils.gui_utils import imgui_utils
 import multiprocessing as mp
 
+from utils.app_logging import LoggedProcess
 from widgets.native_browser_widget import NativeBrowserWidget
 from widgets.thumbnail_widget import ThumbnailWidget
 from widgets.image_preview_widget import ImagePreviewWidget
@@ -13,6 +15,8 @@ from utils.dataset_preprocessing_utils import DatasetPreprocessingUtils
 
 resize_mode = ['stretch','center crop']
 padding_color = ['black', 'white', 'bleeding']
+
+logger = logging.getLogger(__name__)
 
 class DataPreprocessing:
     """Data Preprocessing UI"""
@@ -54,7 +58,7 @@ class DataPreprocessing:
         self.processing_queue = mp.Queue()
         self.processing_reply = mp.Queue()
         self.cancel_processing = False
-        self.processing_process = mp.Process(target=DatasetPreprocessingUtils.create_training_dataset, args=(self.processing_queue, self.processing_reply))
+        self.processing_process = LoggedProcess(target=DatasetPreprocessingUtils.create_training_dataset, args=(self.processing_queue, self.processing_reply), name='dataset-build')
         
         # Processing popup control
         self.is_processing_dataset = False
@@ -221,9 +225,10 @@ class DataPreprocessing:
                     self.is_processing_video = True
                     self.loading_widget.show_simple("Extracting frames...", show_progress=True)
                     self.loading_widget.update_progress(0, len(self.selected_video_files))
-                    mp.Process(
+                    LoggedProcess(
                         target=DatasetPreprocessingUtils.extract_videos,
-                        args=(self.selected_video_files, self.fps, self.video_extraction_queue, self.video_extraction_reply)
+                        args=(self.selected_video_files, self.fps, self.video_extraction_queue, self.video_extraction_reply),
+                        name='video-extract'
                     ).start()
             else:
                 self.loading_widget.render()
@@ -472,14 +477,12 @@ class DataPreprocessing:
             directory_path = self.data_browser.select_directory("Select Save Path", initial_dir=self.save_path)
             if directory_path:
                 self.save_path = directory_path.replace('\\', '/')
-            else:
-                print("No save path selected")
         
         imgui.spacing()
         
         if imgui.button("Process & Save Data", width=parameter_column_width, height=30):
             if not self.imported_files:
-                print("No images to process.")
+                logger.warning("No images to process")
             else:
                 self.settings.images = self.imported_files
 
@@ -872,9 +875,10 @@ class DataPreprocessing:
 
         self.processing_queue.put(self.settings)
         
-        self.processing_process = mp.Process(
+        self.processing_process = LoggedProcess(
             target=DatasetPreprocessingUtils.create_training_dataset,
-            args=(self.processing_queue, self.processing_reply))
+            args=(self.processing_queue, self.processing_reply),
+            name='dataset-build')
         self.processing_process.start()
     # ------------------------------
 
@@ -898,7 +902,7 @@ class DataPreprocessing:
                 self.help_icon.cleanup()
                 
         except Exception as e:
-            print(f"Warning: Error during cleanup: {e}")
+            logger.warning("Error during cleanup: %s", e)
 
     def reset_progress_variables(self):
         """Reset progress tracking variables to default values"""
