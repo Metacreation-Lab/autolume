@@ -6,7 +6,7 @@ Explore features and published artworks on the [Autolume website](https://www.me
 
 ## Platform support
 
-Autolume is supported on Windows 10 and 11, Ubuntu 24.04, and macOS on Apple Silicon.
+Autolume is supported on Windows 10+, Ubuntu 24+, and macOS 14+ on Apple Silicon.
 
 For best performance, an Nvidia GPU is required (RTX 2070 or higher recommended).
 
