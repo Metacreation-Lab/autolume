@@ -18,7 +18,7 @@ class DatasetPreprocessingUtils:
     """Utility class to support dataset preprocessing functions."""
     def __init__(self):
         self.images = []
-        self.resizeMode = 0 # 0 = stretch, 1 = center crop
+        self.resizeMode = 1 # 0 = stretch, 1 = center crop
         self.size = 128
         self.nonSquare = False
         self.fps = 10
