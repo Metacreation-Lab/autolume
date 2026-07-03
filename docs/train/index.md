@@ -1,14 +1,14 @@
 # Train
 
-The Train screen enables users to train models using datasets created on the [Prepare](prepare.md) screen. It supports both training from scratch and resuming from existing checkpoints. It also leverages data augmentation during training to improve model stability and performance, particularly when working with smaller or less diverse datasets. Throughout the training process, checkpoints and image outputs are automatically generated to document progress and model development.
+The Train screen enables users to train models using datasets created on the [Prepare](../prepare.md) screen. It supports both training from scratch and resuming from existing checkpoints. It also leverages data augmentation during training to improve model stability and performance, particularly when working with smaller or less diverse datasets. Throughout the training process, checkpoints and image outputs are automatically generated to document progress and model development.
 
 The screen is split in two panes: training settings on the left, and live training output — status messages and the latest grid of generated sample images — on the right.
 
-![](assets/offline-modules-training-01.png)
+![](../assets/offline-modules-training-01.png)
 
 ## Dataset
 
-The dataset size can range from fewer than a hundred to several thousand samples. A minimum of 50–200 samples is recommended, depending on the diversity and variability of the data. For optimal results, all images within a dataset must have the same dimensions, as a consistent image size is required for model training. Resizing can be performed manually or handled automatically within Autolume on the [Prepare](prepare.md) screen.
+The dataset size can range from fewer than a hundred to several thousand samples. A minimum of 50–200 samples is recommended, depending on the diversity and variability of the data. For optimal results, all images within a dataset must have the same dimensions, as a consistent image size is required for model training. Resizing can be performed manually or handled automatically within Autolume on the [Prepare](../prepare.md) screen.
 
 ## Training Augmentation
 
@@ -16,7 +16,7 @@ To facilitate training with smaller datasets, two augmentation methods are provi
 
 While both methods serve the same purpose, they differ in how they apply these transformations. DiffAug uses fixed-strength, randomized augmentations in every training batch, introducing consistent variation. In contrast, ADA adjusts the strength of augmentations automatically based on how well the model is learning. It's recommended to experiment with both methods and their pipelines to find what works best for your dataset.
 
-If training performance remains poor even after experimenting with augmentation methods and pipelines, consider increasing the size and diversity of your dataset. Additional data can significantly improve model stability and output quality. You may also use the [Prepare](prepare.md) screen’s augmentation features to expand your dataset before training.
+If training performance remains poor even after experimenting with augmentation methods and pipelines, consider increasing the size and diversity of your dataset. Additional data can significantly improve model stability and output quality. You may also use the [Prepare](../prepare.md) screen’s augmentation features to expand your dataset before training.
 
 For a detailed guide on choosing the right augmentation method and pipeline, refer to this document: [How to Select Augmentation Method and Pipeline](training-aug.md)
 

@@ -40,4 +40,4 @@ To prepare a dataset, provide the following:
   - Padding Mode: Determines how empty areas are filled when adjusting aspect ratios.
 - Augmentation: Applies augmentation techniques to the imported images during processing. These transformations are used to increase dataset size. It is important to select augmentation options carefully based on the nature of the data; for example, if the dataset contains orientation-sensitive subjects such as human faces, flip operations should be adjusted accordingly.
 
-Once a dataset is prepared, head to the [Train](train.md) screen to train a model on it.
+Once a dataset is prepared, head to the [Train](train/index.md) screen to train a model on it.

@@ -10,7 +10,7 @@ Autolume is supported on Windows 10 and 11, Ubuntu 24.04, and macOS on Apple Sil
 
 For best performance, an Nvidia GPU is required (RTX 2070 or higher recommended).
 
-Windows users **must follow** the [Windows requirements guide](windows-requirements.md) for proper training performance.
+Windows and Linux users **must follow** the [system requirements guide](system-requirements.md) for proper training performance.
 
 ### Apple Silicon limitations (macOS / MPS)
 
@@ -26,7 +26,7 @@ Autolume opens on the **Perform** screen after the startup splash. A persistent
 navbar at the top of the window gives access to the four screens at any time:
 
 - **[Prepare](prepare.md)** — import images and videos and turn them into a training dataset.
-- **[Train](train.md)** — train a model on a prepared dataset, from scratch or resuming from a checkpoint.
+- **[Train](train/index.md)** — train a model on a prepared dataset, from scratch or resuming from a checkpoint.
 - **[Perform](perform.md)** — load a model and play with it live, in real time.
 - **[Tools](tools.md)** — Projection, Feature Extractor, Super Resolution, and Model Mixing.
 

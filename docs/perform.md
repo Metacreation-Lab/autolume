@@ -2,18 +2,6 @@
 
 The Perform screen is where you load a model and work with it in real time. It is the screen Autolume opens on after startup. It provides you with a diverse set of features to explore the latent space in different ways and to play with the parameters of the network. It also enables you to control the parameters via OSC protocol for audio-reactive and other kinds of interactive works.
 
-## OSC
-
-Autolume allows users to control parameters using its interface but also provides the option to control parameters using [OSC](https://www.google.com/url?q=https://ccrma.stanford.edu/groups/osc/index.html&sa=D&source=editors&ust=1769724592307780&usg=AOvVaw0M9rZhdAGtobHhNvfkNj2x). This allows you to control parameters in Autolume using other software, such as TouchDesigner, Max/MSP, or Processing. The OSC interface is available for all parameters on the Perform screen. Most widgets have an OSC menu similar to the following:
-
-![](assets/live-module-osc-01.png)
-
-It displays the different parameters that can be controlled using OSC. By clicking on a parameter name, a popup opens which allows you to check the box Use OSC to activate the OSC control for that parameter. In the next field, you can provide the OSC channel name. The last field is a mapping function that can be used to perform post-processing on the control signal to make sure that the right data range is used. This follows the math format defined by Python.
-
-![](assets/live-module-osc-02.jpg)
-
-Please see [Performance and OSC](#performance-and-osc) about how to set the OSC IP Address and port in the software you use to send the OSC signals.
-
 ## Network and Latent
 
 This widget allows you to load models and explore their latent space, i.e. the images it can generate.
@@ -174,3 +162,15 @@ The checkboxes allow you to choose which preset you want to load or save to. If 
 At the bottom you can define the path where the presets are saved to and loaded from. Using the "Preset Path" opens a file browser to select a folder. While the "Recent" button opens a popup with the most recently used folders.
 
 The OSC controls of this widget allow you to switch between presets in the current folder, by sending the name of the preset. Please note that you can rename your presets.
+
+## OSC
+
+Autolume allows users to control parameters using its interface but also provides the option to control parameters using [OSC](https://www.google.com/url?q=https://ccrma.stanford.edu/groups/osc/index.html&sa=D&source=editors&ust=1769724592307780&usg=AOvVaw0M9rZhdAGtobHhNvfkNj2x). This allows you to control parameters in Autolume using other software, such as TouchDesigner, Max/MSP, or Processing. The OSC interface is available for all parameters on the Perform screen. Most widgets have an OSC menu similar to the following:
+
+![](assets/live-module-osc-01.png)
+
+It displays the different parameters that can be controlled using OSC. By clicking on a parameter name, a popup opens which allows you to check the box Use OSC to activate the OSC control for that parameter. In the next field, you can provide the OSC channel name. The last field is a mapping function that can be used to perform post-processing on the control signal to make sure that the right data range is used. This follows the math format defined by Python.
+
+![](assets/live-module-osc-02.jpg)
+
+Please see [Performance and OSC](#performance-and-osc) about how to set the OSC IP Address and port in the software you use to send the OSC signals.

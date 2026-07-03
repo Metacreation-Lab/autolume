@@ -4,12 +4,20 @@ site_url = "https://metacreation-lab.github.io/autolume"
 repo_name = "Metacreation-Lab/autolume"
 repo_url = "https://github.com/Metacreation-Lab/autolume"
 extra_css = ["assets/extra.css"]
+nav = [
+    "index.md",
+    "prepare.md",
+    { Train = ["train/index.md", "train/training-aug.md"] },
+    "perform.md",
+    "tools.md",
+    "system-requirements.md",
+]
 
 [project.theme]
 variant = "classic"
 favicon = "assets/logo.webp"
 logo = "assets/logo.webp"
-features = ["navigation.footer"]
+features = ["navigation.footer", "navigation.indexes"]
 
 [project.theme.palette]
 primary = "custom"
