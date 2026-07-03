@@ -20,6 +20,20 @@ On Apple Silicon, training is expected to be extremely slow — roughly 17× slo
 
 Get the latest release from the official website: [Download at metacreation.net](https://www.metacreation.net/autolume#:~:text=Run%20Autolume)
 
+## Interface overview
+
+Autolume opens on the **Perform** screen after the startup splash. A persistent
+navbar at the top of the window gives access to the four screens at any time:
+
+- **[Prepare](prepare.md)** — import images and videos and turn them into a training dataset.
+- **[Train](train.md)** — train a model on a prepared dataset, from scratch or resuming from a checkpoint.
+- **[Perform](perform.md)** — load a model and play with it live, in real time.
+- **[Tools](tools.md)** — Projection, Feature Extractor, Super Resolution, and Model Mixing.
+
+On the right side of the navbar, the cog icon opens **Settings** and the book
+icon opens this documentation. While a training run is active, navigation is
+locked to the Train screen until training finishes or is stopped.
+
 ## Where Autolume stores your data
 
 Autolume keeps everything you generate or download — models, presets, captures,
@@ -30,5 +44,5 @@ user home folder).
 The preferences file that records your data folder lives at
 `~/.config/autolume/config.json`.
 
-Open **Settings** from the top banner in the menu to point Autolume at a
+Open **Settings** (the cog icon in the navbar) to point Autolume at a
 different folder, open it in your file manager, or reset it to the default.
