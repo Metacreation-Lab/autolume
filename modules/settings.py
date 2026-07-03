@@ -6,6 +6,7 @@ import imgui
 
 from assets import OPAQUEGREEN
 from utils.gui_utils import imgui_utils
+from utils.resource_paths import get_version
 from utils.user_data import config_file, data_root, default_data_root, set_data_root
 from widgets.native_browser_widget import NativeBrowserWidget
 
@@ -57,8 +58,7 @@ class Settings:
             imgui.open_popup(SETTINGS_POPUP)
             self._wants_open = False
 
-        imgui.set_next_window_size(
-            self.app.content_width * 0.5, self.app.content_height * 0.32)
+        imgui.set_next_window_size(self.app.content_width * 0.5, 0)
         imgui.set_next_window_position(
             self.app.content_width * 0.5, self.app.content_height * 0.5,
             pivot_x=0.5, pivot_y=0.5)
@@ -105,6 +105,11 @@ class Settings:
             if self.status:
                 imgui.spacing()
                 imgui.text_colored(self.status, 0.4, 0.8, 0.4)
+
+            imgui.spacing()
+            imgui.separator()
+            imgui.spacing()
+            imgui.text_colored(f"Version {get_version()}", 0.7, 0.7, 0.7)
 
             imgui.spacing()
             if imgui.button("Close"):

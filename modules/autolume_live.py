@@ -9,7 +9,7 @@ import gc
 
 from assets import RED, OPAQUEGREEN, HOVERGREEN
 from utils.gui_utils import imgui_window, gl_utils
-from utils.resource_paths import get_version, resource_path
+from utils.resource_paths import resource_path
 from widgets.help_icon_widget import DOCS_BASE_URL
 from enum import IntEnum
 
@@ -78,7 +78,7 @@ class Autolume(imgui_window.ImguiWindow):
     NAVBAR_SCALE = 1.25
 
     def __init__(self):
-        super().__init__(title=f'Autolume-Live v{get_version()}', window_width=3840, window_height=2160)
+        super().__init__(title='Autolume', window_width=3840, window_height=2160)
 
         self.state = States.WELCOME
         self.running = True

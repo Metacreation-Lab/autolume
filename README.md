@@ -1,15 +1,16 @@
 # Autolume
 
-Autolume-Live is a cross-platform tool for real-time visual performances using StyleGAN.
+Autolume is a cross-platform tool for real-time visual performances using StyleGAN.
 
 For detailed documentation and demos look at the [Metacreation Lab Website](https://www.metacreation.net/autolume).
 
-![Autolume-live Screen](images/autolume-screen.png)
+![Autolume Screen](assets/screenshot.jpg)
 
 ## Downloads
 
 Latest release:
 - [Autolume 2.16.2 for Windows](https://1sfu-my.sharepoint.com/:u:/g/personal/lringenb_sfu_ca/IQCoCAMiIz-BS6Rlvyu7aza8ATVbAzL-Hue0F1uXoNxHt-I?e=JF5bOq)
+- [Autolume 2.17.0 preview for macOS](https://github.com/Metacreation-Lab/autolume/releases/tag/v2.17.0-rc1-macos-preview)
 
 ## Examples
 
