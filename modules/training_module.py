@@ -11,7 +11,6 @@ from utils.app_logging import LoggedProcess
 from utils.gui_utils import imgui_utils
 from train import main as train_main
 from widgets.native_browser_widget import NativeBrowserWidget
-from utils.model_dir import list_model_pkls
 from utils.user_data import data_path
 from widgets.help_icon_widget import HelpIconWidget
 from widgets.model_dropdown_widget import ModelDropdownButton
@@ -37,7 +36,6 @@ class TrainingModule:
         self.app = menu.app
         self.config = 1
         self.resume_pkl = ""
-        self.browse_cache = []
         self.aug = 0
         self.ada_pipe = 7
         self.diffaug_pipe = 0
@@ -49,10 +47,7 @@ class TrainingModule:
         self.data_path_browser = NativeBrowserWidget()
         self.save_path_browser = NativeBrowserWidget()
 
-        # browse_cache holds extra pkls found in the selected data directory; the
-        # dropdown merges them with a fresh scan of the models folder on open.
-        self.model_dropdown = ModelDropdownButton(label='Browse',
-                                                  items_provider=lambda: list_model_pkls() + self.browse_cache)
+        self.model_dropdown = ModelDropdownButton(label='Browse', include_models=False)
 
         self.menu = menu
 
@@ -242,20 +237,6 @@ class TrainingModule:
                 directory_path = self.data_path_browser.select_directory("Select Training Dataset Directory", initial_dir=self.data_path)
                 if directory_path:
                     self.data_path = directory_path
-
-                    # Check for PKL files in the directory
-                    pkl_files = []
-                    data_path_dir = Path(self.data_path)
-                    if data_path_dir.is_dir():
-                        for pkl_path in data_path_dir.rglob("*.pkl"):
-                            if pkl_path.is_file():
-                                pkl_path_str = str(pkl_path)
-                                pkl_files.append(pkl_path_str)
-                                if pkl_path_str not in self.browse_cache:
-                                    self.browse_cache.append(pkl_path_str)
-
-                    if pkl_files:
-                        logger.debug("Found %d PKL files in directory", len(pkl_files))
 
             imgui.text("Resume Pkl")
             current_y = imgui.get_cursor_pos_y()
