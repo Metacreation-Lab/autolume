@@ -4,15 +4,21 @@
         <loc>https://metacreation-lab.github.io/dev/</loc>
       </url>
       <url>
-        <loc>https://metacreation-lab.github.io/dev/live-module/</loc>
+        <loc>https://metacreation-lab.github.io/dev/prepare/</loc>
       </url>
       <url>
-        <loc>https://metacreation-lab.github.io/dev/offline-modules/</loc>
+        <loc>https://metacreation-lab.github.io/dev/train/</loc>
       </url>
       <url>
-        <loc>https://metacreation-lab.github.io/dev/training-aug/</loc>
+        <loc>https://metacreation-lab.github.io/dev/train/training-aug/</loc>
       </url>
       <url>
-        <loc>https://metacreation-lab.github.io/dev/windows-requirements/</loc>
+        <loc>https://metacreation-lab.github.io/dev/perform/</loc>
+      </url>
+      <url>
+        <loc>https://metacreation-lab.github.io/dev/tools/</loc>
+      </url>
+      <url>
+        <loc>https://metacreation-lab.github.io/dev/system-requirements/</loc>
       </url>
 </urlset>
