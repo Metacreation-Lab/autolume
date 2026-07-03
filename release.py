@@ -97,7 +97,10 @@ def glfw_native_libs() -> list[tuple[Path, str]]:
     matches = sorted(glfw.glob(patterns[SYSTEM]))
     if not matches:
         fail(f"no GLFW native library matching '{patterns[SYSTEM]}' in {glfw}")
-    return [(matches[0], ".")]
+    # Keep alongside library.py in _internal/glfw/ so pyglfw's frozen loader
+    # finds it without env-var workarounds. On Windows this also ensures
+    # MSVCR120.dll is pre-loaded before glfw3.dll (required on fresh installs).
+    return [(matches[0], "glfw")]
 
 
 def ninja_binary() -> Path:

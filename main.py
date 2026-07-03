@@ -14,16 +14,6 @@ if sys.platform == 'linux' and os.environ.get('WAYLAND_DISPLAY'):
     os.environ.setdefault('PYGLFW_LIBRARY_VARIANT', 'x11')
 
 
-if IS_FROZEN:
-    # pyglfw loads its native library through ctypes at runtime; its frozen-mode
-    # search does not include the bundle root where the lib is packed, so point
-    # it at the bundled copy explicitly (checked before any other search path).
-    for _glfw_lib in ("libglfw.3.dylib", "glfw3.dll", "libglfw.so.3", "libglfw.so"):
-        _glfw_cand = os.path.join(sys._MEIPASS, _glfw_lib)
-        if os.path.exists(_glfw_cand):
-            os.environ.setdefault("PYGLFW_LIBRARY", _glfw_cand)
-            break
-
 from utils.user_data import ensure_data_path
 
 
