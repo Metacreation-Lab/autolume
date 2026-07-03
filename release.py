@@ -186,6 +186,15 @@ def build_args() -> list[str]:
         args += ["--add-data", spec_arg(src, dest)]
 
     args += ["--collect-all", "lpips", "--collect-all", "codecarbon"]
+
+    # PyOpenGL resolves its platform backend (GLX/EGL) via dynamic import at
+    # startup. PyInstaller misses these because there's no static import to trace.
+    if IS_LINUX:
+        args += [
+            "--hidden-import", "OpenGL.platform.glx",
+            "--hidden-import", "OpenGL.platform.egl",
+        ]
+
     return args
 
 
