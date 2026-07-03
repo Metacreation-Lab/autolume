@@ -5,10 +5,15 @@
     "aliases": []
   },
   {
-    "version": "2.16.2",
-    "title": "2.16.2",
+    "version": "2.17-rc1-macos-preview",
+    "title": "2.17-rc1-macos-preview",
     "aliases": [
       "latest"
     ]
+  },
+  {
+    "version": "2.16.2",
+    "title": "2.16.2",
+    "aliases": []
   }
 ]
