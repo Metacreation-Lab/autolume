@@ -76,19 +76,19 @@ For more technical details, please refer to:
 
 - Colour 
 
-    ![](assets/training-aug-diffaug-colour.png)
+    ![](../assets/training-aug-diffaug-colour.png)
 
     Colour transformations adjust brightness, saturation, and contrast to simulate different lighting conditions.
 
 - Translation
 
-    ![](assets/training-aug-diffaug-translation.png)
+    ![](../assets/training-aug-diffaug-translation.png)
 
     Translation shifts the image along the X and Y axes. Useful when subjects appear in different positions.
 
 - Cutout
 
-    ![](assets/training-aug-diffaug-cutout.png)
+    ![](../assets/training-aug-diffaug-cutout.png)
 
     Cutout masks random regions of the image, helping the model learn to focus on different parts of the image.
 
@@ -96,30 +96,30 @@ For more technical details, please refer to:
 
 - Blit (b)
 
-    ![](assets/training-aug-ada-blit.png)
+    ![](../assets/training-aug-ada-blit.png)
 
     Pixel blitting includes flips, 90° interval rotations, and translation operations.
 
 - Geometric (g)
 
-    ![](assets/training-aug-ada-geometric.png)
+    ![](../assets/training-aug-ada-geometric.png)
 
     General geometric transformations include zoom, rotation (up to 360°), and stretching/squishing.
 
 - Colour (c)
 
-    ![](assets/training-aug-ada-colour.png)
+    ![](../assets/training-aug-ada-colour.png)
 
     Colour transformations simulate different lighting through brightness, contrast, and saturation changes.
 
 - Filter (f)
 
-    ![](assets/training-aug-ada-filter.png)
+    ![](../assets/training-aug-ada-filter.png)
 
     Image-space filtering includes sharpening and blurring operations to adjust textures.
 
 - Noise (n) & Cutout (c)
 
-    ![](assets/training-aug-ada-noise.png)
+    ![](../assets/training-aug-ada-noise.png)
 
     Image-space corruptions include adding noise and masking random regions with patches.

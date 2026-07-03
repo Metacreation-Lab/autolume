@@ -22,7 +22,7 @@ save_path_training,training,"Path to save training results\nModel checkpoints an
 data_path_training,training,"Path to the training dataset."
 resume_pkl_training,training,"Model checkpoint file (.pkl) to resume training\nLeave empty to start from scratch"
 augmentation_training,training,"In-training data augmentation method.\nImprove training stability on smaller datasets.\nADA - Adaptive Discriminator Augmentation\nDiffAUG - Differential Augmentation"
-training_augmentation_guide,training,,/training-aug/
+training_augmentation_guide,training,,/train/training-aug/
 aug_pipeline_training,training,"Specific configuration of the data augmentation pipeline\nDifferent augmentation methods have different options",/train/
 batch_size_training,training,"Number of images per training batch\nLarger batches require more VRAM"
 config_training,training,"Preset training configurations:\nauto - Automatic configuration\nstylegan2 - Standard StyleGAN2\npaper256/512/1024 - Paper configurations\ncifar - CIFAR dataset configuration"
