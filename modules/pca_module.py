@@ -14,7 +14,7 @@ from utils import device_utils
 from utils.app_logging import LoggedProcess
 from utils.gui_utils import imgui_utils
 from ganspace.extract_pca import fit
-from widgets.model_download_widget import ModelDropdownButton
+from widgets.model_dropdown_widget import ModelDropdownButton
 from widgets.native_browser_widget import NativeBrowserWidget
 from widgets.help_icon_widget import HelpIconWidget
 from utils.user_data import data_path
@@ -50,7 +50,7 @@ class PCA_Module:
         self.save_path_browser = NativeBrowserWidget()
         self.X_comp, self.Z_comp = None, None
         self.done = False
-        self.model_dropdown = ModelDropdownButton(menu.model_downloader)
+        self.model_dropdown = ModelDropdownButton()
 
     @imgui_utils.scoped_by_object_id
     def __call__(self):

@@ -8,7 +8,7 @@ from torch_utils import legacy
 from architectures import custom_stylegan2
 from utils.gui_utils import imgui_utils
 from utils.model_dir import ensure_models_dir
-from widgets.model_download_widget import ModelDropdownButton
+from widgets.model_dropdown_widget import ModelDropdownButton
 import pickle
 
 import glob
@@ -50,7 +50,7 @@ class SurgeryModule:
 
         self.show_interface = False
 
-        self.model_dropdowns = {m: ModelDropdownButton(menu.model_downloader, label='Browse...') for m in (1, 2)}
+        self.model_dropdowns = {m: ModelDropdownButton(label='Browse...') for m in (1, 2)}
 
 
     def load_pkl(self, pkl, m,ignore_errors=False):

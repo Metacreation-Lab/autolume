@@ -22,7 +22,8 @@ import numpy as np
 from utils.gui_utils import imgui_utils
 from utils.model_dir import list_model_pkls, models_dir
 from widgets.native_browser_widget import NativeBrowserWidget
-from widgets.model_download_widget import ModelDownloadWidget, ModelDropdownButton
+from widgets.model_download_widget import ModelDownloadWidget
+from widgets.model_dropdown_widget import ModelDropdownButton
 
 from . import renderer
 
@@ -50,7 +51,7 @@ class PickleWidget:
 
         self.rescan_models()
         self.model_downloader = ModelDownloadWidget(viz.app, models_dir=models_dir(), on_complete=self.rescan_models)
-        self.model_dropdown = ModelDropdownButton(self.model_downloader, show_download=True)
+        self.model_dropdown = ModelDropdownButton(show_download=True, downloader=self.model_downloader)
 
     def rescan_models(self):
         self.browse_cache = list_model_pkls()

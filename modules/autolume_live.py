@@ -9,10 +9,8 @@ import gc
 
 from assets import RED, OPAQUEGREEN, HOVERGREEN
 from utils.gui_utils import imgui_window, gl_utils
-from utils.model_dir import models_dir
 from utils.resource_paths import get_version, resource_path
 from widgets.help_icon_widget import DOCS_BASE_URL
-from widgets.model_download_widget import ModelDownloadWidget
 from enum import IntEnum
 
 logger = logging.getLogger(__name__)
@@ -54,10 +52,9 @@ def draw_icon_button(icon_texture, label, icon_size, pad, height):
 
 class ModuleHost:
     """Minimal stand-in for the old Menu object: screen modules expect a
-    parent exposing `app` and `model_downloader`."""
+    parent exposing `app`."""
     def __init__(self, app):
         self.app = app
-        self.model_downloader = app.model_downloader
 
 
 class Autolume(imgui_window.ImguiWindow):
@@ -90,8 +87,6 @@ class Autolume(imgui_window.ImguiWindow):
         self.data_preprocessing = None
         self.settings = None
         self.settings_open = False
-
-        self.model_downloader = ModelDownloadWidget(self, models_dir())
 
         self._training_module = None
         self._projection_module = None
@@ -440,9 +435,6 @@ class Autolume(imgui_window.ImguiWindow):
                     self.state = States.ERROR
                 else:
                     self.data_preprocessing()
-
-            if self.state in (States.TRAINING, States.TOOLS):
-                self.model_downloader()
 
             if self.settings_open and self.settings is not None:
                 self.settings()

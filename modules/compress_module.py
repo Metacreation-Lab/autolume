@@ -6,7 +6,7 @@ import dnnlib
 from utils import device_utils
 from utils.gui_utils import imgui_utils
 from prune import main as prune_main
-from widgets.model_download_widget import ModelDropdownButton
+from widgets.model_dropdown_widget import ModelDropdownButton
 from train import main as train_main
 from utils import dataset_tool
 from utils.user_data import data_path
@@ -40,9 +40,9 @@ class CompressModule:
         self.img_size = 2 ** self.img_factor
         self.height = 2 ** self.height_factor
         self.batch_size = 8
-        self.compress_dropdown = ModelDropdownButton(menu.model_downloader, label='Browse...')
-        self.learner_dropdown = ModelDropdownButton(menu.model_downloader, label='Browse...')
-        self.teacher_dropdown = ModelDropdownButton(menu.model_downloader, label='Browse...')
+        self.compress_dropdown = ModelDropdownButton(label='Browse...')
+        self.learner_dropdown = ModelDropdownButton(label='Browse...')
+        self.teacher_dropdown = ModelDropdownButton(label='Browse...')
 
         self.menu = menu
 

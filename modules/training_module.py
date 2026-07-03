@@ -14,7 +14,7 @@ from widgets.native_browser_widget import NativeBrowserWidget
 from utils.model_dir import list_model_pkls
 from utils.user_data import data_path
 from widgets.help_icon_widget import HelpIconWidget
-from widgets.model_download_widget import ModelDropdownButton
+from widgets.model_dropdown_widget import ModelDropdownButton
 
 import cv2
 from utils.gui_utils import gl_utils
@@ -51,7 +51,7 @@ class TrainingModule:
 
         # browse_cache holds extra pkls found in the selected data directory; the
         # dropdown merges them with a fresh scan of the models folder on open.
-        self.model_dropdown = ModelDropdownButton(menu.model_downloader, label='Browse',
+        self.model_dropdown = ModelDropdownButton(label='Browse',
                                                   items_provider=lambda: list_model_pkls() + self.browse_cache)
 
         self.menu = menu

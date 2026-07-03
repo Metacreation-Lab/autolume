@@ -5,7 +5,7 @@ import numpy as np
 
 import dnnlib
 from utils.gui_utils import imgui_utils
-from widgets.model_download_widget import ModelDropdownButton
+from widgets.model_dropdown_widget import ModelDropdownButton
 
 try:
     import cPickle as pickle
@@ -70,7 +70,7 @@ class MixingWidget:
 
         self.browser = NativeBrowserWidget()
 
-        self.model_dropdown = ModelDropdownButton(viz.pickle_widget.model_downloader)
+        self.model_dropdown = ModelDropdownButton()
 
     @imgui_utils.scoped_by_object_id
     def __call__(self, show):

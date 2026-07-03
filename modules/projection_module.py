@@ -14,7 +14,7 @@ import multiprocessing as mp
 from projection.bayle_projection import run_projection
 from widgets.native_browser_widget import NativeBrowserWidget
 from widgets.help_icon_widget import HelpIconWidget
-from widgets.model_download_widget import ModelDropdownButton
+from widgets.model_dropdown_widget import ModelDropdownButton
 
 class ProjectionModule:
     def __init__(self, menu):
@@ -55,7 +55,7 @@ class ProjectionModule:
                                                 daemon=True, name='projection')
         self.projected_texture = None
 
-        self.model_dropdown = ModelDropdownButton(menu.model_downloader)
+        self.model_dropdown = ModelDropdownButton()
 
     @imgui_utils.scoped_by_object_id
     def __call__(self):
