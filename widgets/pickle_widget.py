@@ -50,7 +50,7 @@ class PickleWidget:
 
         self.rescan_models()
         self.model_downloader = ModelDownloadWidget(viz.app, models_dir=models_dir(), on_complete=self.rescan_models)
-        self.model_dropdown = ModelDropdownButton(self.model_downloader)
+        self.model_dropdown = ModelDropdownButton(self.model_downloader, show_download=True)
 
     def rescan_models(self):
         self.browse_cache = list_model_pkls()
