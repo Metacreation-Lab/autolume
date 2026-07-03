@@ -4,7 +4,7 @@ Guidance for AI coding assistants working on Autolume. Humans should read [CONTR
 
 ## Project snapshot
 
-Autolume is a no-coding generative AI system for real-time visual performances using StyleGAN. Target users are artists who train, craft, and perform with their own generative models. Built on Python 3.10 + PyTorch 2.8 (CUDA 12.8), with an imgui-based desktop UI. Windows is the primary platform; Linux (Ubuntu 24.04) is supported.
+Autolume is a no-coding generative AI system for real-time visual performances using StyleGAN. Target users are artists who train, craft, and perform with their own generative models. Built on Python 3.12 + PyTorch 2.8 (CUDA 12.8), with an imgui-based desktop UI. Windows is the primary platform; Linux (Ubuntu 24.04) is supported.
 
 ## Commands
 
@@ -23,7 +23,7 @@ Initial setup also requires CUDA 12.8, MSVC build tools (Windows), `portaudio19-
 ```
 autolume/
   main.py                     # Application entry point
-  pyproject.toml              # Dependencies, Python pin (3.10), CUDA torch index
+  pyproject.toml              # Dependencies, Python pin (3.12), CUDA torch index
   release.py                  # Cross-platform release script (drives PyInstaller)
 
   architectures/              # Generator/discriminator network definitions

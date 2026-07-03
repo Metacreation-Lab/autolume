@@ -15,7 +15,7 @@ Please include a Autolume version, OS, GPU, and CUDA version for any bug — man
 
 ## Development setup
 
-The full setup (CUDA, `uv`, model downloads, FFmpeg, platform-specific dependencies) is documented in the [README's "Development instructions" section](README.md#development-instructions). Please follow it as written; the environment is sensitive (Python 3.10, CUDA 12.8, pinned PyTorch 2.8 wheel).
+The full setup (CUDA, `uv`, model downloads, FFmpeg, platform-specific dependencies) is documented in the [README's "Development instructions" section](README.md#development-instructions). Please follow it as written; the environment is sensitive (Python 3.12, CUDA 12.8, pinned PyTorch 2.8 wheel).
 
 Quick reference once your environment is ready:
 
