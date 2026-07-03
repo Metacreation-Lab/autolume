@@ -7,6 +7,11 @@
   {
     "version": "2.17-rc1-macos-preview",
     "title": "2.17-rc1-macos-preview",
+    "aliases": []
+  },
+  {
+    "version": "2.17.0-rc1-macos-preview",
+    "title": "2.17.0-rc1-macos-preview",
     "aliases": [
       "latest"
     ]
