@@ -45,9 +45,9 @@ class DataPreprocessing:
         self.video_extraction_reply = mp.Queue()
         self.is_processing_video = False
         
-        self.res_factor = 0
-        self.start_res = self.settings.size 
-        self.img_res = self.start_res * (2 ** self.res_factor) # current image resolution
+        self.min_res = 8
+        self.max_res = 1024
+        self.img_res = self.settings.size # current image resolution
 
         self.square = True # non-square framing settings (image is square or not)
         
@@ -396,14 +396,12 @@ class DataPreprocessing:
             
             imgui.same_line()
             if imgui.button("-##img_res", width=button_width):
-                self.res_factor = max(self.res_factor - 1, 0)   
-                self.img_res = self.start_res * (2 ** self.res_factor)
+                self.img_res = max(self.img_res // 2, self.min_res)
                 self.settings.size = self.img_res
-            
+
             imgui.same_line()
             if imgui.button("+##img_res", width=button_width):
-                self.res_factor = self.res_factor + 1
-                self.img_res = self.start_res * (2 ** self.res_factor)
+                self.img_res = min(self.img_res * 2, self.max_res)
                 self.settings.size = self.img_res
             
             # Non-square settings checkbox
