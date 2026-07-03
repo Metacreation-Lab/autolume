@@ -42,7 +42,6 @@ dependencies = [
     "scipy==1.11.3",
     "setuptools<70",
     "timm==0.5.4",
-    "tomli>=2.0.1",
     "torch==2.8.0+cu128 ; sys_platform != 'darwin'",
     "torch==2.8.0 ; sys_platform == 'darwin'",
     "torchaudio==2.8.0+cu128 ; sys_platform != 'darwin'",
