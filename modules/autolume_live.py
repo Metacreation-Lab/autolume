@@ -15,6 +15,8 @@ from enum import IntEnum
 
 logger = logging.getLogger(__name__)
 
+FEEDBACK_URL = "https://docs.google.com/forms/d/e/1FAIpQLSe6ovWLmktE_AYGqxnSC_Ce1X6-A4X0_DAKeaEaej_RrBUgHQ/viewform"
+
 class States(IntEnum):
     ERROR = -2
     CLOSE = -1
@@ -110,6 +112,10 @@ class Autolume(imgui_window.ImguiWindow):
         self.book = cv2.imread(str(resource_path("assets", "book.png")), cv2.IMREAD_UNCHANGED)
         self.book_texture = gl_utils.Texture(image=self.book, width=self.book.shape[1],
                                              height=self.book.shape[0], channels=self.book.shape[2])
+
+        self.comment = cv2.imread(str(resource_path("assets", "comment.png")), cv2.IMREAD_UNCHANGED)
+        self.comment_texture = gl_utils.Texture(image=self.comment, width=self.comment.shape[1],
+                                                height=self.comment.shape[0], channels=self.comment.shape[2])
 
         self.navbar_height = round(self.BASE_FONT_SIZE * self.NAVBAR_SCALE * 2.2)
 
@@ -318,15 +324,20 @@ class Autolume(imgui_window.ImguiWindow):
         button_width = icon_size + 2 * item_pad
         edge_pad = round(nav_font * 0.9)
 
-        imgui.same_line(self.content_width - (edge_pad + 2 * button_width + item_spacing))
+        imgui.same_line(self.content_width - (edge_pad + 3 * button_width + 2 * item_spacing))
         imgui.set_cursor_pos_y(0)
-        if draw_icon_button(self.cog_texture, "Settings", icon_size, item_pad, self.navbar_height):
-            self.open_settings()
+        if draw_icon_button(self.comment_texture, "Feedback", icon_size, item_pad, self.navbar_height):
+            webbrowser.open(FEEDBACK_URL)
 
-        imgui.same_line(self.content_width - (edge_pad + button_width))
+        imgui.same_line(self.content_width - (edge_pad + 2 * button_width + item_spacing))
         imgui.set_cursor_pos_y(0)
         if draw_icon_button(self.book_texture, "Documentation", icon_size, item_pad, self.navbar_height):
             webbrowser.open(DOCS_BASE_URL)
+
+        imgui.same_line(self.content_width - (edge_pad + button_width))
+        imgui.set_cursor_pos_y(0)
+        if draw_icon_button(self.cog_texture, "Settings", icon_size, item_pad, self.navbar_height):
+            self.open_settings()
 
         imgui.end()
 
