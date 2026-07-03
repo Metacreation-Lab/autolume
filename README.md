@@ -71,6 +71,12 @@ ffmpeg/ffprobe are downloaded and bundled into the release automatically via
 - **macOS:** output is `dist/Autolume.app`. It is unsigned, so the first launch
   needs right-click → Open.
 
+Pass `--package` to additionally produce a distributable: an `.AppImage` on
+Linux, a `.dmg` on macOS, or an Inno Setup installer on Windows (requires
+[Inno Setup](https://jrsoftware.org/isdl.php) on the build machine, installable
+with `winget install --id JRSoftware.InnoSetup.7 -e -s winget -i`). Use
+`--package-only` to package an existing `dist/` output without rebuilding.
+
 ### Building documentation
 
 ```bash

@@ -17,9 +17,15 @@ right PyInstaller invocation:
 ffmpeg/ffprobe are bundled on every platform via ffmpeg-downloader so the
 artifact is self-contained (Windows uses gyan.dev's essentials build).
 
+Pass ``--package`` to additionally wrap the build into the platform's
+distributable format: ``.AppImage`` (zstd) on Linux, ``.dmg`` (lzma) on macOS,
+an Inno Setup installer (lzma2) on Windows. ``--package-only`` skips the
+PyInstaller build and packages an existing ``dist/`` output.
+
 PyInstaller cannot cross-compile: each artifact must be built on its own OS.
 """
 
+import argparse
 import importlib.util
 import os
 import platform
@@ -28,6 +34,7 @@ import shutil
 import subprocess
 import sys
 import sysconfig
+import urllib.request
 from pathlib import Path
 
 import ffmpeg_downloader as ffdl
@@ -46,6 +53,8 @@ NEEDS_JIT_TOOLCHAIN = IS_WINDOWS or IS_LINUX
 
 # Staging dir for the precompiled ops bundled into the release.
 PRECOMPILED_OPS_DIR = REPO / "build" / "torch_extensions"
+
+APPIMAGETOOL_URL = "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
 
 # torch 2.8 wheels ship a libomp.dylib stamped minos 14.0 despite the
 # macosx_11_0_arm64 tag (pytorch/pytorch#177140), so the bundle cannot load on
@@ -323,7 +332,167 @@ def post_build() -> None:
         print(f"Release created in {REPO / 'dist' / 'Autolume'}")
 
 
+def artifact_name(ext: str) -> str:
+    return f"autolume-{get_version()}-{SYSTEM.lower()}-{platform.machine().lower()}{ext}"
+
+
+def appimagetool_path() -> Path:
+    on_path = shutil.which("appimagetool")
+    if on_path:
+        return Path(on_path)
+    tool = REPO / "build" / "tools" / "appimagetool-x86_64.AppImage"
+    if not tool.exists():
+        print("Downloading appimagetool...")
+        tool.parent.mkdir(parents=True, exist_ok=True)
+        urllib.request.urlretrieve(APPIMAGETOOL_URL, tool)
+        tool.chmod(0o755)
+    return tool
+
+
+def package_linux() -> None:
+    appdir = REPO / "build" / "Autolume.AppDir"
+    if appdir.exists():
+        shutil.rmtree(appdir)
+    shutil.copytree(REPO / "dist" / "Autolume", appdir / "usr" / "bin", symlinks=True)
+
+    apprun = appdir / "AppRun"
+    apprun.write_text(
+        '#!/bin/sh\n'
+        'HERE="$(dirname "$(readlink -f "$0")")"\n'
+        'exec "$HERE/usr/bin/Autolume" "$@"\n'
+    )
+    apprun.chmod(0o755)
+
+    (appdir / "Autolume.desktop").write_text(
+        "[Desktop Entry]\n"
+        "Type=Application\n"
+        "Name=Autolume\n"
+        "Exec=Autolume\n"
+        "Icon=autolume\n"
+        "Categories=Graphics;\n"
+        "Terminal=false\n"
+    )
+    shutil.copy2(REPO / "assets" / "metacreation-logo.png", appdir / "autolume.png")
+
+    output = REPO / "dist" / artifact_name(".AppImage")
+    # APPIMAGE_EXTRACT_AND_RUN lets appimagetool run without FUSE on the build host.
+    env = {**os.environ, "ARCH": "x86_64", "APPIMAGE_EXTRACT_AND_RUN": "1"}
+    # appimagetool's bundled mksquashfs only supports zstd; level 22 is max.
+    subprocess.run(
+        [str(appimagetool_path()), "--comp", "zstd",
+         "--mksquashfs-opt", "-Xcompression-level", "--mksquashfs-opt", "22",
+         str(appdir), str(output)],
+        check=True, env=env,
+    )
+    print(f"Packaged {output}")
+
+
+def package_macos() -> None:
+    staging = REPO / "build" / "dmg"
+    if staging.exists():
+        shutil.rmtree(staging)
+    staging.mkdir(parents=True)
+    # ditto preserves the ad-hoc code signature; shutil.copytree can break it.
+    subprocess.run(
+        ["ditto", str(REPO / "dist" / "Autolume.app"), str(staging / "Autolume.app")],
+        check=True,
+    )
+    os.symlink("/Applications", staging / "Applications")
+
+    output = REPO / "dist" / artifact_name(".dmg")
+    subprocess.run(
+        ["hdiutil", "create", "-volname", "Autolume", "-srcfolder", str(staging),
+         "-format", "ULMO", "-ov", str(output)],
+        check=True,
+    )
+    print(f"Packaged {output}")
+
+
+def iscc_path() -> Path:
+    on_path = shutil.which("ISCC")
+    if on_path:
+        return Path(on_path)
+    # Inno Setup never adds itself to PATH. Version 7 defaults to a per-user
+    # install under LOCALAPPDATA\Programs; 6 (and machine-wide 7) go to
+    # Program Files (x86).
+    roots = [
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Programs",
+        Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")),
+        Path(os.environ.get("ProgramFiles", r"C:\Program Files")),
+    ]
+    for root in roots:
+        for version in ("Inno Setup 7", "Inno Setup 6"):
+            candidate = root / version / "ISCC.exe"
+            if candidate.exists():
+                return candidate
+    fail("Inno Setup (ISCC.exe) not found; install it from https://jrsoftware.org/isdl.php")
+
+
+def package_windows() -> None:
+    version = get_version()
+    output_base = artifact_name("")
+    # Inno Setup caps single-file output at ~2 GB; if a build ever exceeds it,
+    # add DiskSpanning=yes (splits the installer into .bin slices).
+    iss = REPO / "build" / "autolume.iss"
+    iss.parent.mkdir(parents=True, exist_ok=True)
+    iss.write_text(f"""\
+[Setup]
+AppName=Autolume
+AppVersion={version}
+AppPublisher=Metacreation Lab
+DefaultDirName={{autopf}}\\Autolume
+DefaultGroupName=Autolume
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
+Compression=lzma2
+SolidCompression=yes
+SetupIconFile={REPO / 'assets' / 'metacreation-logo.ico'}
+UninstallDisplayIcon={{app}}\\Autolume.exe
+OutputDir={REPO / 'dist'}
+OutputBaseFilename={output_base}
+
+[Tasks]
+Name: "desktopicon"; Description: "{{cm:CreateDesktopIcon}}"; Flags: unchecked
+
+[Files]
+Source: "{REPO / 'dist' / 'Autolume'}\\*"; DestDir: "{{app}}"; Flags: recursesubdirs createallsubdirs
+
+[Icons]
+Name: "{{group}}\\Autolume"; Filename: "{{app}}\\Autolume.exe"
+Name: "{{autodesktop}}\\Autolume"; Filename: "{{app}}\\Autolume.exe"; Tasks: desktopicon
+""")
+    subprocess.run([str(iscc_path()), str(iss)], check=True)
+    print(f"Packaged {REPO / 'dist' / (output_base + '.exe')}")
+
+
+def package() -> None:
+    if IS_LINUX:
+        package_linux()
+    elif IS_MACOS:
+        package_macos()
+    else:
+        package_windows()
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Build the Autolume PyInstaller release.")
+    parser.add_argument(
+        "--package", action="store_true",
+        help="wrap the build into a distributable (.AppImage / .dmg / Inno Setup installer)",
+    )
+    parser.add_argument(
+        "--package-only", action="store_true",
+        help="skip the PyInstaller build and only package an existing dist/ output",
+    )
+    opts = parser.parse_args()
+
+    if opts.package_only:
+        bundle = REPO / "dist" / ("Autolume.app" if IS_MACOS else "Autolume")
+        if not bundle.exists():
+            fail(f"{bundle} not found; run `uv run release.py` first")
+        package()
+        return
+
     print(f"Building Autolume for {SYSTEM}...")
     clean()
     if NEEDS_JIT_TOOLCHAIN:
@@ -332,6 +501,8 @@ def main() -> None:
     print("Running PyInstaller...")
     subprocess.run(args, check=True, cwd=REPO)
     post_build()
+    if opts.package:
+        package()
 
 
 if __name__ == "__main__":
