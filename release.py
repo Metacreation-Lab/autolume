@@ -18,6 +18,7 @@ PyInstaller cannot cross-compile: each artifact must be built on its own OS.
 import importlib.util
 import os
 import platform
+import plistlib
 import shutil
 import subprocess
 import sys
@@ -34,6 +35,13 @@ IS_LINUX = SYSTEM == "Linux"
 
 # Windows and Linux compile the custom CUDA ops at runtime; macOS does not.
 NEEDS_JIT_TOOLCHAIN = IS_WINDOWS or IS_LINUX
+
+# torch 2.8 wheels ship a libomp.dylib stamped minos 14.0 despite the
+# macosx_11_0_arm64 tag (pytorch/pytorch#177140), so the bundle cannot load on
+# anything older. Declaring it here turns a startup crash on old systems into
+# a clear "requires macOS 14" dialog. Verify with check_macos_compat.py after
+# bumping torch.
+MACOS_MIN_VERSION = "14.0"
 
 
 def fail(message: str) -> "NoReturn":
@@ -192,7 +200,15 @@ def post_build() -> None:
     # dirs (screenshots, recordings, presets, models, ...) are created lazily by
     # the features that use them, so nothing is seeded here.
     if IS_MACOS:
-        print("Built dist/Autolume.app")
+        app = REPO / "dist" / "Autolume.app"
+        plist = app / "Contents" / "Info.plist"
+        info = plistlib.loads(plist.read_bytes())
+        info["LSMinimumSystemVersion"] = MACOS_MIN_VERSION
+        plist.write_bytes(plistlib.dumps(info))
+        # Editing Info.plist invalidates PyInstaller's ad-hoc signature; re-sign
+        # the outer bundle (nested binaries are untouched and stay valid).
+        subprocess.run(["codesign", "--force", "--sign", "-", str(app)], check=True)
+        print(f"Built dist/Autolume.app (requires macOS {MACOS_MIN_VERSION}+)")
     else:
         print(f"Release created in {REPO / 'dist' / 'Autolume'}")
 
