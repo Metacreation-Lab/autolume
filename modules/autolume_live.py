@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 
 FEEDBACK_URL = "https://docs.google.com/forms/d/e/1FAIpQLSe6ovWLmktE_AYGqxnSC_Ce1X6-A4X0_DAKeaEaej_RrBUgHQ/viewform"
 
+DATA_ROOT_POPUP = "Data folder not found##Modal"
+
 class States(IntEnum):
     ERROR = -2
     CLOSE = -1
@@ -101,6 +103,8 @@ class Autolume(imgui_window.ImguiWindow):
         self.data_preprocessing = None
         self.settings = None
         self.settings_open = False
+        self.failed_data_root = user_data.failed_data_root()
+        self._data_root_warning_pending = self.failed_data_root is not None
 
         self._training_module = None
         self._projection_module = None
@@ -260,6 +264,35 @@ class Autolume(imgui_window.ImguiWindow):
 
     def close_settings(self):
         self.settings_open = False
+
+    def _draw_data_root_warning(self):
+        if self._data_root_warning_pending:
+            imgui.open_popup(DATA_ROOT_POPUP)
+            self._data_root_warning_pending = False
+
+        imgui.set_next_window_size(self.content_width * 0.4, 0)
+        imgui.set_next_window_position(
+            self.content_width * 0.5, self.content_height * 0.5,
+            pivot_x=0.5, pivot_y=0.5)
+        opened, _ = imgui.begin_popup_modal(
+            DATA_ROOT_POPUP, flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE))
+        if opened:
+            imgui.text_wrapped(
+                f'Your data folder "{self.failed_data_root}" was not accessible or may have moved.')
+            imgui.spacing()
+            imgui.text_wrapped(
+                'Autolume is using the default folder for this session. '
+                'Your saved setting is unchanged. You can update it in Settings.')
+            imgui.spacing()
+            if imgui.button('Open Settings'):
+                self.failed_data_root = None
+                imgui.close_current_popup()
+                self.open_settings()
+            imgui.same_line()
+            if imgui.button('Dismiss'):
+                self.failed_data_root = None
+                imgui.close_current_popup()
+            imgui.end_popup()
 
     def draw_navbar(self):
         # Scale with the UI font, calibrated to 50px at font 23 before NAVBAR_SCALE.
@@ -484,6 +517,9 @@ class Autolume(imgui_window.ImguiWindow):
                     self.state = States.ERROR
                 else:
                     self.data_preprocessing()
+
+            if self.failed_data_root is not None:
+                self._draw_data_root_warning()
 
             if self.settings_open and self.settings is not None:
                 self.settings()

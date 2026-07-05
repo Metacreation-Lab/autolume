@@ -14,7 +14,7 @@ if sys.platform == 'linux' and os.environ.get('WAYLAND_DISPLAY'):
     os.environ.setdefault('PYGLFW_LIBRARY_VARIANT', 'x11')
 
 
-from utils.user_data import ensure_data_path
+from utils.user_data import init_data_root
 
 
 def get_runtime_bin_dir():
@@ -38,7 +38,7 @@ os.environ["PATH"] = BIN_DIR + os.pathsep + os.environ.get("PATH", "")
 def main():
     # Materialise the user data root so it is discoverable even before any
     # feature writes to it. Category subfolders are still created lazily.
-    ensure_data_path()
+    init_data_root()
 
     from modules.autolume_live import Autolume
 

@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 _prefs = None
 _data_root = None
+_failed_data_root = None
 
 
 def config_dir() -> Path:
@@ -117,6 +118,32 @@ def ensure_data_path(*parts: str) -> Path:
     path = data_path(*parts)
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def init_data_root() -> Path:
+    """Create the data root, falling back to the default for this session only.
+
+    If the configured folder is inaccessible (e.g. an unmounted drive), the
+    persisted preference is left untouched and :func:`failed_data_root` reports
+    the path that failed.
+    """
+    global _data_root, _failed_data_root
+    try:
+        return ensure_data_path()
+    except OSError:
+        configured = data_root()
+        if configured == default_data_root():
+            raise
+        logger.warning("Data root %s is not accessible; using %s for this session",
+                       configured, default_data_root())
+        _failed_data_root = configured
+        _data_root = default_data_root()
+        return ensure_data_path()
+
+
+def failed_data_root():
+    """Configured data root that was inaccessible at startup, or None."""
+    return _failed_data_root
 
 
 def cache_path(*parts: str) -> Path:

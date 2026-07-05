@@ -4,7 +4,7 @@ import sys
 
 import imgui
 
-from assets import OPAQUEGREEN
+from assets import OPAQUEGREEN, RED
 from utils.gui_utils import imgui_utils
 from utils.resource_paths import get_version
 from utils.user_data import config_file, data_root, default_data_root, set_data_root
@@ -41,6 +41,7 @@ class Settings:
         self.pending_root = data_root()
         self.pending_font_size = app.ui_font_size
         self.status = ""
+        self.status_error = False
         self._wants_open = False
         self._open = False
 
@@ -49,9 +50,19 @@ class Settings:
         self._open = True
 
     def _apply(self, path):
+        path = str(path)
+        try:
+            os.makedirs(path, exist_ok=True)
+            if not os.access(path, os.W_OK):
+                raise PermissionError(f"no write access to {path}")
+        except OSError as e:
+            self.status = f"This folder cannot be used. {e}"
+            self.status_error = True
+            return
         set_data_root(path)
         self.pending_root = data_root()
         self.status = f"Data folder set to {self.pending_root}"
+        self.status_error = False
 
     @imgui_utils.scoped_by_object_id
     def __call__(self):
@@ -92,7 +103,11 @@ class Settings:
                 self._apply(self.pending_root or default_data_root())
             imgui.same_line()
             if imgui_utils.button("Open Folder", width=self.app.font_size * 8):
-                _open_in_file_manager(data_root())
+                try:
+                    _open_in_file_manager(data_root())
+                except OSError as e:
+                    self.status = f"Could not open the folder. {e}"
+                    self.status_error = True
             imgui.same_line()
             if imgui_utils.button("Reset to Default", width=self.app.font_size * 10):
                 self._apply(default_data_root())
@@ -105,7 +120,10 @@ class Settings:
             imgui.text_colored(f"Preferences file: {config_file()}", 0.5, 0.5, 0.5)
             if self.status:
                 imgui.spacing()
-                imgui.text_colored(self.status, 0.4, 0.8, 0.4)
+                if self.status_error:
+                    imgui.text_colored(self.status, *RED)
+                else:
+                    imgui.text_colored(self.status, 0.4, 0.8, 0.4)
 
             imgui.spacing()
             imgui.separator()
