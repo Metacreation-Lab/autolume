@@ -11,10 +11,13 @@ import sys
 import glfw
 import imgui
 import imgui.integrations.glfw
+import numpy as np
+import OpenGL.GL as gl
 
 from . import glfw_window
 from . import imgui_utils
 from . import text_utils
+from . import dpi
 
 #----------------------------------------------------------------------------
 
@@ -41,16 +44,10 @@ class ImguiWindow(glfw_window.GlfwWindow):
         self._attach_glfw_callbacks()
         imgui.get_io().ini_saving_rate = 0 # Disable creating imgui.ini at runtime.
         imgui.get_io().mouse_drag_threshold = 0 # Improve behavior with imgui_utils.drag_custom().
-        # Rasterize fonts at the framebuffer scale (2x on HiDPI) so text stays
-        # sharp; sizes exposed to the UI remain in logical (content) coordinates.
         self._font_path  = font
         self._font_sizes = font_sizes
-        fb_width = glfw.get_framebuffer_size(self._glfw_window)[0]
-        font_scale = max(1, round(fb_width / max(self.content_width, 1)))
-        self._font_dpi_scale = font_scale
-        imgui.get_io().font_global_scale = 1 / font_scale
-        self._imgui_fonts = {size: imgui.get_io().fonts.add_font_from_file_ttf(font, size * font_scale) for size in font_sizes}
-        self._imgui_renderer.refresh_font_texture()
+        self._font_atlas_key = self._current_font_atlas_key()
+        self._rebuild_font_atlas()
 
     def close(self):
         self.make_context_current()
@@ -78,18 +75,38 @@ class ImguiWindow(glfw_window.GlfwWindow):
     def set_font_size(self, target): # Applied on next frame.
         self._cur_font_size = min((abs(key - target), key) for key in self._imgui_fonts.keys())[1]
 
-    def _update_font_scale(self):
-        # Rebuild the font atlas when the window moves to a monitor with a different DPI scale.
-        fb_width = glfw.get_framebuffer_size(self._glfw_window)[0]
-        new_scale = max(1, round(fb_width / max(self.content_width, 1)))
-        if new_scale == self._font_dpi_scale:
-            return
-        self._font_dpi_scale = new_scale
-        imgui.get_io().font_global_scale = 1 / new_scale
-        imgui.get_io().fonts.clear()
-        self._imgui_fonts = {size: imgui.get_io().fonts.add_font_from_file_ttf(
-            self._font_path, size * new_scale) for size in self._font_sizes}
+    def scale_ui_size(self, size):
+        # Convert a DPI-independent UI size to logical units for the current monitor.
+        return dpi.scale_ui_size(size, self._glfw_window)
+
+    def _current_font_atlas_key(self):
+        # The atlas must be rebuilt whenever either of these changes: the raster
+        # scale (physical px per logical unit) or the 1x-sharpening state. On
+        # Windows the raster scale is always 1, so the 1x flag is the only signal
+        # that the window crossed onto a different-DPI monitor.
+        w = self._glfw_window
+        return (dpi.pixels_per_logical(w), dpi.is_native_1x(w))
+
+    def _rebuild_font_atlas(self):
+        # Rasterize each UI size at the monitor's physical resolution so text
+        # stays sharp; the sizes the app sees stay in logical units via
+        # font_global_scale.
+        raster_scale = self._font_atlas_key[0]
+        io = imgui.get_io()
+        io.font_global_scale = 1 / raster_scale
+        io.fonts.clear()
+        self._imgui_fonts = {size: io.fonts.add_font_from_file_ttf(
+            self._font_path, size * raster_scale) for size in self._font_sizes}
         self._imgui_renderer.refresh_font_texture()
+
+    def _update_font_scale(self):
+        # Rebuild the atlas when the window moves to a monitor that changes the
+        # atlas key (raster scale or 1x-sharpening state).
+        key = self._current_font_atlas_key()
+        if key == self._font_atlas_key:
+            return
+        self._font_atlas_key = key
+        self._rebuild_font_atlas()
         self.skip_frame()
 
     def begin_frame(self):
@@ -113,6 +130,44 @@ class ImguiWindow(glfw_window.GlfwWindow):
         imgui.end_frame()
         self._imgui_renderer.render(imgui.get_draw_data())
         super().end_frame()
+
+#----------------------------------------------------------------------------
+
+def _refresh_font_texture(renderer, alpha8):
+    # Upload the imgui font atlas, sharpened on 1x displays. There the font's
+    # fractional glyph advances put glyphs on fractional pixels, so bilinear
+    # sampling smears them: nearest-neighbor keeps glyphs bit-exact and the
+    # contrast curve restores stem solidity. On HiDPI the smear is
+    # sub-physical-pixel, so the stock bilinear path is kept. Shared by both
+    # backends; alpha8 for the fixed pipeline (macOS), rgba32 otherwise. The base
+    # renderer calls this once from __init__ before self.window is set (window is
+    # None -> not sharpened); ImguiWindow refreshes again after adding its fonts.
+    io = renderer.io
+    native_1x = dpi.is_native_1x(getattr(renderer, 'window', None))
+    last_texture = gl.glGetIntegerv(gl.GL_TEXTURE_BINDING_2D)
+    gl_format = gl.GL_ALPHA if alpha8 else gl.GL_RGBA
+    if alpha8:
+        width, height, pixels = io.fonts.get_tex_data_as_alpha8()
+        if native_1x:
+            pixels = dpi.sharpen_font_alpha(np.frombuffer(pixels, dtype=np.uint8)).astype(np.uint8).tobytes()
+    else:
+        width, height, pixels = io.fonts.get_tex_data_as_rgba32()
+        if native_1x:
+            rgba = np.frombuffer(pixels, dtype=np.uint8).reshape(-1, 4).copy()
+            rgba[:, 3] = dpi.sharpen_font_alpha(rgba[:, 3]).astype(np.uint8)
+            pixels = rgba.tobytes()
+    if renderer._font_texture is not None:
+        gl.glDeleteTextures([renderer._font_texture])
+    renderer._font_texture = gl.glGenTextures(1)
+    tex_filter = gl.GL_NEAREST if native_1x else gl.GL_LINEAR
+    gl.glBindTexture(gl.GL_TEXTURE_2D, renderer._font_texture)
+    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, tex_filter)
+    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, tex_filter)
+    gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl_format, width, height, 0,
+                    gl_format, gl.GL_UNSIGNED_BYTE, pixels)
+    io.fonts.texture_id = renderer._font_texture
+    gl.glBindTexture(gl.GL_TEXTURE_2D, last_texture)
+    io.fonts.clear_tex_data()
 
 #----------------------------------------------------------------------------
 # Wrapper class for GlfwRenderer to fix a mouse wheel bug on Linux.
@@ -155,6 +210,9 @@ class _GlfwRenderer(imgui.integrations.glfw.GlfwRenderer):
     def scroll_callback(self, window, x_offset, y_offset):
         self.io.mouse_wheel += y_offset * self.mouse_wheel_multiplier
 
+    def refresh_font_texture(self):
+        _refresh_font_texture(self, alpha8=False)
+
 if sys.platform == 'darwin':
     # macOS offers either a GL 2.1 context or a 3.2+ core profile, never both.
     # The app draws with fixed-function GL, so it runs on the 2.1 context, where
@@ -163,9 +221,12 @@ if sys.platform == 'darwin':
     from imgui.integrations.opengl import FixedPipelineRenderer
 
     class _GlfwRenderer(_GlfwRenderer):
-        refresh_font_texture = FixedPipelineRenderer.refresh_font_texture
         render = FixedPipelineRenderer.render
         _create_device_objects = FixedPipelineRenderer._create_device_objects
         _invalidate_device_objects = FixedPipelineRenderer._invalidate_device_objects
+
+        def refresh_font_texture(self):
+            # The fixed pipeline needs the alpha8 atlas format.
+            _refresh_font_texture(self, alpha8=True)
 
 #----------------------------------------------------------------------------

@@ -14,6 +14,7 @@ import glfw
 import OpenGL.GL as gl
 import PIL.Image
 from . import gl_utils
+from . import dpi
 from utils.resource_paths import resource_path
 
 
@@ -44,6 +45,13 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
         # Create window.
         glfw.init()
         glfw.window_hint(glfw.VISIBLE, False)
+        # Windows measures windows in physical pixels and keeps their pixel size
+        # when dragged across monitors, while the UI font follows the monitor's
+        # DPI scale — the layout would reflow. Let GLFW resize the window by the
+        # DPI ratio on monitor change so the font-to-window ratio stays constant,
+        # matching the point-based (reflow-free) behavior macOS gives for free.
+        if sys.platform == 'win32':
+            glfw.window_hint(glfw.SCALE_TO_MONITOR, glfw.TRUE)
         # XWayland: force an EGL context so PyOpenGL's EGL platform (not the
         # buggy GLX one) picks it up.
         if _wayland_session():
@@ -87,16 +95,7 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
             pass
 
     def _content_scale(self):
-        # macOS/native Wayland return logical pixels from get_window_size; no correction needed.
-        # XWayland returns physical pixels (fb == win), so read the OS content scale instead.
-        if sys.platform != 'linux':
-            return 1.0
-        fb_w, _ = glfw.get_framebuffer_size(self._glfw_window)
-        win_w, _ = glfw.get_window_size(self._glfw_window)
-        if fb_w == win_w:
-            xscale, _ = glfw.get_window_content_scale(self._glfw_window)
-            return max(1.0, xscale)
-        return 1.0
+        return dpi.window_unit_scale(self._glfw_window)
 
     @property
     def window_width(self):
