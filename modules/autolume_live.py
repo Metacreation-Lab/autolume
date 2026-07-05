@@ -68,17 +68,23 @@ class Autolume(imgui_window.ImguiWindow):
     # Number of frames to hold the startup splash screen before opening the menu.
     SPLASH_FRAMES = 30
 
-    # Standard-DPI UI font size. Divided by the display's DPI scale so the UI is a
-    # constant, DPI-appropriate size that does NOT change when the window resizes.
-    # scale 1 (Windows/non-retina) -> 23 (clamps to the max key);
-    # scale 2 (retina)             -> 11.5 -> snaps to the min key 14.
-    BASE_FONT_SIZE = 23
+    # UI font size in DPI-independent units. _adjust_font_size multiplies it by
+    # the monitor's DPI scale so the UI keeps the same physical size on every
+    # display and platform, and never rescales with the window: 16px at 100%,
+    # 20 at 125%, 24 at 150%, 32 at 200% (macOS points are DPI-independent, so
+    # it stays 16pt there on every monitor and never reflows between screens).
+    UI_FONT_SIZE = 16
 
     # Navbar text, icons, and height are drawn this much larger than the base UI font.
     NAVBAR_SCALE = 1.25
 
     def __init__(self):
-        super().__init__(title='Autolume', window_width=3840, window_height=2160)
+        # Sizes cover the body font at common DPI scales (16/20/24/32 for
+        # 100/125/150/200%) and the matching navbar font (body * NAVBAR_SCALE:
+        # 20/25/30/40); the navbar draws from a font rasterized at its real
+        # size rather than scaling the base font.
+        super().__init__(title='Autolume', window_width=3840, window_height=2160,
+                         font_sizes=[*range(14, 26), 30, 32, 40])
 
         self.state = States.WELCOME
         self.running = True
@@ -117,7 +123,7 @@ class Autolume(imgui_window.ImguiWindow):
         self.comment_texture = gl_utils.Texture(image=self.comment, width=self.comment.shape[1],
                                                 height=self.comment.shape[0], channels=self.comment.shape[2])
 
-        self.navbar_height = round(self.BASE_FONT_SIZE * self.NAVBAR_SCALE * 2.2)
+        self.navbar_height = round(self.UI_FONT_SIZE * self.NAVBAR_SCALE * 2.2)
 
         # Initialize window.
         self.set_fps_limit(self.DEFAULT_FPS_LIMIT)
@@ -129,7 +135,7 @@ class Autolume(imgui_window.ImguiWindow):
 
     def _adjust_font_size(self):
         old = self.font_size
-        self.set_font_size(self.BASE_FONT_SIZE / self._font_dpi_scale)
+        self.set_font_size(self.scale_ui_size(self.UI_FONT_SIZE))
         if self.font_size != old:
             self.skip_frame() # Layout changed.
 
@@ -231,7 +237,8 @@ class Autolume(imgui_window.ImguiWindow):
 
     def draw_navbar(self):
         # Scale with the UI font, calibrated to 50px at font 23 before NAVBAR_SCALE.
-        nav_font = self.font_size * self.NAVBAR_SCALE
+        nav_font = round(self.font_size * self.NAVBAR_SCALE)
+        nav_font = min(self._imgui_fonts, key=lambda size: abs(size - nav_font))
         self.navbar_height = round(nav_font * 2.2)
         training_active = self._is_training_active()
 
@@ -245,8 +252,9 @@ class Autolume(imgui_window.ImguiWindow):
             imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS |
             imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_SCROLLBAR))
         imgui.pop_style_var(2)
-        # Enlarge text drawn in this window (and calc_text_size) to match the bar.
-        imgui.set_window_font_scale(self.NAVBAR_SCALE)
+        # Use a font rasterized at the navbar size; scaling the base font with
+        # set_window_font_scale stretches glyph quads and blurs on 1x displays.
+        imgui.push_font(self._imgui_fonts[nav_font])
 
         draw_list = imgui.get_window_draw_list()
         draw_list.add_rect_filled(
@@ -339,6 +347,7 @@ class Autolume(imgui_window.ImguiWindow):
         if draw_icon_button(self.cog_texture, "Settings", icon_size, item_pad, self.navbar_height):
             self.open_settings()
 
+        imgui.pop_font()
         imgui.end()
 
     def _draw_module_fullscreen(self, title, module_callable):
