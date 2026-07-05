@@ -53,6 +53,8 @@ autolume/
 - [main.py](main.py) — entry point; wires the UI and rendering pipeline.
 - [pyproject.toml](pyproject.toml) — pinned dependencies; `torch==2.8.0+cu128` is a hard requirement, do not relax it.
 - [release.py](release.py) — cross-platform release script (`uv run release.py`); detects the host OS, resolves package locations via `importlib`, and assembles the PyInstaller `--add-binary`/`--add-data` flags per platform, then copies `sr_models/` and creates runtime dirs. **This is where to add new runtime files** — the auto-generated `Autolume.spec` is gitignored and rebuilt every release. Windows/Linux bundle the runtime JIT toolchain (torch headers/libs, ninja); macOS skips it (ops fall back to reference PyTorch on MPS) and produces `Autolume.app`.
+- [utils/user_data.py](utils/user_data.py) — user preferences and writable data paths. Preferences (data root, UI font size, …) persist to a JSON file at `~/.config/autolume/config.json` (`XDG_CONFIG_HOME` honored); the Settings modal ([modules/settings.py](modules/settings.py)) is their UI. **Add new user-facing preferences here** (a `pref()`/`set_pref()` accessor pair following the existing ones), not as ad-hoc files.
+- [utils/gui_utils/dpi.py](utils/gui_utils/dpi.py) — all display-scale math (monitor DPI scale, font atlas raster scale, 1x text sharpening). The UI is sized in DPI-independent units so it keeps the same physical size and layout on every monitor and platform; start here for any scaling/blurriness issue.
 - [.github/workflows/docs.yml](.github/workflows/docs.yml) — only CI workflow; publishes versioned docs.
 - [zensical.toml](zensical.toml) — docs site config (Material theme variant).
 

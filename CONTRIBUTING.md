@@ -53,6 +53,7 @@ uv run zensical serve    # serve the docs locally at http://127.0.0.1:8000
 - **One logical change per PR.** Smaller PRs land faster and are easier to review.
 - **Update the docs** in [docs/](docs/) when you change user-visible behavior. The site is rebuilt automatically on push to `main`.
 - **Update [release.py](release.py)** if you add new runtime files (help texts, models, assets) — add them to the shared `datas`/`binaries` lists, a per-platform branch, or the `post_build()` copy step, otherwise they will be missing from the packaged release. The auto-generated `Autolume.spec` is gitignored; do not edit it.
+- **Put user preferences in [utils/user_data.py](utils/user_data.py)** if your change needs a persistent, user-facing setting (e.g. the data folder or UI font size). Add an accessor pair following the existing ones — preferences persist to a single JSON file (`~/.config/autolume/config.json`) — and expose the control in the Settings modal ([modules/settings.py](modules/settings.py)) rather than inventing a new config file.
 - **No automated test suite exists.** Verify your change manually by running `uv run main.py` and exercising the affected UI path. Describe what you tested in the PR.
 
 ## Commit message convention
