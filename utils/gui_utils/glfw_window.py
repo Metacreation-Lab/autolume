@@ -165,23 +165,21 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
         self.set_window_size(width, height + self.title_bar_height)
 
     def maximize(self):
+        # Fill the work area explicitly rather than entering the OS "maximized"
+        # state: a maximized window snaps back to its smaller restored size the
+        # moment the user drags it (Windows), and maximize_window is also
+        # unreliable on XWayland and animates badly on undecorated macOS windows.
         area_x, area_y, area_width, area_height = self._get_work_area()
         tbh = round(self.title_bar_height * self._content_scale())  # logical → OS units
-        if sys.platform == 'darwin':
-            # maximize_window animates via NSWindow zoom and misbehaves on
-            # undecorated windows; set the frame directly instead.
-            glfw.set_window_pos(self._glfw_window, area_x, area_y + tbh)
-            glfw.set_window_size(self._glfw_window, area_width, max(area_height - tbh, 1))
-        elif _wayland_session():
-            # XWayland: maximize_window unreliable; fill work area explicitly.
+        if sys.platform != 'darwin':
+            # Clear any stale maximized state. Skipped on macOS, which never has
+            # one and where restoring a screen-filling window plays the NSWindow
+            # zoom animation.
             glfw.restore_window(self._glfw_window)
-            glfw.set_window_size(self._glfw_window, area_width, max(area_height - tbh, 1))
-        else:
-            # Clear stale maximized state and anchor at the work area origin
-            # (selects the right monitor) before maximizing.
-            glfw.restore_window(self._glfw_window)
+        if glfw.get_platform() != glfw.PLATFORM_WAYLAND:
+            # Wayland: compositor owns window position.
             glfw.set_window_pos(self._glfw_window, area_x, area_y + tbh)
-            glfw.maximize_window(self._glfw_window)
+        glfw.set_window_size(self._glfw_window, area_width, max(area_height - tbh, 1))
 
     def set_position(self, x, y):
         # Wayland: compositor owns window position.
