@@ -46,6 +46,7 @@ class ImguiWindow(glfw_window.GlfwWindow):
         imgui.get_io().mouse_drag_threshold = 0 # Improve behavior with imgui_utils.drag_custom().
         self._font_path  = font
         self._font_sizes = font_sizes
+        self._pending_font_sizes = None
         self._font_atlas_key = self._current_font_atlas_key()
         self._rebuild_font_atlas()
 
@@ -74,6 +75,22 @@ class ImguiWindow(glfw_window.GlfwWindow):
 
     def set_font_size(self, target): # Applied on next frame.
         self._cur_font_size = min((abs(key - target), key) for key in self._imgui_fonts.keys())[1]
+
+    def set_font_sizes(self, font_sizes): # Applied on next frame.
+        # Deferred like set_font_size: the atlas cannot be rebuilt mid-frame
+        # because the frame being drawn still references the old font objects.
+        self._pending_font_sizes = {int(size) for size in font_sizes}
+
+    def _apply_pending_font_sizes(self):
+        if self._pending_font_sizes is None:
+            return
+        sizes, self._pending_font_sizes = self._pending_font_sizes, None
+        if sizes == self._font_sizes:
+            return
+        self._font_sizes = sizes
+        self._rebuild_font_atlas()
+        self.set_font_size(self._cur_font_size) # Re-snap onto an existing size.
+        self.skip_frame()
 
     def scale_ui_size(self, size):
         # Convert a DPI-independent UI size to logical units for the current monitor.
@@ -117,6 +134,7 @@ class ImguiWindow(glfw_window.GlfwWindow):
         self._imgui_renderer.mouse_wheel_multiplier = self._cur_font_size / 10
         if self.content_width > 0 and self.content_height > 0:
             self._imgui_renderer.process_inputs()
+        self._apply_pending_font_sizes()
         self._update_font_scale()
 
         # Begin imgui frame.

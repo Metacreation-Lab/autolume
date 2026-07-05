@@ -66,6 +66,21 @@ def save_prefs(prefs: dict) -> None:
         json.dump(prefs, fp, indent=2)
 
 
+def ui_font_size(default: int) -> int:
+    """Configured DPI-independent UI font size, or ``default`` if unset/invalid."""
+    try:
+        return int(load_prefs().get("ui_font_size", default))
+    except (TypeError, ValueError):
+        return default
+
+
+def set_ui_font_size(size: int) -> None:
+    """Persist the UI font size to the preferences file."""
+    prefs = load_prefs()
+    prefs["ui_font_size"] = int(size)
+    save_prefs(prefs)
+
+
 def data_root() -> str:
     """Configured writable data root (or the default)."""
     global _data_root
