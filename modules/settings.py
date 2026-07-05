@@ -39,6 +39,7 @@ class Settings:
         self.browser = NativeBrowserWidget()
         # Edits stay in a working copy until the user applies them.
         self.pending_root = data_root()
+        self.pending_font_size = app.ui_font_size
         self.status = ""
         self._wants_open = False
         self._open = False
@@ -105,6 +106,27 @@ class Settings:
             if self.status:
                 imgui.spacing()
                 imgui.text_colored(self.status, 0.4, 0.8, 0.4)
+
+            imgui.spacing()
+            imgui.separator()
+            imgui.spacing()
+            imgui.text("UI font size")
+            imgui.text_colored(
+                "Base size of the interface text. The whole UI scales with it. "
+                "Applies on release and is remembered across launches.",
+                0.7, 0.7, 0.7)
+            _, self.pending_font_size = imgui.slider_int(
+                "##ui_font_size", self.pending_font_size,
+                self.app.MIN_UI_FONT_SIZE, self.app.MAX_UI_FONT_SIZE)
+            # Rebuilding the font atlas is too heavy per drag tick; apply once
+            # the slider is released (or after keyboard entry).
+            if not imgui.is_mouse_down(0) and self.pending_font_size != self.app.ui_font_size:
+                self.app.set_ui_font_size(self.pending_font_size)
+                self.pending_font_size = self.app.ui_font_size
+            imgui.same_line()
+            if imgui_utils.button("Default", width=self.app.font_size * 7):
+                self.app.set_ui_font_size(self.app.DEFAULT_UI_FONT_SIZE)
+                self.pending_font_size = self.app.ui_font_size
 
             imgui.spacing()
             imgui.separator()

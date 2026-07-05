@@ -8,6 +8,7 @@ import time
 import gc
 
 from assets import RED, OPAQUEGREEN, HOVERGREEN
+from utils import user_data
 from utils.gui_utils import imgui_window, gl_utils
 from utils.resource_paths import resource_path
 from widgets.help_icon_widget import DOCS_BASE_URL
@@ -70,21 +71,26 @@ class Autolume(imgui_window.ImguiWindow):
 
     # UI font size in DPI-independent units. _adjust_font_size multiplies it by
     # the monitor's DPI scale so the UI keeps the same physical size on every
-    # display and platform, and never rescales with the window: 16px at 100%,
-    # 20 at 125%, 24 at 150%, 32 at 200% (macOS points are DPI-independent, so
-    # it stays 16pt there on every monitor and never reflows between screens).
-    UI_FONT_SIZE = 16
+    # display and platform, and never rescales with the window (16px at 100%,
+    # 24 at 150%, 32 at 200%; macOS points are DPI-independent, so it stays
+    # constant there on every monitor and never reflows between screens).
+    # User-configurable in Settings, persisted via utils.user_data.
+    DEFAULT_UI_FONT_SIZE = 16
+    MIN_UI_FONT_SIZE = 12
+    MAX_UI_FONT_SIZE = 24
+
+    # Display scales the font atlas is pre-rasterized for (100/125/150/200%).
+    # Exotic scales snap to the nearest rasterized size.
+    DPI_SCALES = (1.0, 1.25, 1.5, 2.0)
 
     # Navbar text, icons, and height are drawn this much larger than the base UI font.
     NAVBAR_SCALE = 1.25
 
     def __init__(self):
-        # Sizes cover the body font at common DPI scales (16/20/24/32 for
-        # 100/125/150/200%) and the matching navbar font (body * NAVBAR_SCALE:
-        # 20/25/30/40); the navbar draws from a font rasterized at its real
-        # size rather than scaling the base font.
+        self.ui_font_size = self._clamp_ui_font_size(
+            user_data.ui_font_size(self.DEFAULT_UI_FONT_SIZE))
         super().__init__(title='Autolume', window_width=3840, window_height=2160,
-                         font_sizes=[*range(14, 26), 30, 32, 40])
+                         font_sizes=self._font_sizes_for(self.ui_font_size))
 
         self.state = States.WELCOME
         self.running = True
@@ -123,7 +129,7 @@ class Autolume(imgui_window.ImguiWindow):
         self.comment_texture = gl_utils.Texture(image=self.comment, width=self.comment.shape[1],
                                                 height=self.comment.shape[0], channels=self.comment.shape[2])
 
-        self.navbar_height = round(self.UI_FONT_SIZE * self.NAVBAR_SCALE * 2.2)
+        self.navbar_height = round(self.ui_font_size * self.NAVBAR_SCALE * 2.2)
 
         # Initialize window.
         self.set_fps_limit(self.DEFAULT_FPS_LIMIT)
@@ -133,9 +139,29 @@ class Autolume(imgui_window.ImguiWindow):
         self._adjust_font_size()
         self.skip_frame()  # Layout may change after first frame.
 
+    @classmethod
+    def _clamp_ui_font_size(cls, size):
+        return int(min(max(size, cls.MIN_UI_FONT_SIZE), cls.MAX_UI_FONT_SIZE))
+
+    @classmethod
+    def _font_sizes_for(cls, base):
+        # Rasterized sizes needed for this base: the body font at each supported
+        # DPI scale, plus the navbar font derived from each body size.
+        bodies = {round(base * scale) for scale in cls.DPI_SCALES}
+        navs = {round(body * cls.NAVBAR_SCALE) for body in bodies}
+        return sorted(bodies | navs)
+
+    def set_ui_font_size(self, size):
+        size = self._clamp_ui_font_size(size)
+        if size == self.ui_font_size:
+            return
+        self.ui_font_size = size
+        self.set_font_sizes(self._font_sizes_for(size))
+        user_data.set_ui_font_size(size)
+
     def _adjust_font_size(self):
         old = self.font_size
-        self.set_font_size(self.scale_ui_size(self.UI_FONT_SIZE))
+        self.set_font_size(self.scale_ui_size(self.ui_font_size))
         if self.font_size != old:
             self.skip_frame() # Layout changed.
 
