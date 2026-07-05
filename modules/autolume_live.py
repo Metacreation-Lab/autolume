@@ -354,6 +354,10 @@ class Autolume(imgui_window.ImguiWindow):
             if clicked and not nav_disabled:
                 self.navigate_to(target_state)
 
+        # The icon buttons draw no text of their own. Pop back to the base font
+        # here so their tooltips render at the regular UI size.
+        imgui.pop_font()
+
         icon_size = round(nav_font * 0.9)
         button_width = icon_size + 2 * item_pad
         edge_pad = round(nav_font * 0.9)
@@ -373,7 +377,6 @@ class Autolume(imgui_window.ImguiWindow):
         if draw_icon_button(self.cog_texture, "Settings", icon_size, item_pad, self.navbar_height):
             self.open_settings()
 
-        imgui.pop_font()
         imgui.end()
 
     def _draw_module_fullscreen(self, title, module_callable):
