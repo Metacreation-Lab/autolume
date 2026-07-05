@@ -26,22 +26,24 @@ def list_model_pkls():
 
 
 def list_training_run_pkls():
-    """(label, path) tuples for snapshot .pkl files in training run folders.
+    """(run_folder, snapshots) tuples for training run folders with snapshot .pkl files.
 
-    Labels are '<run_folder>/<snapshot>.pkl'; empty if the training-runs
-    folder is missing.
+    Snapshots are (filename, path) tuples. Runs and snapshots are ordered
+    newest first; empty if the training-runs folder is missing.
     """
     root = str(data_path("training-runs"))
     if not os.path.isdir(root):
         return []
     run_regex = re.compile(r"\d+-.*")
     pkl_regex = re.compile(r"network-snapshot-\d+\.pkl")
-    items = []
-    for run in sorted(os.listdir(root)):
+    runs = []
+    for run in sorted(os.listdir(root), reverse=True):
         run_dir = os.path.join(root, run)
         if not (run_regex.fullmatch(run) and os.path.isdir(run_dir)):
             continue
-        for name in sorted(os.listdir(run_dir)):
-            if pkl_regex.fullmatch(name):
-                items.append((f"{run}/{name}", os.path.join(run_dir, name)))
-    return items
+        snapshots = [(name, os.path.join(run_dir, name))
+                     for name in sorted(os.listdir(run_dir), reverse=True)
+                     if pkl_regex.fullmatch(name)]
+        if snapshots:
+            runs.append((run, snapshots))
+    return runs

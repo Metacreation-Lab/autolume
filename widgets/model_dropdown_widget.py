@@ -61,10 +61,13 @@ class ModelDropdownButton:
             if self.run_items:
                 if self.models:
                     imgui.separator()
-                for run_label, pkl in self.run_items:
-                    clicked, _state = imgui.menu_item(f'{run_label}##{pkl}')
-                    if clicked:
-                        picked = pkl
+                for run, snapshots in self.run_items:
+                    if imgui.begin_menu(run):
+                        for name, pkl in snapshots:
+                            clicked, _state = imgui.menu_item(f'{name}##{pkl}')
+                            if clicked:
+                                picked = pkl
+                        imgui.end_menu()
             if self.show_download:
                 imgui.separator()
                 clicked, _state = imgui.menu_item('Download Models...')
