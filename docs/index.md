@@ -46,3 +46,10 @@ The preferences file that records your data folder lives at
 
 Open **Settings** (the cog icon in the navbar) to point Autolume at a
 different folder, open it in your file manager, or reset it to the default.
+
+## Interface size
+
+The interface keeps the same physical size on every screen and never rescales
+when the window is resized or moved between monitors. To make it larger or
+smaller, open **Settings** and adjust the **UI font size** slider. The whole
+interface scales with it, and the value is remembered across launches.
