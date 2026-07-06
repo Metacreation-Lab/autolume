@@ -10,6 +10,7 @@ import dnnlib
 from utils.app_logging import LoggedProcess
 from utils.gui_utils import imgui_utils
 from train import main as train_main
+from training.dataset_validator import validate_dataset
 from widgets.native_browser_widget import NativeBrowserWidget
 from utils.user_data import data_path
 from widgets.help_icon_widget import HelpIconWidget
@@ -70,6 +71,21 @@ class TrainingModule:
         self.image_path = ''
         self.resize_mode = 0
         self.fps = 10
+
+        # Pre-training dataset validation state
+        self._open_validation_popup = False
+        self.validation_queue = mp.Queue()
+        self.validation_reply = mp.Queue()
+        self.validation_process = None
+        self.is_validating = False
+        self.validation_done = False
+        self.validation_is_valid = False
+        self.validation_errors = []
+        self.validation_consistency = []
+        self.validation_current = 0
+        self.validation_total = 0
+        self.validation_percentage = 0.0
+        self.validation_current_file = ""
 
     @property
     def is_training(self):
@@ -330,8 +346,13 @@ class TrainingModule:
                 self._kill_training_process()
                 self.done_button = True
         else:
-            if imgui.button("Start Training", width=-1):
-                self._start_training()
+            if imgui_utils.button("Start Training", width=-1, enabled=not self.is_validating):
+                self._start_dataset_validation(self.data_path)
+
+        if self._open_validation_popup:
+            imgui.open_popup("Validating Dataset")
+            self._open_validation_popup = False
+        self._render_validation_popup()
 
         imgui.end_child()
 
@@ -374,6 +395,182 @@ class TrainingModule:
                 self.image_path = ''
 
         imgui.end_child()
+
+    def _start_dataset_validation(self, dataset_path):
+        """Spawn the dataset validation subprocess and open the validation popup."""
+        self._cleanup_validation_process()
+
+        self.validation_done = False
+        self.validation_is_valid = False
+        self.validation_errors = []
+        self.validation_consistency = []
+        self.validation_current = 0
+        self.validation_total = 0
+        self.validation_percentage = 0.0
+        self.validation_current_file = ""
+
+        self.validation_queue = mp.Queue()
+        self.validation_reply = mp.Queue()
+        self.validation_queue.put({'path': dataset_path})
+        self.validation_process = mp.Process(
+            target=validate_dataset,
+            args=(self.validation_queue, self.validation_reply),
+            name='DatasetValidationProcess',
+        )
+        self.is_validating = True
+        self.validation_process.start()
+        self._open_validation_popup = True
+
+    def _cleanup_validation_process(self):
+        """Tear down the validation subprocess and clear its queues."""
+        if self.validation_process is not None and self.validation_process.is_alive():
+            try:
+                self.validation_process.terminate()
+                self.validation_process.join(timeout=2)
+                if self.validation_process.is_alive():
+                    self.validation_process.kill()
+                    self.validation_process.join()
+            except Exception as e:
+                logger.debug("Error cleaning up validation process: %s", e)
+        self.validation_process = None
+
+        while not self.validation_queue.empty():
+            try:
+                self.validation_queue.get_nowait()
+            except Exception:
+                break
+        while not self.validation_reply.empty():
+            try:
+                self.validation_reply.get_nowait()
+            except Exception:
+                break
+
+        self.is_validating = False
+
+    def _drain_validation_replies(self):
+        """Pull every pending message off the validation reply queue."""
+        while not self.validation_reply.empty():
+            try:
+                data = self.validation_reply.get_nowait()
+            except Exception:
+                break
+            if not isinstance(data, dict):
+                continue
+            if data.get('type') == 'progress':
+                self.validation_current = int(data.get('current', 0))
+                self.validation_total = int(data.get('total', 0))
+                self.validation_percentage = float(data.get('percentage', 0.0))
+                self.validation_current_file = str(data.get('current_file', ''))
+            elif data.get('type') == 'completed':
+                self.validation_done = True
+                self.validation_is_valid = bool(data.get('is_valid', False))
+                self.validation_errors = list(data.get('errors', []))
+                self.validation_consistency = list(data.get('consistency', []))
+                self.validation_total = int(data.get('total', self.validation_total))
+                self.validation_current = int(data.get('checked', self.validation_current))
+
+    def _render_validation_popup(self):
+        """Render the 'Validating Dataset' modal."""
+        popup_width = self.menu.app.content_width // 1.5
+        popup_height = self.menu.app.content_height // 1.5
+        imgui.set_next_window_size(popup_width, popup_height, imgui.ONCE)
+
+        if not imgui.begin_popup_modal("Validating Dataset")[0]:
+            return
+
+        self._drain_validation_replies()
+        progress_width = popup_width - 20
+
+        if not self.validation_done:
+            if self.validation_total > 0:
+                imgui.text(f"Checked: {self.validation_current}/{self.validation_total} images")
+                if self.validation_current_file:
+                    imgui.text(f"Current file: {self.validation_current_file}")
+                imgui.progress_bar(self.validation_percentage / 100.0, (progress_width, 20))
+                pct_label = f"{self.validation_percentage:.1f}%"
+                text_width = imgui.calc_text_size(pct_label)[0]
+                imgui.set_cursor_pos_x((progress_width - text_width) / 2)
+                imgui.text(pct_label)
+            else:
+                imgui.text("Scanning dataset for images...")
+
+            imgui.spacing()
+            imgui.separator()
+            imgui.spacing()
+
+            if imgui_utils.button("Cancel", width=progress_width):
+                try:
+                    self.validation_queue.put('cancel')
+                except Exception:
+                    pass
+                self._cleanup_validation_process()
+                imgui.close_current_popup()
+
+        elif self.validation_is_valid:
+            self._cleanup_validation_process()
+            imgui.close_current_popup()
+            imgui.end_popup()
+            self._start_training()
+            return
+
+        else:
+            imgui.text_colored("Dataset validation failed", 1.0, 0.3, 0.3, 1.0)
+            imgui.text("Please verify the path or use the Data Preparation tool to prepare your dataset.")
+            imgui.separator()
+            imgui.text(f"Checked {self.validation_current}/{self.validation_total} images.")
+
+            list_height = max(popup_height * 0.75, 120)
+            imgui.begin_child(
+                "##validation_errors_list",
+                progress_width,
+                list_height,
+                True,
+            )
+            if self.validation_errors:
+                imgui.text_colored(
+                    f"Invalid images ({len(self.validation_errors)}):",
+                    1.0, 0.5, 0.0, 1.0,
+                )
+                imgui.spacing()
+                for entry in self.validation_errors:
+                    filename = entry.get('filename', '') if isinstance(entry, dict) else ''
+                    message = entry.get('message', str(entry)) if isinstance(entry, dict) else str(entry)
+                    if filename:
+                        imgui.text_colored(filename, 1.0, 0.8, 0.4, 1.0)
+                    imgui.push_text_wrap_pos(progress_width - 20)
+                    imgui.text(message)
+                    imgui.pop_text_wrap_pos()
+                    imgui.spacing()
+
+            if self.validation_consistency:
+                if self.validation_errors:
+                    imgui.separator()
+                    imgui.spacing()
+                imgui.text_colored("Dataset consistency issues:", 1.0, 0.5, 0.0, 1.0)
+                imgui.spacing()
+                for block in self.validation_consistency:
+                    imgui.push_text_wrap_pos(progress_width - 20)
+                    imgui.text(str(block))
+                    imgui.pop_text_wrap_pos()
+                    imgui.spacing()
+            imgui.end_child()
+
+            if imgui_utils.button("Open Data Preparation Module", width=progress_width):
+                self._cleanup_validation_process()
+                self.validation_done = False
+                self.validation_errors = []
+                self.validation_consistency = []
+                imgui.close_current_popup()
+                from modules.autolume_live import States
+                self.app.navigate_to(States.PREPROCESSING)
+            if imgui_utils.button("Close", width=progress_width):
+                self._cleanup_validation_process()
+                self.validation_done = False
+                self.validation_errors = []
+                self.validation_consistency = []
+                imgui.close_current_popup()
+
+        imgui.end_popup()
 
     def _kill_training_process(self):
         try:
