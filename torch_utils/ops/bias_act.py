@@ -15,20 +15,19 @@ import dnnlib
 
 from .. import custom_ops
 from .. import misc
-from . import params
 
 #----------------------------------------------------------------------------
 
 activation_funcs = {
-    'linear':   dnnlib.EasyDict(func=lambda x, **_:         x, def_alpha=0, def_gain=1, cuda_idx=1, ref='', has_2nd_grad=False),
-    'relu':     dnnlib.EasyDict(func=lambda x, **_:         torch.nn.functional.relu(x), def_alpha=0, def_gain=np.sqrt(2), cuda_idx=2, ref='y', has_2nd_grad=False),
-    'lrelu':    dnnlib.EasyDict(func=lambda x, alpha, **_:  torch.nn.functional.leaky_relu(x, alpha), def_alpha=0.2, def_gain=np.sqrt(2), cuda_idx=3, ref='y', has_2nd_grad=False),
-    'tanh':     dnnlib.EasyDict(func=lambda x, **_:         torch.tanh(x), def_alpha=0, def_gain=1, cuda_idx=4, ref='y', has_2nd_grad=True),
-    'sigmoid':  dnnlib.EasyDict(func=lambda x, **_:         torch.sigmoid(x), def_alpha=0, def_gain=1, cuda_idx=5, ref='y', has_2nd_grad=True),
-    'elu':      dnnlib.EasyDict(func=lambda x, **_:         torch.nn.functional.elu(x), def_alpha=0, def_gain=1, cuda_idx=6, ref='y', has_2nd_grad=True),
-    'selu':     dnnlib.EasyDict(func=lambda x, **_:         torch.nn.functional.selu(x), def_alpha=0, def_gain=1, cuda_idx=7, ref='y', has_2nd_grad=True),
-    'softplus': dnnlib.EasyDict(func=lambda x, **_:         torch.nn.functional.softplus(x), def_alpha=0, def_gain=1, cuda_idx=8, ref='y', has_2nd_grad=True),
-    'swish':    dnnlib.EasyDict(func=lambda x, **_: torch.sigmoid(x) * x, def_alpha=0, def_gain=np.sqrt(2), cuda_idx=9, ref='x', has_2nd_grad=True),
+    'linear':   dnnlib.EasyDict(func=lambda x, **_:         x,                                          def_alpha=0,    def_gain=1,             cuda_idx=1, ref='',  has_2nd_grad=False),
+    'relu':     dnnlib.EasyDict(func=lambda x, **_:         torch.nn.functional.relu(x),                def_alpha=0,    def_gain=np.sqrt(2),    cuda_idx=2, ref='y', has_2nd_grad=False),
+    'lrelu':    dnnlib.EasyDict(func=lambda x, alpha, **_:  torch.nn.functional.leaky_relu(x, alpha),   def_alpha=0.2,  def_gain=np.sqrt(2),    cuda_idx=3, ref='y', has_2nd_grad=False),
+    'tanh':     dnnlib.EasyDict(func=lambda x, **_:         torch.tanh(x),                              def_alpha=0,    def_gain=1,             cuda_idx=4, ref='y', has_2nd_grad=True),
+    'sigmoid':  dnnlib.EasyDict(func=lambda x, **_:         torch.sigmoid(x),                           def_alpha=0,    def_gain=1,             cuda_idx=5, ref='y', has_2nd_grad=True),
+    'elu':      dnnlib.EasyDict(func=lambda x, **_:         torch.nn.functional.elu(x),                 def_alpha=0,    def_gain=1,             cuda_idx=6, ref='y', has_2nd_grad=True),
+    'selu':     dnnlib.EasyDict(func=lambda x, **_:         torch.nn.functional.selu(x),                def_alpha=0,    def_gain=1,             cuda_idx=7, ref='y', has_2nd_grad=True),
+    'softplus': dnnlib.EasyDict(func=lambda x, **_:         torch.nn.functional.softplus(x),            def_alpha=0,    def_gain=1,             cuda_idx=8, ref='y', has_2nd_grad=True),
+    'swish':    dnnlib.EasyDict(func=lambda x, **_:         torch.sigmoid(x) * x,                       def_alpha=0,    def_gain=np.sqrt(2),    cuda_idx=9, ref='x', has_2nd_grad=True),
 }
 
 #----------------------------------------------------------------------------
@@ -38,22 +37,14 @@ _null_tensor = torch.empty([0])
 
 def _init():
     global _plugin
-    if _plugin is None or not params.use_custom:
-        if params.use_custom:
-            _plugin = custom_ops.get_plugin(
-                module_name='bias_act_plugin',
-                sources=['bias_act.cpp', 'bias_act.cu'],
-                headers=['bias_act.h'],
-                source_dir=os.path.dirname(__file__),
-                extra_cuda_cflags=['--use_fast_math', '--allow-unsupported-compiler'],
-            )
-            if _plugin is None:
-                params.use_custom = False
-                params.has_custom = False
-                return False
-            params.has_custom = True
-        else:
-            return False
+    if _plugin is None:
+        _plugin = custom_ops.get_plugin(
+            module_name='bias_act_plugin',
+            sources=['bias_act.cpp', 'bias_act.cu'],
+            headers=['bias_act.h'],
+            source_dir=os.path.dirname(__file__),
+            extra_cuda_cflags=['--use_fast_math', '--allow-unsupported-compiler'],
+        )
     return True
 
 #----------------------------------------------------------------------------

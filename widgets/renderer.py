@@ -22,7 +22,7 @@ import dnnlib
 from utils import device_utils
 from utils.resource_paths import resource_path
 from bending.transform_layers import ManipulationLayer
-from torch_utils.ops import upfirdn2d, params
+from torch_utils.ops import upfirdn2d
 from torch_utils import legacy
 from architectures import custom_stylegan2
 from super_res.net_base import SRVGGNetPlus
@@ -228,7 +228,6 @@ class Renderer:
     def __init__(self):
         self.step_y = 100
         self._device = device_utils.get_device()
-        self.kernel_type = self._device.type
         self._pkl_data = dict()  # {pkl: dict | CapturedException, ...}
         self._networks = dict()  # {cache_key: torch.nn.Module, ...}
         self._pinned_bufs = dict()  # {(shape, dtype): torch.Tensor, ...}
@@ -250,7 +249,6 @@ class Renderer:
         self.G_mixed = None
         self.combined_layers = []
         self.model_changed = False
-        self.checked_custom_kernel = False
 
     def render(self, **args):
         self._is_timing = True
@@ -287,12 +285,11 @@ class Renderer:
         data = self._pkl_data.get(pkl, None)
         if data is None:
             logger.info('Loading network pickle "%s"', pkl)
-            if not self.checked_custom_kernel and torch.cuda.is_available():
-                logger.info("Trying to compile custom cuda kernel, this can take a while...")
+            if not self._pkl_data and torch.cuda.is_available():
+                logger.info("Compiling custom cuda kernels, this can take a while...")
             try:
                 with dnnlib.util.open_url(pkl, verbose=False) as f:
                     data = legacy.load_network_pkl(f, custom=True)
-                    self.checked_custom_kernel = True
                 logger.info('Loaded network pickle "%s"', pkl)
             except:
                 data = CapturedException()
@@ -303,7 +300,7 @@ class Renderer:
             raise data
 
         orig_net = data[key]
-        cache_key = (orig_net, self._device, self.kernel_type, tuple(sorted(tweak_kwargs.items())))
+        cache_key = (orig_net, self._device, tuple(sorted(tweak_kwargs.items())))
         net = self._networks.get(cache_key, None)
         if net is None:
             logger.debug('Initializing network "%s"', cache_key)
@@ -428,12 +425,6 @@ class Renderer:
                      ):
         if device is None:
             device = device_utils.get_device().type
-        res.has_custom = params.has_custom
-        if self.checked_custom_kernel:
-            if device == "custom":
-                params.use_custom = True
-            else:
-                params.use_custom = False
         # Set device.
         if device != self._device.type:
             self.set_device(device)
@@ -854,9 +845,8 @@ class Renderer:
         return latent
 
     def set_device(self, device):
-        if device != self.kernel_type:
-            self.kernel_type = device
-            self._device = torch.device("cuda" if device == "custom" else device)
+        if device != self._device.type:
+            self._device = torch.device(device)
             if self._device.type == 'cuda':
                 self._start_event = torch.cuda.Event(enable_timing=True)
                 self._end_event = torch.cuda.Event(enable_timing=True)
