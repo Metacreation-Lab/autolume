@@ -1,7 +1,5 @@
 import os
-import cv2
 import logging
-import numpy as np
 from utils.gui_utils import gl_utils
 
 logger = logging.getLogger(__name__)

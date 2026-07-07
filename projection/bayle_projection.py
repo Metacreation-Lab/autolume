@@ -158,7 +158,7 @@ def project(
         if kmeans and use_clip and target_text is not None:
             from kmeans_pytorch import kmeans
             # data
-            data_size, dims, num_clusters = w_avg_samples, G.z_dim, kmeans_clusters
+            num_clusters = kmeans_clusters
             x = w_samples_1d
             x = torch.from_numpy(x)
 

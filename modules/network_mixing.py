@@ -15,7 +15,6 @@ import pickle
 import glob
 import os
 import re
-import pandas as pd
 from widgets.help_icon_widget import HelpIconWidget
 
 logger = logging.getLogger(__name__)
@@ -60,7 +59,6 @@ class MixingModule:
         self.model_dropdowns = {m: ModelDropdownButton(label='Browse...') for m in (1, 2)}
 
     def load_pkl(self, pkl, m, ignore_errors=False):
-        menu = self.menu
         try:
             resolved = self.resolve_pkl(pkl)
             name = resolved.replace('\\', '/').split('/')[-1]

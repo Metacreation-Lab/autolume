@@ -372,7 +372,6 @@ class DatasetPreprocessingUtils:
         size = settings.size
         resizeMode = settings.resizeMode
         nonSquare = settings.nonSquare
-        nonSquareSettings = settings.nonSquareSettings
         augmentationSettings = settings.augmentationSettings
         output_path = settings.output_path
         

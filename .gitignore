@@ -16,14 +16,3 @@ site/
 
 # OS artifacts
 .DS_Store
-
-# Autolume artifacts
-bin/
-models/
-recordings/
-training-runs/
-ganspace-features/
-data/
-presets/
-torch_extensions/
-*.pth

@@ -5,8 +5,6 @@ import multiprocessing as mp
 
 import imgui
 import numpy as np
-import torch.cuda
-import pandas as pd
 
 import dnnlib
 from torch_utils import legacy

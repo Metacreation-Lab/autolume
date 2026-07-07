@@ -7,10 +7,7 @@ import dnnlib
 from utils.gui_utils import imgui_utils
 
 logger = logging.getLogger(__name__)
-import numpy as np
-import math
-import torch
-from assets import RED, ACTIVE_RED, GRAY
+from assets import ACTIVE_RED, GRAY
 
 
 class OscMenu:

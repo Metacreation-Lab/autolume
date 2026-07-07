@@ -687,13 +687,11 @@ class Renderer:
 
             layer1 = extract_conv_names(self.G)
             layer2 = extract_conv_names(self.G2)
-            use_G1 = True
             if last_entry.keys() == {"A"}:
                 # get resolution through regex from last entry
                 img_resolution = int(re.search(r'\d+', layer1[last_entry["A"]]).group())
             elif last_entry.keys() == {"B"}:
                 img_resolution = int(re.search(r'\d+', layer2[last_entry["B"]]).group())
-                use_G1 = False
             else:
                 raise ValueError("Last entry should be either A or B but is: ", last_entry)
 

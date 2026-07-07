@@ -131,8 +131,6 @@ class Dataset(torch.utils.data.Dataset):
 
         if image.shape[0] == 4:
             image = image[:3, :, :]
-        image_shape = (3, self.width, self.height) if self.height is not None and self.width is not None else self.image_shape
-        
         if list(image.shape) != self.image_shape:
             image = cv2.resize(image.transpose(1,2,0), dsize=self.image_shape[-2:], interpolation=cv2.INTER_CUBIC).transpose(2,0,1)
         assert list(image.shape) == self.image_shape
@@ -141,67 +139,6 @@ class Dataset(torch.utils.data.Dataset):
             assert image.ndim == 3 # CHW
             image = image[:, :, ::-1]
         return image.copy(), self.get_label(idx)
-
-        # if list(image.shape) != image_shape:
-        #     if self.resize_mode == "stretch":
-        #         # 检查图像是否包含padding(通过检查边缘像素值是否为纯黑或纯白)
-        #         img_transposed = image.transpose(1, 2, 0)
-        #         is_padded = False
-                
-        #         # 检查上下左右边缘是否存在padding
-        #         edges = [
-        #             img_transposed[0, :],  # top
-        #             img_transposed[-1, :],  # bottom
-        #             img_transposed[:, 0],  # left
-        #             img_transposed[:, -1]   # right
-        #         ]
-                
-        #         for edge in edges:
-        #             if np.all(edge == 0) or np.all(edge == 255):
-        #                 is_padded = True
-        #                 break
-                
-        #         if is_padded:
-        #             mask = np.any(img_transposed != 0, axis=2) & np.any(img_transposed != 255, axis=2)
-        #             rows = np.any(mask, axis=1)
-        #             cols = np.any(mask, axis=0)
-        #             y_min, y_max = np.where(rows)[0][[0, -1]]
-        #             x_min, x_max = np.where(cols)[0][[0, -1]]
-                    
-        #             content = img_transposed[y_min:y_max+1, x_min:x_max+1]
-        #             resized_content = cv2.resize(content, 
-        #                                     dsize=(image_shape[2], image_shape[1]), 
-        #                                     interpolation=cv2.INTER_CUBIC)
-                    
-        #             padding_value = 0 if np.all(img_transposed[0,0] == 0) else 255
-        #             result = np.full((image_shape[1], image_shape[2], 3), padding_value, dtype=np.uint8)
-                    
-        #             y_start = (image_shape[1] - resized_content.shape[0]) // 2
-        #             x_start = (image_shape[2] - resized_content.shape[1]) // 2
-        #             result[y_start:y_start+resized_content.shape[0], 
-        #                 x_start:x_start+resized_content.shape[1]] = resized_content
-                    
-        #             image = result.transpose(2, 0, 1)
-        #         else:
-        #             image = cv2.resize(image.transpose(1,2,0), 
-        #                             dsize=image_shape[-2:], 
-        #                             interpolation=cv2.INTER_CUBIC).transpose(2,0,1)
-        #     else:
-        #         image = image.transpose(1, 2, 0)
-        #         pil_image = PIL.Image.fromarray(image.astype(np.uint8))
-        #         resize_transform = torchvision.transforms.Resize(min(self.height, self.width))
-        #         resized_image = resize_transform(pil_image)
-        #         crop_transform = torchvision.transforms.CenterCrop((self.height, self.width))
-        #         cropped_image = crop_transform(resized_image)
-        #         image = np.array(cropped_image)
-        #         image = image.transpose(2,0,1)
-                
-        # assert list(image.shape) == self.image_shape
-        # assert image.dtype == np.uint8
-        # if self._xflip[idx]:
-        #     assert image.ndim == 3 # CHW
-        #     image = image[:, :, ::-1]
-        # return image.copy(), self.get_label(idx)
 
     def get_label(self, idx):
         label = self._get_raw_labels()[self._raw_idx[idx]]
@@ -273,100 +210,6 @@ class Dataset(torch.utils.data.Dataset):
 #----------------------------------------------------------------------------
 
 class ImageFolderDataset(Dataset):
-    # def __init__(self,
-    #     path,                   # Path to directory or zip.
-    #     resolution      = None, # Ensure specific resolution, None = highest available.
-    #     height = None,
-    #     width   = None, # Override resolution.
-    #     resize_mode = "stretch",
-    #     fps = 10,
-    #     **super_kwargs,         # Additional arguments for the Dataset base class.
-    # ):
-    #     self._path = path
-    #     self._zipfile = None
-    #     self.height = height
-    #     self.width = width
-    #     self.resize_mode = resize_mode
-    #     # self.has_frames_folder = False
-    #     self.frame_path = set()
-
-    #     if os.path.isdir(self._path):
-    #         self._type = 'dir'
-    #         self._all_fnames = {os.path.relpath(os.path.join(root, fname), start=self._path) for root, _dirs, files in os.walk(self._path) for fname in files}
-    #     elif self._file_ext(self._path) == '.zip':
-    #         self._type = 'zip'
-    #         self._all_fnames = set(self._get_zipfile().namelist())
-    #     # elif self._file_ext(self._path) == '.mp4' or self._file_ext(self._path) == '.avi':
-    #     elif self._file_ext(self._path) in ['.mp4', '.avi', '.gif']:
-    #         self._type = 'video'
-    #         self._all_fnames = [self._path]
-    #     else:
-    #         raise IOError('Path must point to a directory or zip')
-
-    #     found_video = False
-    #     # if any file in self__all_fnames is a video create a new subfolder where we save the frames based on fps using ffmpeg
-    #     for fname in self._all_fnames:
-    #         # if fname.endswith('.mp4') or fname.endswith('.avi'):
-    #         if fname.endswith(('.mp4', '.avi', '.gif')):
-    #             found_video = True
-    #             # if self._type is video or zip we have to create a new folder where we save the frames
-    #             if self._type == 'video' or self._type == 'zip':
-    #                 # extract the name of the video
-    #                 video_name = os.path.splitext(fname)[0]
-    #                 save_name = video_name + '_frames'
-    #                 # update self._path to be the new folder which we create based on cwd
-    #                 save_path = os.path.join(os.getcwd(), save_name)
-    #                 # if file exists we add a number to the end of the folder name
-    #                 i = 1
-    #                 while os.path.exists(save_path):
-    #                     save_path = os.path.join(os.getcwd(), save_name + str(i))
-    #                     i += 1
-    #                 # create the folder
-    #                 os.makedirs(save_path)
-    #                 self._path = save_path
-    #                 video_path = os.path.join(fname)
-    #                 # self.frame_path.add(save_path)
-    #             else:
-    #                 # make dir with the name of the video + _frames
-    #                 video_name = os.path.splitext(fname)[0]
-    #                 save_name = video_name + '_frames'
-    #                 save_path = os.path.join(self._path, save_name)
-    #                 # self.has_frames_folder = True
-    #                 if not os.path.exists(save_path):
-    #                     os.makedirs(save_path)
-    #                 # extract frames from video using ffmpeg
-    #                 video_path = os.path.join(self._path, fname)
-    #             cmd = 'ffmpeg -i {} -vf fps={} {}/%04d.jpg'.format(video_path, fps, save_path)
-    #             self.frame_path.add(save_path)
-    #             os.system(cmd)
-
-    #     # if any of the files were videos we need to update the all_fnames list
-    #     if found_video:
-    #         if os.path.isdir(self._path):
-    #             self._type = 'dir'
-    #             self._all_fnames = {os.path.relpath(os.path.join(root, fname), start=self._path) for root, _dirs, files
-    #                                 in os.walk(self._path) for fname in files}
-    #         elif self._file_ext(self._path) == '.zip':
-    #             self._type = 'zip'
-    #             self._all_fnames = set(self._get_zipfile().namelist())
-    #         else:
-    #             raise IOError('Path must point to a directory or zip')
-
-
-
-
-
-    #     PIL.Image.init()
-    #     self._image_fnames = sorted(fname for fname in self._all_fnames if self._file_ext(fname) in PIL.Image.EXTENSION)
-
-    #     if len(self._image_fnames) == 0:
-    #         raise IOError('No image files found in the specified path')
-
-    #     name = os.path.splitext(os.path.basename(self._path))[0]
-    #     img_shape = [3, self.height,self.width]  if self.width is not None and self.height is not None else list(self._load_raw_image(0).shape)
-    #     raw_shape = [len(self._image_fnames)] + img_shape
-    #     super().__init__(name=name, raw_shape=raw_shape, **super_kwargs)
-
     def __init__(self,
         path,                   # Path to directory or zip.
         resolution      = None, # Ensure specific resolution, None = highest available.
@@ -590,13 +433,6 @@ class ImageFolderDataset(Dataset):
                 os.mkdir(path+str('/resized_images'))
             img.save(path+str('/resized_images/')+str(idx)+'.png', 'PNG')
     
-
-    # def move_frames_folders(self, output_dir):
-    #     for frame_path in self.frame_path:  # 遍历所有帧文件夹路径
-    #         if os.path.exists(frame_path):
-    #             new_path = os.path.join(output_dir, os.path.basename(frame_path))
-    #             os.rename(frame_path, new_path)  # 移动文件夹
-    #             print(f"Moved frames folder to: {new_path}")
 
     def copy_frames_folders(self, output_dir):
         if self.skip_preprocessing:

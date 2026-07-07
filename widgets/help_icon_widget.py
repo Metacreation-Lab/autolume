@@ -1,6 +1,6 @@
+import csv
 import logging
 
-import pandas as pd
 import imgui
 import webbrowser
 from utils.resource_paths import get_version, resource_path
@@ -22,17 +22,18 @@ class HelpIconWidget:
         try:
             csv_path = resource_path("modules", "help_texts.csv")
             if csv_path.exists():
-                df = pd.read_csv(csv_path)
-                if 'module' in df.columns:
-                    df = df[df['module'] == module_name]
-                for _, row in df.iterrows():
-                    if row.get('key') and row.get('text'):
-                        key = str(row['key']).strip()
-                        text = str(row['text']).strip()
-                        text = text.replace('\\n', '\n')
-                        help_texts[key] = text
-                        if pd.notna(row.get('url')) and str(row['url']).strip():
-                            raw_url = str(row['url']).strip()
+                with open(csv_path, newline='', encoding='utf-8') as f:
+                    for row in csv.DictReader(f):
+                        if 'module' in row and row['module'] != module_name:
+                            continue
+                        key = (row.get('key') or '').strip()
+                        if not key:
+                            continue
+                        text = (row.get('text') or '').strip().replace('\\n', '\n')
+                        if text:
+                            help_texts[key] = text
+                        raw_url = (row.get('url') or '').strip()
+                        if raw_url:
                             help_urls[key] = self._resolve_docs_url(raw_url)
         except Exception as e:
             logger.warning("Error loading help texts: %s", e)

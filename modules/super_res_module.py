@@ -3,27 +3,18 @@ import os
 import threading
 import time
 
-import cv2
 import imgui
-import torch
-from torchvision import transforms
-import torchvision.transforms.functional as F
-import numpy as np
 
-from utils import device_utils
 from utils.app_logging import LoggedProcess
-from utils.device_utils import get_device
 from utils.gui_utils import imgui_utils
-from super_res.super_res import main as super_res_main, load_model, get_resolution, check_width_height, get_audio, Reader, Writer, run_super_res, sr_weight_path, ensure_sr_weight
+from super_res.super_res import run_super_res, sr_weight_path, ensure_sr_weight
 
 from dnnlib import EasyDict
 import multiprocessing as mp
 
-import gc
 
 from widgets.native_browser_widget import NativeBrowserWidget
 from widgets.help_icon_widget import HelpIconWidget
-import pandas as pd
 
 args = EasyDict(result_path="", input_path=[""], model_type="Balance",
                 outscale=3, width=4096, height=4096, sharpen_scale=1, scale_mode=0)

@@ -1,11 +1,8 @@
 import PIL
 import imgui
-import os
-import pandas as pd
 import numpy as np
 import torch
 from PIL import ImageFilter
-from PIL.Image import Image
 
 from utils.app_logging import LoggedProcess
 from utils.gui_utils import imgui_utils, gl_utils

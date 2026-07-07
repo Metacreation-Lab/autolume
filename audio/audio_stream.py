@@ -118,7 +118,7 @@ class AudioStream(object):
                 input=True)
             stream.close()
             return True
-        except Exception as e:
+        except Exception:
             # print(e)
             return False
 
