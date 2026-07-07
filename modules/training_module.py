@@ -307,10 +307,10 @@ class TrainingModule:
             if imgui.begin_popup_modal("Advanced...")[0]:
                 imgui.text("Advanced Training Options")
                 imgui.text("Generator Learning Rate")
-                _, self.glr = imgui.input_float("##Generator Learning Rate", self.glr)
+                _, self.glr = imgui_utils.input_float("##Generator Learning Rate", self.glr, format='%.6f')
 
                 imgui.text("Discriminator Learning Rate")
-                _, self.dlr = imgui.input_float("##Discriminator Learning Rate", self.dlr)
+                _, self.dlr = imgui_utils.input_float("##Discriminator Learning Rate", self.dlr, format='%.6f')
 
                 imgui.text("Gamma")
                 _, self.gamma = imgui.input_int("##Gamma", self.gamma)

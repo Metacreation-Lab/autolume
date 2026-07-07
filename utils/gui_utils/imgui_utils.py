@@ -202,6 +202,24 @@ def input_text(label, value, buffer_length, flags, width=None, help_text=''):
 
 
 # ----------------------------------------------------------------------------
+# imgui passes float values through a C float every frame, so assigning the
+# returned value back unconditionally corrupts Python doubles even when the
+# user never touched the field. These wrappers keep the original value unless
+# the field actually changed, and round away float32 noise when it did.
+
+def input_float(label, value, *args, **kwargs):
+    changed, new_value = imgui.input_float(label, value, *args, **kwargs)
+    return changed, round(new_value, 6) if changed else value
+
+
+def input_float2(label, value0, value1, *args, **kwargs):
+    changed, values = imgui.input_float2(label, value0, value1, *args, **kwargs)
+    if changed:
+        return changed, tuple(round(v, 6) for v in values)
+    return changed, (value0, value1)
+
+
+# ----------------------------------------------------------------------------
 
 def drag_previous_control(enabled=True):
     dragging = False
