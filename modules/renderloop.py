@@ -86,34 +86,27 @@ class AsyncRenderer:
         torch.backends.cudnn.allow_tf32 = True
         torch.set_grad_enabled(False)
         renderer_obj = renderer.Renderer()
-        args = None
-        stamp = 0
-        new_arg = False
-        is_mps = device_utils.get_device().type == 'mps'
         renders_since_flush = 0
         with torch.inference_mode():
             while True:
-                if not args_queue.empty():
+                # Block instead of polling: a hot loop pins a CPU core, which
+                # steals GPU boost headroom on power-limited machines.
+                args, stamp = args_queue.get()
+                while not args_queue.empty():
                     args, stamp = args_queue.get()
-                    new_arg = True
-                if new_arg:
-                    with torch.no_grad():
-                        result = renderer_obj.render(**args)
-                    if 'error' in result:
-                        result.error = renderer.CapturedException(result.error)
-                    result_queue.put([result, stamp])
-                    del result
-                    new_arg = False
-                    renders_since_flush += 1
+                with torch.no_grad():
+                    result = renderer_obj.render(**args)
+                if 'error' in result:
+                    result.error = renderer.CapturedException(result.error)
+                result_queue.put([result, stamp])
+                del result
+                renders_since_flush += 1
                 # gc.collect() # Putting a garbage collect here stabilizes the memory usage, but slows down the rendering
                                # Torch seems to store values in the background even with nograd that slow down StyleGAN2 over time
                                # This is a workaround to keep the memory usage stable, but conflicts with imgui causing drops in GUI performance
-                if is_mps:
-                    # torch.mps.empty_cache() synchronizes the GPU; flushing every
-                    # iteration costs more than the memory it returns, so flush
-                    # periodically instead.
-                    if renders_since_flush >= 120:
-                        device_utils.empty_cache()
-                        renders_since_flush = 0
-                else:
+                # empty_cache() synchronizes the GPU on both CUDA and MPS
+                # (~5 ms/frame on CUDA); flush periodically to keep memory
+                # bounded instead.
+                if renders_since_flush >= 120:
                     device_utils.empty_cache()
+                    renders_since_flush = 0
