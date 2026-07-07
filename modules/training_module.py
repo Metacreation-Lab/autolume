@@ -374,29 +374,26 @@ class TrainingModule:
             else:
                 imgui.combo("##Configuration", self.config, configs)
 
-            imgui.set_next_window_size(self.menu.app.content_width // 4, self.menu.app.content_height // 4, imgui.ONCE)
-
-            if imgui_utils.button("Advanced...", width=-1, enabled=not training_active):
-                imgui.open_popup("Advanced...")
-
-            if imgui.begin_popup_modal("Advanced...")[0]:
-                imgui.text("Advanced Training Options")
+            if imgui.collapsing_header("Advanced Options")[0]:
                 imgui.text("Generator Learning Rate")
-                _, self.glr = imgui_utils.input_float("##Generator Learning Rate", self.glr, format='%.6f')
+                changed, value = imgui_utils.input_float("##Generator Learning Rate", self.glr, format='%.6f')
+                if changed and not training_active:
+                    self.glr = value
 
                 imgui.text("Discriminator Learning Rate")
-                _, self.dlr = imgui_utils.input_float("##Discriminator Learning Rate", self.dlr, format='%.6f')
+                changed, value = imgui_utils.input_float("##Discriminator Learning Rate", self.dlr, format='%.6f')
+                if changed and not training_active:
+                    self.dlr = value
 
                 imgui.text("Gamma")
-                _, self.gamma = imgui.input_int("##Gamma", self.gamma)
+                changed, value = imgui.input_int("##Gamma", self.gamma)
+                if changed and not training_active:
+                    self.gamma = value
 
                 imgui.text("Number of ticks between snapshots")
-                _, self.snap = imgui.input_int("##Number of ticks between snapshots", self.snap)
-
-                if imgui_utils.button("Close", enabled=1):
-                    imgui.close_current_popup()
-
-                imgui.end_popup()
+                changed, value = imgui.input_int("##Number of ticks between snapshots", self.snap)
+                if changed and not training_active:
+                    self.snap = value
 
         if self.done_button:
             imgui_utils.button("Stopping...", width=-1, enabled=False)
