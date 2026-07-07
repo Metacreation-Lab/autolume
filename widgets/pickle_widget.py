@@ -18,7 +18,6 @@ except ModuleNotFoundError:
 
 import dnnlib
 import imgui
-import numpy as np
 from utils.gui_utils import imgui_utils
 from utils.model_dir import list_model_pkls, models_dir
 from widgets.native_browser_widget import NativeBrowserWidget

@@ -31,14 +31,12 @@ autolume/
   bending/                    # Network bending operators applied at inference
   dnnlib/                     # Vendored NVIDIA dnnlib (StyleGAN2/3)
   ganspace/                   # GANSpace PCA latent direction discovery
-  ganspace_features/          # Pre-computed GANSpace feature data
   metrics/                    # FID, KID, and related quality metrics
   modules/                    # UI modules and live-performance widgets
   widgets/                    # Reusable imgui widgets
   projection/                 # Image-to-latent projection
   sr_models/                  # Super-resolution model weights (gitignored)
   super_res/                  # Real-ESRGAN super-resolution wrappers
-  super_resolution.py         # Super-resolution top-level pipeline
   torch_utils/                # Vendored NVIDIA torch utilities (custom ops, persistence)
   training/                   # Model training and distillation
   utils/                      # Shared helpers (datasets, GUI, paths, version)

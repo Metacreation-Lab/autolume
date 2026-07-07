@@ -2,7 +2,6 @@ import imgui
 import librosa
 import logging
 import numpy as np
-import torch
 from pythonosc.udp_client import SimpleUDPClient
 
 import dnnlib
@@ -108,7 +107,6 @@ class AudioWidget:
         if show:
             width = viz.app.font_size
             height = imgui.get_text_line_height_with_spacing()
-            bg_color = [0.16, 0.29, 0.48, 0.2]
             _, self.decompose = imgui.checkbox("Decompose##extract", self.decompose)
             if self.decompose:
                 imgui.begin_group()

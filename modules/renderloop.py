@@ -1,8 +1,6 @@
-import gc
 import multiprocessing
 import torch
 
-import dnnlib
 from utils import device_utils
 from utils.app_logging import LoggedProcess
 from widgets import renderer

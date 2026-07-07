@@ -1,5 +1,4 @@
 import imgui
-from utils.gui_utils import imgui_utils
 
 class LoadingOverlayManager:
     """Enhanced loading overlay manager with two different render modes for different types of processes"""

@@ -1,10 +1,8 @@
 import logging
-import os
 
 import imgui
 import numpy as np
 import torch
-import torch.nn.functional as F
 
 from assets import ACTIVE_RED
 
@@ -12,7 +10,6 @@ try:
     import cPickle as pickle
 except ModuleNotFoundError:
     import pickle
-import dnnlib
 from utils.gui_utils import imgui_utils
 from widgets.native_browser_widget import NativeBrowserWidget
 

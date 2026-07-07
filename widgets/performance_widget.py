@@ -12,7 +12,6 @@ import threading
 
 import numpy as np
 import imgui
-import torch.cuda
 
 from utils import device_utils
 from utils.gui_utils import imgui_utils

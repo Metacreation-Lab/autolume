@@ -131,7 +131,6 @@ def fit(queue, reply):
 
     # 'Activations' are really latents in a secondary latent space
     Z_comp = X_comp
-    Z_global_mean = X_global_mean
 
     # Normalize
     Z_comp /= np.linalg.norm(Z_comp, axis=-1, keepdims=True)

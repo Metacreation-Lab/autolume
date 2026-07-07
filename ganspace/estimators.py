@@ -9,7 +9,7 @@
 # governing permissions and limitations under the License.
 
 import logging
-from sklearn.decomposition import FastICA, PCA, IncrementalPCA, MiniBatchSparsePCA, SparsePCA, KernelPCA
+from sklearn.decomposition import FastICA, PCA, IncrementalPCA, SparsePCA
 import fbpca
 import numpy as np
 import itertools

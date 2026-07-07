@@ -22,7 +22,6 @@ import random
 
 import imgui
 import numpy as np
-import torch
 import yaml
 
 import dnnlib
@@ -828,7 +827,7 @@ class LayerWidget:
                     out = f(args[-1])
                     if isinstance(out, (int, float)):
                         trans.params[param_idx] = f(args[-1])
-            except Exception as e:
+            except Exception:
                 if trans.use_osc and isinstance(args[-1], (int, float)):
                     trans.params[param_idx] = args[-1]
 
@@ -842,7 +841,7 @@ class LayerWidget:
                     out = f(args[-1])
                     if isinstance(out, (int, float)):
                         noise["strength"] = f(args[-1])
-            except Exception as e:
+            except Exception:
                 if noise["use_osc"] and isinstance(args[-1], (int, float)):
                     noise["strength"] = args[-1]
 

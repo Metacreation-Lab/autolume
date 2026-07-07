@@ -1,6 +1,5 @@
 import copy
 import logging
-import os
 
 import imgui
 import numpy as np
@@ -340,7 +339,6 @@ class LoopingWidget:
 
     @imgui_utils.scoped_by_object_id
     def seed_viz(self, idx):
-        update_vec = False
         viz = self.viz
         seed = round(self.seeds[idx][0]) + round(self.seeds[idx][1]) * self.step_y
         with imgui_utils.item_width(viz.app.font_size * 8):

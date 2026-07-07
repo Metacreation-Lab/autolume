@@ -27,7 +27,6 @@ dependencies = [
     "openai-clip==1.0.1",
     "opencv-python==4.8.1.78",
     "opensimplex==0.4.5",
-    "pandas==2.1.1",
     "pillow==10.4.0",
     "psutil>=6.0.0",
     "pyaudio==0.2.14",

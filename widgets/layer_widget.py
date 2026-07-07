@@ -17,7 +17,6 @@ import random
 
 import imgui
 import numpy as np
-import torch
 import yaml
 
 import dnnlib
@@ -398,14 +397,6 @@ class LayerWidget:
                                             self.viz.osc_dispatcher.map(f"/{address}",
                                                                         self.osc_funcs[trans.imgui_id][j])
                                             trans.osc_address[j] = address
-                                    # for j in range(len(trans.params)):
-                                    #     changed, trans.mapping[j] = imgui.input_text(f"##mappings_{j}_{u_id}",
-                                    #                                                  trans.mapping[j], 256,
-                                    #                                                  imgui.INPUT_TEXT_ENTER_RETURNS_TRUE | (
-                                    #                                                          imgui.INPUT_TEXT_READ_ONLY * (
-                                    #                                                      not trans.use_osc)))
-                                    #     if j < len(trans.params) - 1:
-                                    #         imgui.same_line()
                             imgui.separator()
 
         for idx in to_remove:
@@ -518,7 +509,7 @@ class LayerWidget:
                     out = f(args[-1])
                     if isinstance(out, (int, float)):
                         trans.params[param_idx] = f(args[-1])
-            except Exception as e:
+            except Exception:
                 if trans.use_osc and isinstance(args[-1], (int, float)):
                     trans.params[param_idx] = args[-1]
 
@@ -532,61 +523,9 @@ class LayerWidget:
                     out = f(args[-1])
                     if isinstance(out, (int, float)):
                         noise["strength"] = f(args[-1])
-            except Exception as e:
+            except Exception:
                 if noise["use_osc"] and isinstance(args[-1], (int, float)):
                     noise["strength"] = args[-1]
 
         return func
-
-# ----------------------------------------------------------------------------
-
-# adjustment widget currently left out since not happy with how it works
-    # @imgui_utils.scoped_by_object_id
-    # def adjust_widget(self, layers):
-    #
-    #     if imgui_utils.button("+##vecs", width=-1, enabled=self.cur_layer is not None):
-    #         if not (self.cur_layer in self.cached_adjustments):
-    #             self.cached_adjustments[self.cur_layer] = []
-    #         adjustment = {"weight": torch.tensor([0]), "dir": torch.randn(1, 512), "path": "", "uid": self.make_id()}
-    #         self.cached_adjustments[self.cur_layer].append(adjustment)
-    #
-    #     remove_idx = None
-    #     if self.cur_layer in self.cached_adjustments:
-    #         for i, adjustment in enumerate(self.cached_adjustments[self.cur_layer]):
-    #             if imgui_utils.button(f"-##remove{adjustment['uid']}",
-    #                                   self.viz.app.button_w * (2 / 8) - (self.viz.app.spacing / 2)):
-    #                 remove_idx = i
-    #             imgui.same_line()
-    #             with imgui_utils.item_width(self.viz.app.button_w * (6 / 8) - (self.viz.app.spacing / 2)):
-    #                 _, adjustment["weight"] = imgui.slider_float(f"##{adjustment['uid']}",adjustment["weight"], -2, 2,
-    #                                                              format='Weight %.3f', power=3)
-    #             imgui.same_line()
-    #             if imgui_utils.button(f"Randomize##{i}", self.viz.app.button_w):
-    #                 adjustment["dir"] = torch.randn(adjustment["dir"].shape)
-    #             if imgui_utils.button(f"Load##{i}", self.viz.app.button_w):
-    #                 dir = torch.load(adjustment["path"])
-    #                 assert dir.shape == adjustment["dir"].shape
-    #                 adjustment["dir"] = dir
-    #             imgui.separator()
-    #
-    #         if remove_idx is not None:
-    #             self.cached_adjustments[self.cur_layer].pop(remove_idx)
-    #             if len(self.cached_adjustments[self.cur_layer]) == 0:
-    #                 del self.cached_adjustments[self.cur_layer]
-    #     imgui.separator()
-    #     _, self.paths[self.cur_layer] = imgui_utils.input_text("Path", self.paths.get(self.cur_layer, ""),
-    #                                                            width=self.viz.app.button_w, flags=0, buffer_length=1024)
-    #     if imgui_utils.button(f"Load##_all{self.cur_layer}", -1):
-    #         if not (self.cur_layer in self.cached_adjustments):
-    #             self.cached_adjustments[self.cur_layer] = []
-    #         dirs =  torch.from_numpy(np.load(self.paths[self.cur_layer])).squeeze()
-    #         for dir in dirs:
-    #             self.cached_adjustments[self.cur_layer].append({"weight": torch.tensor([0]), "dir": dir, "path": "", "uid": self.make_id()})
-    #
-    #
-    #     weighted_adjustments = {}
-    #     for layer, adjustments in self.cached_adjustments.items():
-    #         weighted_adjustments[layer + ".affine"] = torch.stack(
-    #             [adj["weight"] * adj["dir"] for adj in adjustments]).sum(dim=0)
-    #     self.viz.args.adjustments = weighted_adjustments
 

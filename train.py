@@ -28,7 +28,6 @@ import dnnlib as dnnlib
 from training import training_loop
 from metrics import metric_main
 from torch_utils import training_stats, custom_ops
-from queue import Empty
 
 logger = logging.getLogger(__name__)
 
