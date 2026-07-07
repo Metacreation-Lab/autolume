@@ -496,7 +496,7 @@ class LoopingWidget:
 
                 imgui.same_line()
                 with imgui_utils.item_width(viz.app.font_size * 5):
-                    radius_changed, self.radius = imgui.input_float("Radius", self.radius)
+                    radius_changed, self.radius = imgui_utils.input_float("Radius", self.radius)
                 if seed_changed or radius_changed:
                     self.args_queue.put((self.noise_seed, self.radius))
 

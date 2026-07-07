@@ -61,12 +61,12 @@ class CompressModule:
         picked = self.compress_dropdown(width=-1)
         if picked is not None:
             self.compress_pkl = picked
-        _, self.compression_factor = imgui.input_float("Compression Factor", self.compression_factor)
+        _, self.compression_factor = imgui_utils.input_float("Compression Factor", self.compression_factor)
         _, self.n_samples = imgui.input_int("Number of Samples", self.n_samples)
         _, self.batch_size_compress = imgui.input_int("Batch Size", self.batch_size_compress)
         if self.batch_size_compress < 1:
             self.batch_size_compress = 1
-        _, self.noise_prob = imgui.input_float("Noise Probability", self.noise_prob)
+        _, self.noise_prob = imgui_utils.input_float("Noise Probability", self.noise_prob)
 
         if imgui_utils.button('Compress', enabled=len(self.compress_pkl) > 0, width=-1):
             logger.info("Compressing model %s", self.compress_pkl)
