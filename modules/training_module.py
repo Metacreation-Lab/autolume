@@ -1,3 +1,4 @@
+import json
 import logging
 from pathlib import Path
 import zipfile
@@ -23,6 +24,25 @@ ada_pipes = ['blit', 'geom', 'color', 'filter', 'noise', 'cutout', 'bg', 'bgc', 
 diffaug_pipes = ['color,translation,cutout', 'color,translation', 'color,cutout', 'color',
                  'translation', 'cutout,translation', 'cutout']
 configs = ['auto', 'stylegan2', 'paper256', 'paper512', 'paper1024', 'cifar']
+# Mirrors augpipe_specs in train.py; used to recover the pipe name from
+# the augment_kwargs flags stored in a run's training_options.json.
+augpipe_specs = {
+    'blit': dict(xflip=1, rotate90=1, xint=1),
+    'geom': dict(scale=1, rotate=1, aniso=1, xfrac=1),
+    'color': dict(brightness=1, contrast=1, lumaflip=1, hue=1, saturation=1),
+    'filter': dict(imgfilter=1),
+    'noise': dict(noise=1),
+    'cutout': dict(cutout=1),
+    'bg': dict(xflip=1, rotate90=1, xint=1, scale=1, rotate=1, aniso=1, xfrac=1),
+    'bgc': dict(xflip=1, rotate90=1, xint=1, scale=1, rotate=1, aniso=1, xfrac=1, brightness=1, contrast=1,
+                lumaflip=1, hue=1, saturation=1),
+    'bgcf': dict(xflip=1, rotate90=1, xint=1, scale=1, rotate=1, aniso=1, xfrac=1, brightness=1, contrast=1,
+                 lumaflip=1, hue=1, saturation=1, imgfilter=1),
+    'bgcfn': dict(xflip=1, rotate90=1, xint=1, scale=1, rotate=1, aniso=1, xfrac=1, brightness=1, contrast=1,
+                  lumaflip=1, hue=1, saturation=1, imgfilter=1, noise=1),
+    'bgcfnc': dict(xflip=1, rotate90=1, xint=1, scale=1, rotate=1, aniso=1, xfrac=1, brightness=1, contrast=1,
+                   lumaflip=1, hue=1, saturation=1, imgfilter=1, noise=1, cutout=1),
+}
 resize_mode = ['stretch','center crop']
 MBSTD_GROUP = 2
 BATCH_SIZE_CHOICES = [MBSTD_GROUP * x for x in range(1, 33)]
@@ -84,6 +104,60 @@ class TrainingModule:
         if self._zipfile is None:
             self._zipfile = zipfile.ZipFile(self.data_path)
         return self._zipfile
+
+    def _apply_run_settings(self, pkl_path):
+        # Restore the UI settings of the training run the snapshot came from,
+        # using the training_options.json saved next to it. Every field is
+        # optional: anything missing or unrecognized is skipped.
+        options_path = Path(pkl_path).parent / "training_options.json"
+        try:
+            with open(options_path, encoding="utf-8") as f:
+                options = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            logger.debug("No readable training_options.json next to %s", pkl_path)
+            return
+
+        dataset_path = options.get("training_set_kwargs", {}).get("path")
+        if dataset_path and Path(dataset_path).exists():
+            self.data_path = str(dataset_path)
+
+        batch = options.get("batch_size")
+        if isinstance(batch, int):
+            self.batch_size = min(BATCH_SIZE_CHOICES, key=lambda x: abs(x - batch))
+
+        diffaug = options.get("loss_kwargs", {}).get("diffaugment")
+        if diffaug in diffaug_pipes:
+            self.aug = augs.index("DiffAUG")
+            self.diffaug_pipe = diffaug_pipes.index(diffaug)
+        elif "augment_kwargs" in options:
+            flags = {k: v for k, v in options["augment_kwargs"].items() if k != "class_name"}
+            for name, spec in augpipe_specs.items():
+                if spec == flags:
+                    self.aug = augs.index("ADA")
+                    self.ada_pipe = ada_pipes.index(name)
+                    break
+
+        run_dir = options.get("run_dir")
+        if run_dir:
+            tokens = Path(run_dir).name.split("-")
+            if len(tokens) > 1 and tokens[1] in configs:
+                self.config = configs.index(tokens[1])
+
+        gamma = options.get("loss_kwargs", {}).get("r1_gamma")
+        if isinstance(gamma, (int, float)):
+            self.gamma = int(round(gamma))
+
+        glr = options.get("G_opt_kwargs", {}).get("lr")
+        if isinstance(glr, (int, float)):
+            self.glr = float(glr)
+
+        dlr = options.get("D_opt_kwargs", {}).get("lr")
+        if isinstance(dlr, (int, float)):
+            self.dlr = float(dlr)
+
+        snap = options.get("network_snapshot_ticks")
+        if isinstance(snap, int):
+            self.snap = snap
 
     def _start_training(self):
         target_data_path = self.data_path
@@ -222,6 +296,22 @@ class TrainingModule:
                 if directory_path:
                     self.save_path = directory_path
 
+            imgui.text("Resume Pkl (optional)")
+            current_y = imgui.get_cursor_pos_y()
+            imgui.set_cursor_pos_y(current_y - 3)
+            if not training_active:
+                _, self.resume_pkl = imgui_utils.input_text("##Resume Pkl", self.resume_pkl, 1024, 0,
+                    width=pane_width - imgui.calc_text_size("Browse##Resume Pkl")[0] - style.window_padding[0] * 2)
+            else:
+                imgui_utils.input_text("##Resume Pkl", self.resume_pkl, 1024, imgui.INPUT_TEXT_READ_ONLY,
+                    width=pane_width - imgui.calc_text_size("Browse##Resume Pkl")[0] - style.window_padding[0] * 2)
+
+            imgui.same_line()
+            picked = self.model_dropdown(width=self.menu.app.button_w)
+            if picked is not None and not training_active:
+                self.resume_pkl = picked
+                self._apply_run_settings(picked)
+
             imgui.text("Dataset Path")
             current_y = imgui.get_cursor_pos_y()
             imgui.set_cursor_pos_y(current_y - 3)
@@ -237,21 +327,6 @@ class TrainingModule:
                 directory_path = self.data_path_browser.select_directory("Select Training Dataset Directory", initial_dir=self.data_path)
                 if directory_path:
                     self.data_path = directory_path
-
-            imgui.text("Resume Pkl")
-            current_y = imgui.get_cursor_pos_y()
-            imgui.set_cursor_pos_y(current_y - 3)
-            if not training_active:
-                _, self.resume_pkl = imgui_utils.input_text("##Resume Pkl", self.resume_pkl, 1024, 0,
-                    width=pane_width - imgui.calc_text_size("Browse##Resume Pkl")[0] - style.window_padding[0] * 2)
-            else:
-                imgui_utils.input_text("##Resume Pkl", self.resume_pkl, 1024, imgui.INPUT_TEXT_READ_ONLY,
-                    width=pane_width - imgui.calc_text_size("Browse##Resume Pkl")[0] - style.window_padding[0] * 2)
-
-            imgui.same_line()
-            picked = self.model_dropdown(width=self.menu.app.button_w)
-            if picked is not None and not training_active:
-                self.resume_pkl = picked
 
             imgui.text("Training Augmentation")
             imgui.same_line()
