@@ -61,28 +61,6 @@ def set_default_style(color_scheme='dark', spacing=9, indent=23, scrollbar=15):
     s.colors[imgui.COLOR_HEADER] = DARKGREEN
     s.colors[imgui.COLOR_HEADER_HOVERED] = HOVERGREEN
     s.colors[imgui.COLOR_HEADER_ACTIVE] = GREEN
-    # s.colors[imgui.COLOR_SEPARATOR] = [0., 1., 0., 1.00]
-    # s.colors[imgui.COLOR_SEPARATOR_HOVERED] = red_hovered
-    # s.colors[imgui.COLOR_SEPARATOR_ACTIVE] = red_active
-    # s.colors[imgui.COLOR_RESIZE_GRIP] = red
-    # s.colors[imgui.COLOR_RESIZE_GRIP_HOVERED] = red_hovered
-    # s.colors[imgui.COLOR_RESIZE_GRIP_ACTIVE] = red_active
-    # s.colors[imgui.COLOR_PLOT_LINES] = white
-    # s.colors[imgui.COLOR_PLOT_LINES_HOVERED] = white
-    # s.colors[imgui.COLOR_PLOT_HISTOGRAM] = [0., 1., 0., 1.00]
-    # s.colors[imgui.COLOR_PLOT_HISTOGRAM_HOVERED] = [0., 1., 0., 1.00]
-    # s.colors[imgui.COLOR_TEXT_SELECTED_BACKGROUND] = red
-    # s.colors[imgui.COLOR_DRAG_DROP_TARGET] = [0.8, 0.8, 0.8, 1.00]
-    # s.colors[imgui.COLOR_NAV_HIGHLIGHT] = red
-    # s.colors[imgui.COLOR_NAV_WINDOWING_HIGHLIGHT] = red
-    # s.colors[imgui.COLOR_NAV_WINDOWING_DIM_BACKGROUND] = red
-    # s.colors[imgui.COLOR_MODAL_WINDOW_DIM_BACKGROUND] = red
-
-
-
-    c0 = s.colors[imgui.COLOR_MENUBAR_BACKGROUND]
-    c1 = s.colors[imgui.COLOR_FRAME_BACKGROUND]
-    # s.colors[imgui.COLOR_POPUP_BACKGROUND] = [x * 0.7 + y * 0.3 for x, y in zip(c0, c1)][:3] + [1]
 
 
 # ----------------------------------------------------------------------------
@@ -142,7 +120,6 @@ def scoped_by_object_id(method):
 # ----------------------------------------------------------------------------
 
 def color_button(label, color, width=0, height=0):
-    s = imgui.get_style()
     imgui.push_style_color(imgui.COLOR_BUTTON, *color)
     imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, *color)
     imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, *color)
@@ -199,6 +176,24 @@ def input_text(label, value, buffer_length, flags, width=None, help_text=''):
     if not flags & imgui.INPUT_TEXT_ENTER_RETURNS_TRUE:
         changed = (value != old_value)
     return changed, value
+
+
+# ----------------------------------------------------------------------------
+# imgui passes float values through a C float every frame, so assigning the
+# returned value back unconditionally corrupts Python doubles even when the
+# user never touched the field. These wrappers keep the original value unless
+# the field actually changed, and round away float32 noise when it did.
+
+def input_float(label, value, *args, **kwargs):
+    changed, new_value = imgui.input_float(label, value, *args, **kwargs)
+    return changed, round(new_value, 6) if changed else value
+
+
+def input_float2(label, value0, value1, *args, **kwargs):
+    changed, values = imgui.input_float2(label, value0, value1, *args, **kwargs)
+    if changed:
+        return changed, tuple(round(v, 6) for v in values)
+    return changed, (value0, value1)
 
 
 # ----------------------------------------------------------------------------

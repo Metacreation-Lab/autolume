@@ -22,9 +22,7 @@ import dnnlib as dnnlib
 from torch_utils import misc, training_stats, legacy as legacy
 from torch_utils.ops import conv2d_gradfix, grid_sample_gradfix
 from utils import device_utils
-from queue import Empty
 
-from metrics import metric_main
 from codecarbon import EmissionsTracker
 
 logger = logging.getLogger(__name__)

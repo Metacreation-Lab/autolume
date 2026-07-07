@@ -3,7 +3,7 @@ from functools import lru_cache
 from pathlib import Path
 import sys
 
-import tomli
+import tomllib
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -27,7 +27,7 @@ def resource_path(*parts: str) -> Path:
 def _project_table() -> dict:
     """Parse the ``[project]`` table from the bundled ``pyproject.toml``."""
     with open(resource_path("pyproject.toml"), "rb") as fp:
-        return tomli.load(fp)["project"]
+        return tomllib.load(fp)["project"]
 
 
 def get_version() -> str:

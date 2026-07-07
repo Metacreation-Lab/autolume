@@ -1,11 +1,8 @@
 import PIL
 import imgui
-import os
-import pandas as pd
 import numpy as np
 import torch
 from PIL import ImageFilter
-from PIL.Image import Image
 
 from utils.app_logging import LoggedProcess
 from utils.gui_utils import imgui_utils, gl_utils
@@ -132,7 +129,7 @@ class ProjectionModule:
         imgui.text("Learning Rate")
         imgui.same_line()
         with imgui_utils.item_width(input_width):
-            _changed, self.lr = imgui.input_float("##lr", self.lr)
+            _changed, self.lr = imgui_utils.input_float("##lr", self.lr)
         
         imgui.text("Steps")
         imgui.same_line()

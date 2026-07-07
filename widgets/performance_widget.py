@@ -12,7 +12,6 @@ import threading
 
 import numpy as np
 import imgui
-import torch.cuda
 
 from utils import device_utils
 from utils.gui_utils import imgui_utils
@@ -37,8 +36,7 @@ class PerformanceWidget:
         self.use_superres = False
         self.scale_factor = 0
         self.device = device_utils.get_device().type
-        self.custom_kernel_available = False
-    
+
 
     def start_osc_server(self):
         try:
@@ -61,10 +59,6 @@ class PerformanceWidget:
     @imgui_utils.scoped_by_object_id
     def __call__(self, show=True):
         viz = self.viz
-        if "has_custom" in viz.result:
-            self.custom_kernel_available = viz.result.has_custom
-            del viz.result.has_custom
-
         self.gui_times = self.gui_times[1:] + [viz.app.frame_delta]
         if 'render_time' in viz.result:
             self.render_times = self.render_times[1:] + [viz.result.render_time]
@@ -151,14 +145,6 @@ class PerformanceWidget:
                 if imgui.checkbox("GPU", self.device in ("cuda", "mps"))[0]:
                     if accel_type != 'cpu':
                         self.device = accel_type
-
-            imgui.same_line()
-
-            with imgui_utils.grayed_out(not self.custom_kernel_available):
-                if imgui.checkbox("Custom Kernel", self.device == "custom")[0]:
-                    if self.custom_kernel_available:
-                        self.device = "custom"
-
 
             imgui.same_line(spacing=viz.app.spacing*3)
             _, self.use_superres = imgui.checkbox('Super Resolution', self.use_superres)

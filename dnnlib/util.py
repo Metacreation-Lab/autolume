@@ -29,7 +29,6 @@ import urllib
 import urllib.request
 import uuid
 
-from distutils.util import strtobool
 from typing import Any, List, Tuple, Union
 
 
@@ -162,6 +161,16 @@ def format_time_brief(seconds: Union[int, float]) -> str:
         return "{0}h {1:02}m".format(s // (60 * 60), (s // 60) % 60)
     else:
         return "{0}d {1:02}h".format(s // (24 * 60 * 60), (s // (60 * 60)) % 24)
+
+
+def strtobool(val: str) -> bool:
+    # Replacement for distutils.util.strtobool (distutils removed in Python 3.12).
+    val = val.lower()
+    if val in ("y", "yes", "t", "true", "on", "1"):
+        return True
+    if val in ("n", "no", "f", "false", "off", "0"):
+        return False
+    raise ValueError("invalid truth value {!r}".format(val))
 
 
 def ask_yes_no(question: str) -> bool:

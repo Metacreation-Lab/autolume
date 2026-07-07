@@ -22,7 +22,7 @@ import dnnlib
 from utils import device_utils
 from utils.resource_paths import resource_path
 from bending.transform_layers import ManipulationLayer
-from torch_utils.ops import upfirdn2d, params
+from torch_utils.ops import upfirdn2d
 from torch_utils import legacy
 from architectures import custom_stylegan2
 from super_res.net_base import SRVGGNetPlus
@@ -228,7 +228,6 @@ class Renderer:
     def __init__(self):
         self.step_y = 100
         self._device = device_utils.get_device()
-        self.kernel_type = self._device.type
         self._pkl_data = dict()  # {pkl: dict | CapturedException, ...}
         self._networks = dict()  # {cache_key: torch.nn.Module, ...}
         self._pinned_bufs = dict()  # {(shape, dtype): torch.Tensor, ...}
@@ -250,7 +249,8 @@ class Renderer:
         self.G_mixed = None
         self.combined_layers = []
         self.model_changed = False
-        self.checked_custom_kernel = False
+        self._applied_module_state = None  # (net, global_noise, noise_adjustments, ratios)
+        self._submodule_names = (None, None)  # (net, {module: name})
 
     def render(self, **args):
         self._is_timing = True
@@ -287,12 +287,11 @@ class Renderer:
         data = self._pkl_data.get(pkl, None)
         if data is None:
             logger.info('Loading network pickle "%s"', pkl)
-            if not self.checked_custom_kernel and torch.cuda.is_available():
-                logger.info("Trying to compile custom cuda kernel, this can take a while...")
+            if not self._pkl_data and torch.cuda.is_available():
+                logger.info("Compiling custom cuda kernels, this can take a while...")
             try:
                 with dnnlib.util.open_url(pkl, verbose=False) as f:
                     data = legacy.load_network_pkl(f, custom=True)
-                    self.checked_custom_kernel = True
                 logger.info('Loaded network pickle "%s"', pkl)
             except:
                 data = CapturedException()
@@ -303,7 +302,7 @@ class Renderer:
             raise data
 
         orig_net = data[key]
-        cache_key = (orig_net, self._device, self.kernel_type, tuple(sorted(tweak_kwargs.items())))
+        cache_key = (orig_net, self._device, tuple(sorted(tweak_kwargs.items())))
         net = self._networks.get(cache_key, None)
         if net is None:
             logger.debug('Initializing network "%s"', cache_key)
@@ -332,7 +331,16 @@ class Renderer:
         return buf.to(self._device) #self._get_pinned_buf(buf).copy_(buf,non_blocking=True).to(self._device)
 
     def to_cpu(self, buf):
-        return buf.detach().cpu() #self._get_pinned_buf(buf).copy_(buf,non_blocking=True).clone()
+        # Pinned staging avoids the slow pageable copy; pin_memory needs CUDA.
+        if self._device.type == 'cuda':
+            return self._get_pinned_buf(buf).copy_(buf).clone()
+        return buf.detach().cpu()
+
+    def _ensure_on_device(self, module):
+        # Module.to() walks every parameter even when nothing moves; probe first.
+        param = next(module.parameters(), None)
+        if param is not None and param.device.type != self._device.type:
+            module.to(self._device)
 
     def _ignore_timing(self):
         self._is_timing = False
@@ -428,12 +436,6 @@ class Renderer:
                      ):
         if device is None:
             device = device_utils.get_device().type
-        res.has_custom = params.has_custom
-        if self.checked_custom_kernel:
-            if device == "custom":
-                params.use_custom = True
-            else:
-                params.use_custom = False
         # Set device.
         if device != self._device.type:
             self.set_device(device)
@@ -480,7 +482,7 @@ class Renderer:
                 self.combined_layers = combined_layers
                 self.model_changed = True
 
-            self.to_device(self.G)
+            self._ensure_on_device(self.G)
             G = self.G
 
             if save_model:
@@ -492,7 +494,7 @@ class Renderer:
                     pickle.dump(data, f)
 
             if mixing and not (self.G_mixed is None):
-                self.to_device(self.G_mixed)
+                self._ensure_on_device(self.G_mixed)
                 G = self.G_mixed
 
 
@@ -585,21 +587,22 @@ class Renderer:
 
             # Run synthesis network.
             synthesis_kwargs = dnnlib.EasyDict(noise_mode=noise_mode, force_fp32=force_fp32)
+            cache_key = (G.synthesis, tuple(sorted(synthesis_kwargs.items())))
             torch.manual_seed(random_seed)
             w += self.to_device(direction)
             out, manip_layers, = self.run_synthesis_net( w, capture_layer=layer_name, transforms=latent_transforms,
                                                  adjustments=adjustments, noise_adjustments=noise_adjustments, ratios=ratios, use_superres=use_superres,global_noise=global_noise,
                                                  combined_layers=combined_layers,mixing=mixing,
+                                                 build_layers=cache_key not in self._net_layers,
                                                  **synthesis_kwargs)
 
 
             # Update layer list.
-            cache_key = (G.synthesis, tuple(sorted(synthesis_kwargs.items())))
             if cache_key not in self._net_layers:
                 layers = manip_layers
                 if layer_name is not None:
                     torch.manual_seed(random_seed)
-                    _out, layers = self.run_synthesis_net( w, use_superres=False,combined_layers=combined_layers, mixing=mixing, **synthesis_kwargs)
+                    _out, layers = self.run_synthesis_net( w, use_superres=False,combined_layers=combined_layers, mixing=mixing, build_layers=True, **synthesis_kwargs)
                 self._net_layers[cache_key] = layers
                 del layers
 
@@ -641,7 +644,8 @@ class Renderer:
 
 
     def run_synthesis_net(self,*args, capture_layer=None, transforms=None, ratios=None, adjustments=None,
-                          noise_adjustments=None, use_superres=False, global_noise=1, combined_layers=[], mixing=False, **kwargs):
+                          noise_adjustments=None, use_superres=False, global_noise=1, combined_layers=[], mixing=False,
+                          build_layers=False, **kwargs):
         """
         Run the synthesis network and capture the output of a specific layer.
         :param net: Synthesis model
@@ -665,7 +669,10 @@ class Renderer:
             ratios = {}
         if transforms is None:
             transforms = []
-        submodule_names = {mod: name for name, mod in net.named_modules()}
+        cached_net, submodule_names = self._submodule_names
+        if cached_net is not net:
+            submodule_names = {mod: name for name, mod in net.named_modules()}
+            self._submodule_names = (net, submodule_names)
         unique_names = set()
         layers = []
         if not (self.G2 is None) and self.model_changed and len(combined_layers):
@@ -680,13 +687,11 @@ class Renderer:
 
             layer1 = extract_conv_names(self.G)
             layer2 = extract_conv_names(self.G2)
-            use_G1 = True
             if last_entry.keys() == {"A"}:
                 # get resolution through regex from last entry
                 img_resolution = int(re.search(r'\d+', layer1[last_entry["A"]]).group())
             elif last_entry.keys() == {"B"}:
                 img_resolution = int(re.search(r'\d+', layer2[last_entry["B"]]).group())
-                use_G1 = False
             else:
                 raise ValueError("Last entry should be either A or B but is: ", last_entry)
 
@@ -733,31 +738,29 @@ class Renderer:
             except:
                 raise Exception("These models are incompatible. Compressed models generally can not be used for mixing.")
 
+        # Per-layer noise/ratio state only changes on user interaction; write it
+        # directly instead of re-registering pre-hooks every frame.
+        module_state = (net, global_noise, noise_adjustments, ratios)
+        state_changed = module_state != self._applied_module_state
+        if state_changed:
+            for module, name in submodule_names.items():
+                # non-affine conv layers carry the noise/ratio parameters
+                if "conv" in name and not ('affine' in name):
+                    module.global_noise = global_noise
+                    if name in noise_adjustments:
+                        module.noise_regulator = noise_adjustments[name]["strength"]
+                    else:
+                        module.noise_regulator = 0
+                    if name in ratios:
+                        rx, ry = ratios[name]
+                        module.ratio = (rx, ry)
+            # copy the dicts: callers may mutate them between frames
+            self._applied_module_state = (net, global_noise, copy.deepcopy(noise_adjustments), copy.deepcopy(ratios))
+
         def adjustment_hook(module, inputs):
-            #pre forward hook to add adjustments to the latent vector and resize input to fit ratio
-            inps = []
-            for inp in inputs:
-                if inp is not None:
-                    inps.append(inp.shape)
-                else:
-                    inps.append(None)
+            # pre-forward hook: add adjustments to affine (style) inputs
             name = submodule_names[module]
-            if "conv" in name and not ('affine' in name):
-                module.global_noise = global_noise
-                # if not affine means has noise parameter and is convolutional
-                if name in noise_adjustments:
-                    noise_strength = noise_adjustments[name]["strength"]
-                    module.noise_regulator = noise_strength
-                else:
-                    module.noise_regulator = 0
-
-                if name in ratios:
-                    # if layer is in ratios, resize activations to fit ratio
-                    rx, ry = ratios[name]
-                    module.ratio = (rx, ry)
-
             if "affine" in name and name in adjustments.keys():
-                # if affine (style vector insertion) and in adjustments, add adjustments to latent vector
                 adj = adjustments[name]
                 return inputs[0] + adj.to(device=inputs[0].device, dtype=inputs[0].dtype)
 
@@ -795,8 +798,18 @@ class Renderer:
                 layers.append(dnnlib.EasyDict(name=name, shape=shape, dtype=dtype))
                 if name == capture_layer:
                     raise CaptureSuccess(out)
-        hooks = [module.register_forward_hook(module_hook) for module in net.modules()]
-        hooks.extend([module.register_forward_pre_hook(adjustment_hook) for module in net.modules()])
+        # Hooks cost a registration plus a Python callback per module per
+        # frame, so only register them when something inspects or edits the
+        # activations. Scan one extra frame after a state change so the cached
+        # layer list picks up the new shapes.
+        needs_layer_scan = (build_layers or capture_layer is not None or len(transforms) > 0
+                            or state_changed
+                            or any(tuple(r) != (1, 1) for r in ratios.values()))
+        hooks = []
+        if needs_layer_scan:
+            hooks += [module.register_forward_hook(module_hook) for module in net.modules()]
+        if adjustments:
+            hooks += [module.register_forward_pre_hook(adjustment_hook) for module in net.modules()]
         try:
             with torch.no_grad():
                 out, _ = net(*args, **kwargs)
@@ -854,9 +867,8 @@ class Renderer:
         return latent
 
     def set_device(self, device):
-        if device != self.kernel_type:
-            self.kernel_type = device
-            self._device = torch.device("cuda" if device == "custom" else device)
+        if device != self._device.type:
+            self._device = torch.device(device)
             if self._device.type == 'cuda':
                 self._start_event = torch.cuda.Event(enable_timing=True)
                 self._end_event = torch.cuda.Event(enable_timing=True)

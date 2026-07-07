@@ -15,7 +15,7 @@ Please include a Autolume version, OS, GPU, and CUDA version for any bug — man
 
 ## Development setup
 
-The full setup (CUDA, `uv`, model downloads, FFmpeg, platform-specific dependencies) is documented in the [README's "Development instructions" section](README.md#development-instructions). Please follow it as written; the environment is sensitive (Python 3.10, CUDA 12.8, pinned PyTorch 2.8 wheel).
+The full setup (CUDA, `uv`, model downloads, FFmpeg, platform-specific dependencies) is documented in the [README's "Development instructions" section](README.md#development-instructions). Please follow it as written; the environment is sensitive (Python 3.12, CUDA 12.8, pinned PyTorch 2.8 wheel).
 
 Quick reference once your environment is ready:
 
@@ -34,12 +34,12 @@ uv run zensical serve    # serve the docs locally at http://127.0.0.1:8000
 | `audio/` | Audio capture and analysis (librosa, pyaudio) |
 | `bending/` | Network bending operators applied at inference |
 | `dnnlib/` | Vendored NVIDIA dnnlib utilities (StyleGAN2/3) |
-| `ganspace/`, `ganspace_features/` | GANSpace PCA-based latent direction discovery |
+| `ganspace/` | GANSpace PCA-based latent direction discovery |
 | `metrics/` | FID, KID, and related quality metrics |
 | `modules/` | UI modules and live performance widgets |
 | `widgets/` | Reusable imgui widgets |
 | `projection/` | Image-to-latent projection |
-| `super_res/`, `sr_models/`, `super_resolution.py` | Real-ESRGAN super-resolution pipeline |
+| `super_res/`, `sr_models/` | Real-ESRGAN super-resolution pipeline |
 | `torch_utils/` | Vendored NVIDIA torch utilities (custom ops, persistence) |
 | `training/` | Model training and distillation |
 | `utils/` | Shared helpers (datasets, GUI, paths, version) |

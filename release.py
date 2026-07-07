@@ -5,7 +5,8 @@ right PyInstaller invocation:
 
 - Windows / Linux bundle the runtime JIT toolchain (torch headers + libs, ninja,
   python headers) because the custom StyleGAN ops are compiled on first use when
-  running on CUDA. Windows additionally ships ``python310.lib``.
+  running on CUDA. Windows additionally ships the Python import library
+  (e.g. ``python312.lib``).
 - macOS skips that toolchain entirely (the ops fall back to reference PyTorch on
   MPS) and produces an ``Autolume.app`` bundle instead of a plain folder.
 
@@ -172,7 +173,11 @@ def build_args() -> list[str]:
             datas.append((py_include, "include"))
 
         if IS_WINDOWS:
-            python_lib = Path(sys.base_prefix) / "libs" / "python310.lib"
+            python_lib = (
+                Path(sys.base_prefix)
+                / "libs"
+                / f"python{sys.version_info.major}{sys.version_info.minor}.lib"
+            )
             if python_lib.exists():
                 binaries.append((python_lib, "libs"))
             else:

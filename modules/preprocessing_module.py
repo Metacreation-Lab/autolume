@@ -1,6 +1,5 @@
 import logging
 from pathlib import Path
-import pandas as pd
 import imgui
 from utils.gui_utils import imgui_utils
 import multiprocessing as mp

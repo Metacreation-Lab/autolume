@@ -28,7 +28,6 @@ import dnnlib as dnnlib
 from training import training_loop
 from metrics import metric_main
 from torch_utils import training_stats, custom_ops
-from queue import Empty
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +139,16 @@ def parse_comma_separated_list(s):
     if s is None or s.lower() == 'none' or s == '':
         return []
     return s.split(',')
+
+#----------------------------------------------------------------------------
+
+def extract_resume_kimg(resume_pkl):
+    """Extract the kimg value from a snapshot filename such as
+    "network-snapshot-000123.pkl", so that kimg counting continues across
+    resumed trainings. Returns 0 for other filenames (e.g. pre-trained
+    pickles or URLs)."""
+    match = re.fullmatch(r'network-snapshot-(\d+)\.pkl', os.path.basename(resume_pkl))
+    return int(match.group(1)) if match else 0
 
 #----------------------------------------------------------------------------
 
@@ -393,6 +402,7 @@ def main(queue, reply):
         # Resume.
         if opts.resume is not None:
             c.resume_pkl = opts.resume
+            c.nimg = extract_resume_kimg(opts.resume) * 1000
             c.ada_kimg = 100 # Make ADA react faster at the beginning.
             c.ema_rampup = None # Disable EMA rampup.
             c.loss_kwargs.blur_init_sigma = 0 # Disable blur rampup.

@@ -22,7 +22,6 @@ import random
 
 import imgui
 import numpy as np
-import torch
 import yaml
 
 import dnnlib
@@ -516,8 +515,8 @@ class LayerWidget:
                 if self.cur_layer is not None:
                     if "torgb" not in self.cur_layer and "output" not in self.cur_layer:
                         with imgui_utils.item_width(-1):
-                            _, ratio = imgui.input_float2(f"Ratio##{self.cur_layer}ratio", *ratio, format='%.2f',
-                                                          flags=imgui.INPUT_TEXT_ENTER_RETURNS_TRUE)
+                            _, ratio = imgui_utils.input_float2(f"Ratio##{self.cur_layer}ratio", *ratio, format='%.2f',
+                                                                flags=imgui.INPUT_TEXT_ENTER_RETURNS_TRUE)
 
                 if len(layers) > 0:
                     self.transform_widget(layers)
@@ -671,7 +670,7 @@ class LayerWidget:
                         with imgui_utils.item_width(self.viz.app.font_size * 8):
                             for j in range(len(trans.params)):
                                 if trans.type == "f":
-                                    changed, trans.params[j] = imgui.input_float(f"##{j}_{u_id}", trans.params[j])
+                                    changed, trans.params[j] = imgui_utils.input_float(f"##{j}_{u_id}", trans.params[j])
                                     imgui.same_line()
                                     _clicked, dragging, dx, dy = imgui_utils.drag_button(f"Drag##_{j}_{u_id}",
                                                                                          width=self.viz.app.button_w)
@@ -736,7 +735,7 @@ class LayerWidget:
         if modes[trans.mode] == "all":
             trans.indices = list(range(0, trans.max_idx))
         elif modes[trans.mode] == "random":
-            _changed, p = imgui.input_float("%##{trans.imgui_id}", trans.percentage)
+            _changed, p = imgui_utils.input_float("%##{trans.imgui_id}", trans.percentage)
             trans.percentage = np.clip(p, 0, 1)
             imgui.same_line()
             if imgui_utils.button(f"randomize##{trans.imgui_id}", width=self.viz.app.button_w) or _changed or update:
@@ -828,7 +827,7 @@ class LayerWidget:
                     out = f(args[-1])
                     if isinstance(out, (int, float)):
                         trans.params[param_idx] = f(args[-1])
-            except Exception as e:
+            except Exception:
                 if trans.use_osc and isinstance(args[-1], (int, float)):
                     trans.params[param_idx] = args[-1]
 
@@ -842,7 +841,7 @@ class LayerWidget:
                     out = f(args[-1])
                     if isinstance(out, (int, float)):
                         noise["strength"] = f(args[-1])
-            except Exception as e:
+            except Exception:
                 if noise["use_osc"] and isinstance(args[-1], (int, float)):
                     noise["strength"] = args[-1]
 

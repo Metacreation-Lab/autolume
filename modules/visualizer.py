@@ -46,7 +46,6 @@ from utils import device_utils
 import glfw
 from OpenGL import GL as gl
 import ctypes
-import pandas as pd
 import os
 
 logger = logging.getLogger(__name__)
