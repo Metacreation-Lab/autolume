@@ -210,7 +210,7 @@ class TrainingModule:
             desc="",
             metrics=[],
             kimg=25000,
-            nkimg=0,
+            nkimg=None,
             tick=4,
             snap=self.snap,
             seed=0,
