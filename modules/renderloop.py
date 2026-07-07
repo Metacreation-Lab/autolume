@@ -58,10 +58,12 @@ class AsyncRenderer:
 
     def set_args(self, **args):
         if not self._closed:
-            if self._args_queue.empty():
-                if not compare_args(args, self._cur_args):
-                    self._args_queue.put([args, self._cur_stamp])
-                self._cur_args = args
+            # Put every change. The render loop drains the queue and renders
+            # the latest args, so pacing follows render speed and stale args
+            # are skipped.
+            if not compare_args(args, self._cur_args):
+                self._args_queue.put([args, self._cur_stamp])
+            self._cur_args = args
 
     def get_result(self):
         if not self._closed:
