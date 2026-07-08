@@ -44,7 +44,6 @@ augpipe_specs = {
     'bgcfnc': dict(xflip=1, rotate90=1, xint=1, scale=1, rotate=1, aniso=1, xfrac=1, brightness=1, contrast=1,
                    lumaflip=1, hue=1, saturation=1, imgfilter=1, noise=1, cutout=1),
 }
-resize_mode = ['stretch','center crop']
 MBSTD_GROUP = 2
 BATCH_SIZE_CHOICES = [MBSTD_GROUP * x for x in range(1, 33)]
 
@@ -80,7 +79,6 @@ class TrainingModule:
         self.message = ""
         self.done = False
         self.training_process = LoggedProcess(target=train_main, args=(self.queue, self.reply), name='training')
-        self.found_video = False
         self._zipfile = None
         self.gamma = 10
         self.glr = 0.002
@@ -89,8 +87,6 @@ class TrainingModule:
         self.mirror = False # Mirror only accesible in preprocessing module
         self.done_button = False
         self.image_path = ''
-        self.resize_mode = 0
-        self.fps = 10
 
         # Pre-training dataset validation state
         self._open_validation_popup = False
@@ -178,21 +174,6 @@ class TrainingModule:
     def _start_training(self):
         target_data_path = self.data_path
 
-        # Manipulate resolution training parameter based on dataset resolution (for now)
-        # Read resolution from first image in dataset
-        detected_resolution = None
-        target_path = Path(target_data_path)
-        if target_path.is_dir():
-            image_files = [f for f in target_path.iterdir()
-                        if f.is_file() and f.suffix.lower() == '.png']
-            if image_files:
-                first_image_path = str(image_files[0])
-                img = cv2.imread(first_image_path)
-                if img is not None:
-                    height, width = img.shape[:2]
-                    detected_resolution = (width, height)
-                    logger.debug("Detected image resolution from dataset: %s", detected_resolution)
-
         kwargs = dnnlib.EasyDict(
             outdir=self.save_path,
             data=str(target_data_path),
@@ -205,8 +186,6 @@ class TrainingModule:
             w_dim=512,
             cond=False,
             mirror=self.mirror,
-            resolution=detected_resolution,
-            resize_mode = resize_mode[self.resize_mode],
             aug="ada" if augs[self.aug] == "ADA" else "noaug",
             augpipe=ada_pipes[self.ada_pipe],
             resume=self.resume_pkl if self.resume_pkl != "" else None,
@@ -241,7 +220,6 @@ class TrainingModule:
             teacher = None,
             custom=True,
             lpips_image_size=256,
-            fps=self.fps if self.found_video else 10,
         )
 
         if self.training_process.pid is not None:
