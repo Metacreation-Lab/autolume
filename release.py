@@ -28,6 +28,8 @@ from pathlib import Path
 
 import ffmpeg_downloader as ffdl
 
+from utils.resource_paths import get_version
+
 REPO = Path(__file__).resolve().parent
 SYSTEM = platform.system()  # 'Windows' | 'Darwin' | 'Linux'
 IS_WINDOWS = SYSTEM == "Windows"
@@ -221,6 +223,10 @@ def post_build() -> None:
         plist = app / "Contents" / "Info.plist"
         info = plistlib.loads(plist.read_bytes())
         info["LSMinimumSystemVersion"] = MACOS_MIN_VERSION
+        info["CFBundleShortVersionString"] = get_version()
+        info["NSHumanReadableCopyright"] = (
+            "Metacreation Lab for Creative AI\nmetacreation.net/autolume"
+        )
         plist.write_bytes(plistlib.dumps(info))
         # Editing Info.plist invalidates PyInstaller's ad-hoc signature; re-sign
         # the outer bundle (nested binaries are untouched and stay valid).
