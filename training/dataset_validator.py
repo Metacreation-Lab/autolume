@@ -19,25 +19,16 @@ def _file_ext(fname: str) -> str:
 
 
 def _load_image_array(path: str) -> np.ndarray:
-    """Load an image to a CHW numpy array."""
+    """Load an image to a CHW numpy array, exactly as the training loader does."""
     with open(path, 'rb') as f:
         if pyspng is not None and _file_ext(path) == '.png':
             image = pyspng.load(f.read())
         else:
-            pil_image = PIL.Image.open(f)
-            if pil_image.mode == 'P':
-                pil_image = pil_image.convert('RGB')
-            image = np.array(pil_image)
+            image = np.array(PIL.Image.open(f))
 
     if image.ndim == 2:
         image = image[:, :, np.newaxis]
-    image = image.transpose(2, 0, 1)
-
-    if image.shape[0] == 1:
-        image = np.repeat(image, 3, axis=0)
-    if image.shape[0] == 4:
-        image = image[:3, :, :]
-    return image
+    return image.transpose(2, 0, 1)
 
 
 def _discover_image_files(path: str) -> list[str]:
@@ -56,9 +47,14 @@ def _discover_image_files(path: str) -> list[str]:
 
 
 def _check_absolute(channels: int, height: int, width: int, dtype) -> list[str]:
-    """Per-image checks that need no reference: square, power-of-2, dtype."""
+    """Per-image checks that need no reference: RGB, square, power-of-2, dtype."""
     errors: list[str] = []
 
+    if channels != 3:
+        errors.append(
+            f"Has {channels} colour channel(s), expected 3 (RGB). "
+            "Convert it with the Data Preparation tool."
+        )
     if height != width:
         errors.append(
             f"Not square ({width}x{height}). Training only accepts square images."
