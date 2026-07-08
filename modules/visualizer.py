@@ -582,7 +582,7 @@ class Visualizer:
         style = imgui.get_style()
         header_text_width = imgui.calc_text_size(header_label).x
         help_icon_size = imgui.get_font_size()
-        extra = 65  
+        extra = 55 
         spacing = self.pane_w - (style.window_padding[0] * 2) - header_text_width - help_icon_size - style.item_spacing[0] - extra
         imgui.dummy(spacing, 0)
         url = self.help_urls.get(help_key)
