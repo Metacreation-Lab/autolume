@@ -161,9 +161,6 @@ def training_loop(
             print('Image shape:', training_set.image_shape)
             print('Label shape:', training_set.label_shape)
             reply.put(['Num images: ' + str(len(training_set)) + '\n Image shape: ' + str(training_set.image_shape) + '\n Label shape: ' + str(training_set.label_shape), False])
-            print('Saving Resized Images')
-            training_set.save_resized(run_dir)
-            training_set.copy_frames_folders(run_dir)
             print()
     except Exception:
         logger.exception("Failed to load training set")

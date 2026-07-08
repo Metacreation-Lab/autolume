@@ -9,53 +9,17 @@
 """Streaming images and labels from datasets created with dataset_tool.py."""
 
 import os
-import shutil
-
-
-import cv2
 import numpy as np
 import zipfile
 import PIL.Image
-import torchvision.transforms
 import json
 import torch
 import dnnlib
-import logging
-
-logger = logging.getLogger(__name__)
 
 try:
     import pyspng
 except ImportError:
     pyspng = None
-
-
-def calc_res(shape):
-    base0 = 2 ** int(np.log2(shape[0]))
-    base1 = 2 ** int(np.log2(shape[1]))
-    base = min(base0, base1)
-    min_res = min(shape[0], shape[1])
-
-    def int_log2(xs, base):
-        return [x * 2 ** (2 - int(np.log2(base))) % 1 == 0 for x in xs]
-
-    if min_res != base or max(*shape) / min(*shape) >= 2:
-        if np.log2(base) < 10 and all(int_log2(shape, base * 2)):
-            base = base * 2
-
-    return base  # , [shape[0]/base, shape[1]/base]
-
-def calc_init_res(shape, resolution=None):
-    if len(shape) == 1:
-        shape = [shape[0], shape[0], 1]
-    elif len(shape) == 2:
-        shape = [*shape, 1]
-    size = shape[:2] if shape[2] < min(*shape[:2]) else shape[1:] # fewer colors than pixels
-    if resolution is None:
-        resolution = calc_res(size)
-    res_log2 = int(np.log2(resolution))
-    init_res = [int(s * 2**(2-res_log2)) for s in size]
-    return init_res, resolution, res_log2
 
 #----------------------------------------------------------------------------
 
@@ -120,19 +84,9 @@ class Dataset(torch.utils.data.Dataset):
     def __len__(self):
         return self._raw_idx.size
 
-    
-
     def __getitem__(self, idx):
         image = self._load_raw_image(self._raw_idx[idx])
         assert isinstance(image, np.ndarray)
-
-        if image.shape[0] == 1:
-            image = np.repeat(image, 3, axis=0)
-
-        if image.shape[0] == 4:
-            image = image[:3, :, :]
-        if list(image.shape) != self.image_shape:
-            image = cv2.resize(image.transpose(1,2,0), dsize=self.image_shape[-2:], interpolation=cv2.INTER_CUBIC).transpose(2,0,1)
         assert list(image.shape) == self.image_shape
         assert image.dtype == np.uint8
         if self._xflip[idx]:
@@ -171,18 +125,8 @@ class Dataset(torch.utils.data.Dataset):
     @property
     def resolution(self):
         assert len(self.image_shape) == 3 # CHW
-        max_res = calc_res(self.image_shape[1:])
-        return max_res
-
-    # !!! custom init res
-    @property
-    def res_log2(self):
-        return int(np.ceil(np.log2(self.resolution)))
-
-    # !!! custom init res
-    @property
-    def init_res(self):
-        return [int(s * 2 ** (2 - self.res_log2)) for s in self.image_shape[1:]]
+        assert self.image_shape[1] == self.image_shape[2]
+        return self.image_shape[1]
 
     @property
     def label_shape(self):
@@ -213,121 +157,29 @@ class ImageFolderDataset(Dataset):
     def __init__(self,
         path,                   # Path to directory or zip.
         resolution      = None, # Ensure specific resolution, None = highest available.
-        height = None,
-        width   = None, # Override resolution.
-        resize_mode = "stretch",
-        fps = 10,
-        skip_preprocessing = True,  # If True, skip video extraction and resizing (data already preprocessed)
         **super_kwargs,         # Additional arguments for the Dataset base class.
     ):
-        self._path = os.path.abspath(path)
+        self._path = path
         self._zipfile = None
-        self.height = height
-        self.width = width
-        self.resize_mode = resize_mode
-        self.frame_path = set()
 
-        self.skip_preprocessing = skip_preprocessing
-        
-        if not os.path.exists(self._path):
-            raise IOError(f'Path does not exist: {self._path}')
-            
         if os.path.isdir(self._path):
             self._type = 'dir'
+            self._all_fnames = {os.path.relpath(os.path.join(root, fname), start=self._path) for root, _dirs, files in os.walk(self._path) for fname in files}
         elif self._file_ext(self._path) == '.zip':
             self._type = 'zip'
-            self._zipfile = zipfile.ZipFile(self._path)
+            self._all_fnames = set(self._get_zipfile().namelist())
         else:
             raise IOError('Path must point to a directory or zip')
 
-        # Skip video extraction, we now expect the data to be preprocessed already
-        video_files = []
-        if not self.skip_preprocessing:
-            if self._type == 'dir':
-                for root, _, files in os.walk(self._path):
-                    for fname in files:
-                        if fname.endswith(('.mp4', '.avi', '.gif','.MOV','.mov','.mkv')):
-                            video_files.append(os.path.join(root, fname))
-            elif self._type == 'zip':
-                for fname in self._zipfile.namelist():
-                    if fname.endswith(('.mp4', '.avi', '.gif','.MOV','.mov','.mkv')):
-                        video_files.append(fname)
-
-        frames_extracted = False
-        if video_files and not self.skip_preprocessing:
-            print(f"Found {len(video_files)} video file(s), extracting frames...")
-            for video_path in video_files:
-                try:
-                    if self._type == 'zip':
-                        # 对于zip文件中的视频，先解压到临时目录
-                        temp_dir = tempfile.mkdtemp()
-                        video_data = self._zipfile.read(video_path)
-                        temp_video_path = os.path.join(temp_dir, os.path.basename(video_path))
-                        with open(temp_video_path, 'wb') as f:
-                            f.write(video_data)
-                        video_path = temp_video_path
-
-                    video_name = os.path.splitext(os.path.basename(video_path))[0]
-                    save_path = os.path.join(self._path, f"{video_name}_frames")
-                    
-                    if not os.path.exists(save_path):
-                        os.makedirs(save_path)
-                    
-                    cmd = f'ffmpeg -i "{video_path}" -vf fps={fps} "{save_path}/%04d.jpg"'
-                    print(f"Executing command: {cmd}")
-                    result = os.system(cmd)
-                    
-                    if result == 0:
-                        print(f"Successfully extracted frames from {video_path}")
-                        self.frame_path.add(save_path)
-                        frames_extracted = True
-                        
-                        extracted_frames = [f for f in os.listdir(save_path) if f.endswith(('.jpg', '.png'))]
-                        if not extracted_frames:
-                            print(f"Warning: No frames were extracted from {video_path}")
-                        else:
-                            print(f"Extracted {len(extracted_frames)} frames from {video_path}")
-                    else:
-                        print(f"Failed to extract frames from {video_path}, ffmpeg returned {result}")
-                        
-                except Exception:
-                    logger.exception("Error processing video %s", video_path)
-                finally:
-                    if self._type == 'zip' and 'temp_dir' in locals():
-                        import shutil
-                        shutil.rmtree(temp_dir)
-
-        if self._type == 'dir':
-            self._all_fnames = {os.path.relpath(os.path.join(root, fname), start=self._path) 
-                               for root, _dirs, files in os.walk(self._path) 
-                               for fname in files}
-        else:  # zip
-            self._all_fnames = set(self._zipfile.namelist())
-
         PIL.Image.init()
-        self._image_fnames = sorted(fname for fname in self._all_fnames 
-                                  if self._file_ext(fname) in PIL.Image.EXTENSION)
-        
+        self._image_fnames = sorted(fname for fname in self._all_fnames if self._file_ext(fname) in PIL.Image.EXTENSION)
         if len(self._image_fnames) == 0:
-            if video_files:
-                if frames_extracted:
-                    raise IOError('Failed to find any extracted frames after processing videos')
-                else:
-                    raise IOError('Failed to extract frames from any of the videos')
-            else:
-                raise IOError('No image files found in the specified path')
+            raise IOError('No image files found in the specified path')
 
-        print(f"Found {len(self._image_fnames)} image files")
-        
         name = os.path.splitext(os.path.basename(self._path))[0]
-        
-        if self.skip_preprocessing:
-            img_shape = list(self._load_raw_image(0).shape)
-        else:
-            img_shape = [3, self.height, self.width] if self.width is not None and self.height is not None else list(self._load_raw_image(0).shape)
-        
-        raw_shape = [len(self._image_fnames)] + img_shape
-        
+        raw_shape = [len(self._image_fnames)] + list(self._load_raw_image(0).shape)
+        if resolution is not None and (raw_shape[2] != resolution or raw_shape[3] != resolution):
+            raise IOError('Image files do not match the specified resolution')
         super().__init__(name=name, raw_shape=raw_shape, **super_kwargs)
 
     @staticmethod
@@ -353,8 +205,6 @@ class ImageFolderDataset(Dataset):
                 self._zipfile.close()
         finally:
             self._zipfile = None
-    
-
 
     def __getstate__(self):
         return dict(super().__getstate__(), _zipfile=None)
@@ -365,10 +215,7 @@ class ImageFolderDataset(Dataset):
             if pyspng is not None and self._file_ext(fname) == '.png':
                 image = pyspng.load(f.read())
             else:
-                pil_image = PIL.Image.open(f)
-                if pil_image.mode == 'P':
-                    pil_image = pil_image.convert('RGB')  # Convert limited palette images to RGB
-                image = np.array(pil_image)
+                image = np.array(PIL.Image.open(f))
         if image.ndim == 2:
             image = image[:, :, np.newaxis] # HW => HWC
         image = image.transpose(2, 0, 1) # HWC => CHW
@@ -388,72 +235,4 @@ class ImageFolderDataset(Dataset):
         labels = labels.astype({1: np.int64, 2: np.float32}[labels.ndim])
         return labels
 
-    @property
-    def heightandwidth(self):
-        return self._load_raw_image(0).shape[1:]
-
-    def __getitem__(self, idx):
-        image = self._load_raw_image(self._raw_idx[idx])
-        assert isinstance(image, np.ndarray)
-        if image.shape[0] == 1: # Greyscale images
-            image = np.repeat(image, 3, axis=0) # Convert greyscale to RGB
-        if image.shape[0] == 4: # RGBA images
-            image = image[:3, :, :] # Drop alpha to RGB
-        
-        if not self.skip_preprocessing:
-            image_shape = (3, self.width, self.height) if self.height is not None and self.width is not None else self.image_shape
-            if list(image.shape) != image_shape:
-                if self.resize_mode == "stretch":
-                    image = cv2.resize(image.transpose(1,2,0), dsize=image_shape[-2:], interpolation=cv2.INTER_CUBIC).transpose(2,0,1)
-                else:
-                    image = image.transpose(1, 2, 0)
-                    pil_image = PIL.Image.fromarray(image.astype(np.uint8))  # Convert NumPy array to PIL Image
-                    resize_transform = torchvision.transforms.Resize(min(self.height, self.width))  # 先等比例缩放
-                    resized_image = resize_transform(pil_image)  # 应用 Resize 变换
-                    crop_transform  = torchvision.transforms.CenterCrop((self.height, self.width))  # Target size
-                    cropped_image = crop_transform(resized_image )  # Perform the center crop
-                    image = np.array(cropped_image)  # Convert back to NumPy array
-                    image = image.transpose(2,0,1)
-        
-        assert list(image.shape) == self.image_shape
-        assert image.dtype == np.uint8
-        if self._xflip[idx]:
-            assert image.ndim == 3 # CHW
-            image = image[:, :, ::-1]
-        return image.copy(), self.get_label(idx)
-    
-    def save_resized(self, path):
-        if self.skip_preprocessing:
-            return
-            
-        for idx in np.arange(self.__len__()):
-            img, label = self.__getitem__(idx)
-            img = PIL.Image.fromarray(img.astype(np.uint8).transpose(1,2,0), 'RGB')
-            if not os.path.exists(path+str('/resized_images')):
-                os.mkdir(path+str('/resized_images'))
-            img.save(path+str('/resized_images/')+str(idx)+'.png', 'PNG')
-    
-
-    def copy_frames_folders(self, output_dir):
-        if self.skip_preprocessing:
-            return
-            
-        for frame_path in self.frame_path:  # 遍历所有帧文件夹路径
-            if os.path.exists(frame_path):
-                new_path = os.path.join(output_dir, os.path.basename(frame_path))
-                print(f"Copying folder: {frame_path} to {new_path}")
-                try:
-                    shutil.copytree(frame_path, new_path, dirs_exist_ok=True)  # 复制文件夹，允许目标目录已存在
-                    print(f"Copied frames folder to: {new_path}")
-                except Exception as e:
-                    print(f"Failed to copy {frame_path} to {new_path}: {e}")
-            else:
-                print(f"Frame folder does not exist: {frame_path}")
-
-    @property
-    def resolution(self):
-        image_shape = (
-        3, self.height, self.width) if self.height is not None and self.width is not None else self.image_shape
-        assert len(image_shape) == 3  # CHW
-        max_res = calc_res(image_shape[1:])
-        return max_res
+#----------------------------------------------------------------------------
