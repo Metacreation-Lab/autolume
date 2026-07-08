@@ -576,19 +576,34 @@ class TrainingModule:
                 list_height,
                 True,
             )
-            if self.validation_errors:
+            # Entries with a filename describe one invalid image each. Entries
+            # without one are dataset-level notices (no images found, scan
+            # stopped early, ...) and must not count as invalid images.
+            image_entries = []
+            general_entries = []
+            for entry in self.validation_errors:
+                if isinstance(entry, dict) and entry.get('filename'):
+                    image_entries.append(entry)
+                else:
+                    general_entries.append(entry)
+
+            for entry in general_entries:
+                message = entry.get('message', str(entry)) if isinstance(entry, dict) else str(entry)
+                imgui.push_text_wrap_pos(progress_width - 20)
+                imgui.text(message)
+                imgui.pop_text_wrap_pos()
+                imgui.spacing()
+
+            if image_entries:
                 imgui.text_colored(
-                    f"Invalid images ({len(self.validation_errors)}):",
+                    f"Invalid images ({len(image_entries)}):",
                     1.0, 0.5, 0.0, 1.0,
                 )
                 imgui.spacing()
-                for entry in self.validation_errors:
-                    filename = entry.get('filename', '') if isinstance(entry, dict) else ''
-                    message = entry.get('message', str(entry)) if isinstance(entry, dict) else str(entry)
-                    if filename:
-                        imgui.text_colored(filename, 1.0, 0.8, 0.4, 1.0)
+                for entry in image_entries:
+                    imgui.text_colored(entry['filename'], 1.0, 0.8, 0.4, 1.0)
                     imgui.push_text_wrap_pos(progress_width - 20)
-                    imgui.text(message)
+                    imgui.text(entry.get('message', ''))
                     imgui.pop_text_wrap_pos()
                     imgui.spacing()
 
