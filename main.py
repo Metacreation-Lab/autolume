@@ -43,6 +43,14 @@ def get_runtime_bin_dir():
 BIN_DIR = get_runtime_bin_dir()
 os.environ["PATH"] = BIN_DIR + os.pathsep + os.environ.get("PATH", "")
 
+if IS_FROZEN:
+    # imageio-ffmpeg's own binary is pruned from the bundle (release.py);
+    # route it to the ffmpeg already shipped in bin/.
+    os.environ.setdefault(
+        "IMAGEIO_FFMPEG_EXE",
+        os.path.join(BIN_DIR, "ffmpeg.exe" if os.name == "nt" else "ffmpeg"),
+    )
+
 
 def main():
     # Materialise the user data root so it is discoverable even before any
