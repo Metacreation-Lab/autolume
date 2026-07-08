@@ -4,6 +4,15 @@ import sys
 
 IS_FROZEN = getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS")
 
+# Build cache for the custom CUDA ops: precompiled entries ship inside the
+# bundle; in development the cache lives at the repository root. Must be set
+# before the first op is loaded and is inherited by spawned worker processes.
+os.environ.setdefault(
+    "TORCH_EXTENSIONS_DIR",
+    os.path.join(sys._MEIPASS, "torch_extensions") if IS_FROZEN
+    else os.path.join(os.path.dirname(os.path.abspath(__file__)), "torch_extensions"),
+)
+
 if sys.platform == 'darwin':
     # Must be set before torch is imported.
     os.environ.setdefault('PYTORCH_ENABLE_MPS_FALLBACK', '1')

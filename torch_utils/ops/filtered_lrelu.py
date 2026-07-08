@@ -30,7 +30,7 @@ def _init():
             source_dir=os.path.dirname(__file__),
             extra_cuda_cflags=['--use_fast_math', '--allow-unsupported-compiler'],
         )
-    return True
+    return _plugin is not None
 
 def _get_filter_size(f):
     if f is None:

@@ -3,12 +3,16 @@
 Run with ``uv run release.py``. Detects the host platform and assembles the
 right PyInstaller invocation:
 
-- Windows / Linux bundle the runtime JIT toolchain (torch headers + libs, ninja,
-  python headers) because the custom StyleGAN ops are compiled on first use when
-  running on CUDA. Windows additionally ships the Python import library
-  (e.g. ``python312.lib``).
-- macOS skips that toolchain entirely (the ops fall back to reference PyTorch on
-  MPS) and produces an ``Autolume.app`` bundle instead of a plain folder.
+- Windows / Linux precompile the custom StyleGAN CUDA ops for compute
+  capabilities 7.5/8.6/8.9/12.0 (RTX 20/30/40/50 series) via
+  ``scripts/precompile_ops.py`` and ship them in the bundle, so users need no
+  compiler or CUDA toolkit. They also bundle the runtime JIT toolchain (torch
+  headers + libs, ninja, python headers) so cards with other compute
+  capabilities can fall back to compiling the ops on first use (this requires
+  MSVC/GCC + CUDA nvcc on the user's machine). Windows additionally ships the
+  Python import library (e.g. ``python312.lib``).
+- macOS skips all of that (the ops fall back to reference PyTorch on MPS) and
+  produces an ``Autolume.app`` bundle instead of a plain folder.
 
 ffmpeg/ffprobe are bundled on every platform via ffmpeg-downloader so the
 artifact is self-contained.
@@ -36,8 +40,12 @@ IS_WINDOWS = SYSTEM == "Windows"
 IS_MACOS = SYSTEM == "Darwin"
 IS_LINUX = SYSTEM == "Linux"
 
-# Windows and Linux compile the custom CUDA ops at runtime; macOS does not.
+# Windows and Linux ship precompiled custom CUDA ops with a runtime JIT
+# fallback for other compute capabilities; macOS uses neither.
 NEEDS_JIT_TOOLCHAIN = IS_WINDOWS or IS_LINUX
+
+# Staging dir for the precompiled ops bundled into the release.
+PRECOMPILED_OPS_DIR = REPO / "build" / "torch_extensions"
 
 # torch 2.8 wheels ship a libomp.dylib stamped minos 14.0 despite the
 # macosx_11_0_arm64 tag (pytorch/pytorch#177140), so the bundle cannot load on
@@ -159,8 +167,10 @@ def build_args() -> list[str]:
         (clip / "bpe_simple_vocab_16e6.txt.gz", "clip"),
     ]
 
-    # --- Runtime JIT toolchain (Windows + Linux only) ---------------------
+    # --- Precompiled CUDA ops + runtime JIT toolchain (Windows + Linux) ---
     if NEEDS_JIT_TOOLCHAIN:
+        datas.append((PRECOMPILED_OPS_DIR, "torch_extensions"))
+
         binaries.append((ninja_binary(), "bin"))  # same collision risk as ffmpeg
 
         torch_lib = package_dir("torch") / "lib"
@@ -205,6 +215,16 @@ def build_args() -> list[str]:
     return args
 
 
+def precompile_ops() -> None:
+    """Build the custom CUDA ops for the supported archs and stage them for bundling."""
+    print("Precompiling custom CUDA ops...")
+    subprocess.run(
+        [sys.executable, str(REPO / "scripts" / "precompile_ops.py"), "--export", str(PRECOMPILED_OPS_DIR)],
+        check=True,
+        cwd=REPO,
+    )
+
+
 def clean() -> None:
     for name in ("dist", "build"):
         target = REPO / name
@@ -239,6 +259,8 @@ def post_build() -> None:
 def main() -> None:
     print(f"Building Autolume for {SYSTEM}...")
     clean()
+    if NEEDS_JIT_TOOLCHAIN:
+        precompile_ops()
     args = build_args()
     print("Running PyInstaller...")
     subprocess.run(args, check=True, cwd=REPO)

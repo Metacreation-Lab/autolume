@@ -6,6 +6,9 @@ dist/
 build/
 *.spec
 
+# Custom ops build cache
+torch_extensions/
+
 # MkDocs
 site/
 
