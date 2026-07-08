@@ -15,7 +15,7 @@ right PyInstaller invocation:
   produces an ``Autolume.app`` bundle instead of a plain folder.
 
 ffmpeg/ffprobe are bundled on every platform via ffmpeg-downloader so the
-artifact is self-contained.
+artifact is self-contained (Windows uses gyan.dev's essentials build).
 
 PyInstaller cannot cross-compile: each artifact must be built on its own OS.
 """
@@ -73,12 +73,30 @@ def spec_arg(src: Path, dest: str) -> str:
     return f"{src}{os.pathsep}{dest}"
 
 
+# Windows bundles gyan.dev's "essentials" ffmpeg (~97 MB/exe vs ~136 MB for
+# the default full build); libx264 + aac is all Autolume uses. The major
+# version is pinned because "release@essentials" resolves the latest version
+# across all providers, usually a btbn post-release with no essentials build.
+FFMPEG_WIN_SPEC = "8@essentials"
+
+
 def ensure_ffmpeg() -> tuple[Path, Path]:
     """Make sure ffmpeg + ffprobe are downloaded and return their paths."""
+    if IS_WINDOWS and ffdl.installed():
+        banner = subprocess.run(
+            [ffdl.ffmpeg_path, "-version"], capture_output=True, text=True
+        ).stdout.partition("\n")[0]
+        if "essentials_build" not in banner:
+            print(f"Cached ffmpeg is not the essentials build ({banner}); replacing...")
+            subprocess.run(
+                [sys.executable, "-m", "ffmpeg_downloader", "uninstall", "-y"], check=True
+            )
     if not ffdl.installed():
         print("Installing ffmpeg via ffmpeg-downloader...")
         cmd = [sys.executable, "-m", "ffmpeg_downloader", "install", "-y"]
-        if not IS_WINDOWS:
+        if IS_WINDOWS:
+            cmd.append(FFMPEG_WIN_SPEC)
+        else:
             cmd.append("--no-simlinks")  # don't touch the user's ~/.local/bin
         subprocess.run(cmd, check=True)
     ffmpeg = ffdl.ffmpeg_path and Path(ffdl.ffmpeg_path)
@@ -174,9 +192,20 @@ def build_args() -> list[str]:
         binaries.append((ninja_binary(), "bin"))  # same collision risk as ffmpeg
 
         torch_lib = package_dir("torch") / "lib"
-        link_libs = "*.lib" if IS_WINDOWS else "*.so*"
-        for lib in sorted(torch_lib.glob(link_libs)):
-            binaries.append((lib, "torch/lib"))
+        if IS_WINDOWS:
+            # Only the import libraries that torch.utils.cpp_extension links
+            # (see _prepare_ldflags there). The other *.lib in torch/lib are
+            # static libraries the JIT never uses; dnnl.lib alone is 2.2 GB.
+            jit_link_libs = ["c10.lib", "c10_cuda.lib", "torch.lib",
+                             "torch_cpu.lib", "torch_cuda.lib", "torch_python.lib"]
+            for name in jit_link_libs:
+                lib = torch_lib / name
+                if not lib.exists():
+                    fail(f"expected torch import library not found: {lib}")
+                binaries.append((lib, "torch/lib"))
+        else:
+            for lib in sorted(torch_lib.glob("*.so*")):
+                binaries.append((lib, "torch/lib"))
 
         datas.append((package_dir("torch") / "include", "torch/include"))
 
@@ -233,6 +262,43 @@ def clean() -> None:
             shutil.rmtree(target)
 
 
+# Collected binaries the app can never reach, deleted from the bundle after
+# PyInstaller runs (globs relative to dist/Autolume).
+PRUNE_PATTERNS = [
+    # PyInstaller copies nvrtc to the bundle root as an import of
+    # caffe2_nvrtc.dll, but the loader resolves the torch/lib copy via torch's
+    # add_dll_directory; the root copy is an 83 MB dead duplicate.
+    "_internal/nvrtc64_*.dll",
+    # Multi-GPU cusolver backend (150 MB); torch_cuda.dll does not import it
+    # and nothing in Autolume reaches the cusolverMg APIs.
+    "_internal/torch/lib/cusolverMg64_*.dll",
+    # imageio-ffmpeg's own ffmpeg (62 MB); main.py points IMAGEIO_FFMPEG_EXE
+    # at the ffmpeg already shipped in bin/.
+    "_internal/imageio_ffmpeg/binaries/ffmpeg-*",
+    # cuRAND (69 MB); nothing in the bundle references it, torch uses its own
+    # Philox RNG on CUDA. Verified by training + inference with it removed.
+    "_internal/torch/lib/curand64_*.dll",
+    # cuDNN's RNN/attention sub-library (269 MB), loaded lazily by the cudnn
+    # shim; StyleGAN is conv-only. Verified by training + inference with it
+    # removed.
+    "_internal/torch/lib/cudnn_adv64_*.dll",
+    # Alternate nvrtc build (83 MB); nothing references it and the primary
+    # nvrtc ships alongside.
+    "_internal/torch/lib/nvrtc64_*.alt.dll",
+]
+
+
+def prune_bundle() -> None:
+    bundle = REPO / "dist" / "Autolume"
+    freed = 0
+    for pattern in PRUNE_PATTERNS:
+        for path in bundle.glob(pattern):
+            freed += path.stat().st_size
+            path.unlink()
+            print(f"Pruned {path.relative_to(bundle)}")
+    print(f"Pruning freed {freed / 1024 / 1024:.0f} MB")
+
+
 def post_build() -> None:
     # Read-only resources are bundled and resolved via utils.resource_paths, so
     # nothing needs to be copied next to the executable. Writable user-output
@@ -253,6 +319,7 @@ def post_build() -> None:
         subprocess.run(["codesign", "--force", "--sign", "-", str(app)], check=True)
         print(f"Built dist/Autolume.app (requires macOS {MACOS_MIN_VERSION}+)")
     else:
+        prune_bundle()
         print(f"Release created in {REPO / 'dist' / 'Autolume'}")
 
 
