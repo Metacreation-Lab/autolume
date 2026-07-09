@@ -42,62 +42,81 @@ class PerformanceWidget:
             del viz.result.render_time
 
         if show:
+            fs = viz.app.font_size
+            # Wider than viz.app.label_w so "OSC input"/"NDI output" fit.
+            label_w = max(viz.app.label_w, round(fs * 5.5))
+            stats_x = label_w + fs * 6.5
+            mid_col_x = label_w + fs * 15.5
+            right_col_x = mid_col_x + fs * 10.5 + viz.app.spacing
+
+            # Row 1: GUI stats | FPS limit | Vertical sync.
             imgui.text('GUI')
-            imgui.same_line(viz.app.label_w)
-            with imgui_utils.item_width(viz.app.font_size * 8):
+            imgui.same_line(label_w)
+            with imgui_utils.item_width(fs * 6):
                 imgui.plot_lines('##gui_times', array.array('f', self.gui_times), scale_min=0)
-            imgui.same_line(viz.app.label_w + viz.app.font_size * 9)
+            imgui.same_line(stats_x)
             t = [x for x in self.gui_times if x > 0]
             t = np.mean(t) if len(t) > 0 else 0
-            imgui.text(f'{t * 1e3:.1f} ms' if t > 0 else 'N/A')
-            imgui.same_line(viz.app.label_w + viz.app.font_size * 14)
-            imgui.text(f'{1 / t:.1f} FPS' if t > 0 else 'N/A')
-            imgui.same_line(viz.app.label_w + viz.app.font_size * 18 + viz.app.spacing * 3)
-            with imgui_utils.item_width(viz.app.font_size * 6):
+            imgui.text(f'{t * 1e3:.1f} ms · {1 / t:.1f} FPS' if t > 0 else 'N/A')
+            imgui.same_line(mid_col_x)
+            with imgui_utils.item_width(fs * 6):
                 _changed, self.fps_limit = imgui.input_int('FPS limit', self.fps_limit,
                                                            flags=imgui.INPUT_TEXT_ENTER_RETURNS_TRUE)
                 self.fps_limit = min(max(self.fps_limit, 5), 1000)
-            pos_x = imgui.get_item_rect_max()[0] + (viz.app.spacing*3)
-            imgui.same_line(pos_x)
+            imgui.same_line(right_col_x)
             _clicked, self.use_vsync = imgui.checkbox('Vertical sync', self.use_vsync)
 
-        if show:
+            # Row 2: Render stats | Device | Force FP32.
             imgui.text('Render')
-            imgui.same_line(viz.app.label_w)
-            with imgui_utils.item_width(viz.app.font_size * 8):
+            imgui.same_line(label_w)
+            with imgui_utils.item_width(fs * 6):
                 imgui.plot_lines('##render_times', array.array('f', self.render_times), scale_min=0)
-            imgui.same_line(viz.app.label_w + viz.app.font_size * 9)
+            imgui.same_line(stats_x)
             t = [x for x in self.render_times if x > 0]
             t = np.mean(t) if len(t) > 0 else 0
-            imgui.text(f'{t * 1e3:.1f} ms' if t > 0 else 'N/A')
-            imgui.same_line(viz.app.label_w + viz.app.font_size * 14)
-            imgui.text(f'{1 / t:.1f} FPS' if t > 0 else 'N/A')
-            imgui.same_line(pos_x)
+            imgui.text(f'{t * 1e3:.1f} ms · {1 / t:.1f} FPS' if t > 0 else 'N/A')
+            imgui.same_line(mid_col_x)
+            accel_type = device_utils.get_device().type
+            with imgui_utils.grayed_out(accel_type == 'cpu'):
+                if imgui.radio_button('GPU', self.device in ('cuda', 'mps')) and accel_type != 'cpu':
+                    self.device = accel_type
+            imgui.same_line()
+            if imgui.radio_button('CPU', self.device == 'cpu'):
+                self.device = 'cpu'
+            imgui.same_line(right_col_x)
             _clicked, self.force_fp32 = imgui.checkbox('Force FP32', self.force_fp32)
 
-            imgui.text('Server')
+            # Row 3: OSC input server | Super Resolution.
+            imgui.text('OSC input')
+            imgui.same_line(label_w)
+            imgui.text('IP')
             imgui.same_line()
-            with imgui_utils.item_width(viz.app.font_size * 6):
-                changed_ip, self.viz.in_ip = imgui.input_text(f"OSC IP Addresse", self.viz.in_ip, 256,
+            with imgui_utils.item_width(fs * 6):
+                changed_ip, self.viz.in_ip = imgui.input_text('##osc_ip', self.viz.in_ip, 256,
                                                               imgui.INPUT_TEXT_CHARS_NO_BLANK | imgui.INPUT_TEXT_ENTER_RETURNS_TRUE)
-                imgui.same_line()
-                changed_port, self.viz.in_port = imgui.input_int(f"OSC port", self.viz.in_port,
+            imgui.same_line()
+            imgui.text('Port')
+            imgui.same_line()
+            with imgui_utils.item_width(fs * 6):
+                changed_port, self.viz.in_port = imgui.input_int('##osc_port', self.viz.in_port,
                                                                  flags=imgui.INPUT_TEXT_ENTER_RETURNS_TRUE)
-                
-                imgui.same_line()
-                if imgui.button("Activate Server"):
-                    self.viz.start_osc_server()
-
-                imgui.same_line()
-                # NDI parameters
-                with imgui_utils.grayed_out(ndi is None):
-                    clicked_ndi, ndi_enabled = imgui.checkbox("NDI", self.viz.ndi_send is not None)
-                    imgui.same_line()
-                    changed_ndi, self.viz.ndi_name = imgui.input_text(f"NDI Name", self.viz.ndi_name,
-                                                                      256, imgui.INPUT_TEXT_CHARS_NO_BLANK | imgui.INPUT_TEXT_ENTER_RETURNS_TRUE)
-
-            if changed_port or changed_ip:
+            imgui.same_line()
+            if imgui.button('Restart') or changed_port or changed_ip:
                 self.viz.start_osc_server()
+            imgui.same_line(right_col_x)
+            _, self.use_superres = imgui.checkbox('Super Resolution', self.use_superres)
+
+            # Row 4: NDI video output.
+            imgui.text('NDI output')
+            imgui.same_line(label_w)
+            with imgui_utils.grayed_out(ndi is None):
+                clicked_ndi, ndi_enabled = imgui.checkbox('Enabled##ndi', self.viz.ndi_send is not None)
+                imgui.same_line()
+                imgui.text('Name')
+                imgui.same_line()
+                with imgui_utils.item_width(fs * 8):
+                    changed_ndi, self.viz.ndi_name = imgui.input_text('##ndi_name', self.viz.ndi_name, 256,
+                                                                      imgui.INPUT_TEXT_CHARS_NO_BLANK | imgui.INPUT_TEXT_ENTER_RETURNS_TRUE)
 
             if ndi is not None:
                 if clicked_ndi:
@@ -107,19 +126,6 @@ class PerformanceWidget:
                         self.viz.stop_ndi()
                 elif changed_ndi and self.viz.ndi_send is not None:
                     self.viz.start_ndi()
-
-            if imgui.checkbox("CPU", self.device=="cpu")[0]:
-                self.device = "cpu"
-
-            imgui.same_line()
-            accel_type = device_utils.get_device().type
-            with imgui_utils.grayed_out(accel_type == 'cpu'):
-                if imgui.checkbox("GPU", self.device in ("cuda", "mps"))[0]:
-                    if accel_type != 'cpu':
-                        self.device = accel_type
-
-            imgui.same_line(spacing=viz.app.spacing*3)
-            _, self.use_superres = imgui.checkbox('Super Resolution', self.use_superres)
 
         viz.app.set_fps_limit(self.fps_limit)
         viz.app.set_vsync(self.use_vsync)
