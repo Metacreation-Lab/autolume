@@ -5,6 +5,13 @@
     "aliases": []
   },
   {
+    "version": "2.17.0-rc2",
+    "title": "2.17.0-rc2",
+    "aliases": [
+      "latest"
+    ]
+  },
+  {
     "version": "2.17.0-rc1-macos-preview",
     "title": "2.17.0-rc1-macos-preview",
     "aliases": []
@@ -12,9 +19,7 @@
   {
     "version": "2.17.0-rc1",
     "title": "2.17.0-rc1",
-    "aliases": [
-      "latest"
-    ]
+    "aliases": []
   },
   {
     "version": "2.16.2",
