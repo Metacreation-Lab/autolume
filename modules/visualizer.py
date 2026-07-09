@@ -73,10 +73,10 @@ class Visualizer:
         self.out_port = 1337
         self.osc_dispatcher = Dispatcher()
         self.osc_client = SimpleUDPClient(self.out_ip, self.out_port)
-        self.server = BlockingOSCUDPServer((self.in_ip, self.in_port), self.osc_dispatcher)
-        self.server_thread = threading.Thread(target=self.server.serve_forever, daemon=True)
-        self.server_thread.start()
-        self.osc_dispatcher.map("/*", self.osc_message_handler)  # 修改数名
+        self.server = None
+        self.server_thread = None
+        self.start_osc_server()
+        self.osc_dispatcher.map("/*", self.osc_message_handler)
 
 
 
@@ -485,6 +485,36 @@ class Visualizer:
     def osc_message_handler(self, address, *args):
         logger.debug("OSC message received at %s with arguments: %s", address, args)
 
+    def stop_osc_server(self):
+        if self.server is not None:
+            self.server.shutdown()
+            self.server.server_close()
+            self.server = None
+        if self.server_thread is not None:
+            self.server_thread.join()
+            self.server_thread = None
+
+    def start_osc_server(self, max_attempts=20):
+        self.stop_osc_server()
+        requested_port = self.in_port
+        for attempt in range(max_attempts):
+            port = requested_port + attempt
+            try:
+                self.server = BlockingOSCUDPServer((self.in_ip, port), self.osc_dispatcher)
+            except OSError as exc:
+                logger.debug("OSC port %s unavailable: %s", port, exc)
+                continue
+            self.in_port = port
+            self.server_thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+            self.server_thread.start()
+            if port != requested_port:
+                logger.info("OSC port %s in use, server started on fallback %s:%s", requested_port, self.in_ip, port)
+            else:
+                logger.info("OSC server started on %s:%s", self.in_ip, port)
+            return
+        logger.error("Failed to start OSC server on %s: ports %s-%s unavailable",
+                     self.in_ip, requested_port, requested_port + max_attempts - 1)
+
 
 
     def close(self):
@@ -494,9 +524,7 @@ class Visualizer:
             self._async_renderer.close()
             self._async_renderer = None
 
-        if self.server is not None:
-            self.server.shutdown()
-            self.server = None
+        self.stop_osc_server()
 
         if ndi is not None and self.ndi_send is not None:
             ndi.send_destroy(self.ndi_send)

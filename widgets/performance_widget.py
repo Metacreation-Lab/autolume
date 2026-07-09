@@ -7,18 +7,13 @@
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
 import array
-import logging
-import threading
 
 import numpy as np
 import imgui
 
 from utils import device_utils
 from utils.gui_utils import imgui_utils
-from pythonosc.osc_server import BlockingOSCUDPServer
-from pythonosc.udp_client import SimpleUDPClient
 
-logger = logging.getLogger(__name__)
 try:
     import NDIlib as ndi
 except ImportError:
@@ -36,24 +31,6 @@ class PerformanceWidget:
         self.use_superres = False
         self.scale_factor = 0
         self.device = device_utils.get_device().type
-
-
-    def start_osc_server(self):
-        try:
-            # 如果服务器已经在运行，先关闭它
-            if hasattr(self.viz, 'server') and self.viz.server:
-                self.viz.server.shutdown()
-                self.viz.server.server_close()
-                if hasattr(self.viz, 'server_thread') and self.viz.server_thread:
-                    self.viz.server_thread.join()
-
-            self.viz.server = BlockingOSCUDPServer((self.viz.in_ip, self.viz.in_port), self.viz.osc_dispatcher)
-            self.viz.server_thread = threading.Thread(target=self.viz.server.serve_forever, daemon=True)
-            self.viz.server_thread.start()
-            self.viz.osc_client = SimpleUDPClient(self.viz.in_ip, self.viz.in_port)
-            logger.info("OSC server started on %s:%s", self.viz.in_ip, self.viz.in_port)
-        except Exception as e:
-            logger.error("Failed to start OSC server: %s", e)
 
 
     @imgui_utils.scoped_by_object_id
@@ -109,7 +86,7 @@ class PerformanceWidget:
                 
                 imgui.same_line()
                 if imgui.button("Activate Server"):
-                    self.start_osc_server()
+                    self.viz.start_osc_server()
 
                 imgui.same_line()
                 # NDI parameters
@@ -118,17 +95,7 @@ class PerformanceWidget:
                                                                       256, imgui.INPUT_TEXT_CHARS_NO_BLANK | imgui.INPUT_TEXT_ENTER_RETURNS_TRUE)
 
             if changed_port or changed_ip:
-                self.viz.server.shutdown()
-                self.viz.server.server_close()
-                self.viz.server_thread.join()
-                try:
-                    self.viz.server = BlockingOSCUDPServer((self.viz.in_ip, self.viz.in_port), self.viz.osc_dispatcher)
-                except Exception:
-                    logger.error("Invalid OSC server address %s:%s", self.viz.in_ip, self.viz.in_port)
-                logger.info("OSC server restarted on %s:%s", self.viz.in_ip, self.viz.in_port)
-                self.viz.server_thread = threading.Thread(target=self.viz.server.serve_forever, daemon=True)
-                self.viz.server_thread.start()
-                self.viz.osc_client = SimpleUDPClient(self.viz.in_ip, self.viz.in_port)
+                self.viz.start_osc_server()
 
             if changed_ndi and ndi is not None:
                         send_settings = ndi.SendCreate()
