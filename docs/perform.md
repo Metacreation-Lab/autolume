@@ -91,11 +91,17 @@ The Perfect Loop option at the bottom of both looping options can help capture t
 
 ![](assets/live-module-performance-and-osc-01.png)
 
-This widget provides information and settings about the Perform screen’s performance, OSC connection IP address and port, and NDI name for sending visuals out.
+This widget shows the Perform screen’s performance and gathers its input/output settings: the OSC server that receives control signals and the NDI stream that sends the visuals out.
 
-The Render FPS shows the frame rate of the images being generated. The NDI Name can be used to receive the visuals in the software using the NDI protocol. The OSC information is to receive OSC signals in Autolume.
+The GUI and Render rows show the frame time and frame rate of the interface and of the image generation respectively.
 
-At the bottom of the widget, you check the box for CPU, if you want to run on CPU only. This will allow you to still perform in real time, but will significantly reduce the frame rate of image generation (to around 1 fps, depending on your specific CPU). You can also choose the Custom Kernel option after a model is loaded to increase the performance and boost the rendering frame rate.
+- FPS limit: Caps the frame rate of the interface, which also limits how often new images are generated.
+- Vertical sync: Synchronizes the interface with the display refresh rate.
+- GPU/CPU: Selects the device used for image generation. Running on CPU still allows you to perform in real time, but significantly reduces the frame rate of image generation (to around 1 fps, depending on your specific CPU).
+- Force FP32: Forces full 32-bit precision in the model. This can fix visual artifacts on some GPUs at the cost of performance.
+- Super Resolution: Upscales the generated images in real time.
+- OSC input: The IP address and port on which Autolume listens for incoming OSC signals. Press Restart (or Enter in either field) to apply changes. See [OSC](#osc) for how to control parameters.
+- NDI output: When Enabled, the visuals are streamed over the NDI protocol and can be received in other software such as OBS, Resolume, or TouchDesigner. Name sets the name under which the stream appears on the network. Disabling it saves a bit of processing time per frame.
 
 ## Adjust Input
 
