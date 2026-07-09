@@ -91,17 +91,22 @@ class PerformanceWidget:
                 imgui.same_line()
                 # NDI parameters
                 with imgui_utils.grayed_out(ndi is None):
+                    clicked_ndi, ndi_enabled = imgui.checkbox("NDI", self.viz.ndi_send is not None)
+                    imgui.same_line()
                     changed_ndi, self.viz.ndi_name = imgui.input_text(f"NDI Name", self.viz.ndi_name,
                                                                       256, imgui.INPUT_TEXT_CHARS_NO_BLANK | imgui.INPUT_TEXT_ENTER_RETURNS_TRUE)
 
             if changed_port or changed_ip:
                 self.viz.start_osc_server()
 
-            if changed_ndi and ndi is not None:
-                        send_settings = ndi.SendCreate()
-                        send_settings.ndi_name = self.viz.ndi_name
-                        ndi.send_destroy(self.viz.ndi_send)
-                        self.viz.ndi_send = ndi.send_create(send_settings)
+            if ndi is not None:
+                if clicked_ndi:
+                    if ndi_enabled:
+                        self.viz.start_ndi()
+                    else:
+                        self.viz.stop_ndi()
+                elif changed_ndi and self.viz.ndi_send is not None:
+                    self.viz.start_ndi()
 
             if imgui.checkbox("CPU", self.device=="cpu")[0]:
                 self.device = "cpu"

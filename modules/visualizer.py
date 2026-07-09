@@ -84,11 +84,7 @@ class Visualizer:
         self.ndi_name = 'Autolume Live'
         self.ndi_send = None
         self.video_frame = None
-        if ndi is not None:
-            send_settings = ndi.SendCreate()
-            send_settings.ndi_name = self.ndi_name
-            self.ndi_send = ndi.send_create(send_settings)
-            self.video_frame = ndi.VideoFrameV2()
+        self.start_ndi()
 
         # Internals.
 
@@ -517,6 +513,20 @@ class Visualizer:
 
 
 
+    def start_ndi(self):
+        if ndi is None:
+            return
+        self.stop_ndi()
+        send_settings = ndi.SendCreate()
+        send_settings.ndi_name = self.ndi_name
+        self.ndi_send = ndi.send_create(send_settings)
+        self.video_frame = ndi.VideoFrameV2()
+
+    def stop_ndi(self):
+        if ndi is not None and self.ndi_send is not None:
+            ndi.send_destroy(self.ndi_send)
+            self.ndi_send = None
+
     def close(self):
         self.disable_audio_widget()
 
@@ -526,9 +536,7 @@ class Visualizer:
 
         self.stop_osc_server()
 
-        if ndi is not None and self.ndi_send is not None:
-            ndi.send_destroy(self.ndi_send)
-            self.ndi_send = None
+        self.stop_ndi()
 
 
     def add_recent_pickle(self, pkl, ignore_errors=False):
