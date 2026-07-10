@@ -19,7 +19,8 @@ artifact is self-contained (Windows uses gyan.dev's essentials build).
 
 Pass ``--package`` to additionally wrap the build into the platform's
 distributable format: ``.AppImage`` (zstd) on Linux, ``.dmg`` (lzma) on macOS,
-an Inno Setup installer (lzma2) on Windows. ``--package-only`` skips the
+an Inno Setup installer (lzma2) plus a portable ``.tar.xz`` on Windows.
+``--package-only`` skips the
 PyInstaller build and packages an existing ``dist/`` output.
 
 PyInstaller cannot cross-compile: each artifact must be built on its own OS.
@@ -34,6 +35,7 @@ import shutil
 import subprocess
 import sys
 import sysconfig
+import tarfile
 import urllib.request
 from pathlib import Path
 
@@ -430,7 +432,7 @@ def iscc_path() -> Path:
 
 def package_windows() -> None:
     version = get_version()
-    output_base = artifact_name("")
+    output_base = artifact_name("-setup")
     # Inno Setup caps single-file output at ~2 GB; if a build ever exceeds it,
     # add DiskSpanning=yes (splits the installer into .bin slices).
     iss = REPO / "build" / "autolume.iss"
@@ -463,6 +465,16 @@ Name: "{{autodesktop}}\\Autolume"; Filename: "{{app}}\\Autolume.exe"; Tasks: des
 """)
     subprocess.run([str(iscc_path()), str(iss)], check=True)
     print(f"Packaged {REPO / 'dist' / (output_base + '.exe')}")
+
+    # Portable no-install variant. Windows 11 23H2+ extracts .tar.xz natively
+    # (File Explorer and bsdtar); older Windows needs 7-Zip. stdlib lzma is
+    # single-threaded, so this takes ~20 minutes for the ~5 GB bundle — the
+    # price of the smallest archive with a conventional extension.
+    archive = REPO / "dist" / artifact_name(".tar.xz")
+    print(f"Creating {archive.name} (single-threaded xz; this takes a while)...")
+    with tarfile.open(archive, "w:xz") as tar:
+        tar.add(REPO / "dist" / "Autolume", arcname="Autolume")
+    print(f"Packaged {archive}")
 
 
 def package() -> None:
