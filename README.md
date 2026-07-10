@@ -10,7 +10,7 @@ For detailed documentation and demos look at the [Metacreation Lab Website](http
 
 Latest release:
 - [Autolume 2.16.2 for Windows](https://1sfu-my.sharepoint.com/:u:/g/personal/lringenb_sfu_ca/IQCoCAMiIz-BS6Rlvyu7aza8ATVbAzL-Hue0F1uXoNxHt-I?e=JF5bOq)
-- [Autolume 2.17.0 preview for macOS](https://github.com/Metacreation-Lab/autolume/releases/tag/v2.17.0-rc1-macos-preview)
+- [Autolume 2.17.0 preview for Windows and macOS](https://github.com/Metacreation-Lab/autolume/releases/tag/v2.17.0-rc2)
 
 ## Examples
 
