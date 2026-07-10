@@ -67,7 +67,7 @@ class TrainingModule:
         self.data_path_browser = NativeBrowserWidget()
         self.save_path_browser = NativeBrowserWidget()
 
-        self.model_dropdown = ModelDropdownButton(label='Browse', include_models=False)
+        self.model_dropdown = ModelDropdownButton(label='Browse')
 
         self.menu = menu
 
