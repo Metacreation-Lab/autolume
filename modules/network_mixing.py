@@ -241,8 +241,8 @@ class MixingModule:
 
             imgui.separator()
 
-            _, self.output_name = imgui_utils.input_text("##network_mixing_pkl", 
-                                                        self.output_name, 
+            _, self.output_name = imgui_utils.input_text("##network_mixing_pkl",
+                                                        self.output_name,
                                                         1024,
                                                         help_text="Name of the output model",
                                                         width=input_width,
@@ -274,11 +274,14 @@ class MixingModule:
         imgui.set_column_width(1, w_ckb)
         imgui.set_column_width(2, w_ckb)
         imgui.set_column_width(3, button_width + style.item_spacing[0])
-        imgui.next_column()  
+        imgui.next_column()
         imgui.text(os.path.basename(self.model1))
         imgui.next_column()
         imgui.text(os.path.basename(self.model2))
         imgui.next_column()
+        help_icon_size = imgui.get_font_size()
+        imgui.dummy(imgui.get_content_region_available_width() - help_icon_size - 10, 0)
+        self.help_icon.render_with_url(self.help_texts.get("combine_guide"), self.help_urls.get("combine_guide"), "Read More")
         imgui.next_column()
         imgui.columns(1)
         imgui.separator()
