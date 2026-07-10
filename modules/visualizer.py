@@ -7,6 +7,7 @@
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 import logging
 import threading
+import time
 import numpy as np
 import queue
 import datetime
@@ -51,6 +52,24 @@ import os
 logger = logging.getLogger(__name__)
 
 #----------------------------------------------------------------------------
+class RecordingDispatcher(Dispatcher):
+    """Dispatcher that records when each incoming OSC address was last seen."""
+
+    def __init__(self):
+        super().__init__()
+        self._last_seen = {}
+
+    def handlers_for_address(self, address_pattern):
+        self._last_seen[address_pattern] = time.time()
+        return super().handlers_for_address(address_pattern)
+
+    def streaming_addresses(self, window=10.0):
+        # Segments starting with "_" are sender metadata (e.g. TouchDesigner's /_samplerate).
+        cutoff = time.time() - window
+        return sorted(addr for addr, seen in list(self._last_seen.items())
+                      if seen >= cutoff and not addr.rsplit("/", 1)[-1].startswith("_"))
+
+#----------------------------------------------------------------------------
 class Visualizer:
     def __init__(self, app, renderer):
         self.app = app
@@ -71,7 +90,7 @@ class Visualizer:
         self.in_port = 1338
         self.out_ip = "127.0.0.1"
         self.out_port = 1337
-        self.osc_dispatcher = Dispatcher()
+        self.osc_dispatcher = RecordingDispatcher()
         self.osc_client = SimpleUDPClient(self.out_ip, self.out_port)
         self.server = None
         self.server_thread = None

@@ -65,23 +65,41 @@ class OscMenu:
 
         return wrapper
 
+    def remap_address(self, key):
+        self.viz.osc_dispatcher.map(f"/{self.osc_addresses[key]}", self.wrapped_funcs[key])
+        try:
+            self.viz.osc_dispatcher.unmap(f"/{self.cached_osc_addresses[key]}", self.wrapped_funcs[key])
+        except Exception:
+            logger.warning("OSC address %s is not mapped", self.cached_osc_addresses[key])
+        self.cached_osc_addresses[key] = self.osc_addresses[key]
+
     @imgui_utils.scoped_by_object_id
     def osc_item(self, key):
         viz = self.viz
         _, self.use_osc[key] = imgui.checkbox(f"Use OSC##{self.label}_{key}", self.use_osc[key])
         with imgui_utils.grayed_out(not self.use_osc[key]):
-            changed, self.osc_addresses[key] = imgui.input_text(f"##OSCAddress_{self.label}_{key}",
-                                                                self.osc_addresses[key], 256,
-                                                                imgui.INPUT_TEXT_CHARS_NO_BLANK | (
-                                                                        imgui.INPUT_TEXT_READ_ONLY * (
-                                                                    not self.use_osc[key])))
+            with imgui_utils.item_width(-(imgui.get_frame_height() + imgui.get_style().item_spacing.x)):
+                changed, self.osc_addresses[key] = imgui.input_text(f"##OSCAddress_{self.label}_{key}",
+                                                                    self.osc_addresses[key], 256,
+                                                                    imgui.INPUT_TEXT_CHARS_NO_BLANK | (
+                                                                            imgui.INPUT_TEXT_READ_ONLY * (
+                                                                        not self.use_osc[key])))
             if changed:
-                viz.osc_dispatcher.map(f"/{self.osc_addresses[key]}", self.wrapped_funcs[key])
-                try:
-                    viz.osc_dispatcher.unmap(f"/{self.cached_osc_addresses[key]}", self.wrapped_funcs[key])
-                except Exception:
-                    logger.warning("OSC address %s is not mapped", self.cached_osc_addresses[key])
-                self.cached_osc_addresses[key] = self.osc_addresses[key]
+                self.remap_address(key)
+            imgui.same_line()
+            if imgui.arrow_button(f"##OSCAddressPick_{self.label}_{key}", imgui.DIRECTION_DOWN) and self.use_osc[key]:
+                imgui.open_popup(f"OSCAddressPopup_{self.label}_{key}")
+            if imgui.begin_popup(f"OSCAddressPopup_{self.label}_{key}"):
+                addresses = viz.osc_dispatcher.streaming_addresses()
+                if not addresses:
+                    imgui.text_disabled("No OSC input detected")
+                for address in addresses:
+                    stored = address[1:] if address.startswith("/") else address
+                    clicked, _ = imgui.selectable(address, stored == self.osc_addresses[key])
+                    if clicked:
+                        self.osc_addresses[key] = stored
+                        self.remap_address(key)
+                imgui.end_popup()
             if self.use_map.get(key, False):
                 changed, self.mappings[key] = imgui.input_text(f"##Mappings_{self.label}_{key}",
                                                                self.mappings[key], 256,
