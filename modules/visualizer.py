@@ -578,15 +578,11 @@ class Visualizer:
 
     def _header_help_icon(self, header_label, help_key, hyperlink_text="Read More"):
         """Position and render the help icon to the right of a collapsing header."""
-        imgui.same_line()
-        style = imgui.get_style()
-        header_text_width = imgui.calc_text_size(header_label).x
-        help_icon_size = imgui.get_font_size()
-        extra = 55 
-        spacing = self.pane_w - (style.window_padding[0] * 2) - header_text_width - help_icon_size - style.item_spacing[0] - extra
-        imgui.dummy(spacing, 0)
-        url = self.help_urls.get(help_key)
-        self.help_icon.render_with_url(self.help_texts.get(help_key), url, hyperlink_text)
+        self.help_icon.render_aligned(header_label, self.pane_w,
+                                      self.help_texts.get(help_key),
+                                      url=self.help_urls.get(help_key),
+                                      hyperlink_text=hyperlink_text,
+                                      trailing_offset=55)
 
     @imgui_utils.scoped_by_object_id
     def __call__(self):

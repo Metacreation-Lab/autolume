@@ -75,21 +75,6 @@ class DataPreprocessing:
         self.help_icon = HelpIconWidget()
         self.help_texts, self.help_urls = self.help_icon.load_help_texts("preprocessing")
 
-    def _render_help_icon(self, label, container_width, tooltip_text,
-                          hyperlinks=None, trailing_offset=10):
-        
-        style = imgui.get_style()
-        help_icon_size = imgui.get_font_size()
-        text_width = imgui.calc_text_size(label).x
-        spacing = (container_width - (style.window_padding[0] * 2)
-                   - text_width - help_icon_size - style.item_spacing[0] - trailing_offset)
-        imgui.same_line()
-        imgui.dummy(spacing, 0)
-        if hyperlinks:
-            self.help_icon.render_with_urls(tooltip_text, hyperlinks)
-        else:
-            self.help_icon.render(tooltip_text)
-
     def __call__(self):
         """Preprocessing content"""
         imgui_utils.set_default_style()
@@ -122,9 +107,9 @@ class DataPreprocessing:
         tutorial_video_url = "https://www.youtube.com/watch?v=7Pc5-ULeXkM&feature=youtu.be"
         import_hyperlinks.append((tutorial_video_url, "Tutorial Video"))
 
-        self._render_help_icon("Import Data", first_column_width,
-                               self.help_texts.get("import_data"),
-                               hyperlinks=import_hyperlinks, trailing_offset=5)
+        self.help_icon.render_aligned("Import Data", first_column_width,
+                                      self.help_texts.get("import_data"),
+                                      hyperlinks=import_hyperlinks, trailing_offset=5)
 
         imgui.separator()
  
@@ -372,12 +357,11 @@ class DataPreprocessing:
         # Image options
         header_opened = imgui.collapsing_header("Image Options", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]
 
-        image_options_url = self.help_urls.get("image_options")
-        self._render_help_icon("Image Options", first_column_width,
-                               self.help_texts.get("image_options"),
-                               hyperlinks=[(image_options_url, "Read More")] if image_options_url else None,
-                               trailing_offset=35)
-        
+        self.help_icon.render_aligned("Image Options", first_column_width,
+                                      self.help_texts.get("image_options"),
+                                      url=self.help_urls.get("image_options"),
+                                      trailing_offset=35)
+
         if header_opened:
             imgui.text("Resize Mode")
             imgui.same_line()
@@ -449,10 +433,10 @@ class DataPreprocessing:
 
         augmentation_header_opened = imgui.collapsing_header("Augmentation", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]
 
-        self._render_help_icon("Augmentation", first_column_width,
-                               self.help_texts.get("augmentation"),
-                               trailing_offset=35)
-        
+        self.help_icon.render_aligned("Augmentation", first_column_width,
+                                      self.help_texts.get("augmentation"),
+                                      trailing_offset=35)
+
         if augmentation_header_opened:
             xflip_clicked, new_xflip = imgui.checkbox("X-Flip", self.settings.augmentationSettings["xFlip"])
             if xflip_clicked:

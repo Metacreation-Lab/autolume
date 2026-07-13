@@ -369,15 +369,10 @@ class TrainingModule:
                 imgui.combo("##Configuration", self.config, configs)
 
             advanced_header_open = imgui.collapsing_header("Advanced Options")[0]
-
-            imgui.same_line()
-            help_icon_size = imgui.get_font_size()
-            style = imgui.get_style()
-            header_text_width = imgui.calc_text_size("Advanced Options").x
-            spacing = pane_width - (style.window_padding[0] * 2) - header_text_width - help_icon_size - style.item_spacing[0] - 35
-            imgui.dummy(spacing, 0)
-            self.help_icon.render_with_url(self.help_texts.get("advanced_options"),
-                                           self.help_urls.get("advanced_options"), "Read More")
+            self.help_icon.render_aligned("Advanced Options", pane_width,
+                                          self.help_texts.get("advanced_options"),
+                                          url=self.help_urls.get("advanced_options"),
+                                          trailing_offset=35)
 
             if advanced_header_open:
                 imgui.text("Generator Learning Rate")
