@@ -76,6 +76,21 @@ class HelpIconWidget:
             return
         self._render_popup(tooltip_text, hyperlinks if hyperlinks else None)
     
+    def render_aligned(self, label, container_width, tooltip_text,
+                       url=None, hyperlink_text="Read More",
+                       hyperlinks=None, trailing_offset=10):
+        """Right-align the help icon after a label or header within container_width."""
+        style = imgui.get_style()
+        spacing = (container_width - style.window_padding[0] * 2
+                   - imgui.calc_text_size(label).x - imgui.get_font_size()
+                   - style.item_spacing[0] - trailing_offset)
+        imgui.same_line()
+        imgui.dummy(max(spacing, 0), 0)
+        if hyperlinks:
+            self.render_with_urls(tooltip_text, hyperlinks)
+        else:
+            self.render_with_url(tooltip_text, url, hyperlink_text)
+
     def _render_popup(self, tooltip_text, hyperlinks=None):
         """Internal method to render the help icon and popup
         Args:
