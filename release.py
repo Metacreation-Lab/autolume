@@ -12,7 +12,15 @@ right PyInstaller invocation:
   MSVC/GCC + CUDA nvcc on the user's machine). Windows additionally ships the
   Python import library (e.g. ``python312.lib``).
 - macOS skips all of that (the ops fall back to reference PyTorch on MPS) and
-  produces an ``Autolume.app`` bundle instead of a plain folder.
+  produces an ``Autolume.app`` bundle instead of a plain folder. The app is
+  signed with the Developer ID Application identity from the keychain when one
+  is present (hardened runtime + ``entitlements.plist``), falling back to
+  ad-hoc signing with a warning. ``--package`` also signs the ``.dmg``.
+  Notarization is a separate, explicit step: ``--notarize`` submits the
+  packaged ``.dmg`` to Apple and staples the ticket, using the
+  ``autolume-notary`` keychain profile (create it once with ``xcrun notarytool
+  store-credentials``). It can be combined with ``--package`` or run alone
+  against an already-built ``.dmg``.
 
 ffmpeg/ffprobe are bundled on every platform via ffmpeg-downloader so the
 artifact is self-contained (Windows uses gyan.dev's essentials build).
@@ -27,6 +35,7 @@ PyInstaller cannot cross-compile: each artifact must be built on its own OS.
 """
 
 import argparse
+import functools
 import importlib.util
 import os
 import platform
@@ -64,6 +73,12 @@ APPIMAGETOOL_URL = "https://github.com/AppImage/appimagetool/releases/download/c
 # a clear "requires macOS 14" dialog. Verify with check_macos_compat.py after
 # bumping torch.
 MACOS_MIN_VERSION = "14.0"
+
+# Hardened-runtime exceptions + microphone access for the signed macOS build.
+ENTITLEMENTS = REPO / "entitlements.plist"
+
+# notarytool keychain profile holding the App Store Connect API key.
+NOTARY_PROFILE = "autolume-notary"
 
 
 def fail(message: str) -> "NoReturn":
@@ -143,6 +158,26 @@ def glfw_native_libs() -> list[tuple[Path, str]]:
     return [(matches[0], "glfw")]
 
 
+@functools.cache
+def signing_identity() -> str | None:
+    """Find a Developer ID Application identity in the keychain, or None."""
+    result = subprocess.run(
+        ["security", "find-identity", "-v", "-p", "codesigning"],
+        capture_output=True, text=True,
+    )
+    for line in result.stdout.splitlines():
+        if "Developer ID Application" in line:
+            identity = line.split('"')[1]
+            print(f"Signing with identity: {identity}")
+            return identity
+    print(
+        "warning: no Developer ID Application identity in the keychain; "
+        "signing ad-hoc (users will hit Gatekeeper warnings)",
+        file=sys.stderr,
+    )
+    return None
+
+
 def ninja_binary() -> Path:
     binary = package_dir("ninja") / "data" / "bin" / ("ninja.exe" if IS_WINDOWS else "ninja")
     if not binary.exists():
@@ -173,6 +208,14 @@ def build_args() -> list[str]:
     if IS_MACOS:
         # Emits dist/Autolume.app
         args.append("--windowed")
+        identity = signing_identity()
+        if identity:
+            # PyInstaller deep-signs every nested binary with the hardened
+            # runtime, as notarization requires.
+            args += [
+                "--codesign-identity", identity,
+                "--osx-entitlements-file", str(ENTITLEMENTS),
+            ]
 
     # --- Binaries shipped on every platform -------------------------------
     # ffmpeg/ffprobe (and ninja below) go in a bin/ subdir, not the bundle root:
@@ -324,10 +367,21 @@ def post_build() -> None:
         info["NSHumanReadableCopyright"] = (
             "Metacreation Lab for Creative AI\nmetacreation.net/autolume"
         )
+        info["NSMicrophoneUsageDescription"] = (
+            "Autolume uses the microphone for audio-reactive visuals."
+        )
         plist.write_bytes(plistlib.dumps(info))
-        # Editing Info.plist invalidates PyInstaller's ad-hoc signature; re-sign
-        # the outer bundle (nested binaries are untouched and stay valid).
-        subprocess.run(["codesign", "--force", "--sign", "-", str(app)], check=True)
+        # Editing Info.plist invalidates the bundle signature; re-sign the
+        # outer bundle (nested binaries are untouched and stay valid).
+        identity = signing_identity()
+        if identity:
+            subprocess.run(
+                ["codesign", "--force", "--options", "runtime", "--timestamp",
+                 "--entitlements", str(ENTITLEMENTS), "--sign", identity, str(app)],
+                check=True,
+            )
+        else:
+            subprocess.run(["codesign", "--force", "--sign", "-", str(app)], check=True)
         print(f"Built dist/Autolume.app (requires macOS {MACOS_MIN_VERSION}+)")
     else:
         prune_bundle()
@@ -394,7 +448,7 @@ def package_macos() -> None:
     if staging.exists():
         shutil.rmtree(staging)
     staging.mkdir(parents=True)
-    # ditto preserves the ad-hoc code signature; shutil.copytree can break it.
+    # ditto preserves the code signature; shutil.copytree can break it.
     subprocess.run(
         ["ditto", str(REPO / "dist" / "Autolume.app"), str(staging / "Autolume.app")],
         check=True,
@@ -407,7 +461,41 @@ def package_macos() -> None:
          "-format", "ULMO", "-ov", str(output)],
         check=True,
     )
-    print(f"Packaged {output}")
+
+    identity = signing_identity()
+    if identity:
+        subprocess.run(
+            ["codesign", "--timestamp", "--sign", identity, str(output)], check=True
+        )
+    else:
+        print("warning: DMG is unsigned; Gatekeeper will block it", file=sys.stderr)
+    print(f"Packaged {output} (pass --notarize to submit it to Apple)")
+
+
+def notarize(dmg: Path) -> None:
+    """Submit the DMG to Apple's notary service and staple the ticket.
+
+    Notarizing the DMG covers the .app inside it, which must already carry a
+    hardened-runtime Developer ID signature.
+    """
+    print("Notarizing (Apple usually takes a few minutes)...")
+    result = subprocess.run(
+        ["xcrun", "notarytool", "submit", str(dmg),
+         "--keychain-profile", NOTARY_PROFILE, "--wait"],
+    )
+    if result.returncode != 0:
+        fail(
+            "notarization failed; the DMG is signed but Gatekeeper will "
+            f"block it on other machines. If the '{NOTARY_PROFILE}' keychain "
+            "profile is missing, create it once with `xcrun notarytool "
+            f"store-credentials {NOTARY_PROFILE} --key <AuthKey.p8> "
+            "--key-id <key-id> --issuer-id <issuer-id>` using an App Store "
+            "Connect API key (see README). If the submission was rejected, "
+            "inspect it with `xcrun notarytool log <submission-id> "
+            f"--keychain-profile {NOTARY_PROFILE}`."
+        )
+    subprocess.run(["xcrun", "stapler", "staple", str(dmg)], check=True)
+    print("Notarized and stapled.")
 
 
 def iscc_path() -> Path:
@@ -496,25 +584,39 @@ def main() -> None:
         "--package-only", action="store_true",
         help="skip the PyInstaller build and only package an existing dist/ output",
     )
+    parser.add_argument(
+        "--notarize", action="store_true",
+        help="submit the packaged .dmg to Apple's notary service and staple the "
+             "ticket (macOS only); combine with --package or run alone against "
+             "an existing .dmg",
+    )
     opts = parser.parse_args()
+
+    if opts.notarize and not IS_MACOS:
+        fail("--notarize only applies to the macOS .dmg")
 
     if opts.package_only:
         bundle = REPO / "dist" / ("Autolume.app" if IS_MACOS else "Autolume")
         if not bundle.exists():
             fail(f"{bundle} not found; run `uv run release.py` first")
         package()
-        return
+    elif opts.package or not opts.notarize:
+        print(f"Building Autolume for {SYSTEM}...")
+        clean()
+        if NEEDS_JIT_TOOLCHAIN:
+            precompile_ops()
+        args = build_args()
+        print("Running PyInstaller...")
+        subprocess.run(args, check=True, cwd=REPO)
+        post_build()
+        if opts.package:
+            package()
 
-    print(f"Building Autolume for {SYSTEM}...")
-    clean()
-    if NEEDS_JIT_TOOLCHAIN:
-        precompile_ops()
-    args = build_args()
-    print("Running PyInstaller...")
-    subprocess.run(args, check=True, cwd=REPO)
-    post_build()
-    if opts.package:
-        package()
+    if opts.notarize:
+        dmg = REPO / "dist" / artifact_name(".dmg")
+        if not dmg.exists():
+            fail(f"{dmg} not found; run `uv run release.py --package` first")
+        notarize(dmg)
 
 
 if __name__ == "__main__":

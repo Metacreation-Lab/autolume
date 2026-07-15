@@ -68,8 +68,8 @@ ffmpeg/ffprobe are downloaded and bundled into the release automatically via
 `ffmpeg-downloader`.
 
 - **Windows / Linux:** output is the `dist/Autolume/` folder.
-- **macOS:** output is `dist/Autolume.app`. It is unsigned, so the first launch
-  needs right-click → Open.
+- **macOS:** output is `dist/Autolume.app`, code-signed automatically — see
+  [macOS signing and notarization](#macos-signing-and-notarization).
 
 Pass `--package` to additionally produce a distributable: an `.AppImage` on
 Linux, a `.dmg` on macOS, or an Inno Setup installer plus a portable `.tar.xz`
@@ -77,6 +77,48 @@ archive on Windows (requires
 [Inno Setup](https://jrsoftware.org/isdl.php) on the build machine, installable
 with `winget install --id JRSoftware.InnoSetup.7 -e -s winget -i`). Use
 `--package-only` to package an existing `dist/` output without rebuilding.
+
+#### macOS signing and notarization
+
+Gatekeeper only opens a downloaded app without friction when it is both
+**signed** with a Developer ID and **notarized** by Apple (an automated
+malware scan of the uploaded file — this applies to all distribution outside
+the App Store, GitHub releases included). The release script handles both,
+after a one-time setup.
+
+**One-time setup**
+
+1. *Signing certificate:* install a `Developer ID Application` certificate
+   and its private key in your login keychain. Verify it is visible with:
+   ```bash
+   security find-identity -v -p codesigning
+   ```
+2. *Notarization credentials:* ask a team admin for an App Store Connect API
+   key with the Developer role (App Store Connect → Users and Access →
+   Integrations → Team Keys). You need three values from that page: the `.p8`
+   key file, the Key ID, and the Issuer ID. Store them under the
+   `autolume-notary` keychain profile:
+   ```bash
+   xcrun notarytool store-credentials autolume-notary \
+     --key AuthKey_XXXXXX.p8 --key-id <key-id> --issuer-id <issuer-id>
+   ```
+
+**Release flow**
+
+```bash
+uv run release.py --package --notarize
+```
+
+- The build signs `Autolume.app` (hardened runtime + `entitlements.plist`)
+  with the Developer ID certificate found in the keychain. If there is none,
+  the script warns and falls back to an ad-hoc signature; the app then still
+  runs locally, but downloads are blocked by Gatekeeper.
+- `--package` wraps the app into a `.dmg` and signs it.
+- `--notarize` submits the `.dmg` to Apple (usually takes a few minutes) and
+  staples the resulting ticket, so users can open the app with a plain
+  double-click. It can also be run on its own against an already-built `.dmg`
+  — notarizing after the fact also unblocks copies that were published or
+  downloaded earlier, since Gatekeeper checks Apple's servers online.
 
 ### Building documentation
 
