@@ -162,6 +162,12 @@ class LoopingWidget:
 
         self.remove_entry = -1
 
+    def recreate_osc_client(self):
+        try:
+            self.osc_client = SimpleUDPClient(self.osc_ip, self.osc_port)
+        except Exception as e:
+            logger.warning("Invalid OSC output %s:%s, keeping previous client: %s", self.osc_ip, self.osc_port, e)
+
     def alpha_handler(self):
         def func(address, *args):
             try:
@@ -500,15 +506,17 @@ class LoopingWidget:
 
             _, self.perfect_loop = imgui.checkbox("Perfect Loop", self.perfect_loop)
             imgui.same_line()
-            _changed, self.osc_ip = imgui_utils.input_text("OSC IP", self.osc_ip, 256, imgui.INPUT_TEXT_CHARS_NO_BLANK,
+            _changed, self.osc_ip = imgui_utils.input_text("OSC IP", self.osc_ip, 256,
+                                                           imgui.INPUT_TEXT_CHARS_NO_BLANK | imgui.INPUT_TEXT_ENTER_RETURNS_TRUE,
                                                            width=viz.app.font_size * 4.5)
             if _changed:
-                self.osc_client = SimpleUDPClient(self.osc_ip, self.osc_port)
+                self.recreate_osc_client()
             imgui.same_line(spacing=viz.app.spacing* 2)
             with imgui_utils.item_width(viz.app.font_size * 6):
-                _changed, self.osc_port = imgui.input_int("OSC Port", self.osc_port)
+                _changed, self.osc_port = imgui.input_int("OSC Port", self.osc_port,
+                                                          flags=imgui.INPUT_TEXT_ENTER_RETURNS_TRUE)
             if _changed:
-                self.osc_client = SimpleUDPClient(self.osc_ip, self.osc_port)
+                self.recreate_osc_client()
 
             imgui.same_line(spacing=viz.app.spacing * 2)
             _changed, self.osc_address = imgui_utils.input_text("OSC Address", self.osc_address, 256,
