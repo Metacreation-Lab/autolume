@@ -55,12 +55,26 @@ class OscMenu:
         return wrapper
 
     def map_func(self, func, key):
+        mapping = self.mappings[key]
+        try:
+            code = compile(mapping, "<osc-mapping>", "eval")
+        except SyntaxError as e:
+            logger.warning("Invalid OSC mapping %r for %s, forwarding raw values: %s", mapping, key, e)
+            code = None
+        warned = False
+
         def wrapper(*args, **kwargs):
+            nonlocal warned
+            if code is None:
+                func(*args)
+                return
             try:
-                f = lambda x: eval(self.mappings[key])
+                f = lambda x: eval(code)
                 func(args[0], f(args[-1]))
             except Exception as e:
-                logger.warning("OSC mapping failed, forwarding raw args: %s", e)
+                if not warned:
+                    logger.warning("OSC mapping %r for %s failed, forwarding raw args: %s", mapping, key, e)
+                    warned = True
                 func(*args)
 
         return wrapper
@@ -103,7 +117,7 @@ class OscMenu:
             if self.use_map.get(key, False):
                 changed, self.mappings[key] = imgui.input_text(f"##Mappings_{self.label}_{key}",
                                                                self.mappings[key], 256,
-                                                                (
+                                                                imgui.INPUT_TEXT_ENTER_RETURNS_TRUE | (
                                                                        imgui.INPUT_TEXT_READ_ONLY * (
                                                                    not self.use_osc[key])))
                 if changed:
