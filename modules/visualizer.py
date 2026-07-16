@@ -86,7 +86,7 @@ class Visualizer:
             self.has_microphone = True
         except Exception as exc:
             logger.warning("No microphone found: %s", exc)
-        self.in_ip = "127.0.0.1"
+        self.in_ip = "0.0.0.0"
         self.in_port = 1338
         self.out_ip = "127.0.0.1"
         self.out_port = 1337

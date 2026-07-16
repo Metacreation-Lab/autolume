@@ -100,7 +100,7 @@ The GUI and Render rows show the frame time and frame rate of the interface and 
 - GPU/CPU: Selects the device used for image generation. Running on CPU still allows you to perform in real time, but significantly reduces the frame rate of image generation (to around 1 fps, depending on your specific CPU).
 - Force FP32: Forces full 32-bit precision in the model. This can fix visual artifacts on some GPUs at the cost of performance.
 - Super Resolution: Upscales the generated images in real time.
-- OSC input: The IP address and port on which Autolume listens for incoming OSC signals. Press Restart (or Enter in either field) to apply changes. See [OSC](#osc) for how to control parameters.
+- OSC input: The source and port on which Autolume listens for incoming OSC signals. The default source, Any network, receives from other devices such as phones and controllers. This machine receives only from apps running on this computer. The source list also shows the addresses of your computer on each network it is connected to. Use one of them as the destination in the app sending the OSC signals. Changing the source applies immediately. For the port, press Restart (or Enter) to apply. See [OSC](#osc) for how to control parameters.
 - NDI output: When Enabled, the visuals are streamed over the NDI protocol and can be received in other software such as OBS, Resolume, or TouchDesigner. Name sets the name under which the stream appears on the network. Disabling it saves a bit of processing time per frame.
 
 ## Adjust Input
@@ -179,4 +179,4 @@ It displays the different parameters that can be controlled using OSC. By clicki
 
 ![](assets/live-module-osc-02.jpg)
 
-Please see [Performance and OSC](#performance-and-osc) about how to set the OSC IP Address and port in the software you use to send the OSC signals.
+By default Autolume listens on all networks, so apps on your phone or another computer can send OSC to it directly. Please see [Performance and OSC](#performance-and-osc) about how to find the address and port to use in the software that sends the OSC signals.

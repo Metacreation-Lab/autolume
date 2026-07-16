@@ -12,6 +12,7 @@ import numpy as np
 import imgui
 
 from utils import device_utils
+from utils import network_utils
 from utils.gui_utils import imgui_utils
 
 try:
@@ -31,6 +32,7 @@ class PerformanceWidget:
         self.use_superres = False
         self.scale_factor = 0
         self.device = device_utils.get_device().type
+        self.bind_addresses = network_utils.list_bind_addresses()
 
 
     @imgui_utils.scoped_by_object_id
@@ -89,11 +91,18 @@ class PerformanceWidget:
             # Row 3: OSC input server | Super Resolution.
             imgui.text('OSC input')
             imgui.same_line(label_w)
-            imgui.text('IP')
+            imgui.text('Source')
             imgui.same_line()
-            with imgui_utils.item_width(fs * 6):
-                changed_ip, self.viz.in_ip = imgui.input_text('##osc_ip', self.viz.in_ip, 256,
-                                                              imgui.INPUT_TEXT_CHARS_NO_BLANK | imgui.INPUT_TEXT_ENTER_RETURNS_TRUE)
+            addresses = self.bind_addresses
+            if self.viz.in_ip not in [ip for _, ip in addresses]:
+                addresses = addresses + [(self.viz.in_ip, self.viz.in_ip)]
+            current = [ip for _, ip in addresses].index(self.viz.in_ip)
+            with imgui_utils.item_width(fs * 9):
+                changed_source, selected = imgui.combo('##osc_source', current, [label for label, _ in addresses])
+            if imgui.is_item_clicked():
+                self.bind_addresses = network_utils.list_bind_addresses()
+            if changed_source:
+                self.viz.in_ip = addresses[selected][1]
             imgui.same_line()
             imgui.text('Port')
             imgui.same_line()
@@ -101,7 +110,7 @@ class PerformanceWidget:
                 changed_port, self.viz.in_port = imgui.input_int('##osc_port', self.viz.in_port,
                                                                  flags=imgui.INPUT_TEXT_ENTER_RETURNS_TRUE)
             imgui.same_line()
-            if imgui.button('Restart') or changed_port or changed_ip:
+            if imgui.button('Restart') or changed_port or changed_source:
                 self.viz.start_osc_server()
             imgui.same_line(right_col_x)
             _, self.use_superres = imgui.checkbox('Super Resolution', self.use_superres)
