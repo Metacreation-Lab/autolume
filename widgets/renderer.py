@@ -812,7 +812,7 @@ class Renderer:
             hooks += [module.register_forward_pre_hook(adjustment_hook) for module in net.modules()]
         try:
             with torch.no_grad():
-                out, _ = net(*args, **kwargs)
+                out = net(*args, **kwargs)
                 if isinstance(out, tuple):
                     out = out[0]
                 if use_superres:
