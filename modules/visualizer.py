@@ -10,7 +10,6 @@ import threading
 import time
 import numpy as np
 import queue
-import datetime
 import imgui
 import cv2
 import pyaudio
@@ -19,9 +18,9 @@ import dnnlib
 from utils.gui_utils import imgui_utils
 from utils.gui_utils import gl_utils
 from utils.gui_utils import text_utils
-from utils.user_data import data_path
 from widgets import pickle_widget
 from widgets import latent_widget
+from widgets import display_capture_widget
 from widgets import trunc_noise_widget
 from widgets import performance_widget
 from widgets import layer_widget
@@ -41,8 +40,6 @@ try:
     import NDIlib as ndi
 except ImportError:
     ndi = None  # NDIlib is optional; NDI streaming is disabled when it isn't installed.
-
-from utils import device_utils
 
 import glfw
 from OpenGL import GL as gl
@@ -119,6 +116,7 @@ class Visualizer:
         self.result             = dnnlib.EasyDict()
 
         # Widgets.
+        self.display_capture_widget = display_capture_widget.DisplayCaptureWidget(self)
         self.pickle_widget      = pickle_widget.PickleWidget(self)
         self.latent_widget      = latent_widget.LatentWidget(self)
         self.trunc_noise_widget = trunc_noise_widget.TruncationNoiseWidget(self)
@@ -483,6 +481,7 @@ class Visualizer:
                 out.write(frame)
         if out is not None:
             out.release()
+            logger.info("Recording saved to %s", self.recording_file_path)
 
     def capture_screenshot(self, file_path):
         if 'image' in self.result:
@@ -493,7 +492,10 @@ class Visualizer:
 
             # Save the image using OpenCV
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
-            cv2.imwrite(file_path, image_data)
+            if cv2.imwrite(file_path, image_data):
+                logger.info("Screenshot saved to %s", file_path)
+            else:
+                logger.error("Failed to save screenshot to %s", file_path)
         else:
             logger.warning("No render result available to capture")
 
@@ -602,64 +604,11 @@ class Visualizer:
         if self.reset_scroll:
             imgui.set_scroll_y(0)
             self.reset_scroll = False
-        # Scale with the UI font, calibrated to 36px at font 14.
-        toolbar_height = round(self.app.font_size * 36 / 14)
 
-        # Anchor the toolbar row (the logo used to do this) so the right-aligned
-        # button group below lands on the same baseline.
-        imgui.set_cursor_pos_y(toolbar_height / 4)
-        imgui.dummy(0, 0)
-
-        # The fullscreen display uses a core-profile GL 3.3 context that shares
-        # textures with the main legacy context; macOS cannot share across those
-        # profiles, so the button is omitted there.
-        show_fullscreen = not device_utils.is_macos()
-        fullscreen_label = "Full Screen Display" if not self.is_fullscreen_display else "Exit Full Screen"
-        fit_label = "Fit Screen" if not self.fit_screen else "Raw Scale"
-        record_label = 'Start Recording' if not self.is_recording else 'Stop Recording'
-
-        # Right-align the toolbar so its last button lines up with the section
-        # buttons below, by anchoring the group at right_edge minus its width.
-        labels = ([fullscreen_label] if show_fullscreen else []) + [fit_label, 'Screen Capture', record_label]
-        style = imgui.get_style()
-        button_padding = style.frame_padding[0] * 2
-        gap = style.item_spacing[0]
-        total_width = sum(imgui.calc_text_size(label)[0] + button_padding for label in labels) + gap * (len(labels) - 1)
-        imgui.same_line(imgui.get_window_content_region_max()[0] - total_width)
-
-        if show_fullscreen:
-            if imgui.button(fullscreen_label):
-                if self.is_fullscreen_display:
-                    self.is_fullscreen_display = False
-                    if self.fullscreen_window:
-                        glfw.destroy_window(self.fullscreen_window)
-                        self.fullscreen_window = None
-                        self.window_created = False
-                else:
-                    self.is_fullscreen_display = True
-                    self.window_created = False
-            imgui.same_line()
-
-        if imgui.button(fit_label):
-            self.fit_screen = not self.fit_screen
-
-        imgui.same_line()
-        if imgui.button('Screen Capture'):
-            now = datetime.datetime.now()
-            current_time_str = now.strftime("%Y-%m-%d %H-%M-%S")
-            self.capture_screenshot(str(data_path('captures', f'{current_time_str}.png')))
-
-        imgui.same_line()
-        if imgui.button(record_label):
-            if not self.is_recording:
-                now = datetime.datetime.now()
-                current_time_str = now.strftime("%Y-%m-%d %H-%M-%S")
-                self.start_recording(str(data_path('captures', f'{current_time_str}.mp4')))
-            else:
-                self.stop_recording()
-
-        # Start the widgets below the bar (the row above may be shorter than it).
-        imgui.set_cursor_pos_y(toolbar_height + self.app.spacing)
+        # Display & Capture
+        header_opened = imgui_utils.collapsing_header('Display & Capture', default=True)[0]
+        self._header_help_icon('Display & Capture', 'display_capture')
+        self.display_capture_widget(header_opened)
 
         # Network & Latent
         header_opened = imgui_utils.collapsing_header('Network & Latent', default=True)[0]

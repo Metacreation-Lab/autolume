@@ -29,7 +29,6 @@ class PerformanceWidget:
         self.fps_limit = 60
         self.use_vsync = False
         self.force_fp32 = False
-        self.use_superres = False
         self.scale_factor = 0
         self.device = device_utils.get_device().type
         self.bind_addresses = network_utils.list_bind_addresses()
@@ -88,7 +87,7 @@ class PerformanceWidget:
             imgui.same_line(right_col_x)
             _clicked, self.force_fp32 = imgui.checkbox('Force FP32', self.force_fp32)
 
-            # Row 3: OSC input server | Super Resolution.
+            # Row 3: OSC input server.
             imgui.text('OSC input')
             imgui.same_line(label_w)
             imgui.text('Source')
@@ -112,8 +111,6 @@ class PerformanceWidget:
             imgui.same_line()
             if imgui.button('Restart') or changed_port or changed_source:
                 self.viz.start_osc_server()
-            imgui.same_line(right_col_x)
-            _, self.use_superres = imgui.checkbox('Super Resolution', self.use_superres)
 
             # Row 4: NDI video output.
             imgui.text('NDI output')
@@ -139,7 +136,6 @@ class PerformanceWidget:
         viz.app.set_fps_limit(self.fps_limit)
         viz.app.set_vsync(self.use_vsync)
         viz.args.force_fp32 = self.force_fp32
-        viz.args.use_superres = self.use_superres
         viz.args.device = self.device
 
 # ----------------------------------------------------------------------------
