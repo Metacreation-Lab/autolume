@@ -14,7 +14,7 @@ Windows and Linux users **must follow** the [system requirements guide](system-r
 
 ### Apple Silicon limitations (macOS / MPS)
 
-On Apple Silicon, training is expected to be extremely slow — roughly 17× slower on an M1 Max than on a laptop RTX 4090 at 64×64 — and impractical above that resolution.
+Training a model on macOS is expected to be extremely slow and impractical for any resolution above 64x64.
 
 ## Downloading Autolume
 

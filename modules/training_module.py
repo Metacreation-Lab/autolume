@@ -1,6 +1,7 @@
 import json
 import logging
 from pathlib import Path
+import sys
 import zipfile
 
 import imgui
@@ -409,6 +410,28 @@ class TrainingModule:
             imgui.open_popup("Validating Dataset")
             self._open_validation_popup = False
         self._render_validation_popup()
+
+        if sys.platform == "darwin":
+            warning = ("Warning: Training a model on macOS is expected to be extremely slow "
+                       "and impractical for any resolution above 64x64.")
+            box_pad = self.menu.app.font_size * 0.5
+            box_width = pane_width - style.window_padding[0] * 2
+            wrap_width = box_width - box_pad * 2
+            box_height = imgui.calc_text_size(warning, wrap_width=wrap_width).y + box_pad * 2
+            footer_y = imgui.get_window_height() - style.window_padding[1] - box_height
+            if footer_y > imgui.get_cursor_pos_y():
+                imgui.set_cursor_pos_y(footer_y)
+            box_x, box_y = imgui.get_cursor_screen_pos()
+            imgui.get_window_draw_list().add_rect_filled(
+                box_x, box_y, box_x + box_width, box_y + box_height,
+                imgui.get_color_u32_rgba(0.30, 0.25, 0.05, 1.0),
+                rounding=style.frame_rounding,
+            )
+            cursor_x, cursor_y = imgui.get_cursor_pos()
+            imgui.set_cursor_pos((cursor_x + box_pad, cursor_y + box_pad))
+            imgui.push_text_wrap_pos(cursor_x + box_pad + wrap_width)
+            imgui.text_colored(warning, 1.0, 1.0, 0.0, 1.0)
+            imgui.pop_text_wrap_pos()
 
         imgui.end_child()
 
