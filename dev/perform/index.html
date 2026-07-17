@@ -435,6 +435,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#display-and-capture" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Display and Capture
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#network-and-latent" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -717,6 +728,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#display-and-capture" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Display and Capture
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#network-and-latent" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -930,6 +952,17 @@
 
 <h1 id="perform">Perform<a class="headerlink" href="#perform" title="Permanent link">&para;</a></h1>
 <p>The Perform screen is where you load a model and work with it in real time. It is the screen Autolume opens on after startup. It provides you with a diverse set of features to explore the latent space in different ways and to play with the parameters of the network. It also enables you to control the parameters via OSC protocol for audio-reactive and other kinds of interactive works.</p>
+<h2 id="display-and-capture">Display and Capture<a class="headerlink" href="#display-and-capture" title="Permanent link">&para;</a></h2>
+<p><img alt="" src="../assets/live-module-display-capture-01.png" /></p>
+<p>This widget controls how the visuals are displayed and lets you capture them.</p>
+<ul>
+<li>Raw Scale: Shows the visuals at their native size.</li>
+<li>Fit: Scales the visuals to fill the preview area.</li>
+<li>Super Resolution: Upscales the generated images in real time.</li>
+<li>Fullscreen: Shows the visuals in full screen on the main display. Press Exit Fullscreen to return. This button is not available on macOS.</li>
+<li>Screenshot: Saves a snapshot of the visuals as an image in the captures folder (under your <a href="../#where-autolume-stores-your-data">data folder</a>, <code>~/autolume/captures</code> by default).</li>
+<li>Record: Records the visuals as a video in the captures folder. The button turns into a red Stop button while recording.</li>
+</ul>
 <h2 id="network-and-latent">Network and Latent<a class="headerlink" href="#network-and-latent" title="Permanent link">&para;</a></h2>
 <p>This widget allows you to load models and explore their latent space, i.e. the images it can generate.</p>
 <h3 id="model-loading">Model Loading<a class="headerlink" href="#model-loading" title="Permanent link">&para;</a></h3>
@@ -1011,7 +1044,6 @@
 <li>Vertical sync: Synchronizes the interface with the display refresh rate.</li>
 <li>GPU/CPU: Selects the device used for image generation. Running on CPU still allows you to perform in real time, but significantly reduces the frame rate of image generation (to around 1 fps, depending on your specific CPU).</li>
 <li>Force FP32: Forces full 32-bit precision in the model. This can fix visual artifacts on some GPUs at the cost of performance.</li>
-<li>Super Resolution: Upscales the generated images in real time.</li>
 <li>OSC input: The source and port on which Autolume listens for incoming OSC signals. The default source, Any network, receives from other devices such as phones and controllers. This machine receives only from apps running on this computer. The source list also shows the addresses of your computer on each network it is connected to. Use one of them as the destination in the app sending the OSC signals. Changing the source applies immediately. For the port, press Restart (or Enter) to apply. See <a href="#osc">OSC</a> for how to control parameters.</li>
 <li>NDI output: When Enabled, the visuals are streamed over the NDI protocol and can be received in other software such as OBS, Resolume, or TouchDesigner. Name sets the name under which the stream appears on the network. Disabling it saves a bit of processing time per frame.</li>
 </ul>
@@ -1051,8 +1083,7 @@
 <h2 id="osc">OSC<a class="headerlink" href="#osc" title="Permanent link">&para;</a></h2>
 <p>Autolume allows users to control parameters using its interface but also provides the option to control parameters using <a href="https://www.google.com/url?q=https://ccrma.stanford.edu/groups/osc/index.html&amp;sa=D&amp;source=editors&amp;ust=1769724592307780&amp;usg=AOvVaw0M9rZhdAGtobHhNvfkNj2x">OSC</a>. This allows you to control parameters in Autolume using other software, such as TouchDesigner, Max/MSP, or Processing. The OSC interface is available for all parameters on the Perform screen. Most widgets have an OSC menu similar to the following:</p>
 <p><img alt="" src="../assets/live-module-osc-01.png" /></p>
-<p>It displays the different parameters that can be controlled using OSC. By clicking on a parameter name, a popup opens which allows you to check the box Use OSC to activate the OSC control for that parameter. In the next field, you can provide the OSC channel name. The arrow button next to it lists the addresses currently being received by the OSC server, so you can pick one instead of typing it. Addresses whose name starts with an underscore are hidden from this list, as they carry sender metadata rather than control signals. For example, TouchDesigner sends a <code>/_samplerate</code> message alongside its channel data. The last field is a mapping function that can be used to perform post-processing on the control signal to make sure that the right data range is used. This follows the math format defined by Python.</p>
-<p><img alt="" src="../assets/live-module-osc-02.jpg" /></p>
+<p>It displays the different parameters that can be controlled using OSC. By clicking on a parameter name, a popup opens which allows you to check the box Use OSC to activate the OSC control for that parameter. In the next field, you can provide the OSC channel name. The arrow button next to it lists the addresses currently being received by the OSC server, so you can pick one instead of typing it. The last field is a mapping function that can be used to perform post-processing on the control signal to make sure that the right data range is used. This follows the math format defined by Python.</p>
 <p>By default Autolume listens on all networks, so apps on your phone or another computer can send OSC to it directly. Please see <a href="#performance-and-osc">Performance and OSC</a> about how to find the address and port to use in the software that sends the OSC signals.</p>
 
 
