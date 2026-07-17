@@ -199,15 +199,13 @@ def icon_path() -> Path | None:
 
 
 def build_args() -> list[str]:
-    args = [sys.executable, "-m", "PyInstaller", "main.py", "--name", "Autolume", "--noconfirm"]
+    args = [sys.executable, "-m", "PyInstaller", "main.py", "--name", "Autolume", "--noconfirm", "--windowed"]
 
     icon = icon_path()
     if icon:
         args += ["--icon", str(icon)]
 
     if IS_MACOS:
-        # Emits dist/Autolume.app
-        args.append("--windowed")
         identity = signing_identity()
         if identity:
             # PyInstaller deep-signs every nested binary with the hardened
