@@ -57,9 +57,16 @@ def main():
     # feature writes to it. Category subfolders are still created lazily.
     init_data_root()
 
+    # Loads the heavy dependency stack (torch, audio, rendering) on a
+    # background thread while the splash screen shows its progress. Started
+    # by the splash once it is on screen: imports contend for the GIL, so
+    # starting earlier delays the first frame on cold systems.
+    from utils.startup_loader import StartupLoader
+    loader = StartupLoader()
+
     from modules.autolume_live import Autolume
 
-    app = Autolume()
+    app = Autolume(loader)
 
     while not app.should_close():
         app.draw_frame()
@@ -77,16 +84,6 @@ if __name__ == "__main__":
     logger = logging.getLogger("autolume")
 
     try:
-        # Imported here (not at module level) so a failure in the heavy
-        # dependency stack is captured by the log instead of vanishing in
-        # windowed frozen builds.
-        import torch
-
-        torch.backends.cudnn.benchmark = True
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True
-        torch.set_grad_enabled(False)
-
         main()
     except SystemExit:
         raise

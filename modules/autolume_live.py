@@ -68,7 +68,8 @@ class Autolume(imgui_window.ImguiWindow):
 
     DEFAULT_FPS_LIMIT = 60
 
-    # Number of frames to hold the startup splash screen before opening the menu.
+    # Minimum number of frames to hold the startup splash screen; it stays up
+    # longer if the background loader is still importing the heavy stack.
     SPLASH_FRAMES = 30
 
     # UI font size in DPI-independent units. _adjust_font_size multiplies it by
@@ -88,12 +89,13 @@ class Autolume(imgui_window.ImguiWindow):
     # Navbar text, icons, and height are drawn this much larger than the base UI font.
     NAVBAR_SCALE = 1.25
 
-    def __init__(self):
+    def __init__(self, loader):
         self.ui_font_size = self._clamp_ui_font_size(
             user_data.ui_font_size(self.DEFAULT_UI_FONT_SIZE))
         super().__init__(title='Autolume', window_width=3840, window_height=2160,
                          font_sizes=self._font_sizes_for(self.ui_font_size))
 
+        self.loader = loader
         self.state = States.WELCOME
         self.running = True
         self.viz = None
@@ -454,8 +456,33 @@ class Autolume(imgui_window.ImguiWindow):
         imgui.begin('##welcome', closable=False,
                     flags=(imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_SCROLLBAR))
         imgui.image(self.splash_texture.gl_id, self.content_width, self.content_height)
+        self._draw_splash_status()
         imgui.end()
         imgui.pop_style_var(2)
+
+    def _draw_splash_status(self):
+        draw_list = imgui.get_window_draw_list()
+        bar_h = max(2, round(self.font_size * 0.25))
+        bar_y = self.content_height - bar_h
+
+        pad = round(self.font_size * 0.75)
+        text = self.loader.status
+        _, text_h = imgui.calc_text_size(text)
+        # Dark text: the splash artwork is white.
+        draw_list.add_text(pad, bar_y - pad - text_h,
+                           imgui.get_color_u32_rgba(0, 0, 0, 0.85), text)
+
+        # Indeterminate bar: import progress cannot be measured, so a band
+        # sweeps left to right to show the app is alive on slow cold starts.
+        draw_list.add_rect_filled(0, bar_y, self.content_width, self.content_height,
+                                  imgui.get_color_u32_rgba(*OPAQUEGREEN))
+        period = 1.2
+        phase = (time.time() % period) / period
+        band_w = self.content_width * 0.25
+        x0 = (self.content_width + band_w) * phase - band_w
+        draw_list.add_rect_filled(max(0, x0), bar_y,
+                                  min(self.content_width, x0 + band_w), self.content_height,
+                                  imgui.get_color_u32_rgba(*RED))
 
     def draw_frame(self):
 
@@ -477,10 +504,17 @@ class Autolume(imgui_window.ImguiWindow):
         self.label_w = round(self.font_size * 4.5)
 
         if self.state == States.WELCOME:
-            # Hold the splash image for SPLASH_FRAMES frames, then open the live screen.
+            # Hold the splash until the background loader finishes, at least
+            # SPLASH_FRAMES frames, then open the live screen. finalize()
+            # re-raises a load failure on this thread so it reaches the log.
             self._draw_splash()
+            if not self.loader.started and self.splash_delay < self.SPLASH_FRAMES:
+                # Second frame: the first frame's buffer swap has happened, so
+                # the splash is visible and the heavy imports can begin.
+                self.loader.start()
             self.splash_delay -= 1
-            if self.splash_delay <= 0:
+            if self.loader.error is not None or (self.splash_delay <= 0 and self.loader.done):
+                self.loader.finalize()
                 self.navigate_to(States.LIVE)
                 if sys.platform != 'linux':
                     # Title bar height reads 0 while hidden; restore before sizing.
