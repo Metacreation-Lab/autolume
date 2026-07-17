@@ -285,15 +285,15 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#platform-support" class="md-nav__link">
+  <a href="#supported-platforms" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Platform support
+        Supported platforms
       </span>
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Platform support">
+    <nav class="md-nav" aria-label="Supported platforms">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -339,17 +339,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         Where Autolume stores your data
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#interface-size" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Interface size
       </span>
     </span>
   </a>
@@ -538,32 +527,6 @@
   
 
     
-      
-      
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="./system-requirements/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-  System Requirements
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-    
   </ul>
 </nav>
                   </div>
@@ -593,15 +556,15 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#platform-support" class="md-nav__link">
+  <a href="#supported-platforms" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Platform support
+        Supported platforms
       </span>
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Platform support">
+    <nav class="md-nav" aria-label="Supported platforms">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -653,17 +616,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#interface-size" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Interface size
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -685,40 +637,28 @@
 <h1 id="getting-started">Getting Started<a class="headerlink" href="#getting-started" title="Permanent link">&para;</a></h1>
 <p>Autolume is a no-coding generative AI system allowing artists to train, craft, and explore their own models.</p>
 <p>Explore features and published artworks on the <a href="https://www.metacreation.net/autolume">Autolume website</a>.</p>
-<h2 id="platform-support">Platform support<a class="headerlink" href="#platform-support" title="Permanent link">&para;</a></h2>
+<h2 id="supported-platforms">Supported platforms<a class="headerlink" href="#supported-platforms" title="Permanent link">&para;</a></h2>
 <p>Autolume is supported on Windows 10+, Ubuntu 24+, and macOS 14+ on Apple Silicon.</p>
 <p>For best performance, an Nvidia GPU is required (RTX 2070 or higher recommended).</p>
-<p>Windows and Linux users <strong>must follow</strong> the <a href="system-requirements/">system requirements guide</a> for proper training performance.</p>
+<p>Linux users need to run Autolume from sources following the <a href="https://github.com/Metacreation-Lab/autolume/blob/main/README.md#development-instructions">development instructions</a>.</p>
 <h3 id="apple-silicon-limitations-macos-mps">Apple Silicon limitations (macOS / MPS)<a class="headerlink" href="#apple-silicon-limitations-macos-mps" title="Permanent link">&para;</a></h3>
 <p>Training a model on macOS is expected to be extremely slow and impractical for any resolution above 64x64.</p>
 <h2 id="downloading-autolume">Downloading Autolume<a class="headerlink" href="#downloading-autolume" title="Permanent link">&para;</a></h2>
-<p>Get the latest release from the official website: <a href="https://www.metacreation.net/autolume#:~:text=Run%20Autolume">Download at metacreation.net</a></p>
+<p>Get the latest release from GitHub: <a href="https://github.com/Metacreation-Lab/autolume/releases/latest">Download at github.com</a></p>
 <h2 id="interface-overview">Interface overview<a class="headerlink" href="#interface-overview" title="Permanent link">&para;</a></h2>
-<p>Autolume opens on the <strong>Perform</strong> screen after the startup splash. A persistent
-navbar at the top of the window gives access to the four screens at any time:</p>
+<p><img alt="" src="assets/overview-user-interface-01.jpg" /></p>
+<p>Autolume opens on the <strong>Perform</strong> screen after the startup splash. The navbar at the top of the window gives access to the four screens at any time:</p>
 <ul>
 <li><strong><a href="prepare/">Prepare</a></strong> — import images and videos and turn them into a training dataset.</li>
 <li><strong><a href="train/">Train</a></strong> — train a model on a prepared dataset, from scratch or resuming from a checkpoint.</li>
 <li><strong><a href="perform/">Perform</a></strong> — load a model and play with it live, in real time.</li>
 <li><strong><a href="tools/">Tools</a></strong> — Projection, Feature Extractor, Super Resolution, and Model Mixing.</li>
 </ul>
-<p>On the right side of the navbar, the cog icon opens <strong>Settings</strong> and the book
-icon opens this documentation. While a training run is active, navigation is
-locked to the Train screen until training finishes or is stopped.</p>
+<p>On the right side of the navbar, the cog icon opens <strong>Settings</strong> and the book icon opens this documentation. While a training run is active, navigation is locked to the Train screen until training finishes or is stopped.</p>
 <h2 id="where-autolume-stores-your-data">Where Autolume stores your data<a class="headerlink" href="#where-autolume-stores-your-data" title="Permanent link">&para;</a></h2>
-<p>Autolume keeps everything you generate or download — models, presets, captures,
-GANSpace features, training runs, and datasets — in a single
-<strong>data folder</strong>. By default this is <code>~/autolume</code> (i.e. <code>autolume/</code> inside your
-user home folder).</p>
-<p>The preferences file that records your data folder lives at
-<code>~/.config/autolume/config.json</code>.</p>
-<p>Open <strong>Settings</strong> (the cog icon in the navbar) to point Autolume at a
-different folder, open it in your file manager, or reset it to the default.</p>
-<h2 id="interface-size">Interface size<a class="headerlink" href="#interface-size" title="Permanent link">&para;</a></h2>
-<p>The interface keeps the same physical size on every screen and never rescales
-when the window is resized or moved between monitors. To make it larger or
-smaller, open <strong>Settings</strong> and adjust the <strong>UI font size</strong> slider. The whole
-interface scales with it, and the value is remembered across launches.</p>
+<p>Autolume keeps everything you generate or download — models, presets, captures, GANSpace features, training runs, and datasets — in a single <strong>data folder</strong>. By default this is <code>~/autolume</code> (i.e. <code>autolume/</code> inside your user home folder).</p>
+<p>The preferences file that records your data folder lives at <code>~/.config/autolume/config.json</code>.</p>
+<p>Open <strong>Settings</strong> (the cog icon in the navbar) to point Autolume at a different folder, open it in your file manager, or reset it to the default.</p>
 
 
 
