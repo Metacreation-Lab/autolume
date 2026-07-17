@@ -10,7 +10,6 @@ nav = [
     { Train = ["train/index.md", "train/training-aug.md"] },
     "perform.md",
     "tools.md",
-    "system-requirements.md",
 ]
 
 [project.theme]

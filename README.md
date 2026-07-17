@@ -4,13 +4,13 @@ Autolume is a cross-platform tool for real-time visual performances using StyleG
 
 For detailed documentation and demos look at the [Metacreation Lab Website](https://www.metacreation.net/autolume).
 
-![Autolume Screen](assets/screenshot.jpg)
+![Autolume Screen](docs/assets/overview-user-interface-01.jpg)
 
 ## Downloads
 
-Latest release:
-- [Autolume 2.16.2 for Windows](https://1sfu-my.sharepoint.com/:u:/g/personal/lringenb_sfu_ca/IQCoCAMiIz-BS6Rlvyu7aza8ATVbAzL-Hue0F1uXoNxHt-I?e=JF5bOq)
-- [Autolume 2.17.0 preview for Windows and macOS](https://github.com/Metacreation-Lab/autolume/releases/tag/v2.17.0-rc2)
+[➡️ Download for Windows and macOS](https://github.com/Metacreation-Lab/autolume/releases/latest)
+
+Linux users need to run Autolume from sources following the [development instructions](#development-instructions).
 
 ## Examples
 
@@ -18,13 +18,13 @@ For examples of artworks created with Autolume see: https://www.metacreation.net
 
 ## Development instructions
 
-We recommend `uv` for managing python venv ([installation link](https://docs.astral.sh/uv/#installation))
+`uv` is required for setting up the python environment ([installation link](https://docs.astral.sh/uv/#installation))
 
 ### Dependencies
 
 #### Windows
 
-- CUDA ([download link](https://developer.nvidia.com/cuda-downloads))
+- CUDA 12.8 ([download link](https://developer.nvidia.com/cuda-12-8-0-download-archive))
   - Minimum components: CUDA Development + CUDA Runtime
 - Microsoft C++ Build Tools ([download link](https://download.visualstudio.microsoft.com/download/pr/13907dbe-8bb3-4cfe-b0ae-147e70f8b2f3/a3193e6e6135ef7f598d6a9e429b010d77260dba33dddbee343a47494b5335a3/vs_BuildTools.exe))
   - Minimum components: Desktop development with C++
@@ -32,7 +32,7 @@ We recommend `uv` for managing python venv ([installation link](https://docs.ast
 
 #### Linux (Ubuntu 24+)
 
-- CUDA ([download link](https://developer.nvidia.com/cuda-downloads))
+- CUDA ([download link](https://developer.nvidia.com/cuda-12-8-0-download-archive))
   - Minimum components: CUDA Development + CUDA Runtime
 - FFmpeg and PortAudio: `sudo apt install portaudio19-dev ffmpeg`
 
