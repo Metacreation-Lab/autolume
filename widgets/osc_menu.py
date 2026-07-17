@@ -10,6 +10,28 @@ logger = logging.getLogger(__name__)
 from assets import ACTIVE_RED, GRAY
 
 
+def osc_address_picker(viz, tag, current_address, enabled=True):
+    """Arrow button opening a popup listing currently streaming OSC addresses.
+
+    Returns (changed, address) where address is stored without the leading slash."""
+    changed = False
+    address = current_address
+    if imgui.arrow_button(f"##OSCAddressPick_{tag}", imgui.DIRECTION_DOWN) and enabled:
+        imgui.open_popup(f"OSCAddressPopup_{tag}")
+    if imgui.begin_popup(f"OSCAddressPopup_{tag}"):
+        addresses = viz.osc_dispatcher.streaming_addresses()
+        if not addresses:
+            imgui.text_disabled("No OSC input detected")
+        for streaming_address in addresses:
+            stored = streaming_address[1:] if streaming_address.startswith("/") else streaming_address
+            clicked, _ = imgui.selectable(streaming_address, stored == current_address)
+            if clicked:
+                address = stored
+                changed = True
+        imgui.end_popup()
+    return changed, address
+
+
 class OscMenu:
     def __init__(self, viz, funcs, use_map=None, label="##OSC"):
         self.viz = viz
@@ -101,19 +123,11 @@ class OscMenu:
             if changed:
                 self.remap_address(key)
             imgui.same_line()
-            if imgui.arrow_button(f"##OSCAddressPick_{self.label}_{key}", imgui.DIRECTION_DOWN) and self.use_osc[key]:
-                imgui.open_popup(f"OSCAddressPopup_{self.label}_{key}")
-            if imgui.begin_popup(f"OSCAddressPopup_{self.label}_{key}"):
-                addresses = viz.osc_dispatcher.streaming_addresses()
-                if not addresses:
-                    imgui.text_disabled("No OSC input detected")
-                for address in addresses:
-                    stored = address[1:] if address.startswith("/") else address
-                    clicked, _ = imgui.selectable(address, stored == self.osc_addresses[key])
-                    if clicked:
-                        self.osc_addresses[key] = stored
-                        self.remap_address(key)
-                imgui.end_popup()
+            picked, picked_address = osc_address_picker(viz, f"{self.label}_{key}", self.osc_addresses[key],
+                                                        enabled=self.use_osc[key])
+            if picked:
+                self.osc_addresses[key] = picked_address
+                self.remap_address(key)
             if self.use_map.get(key, False):
                 changed, self.mappings[key] = imgui.input_text(f"##Mappings_{self.label}_{key}",
                                                                self.mappings[key], 256,

@@ -12,6 +12,7 @@ except ModuleNotFoundError:
     import pickle
 from utils.gui_utils import imgui_utils
 from widgets.native_browser_widget import NativeBrowserWidget
+from widgets.osc_menu import osc_address_picker
 
 logger = logging.getLogger(__name__)
 
@@ -127,8 +128,13 @@ class AdjusterWidget:
                 with imgui_utils.grayed_out(not use_osc):
                     changed, new_address = imgui_utils.input_text(f"##vslide_osc{i}", self.vslide_address[i], 256,
                                                                   imgui.INPUT_TEXT_CHARS_NO_BLANK,
-                                                                  width=self.viz.app.button_w,
+                                                                  width=self.viz.app.button_w - imgui.get_frame_height() - self.viz.app.spacing,
                                                                   help_text="osc address")
+                    imgui.same_line()
+                    picked, picked_address = osc_address_picker(self.viz, f"vslide_osc{i}", self.vslide_address[i],
+                                                                enabled=use_osc)
+                    if picked:
+                        changed, new_address = True, picked_address
                     s.item_spacing = [self.viz.app.spacing, self.viz.app.spacing]
                     s.item_inner_spacing = [self.viz.app.spacing, self.viz.app.spacing]
                     if changed:

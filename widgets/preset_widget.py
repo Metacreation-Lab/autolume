@@ -5,6 +5,7 @@ import numpy as np
 from utils.gui_utils import imgui_utils
 from utils.user_data import data_path
 from widgets.native_browser_widget import NativeBrowserWidget
+from widgets.osc_menu import osc_address_picker
 
 logger = logging.getLogger(__name__)
 
@@ -385,6 +386,11 @@ class PresetWidget:
                                                             (imgui.INPUT_TEXT_READ_ONLY) * (not self.use_osc),
                                                             width=viz.app.font_size * 5,
                                                             help_text="Osc Address")
+                imgui.same_line()
+                picked, picked_address = osc_address_picker(viz, "OSC_load", self.osc_addresses,
+                                                            enabled=self.use_osc)
+                if picked:
+                    changed, osc_address = True, picked_address
                 if changed:
                     try:
                         viz.osc_dispatcher.unmap(f"/{self.osc_addresses}", self.osc_handler)

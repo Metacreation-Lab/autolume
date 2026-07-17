@@ -703,6 +703,13 @@ class LayerWidget:
                                                                             (
                                                                                 imgui.INPUT_TEXT_READ_ONLY) * (
                                                                                 not trans.use_osc))
+                                        imgui.same_line()
+                                        picked, picked_address = osc_menu.osc_address_picker(self.viz,
+                                                                                             f"osc_{j}_{u_id}",
+                                                                                             trans.osc_address[j],
+                                                                                             enabled=trans.use_osc)
+                                        if picked:
+                                            changed, address = True, picked_address
                                         if j < len(trans.params) - 1:
                                             imgui.same_line()
 
@@ -801,6 +808,12 @@ class LayerWidget:
                                                             (
                                                                 imgui.INPUT_TEXT_READ_ONLY) * (
                                                                 not noise["use_osc"]))
+                        imgui.same_line()
+                        picked, picked_address = osc_menu.osc_address_picker(self.viz, f"osc_noise_{noise['id']}",
+                                                                             noise["osc_address"],
+                                                                             enabled=noise["use_osc"])
+                        if picked:
+                            changed, address = True, picked_address
 
                         if changed:
 
