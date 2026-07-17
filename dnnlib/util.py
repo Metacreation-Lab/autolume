@@ -408,7 +408,6 @@ def open_url(url: str, cache_dir: str = None, num_attempts: int = 10, verbose: b
     assert not (return_filename and (not cache))
 
     # Doesn't look like an URL scheme so interpret it as a local filename.
-    print(url)
     if not re.match('^[a-z]+://', url):
         return url if return_filename else open(url, "rb")
 
