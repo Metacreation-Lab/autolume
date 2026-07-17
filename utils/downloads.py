@@ -16,7 +16,7 @@ from utils.resource_paths import resource_path
 CHUNK_SIZE = 1024 * 1024
 
 logger = logging.getLogger(__name__)
-REQUIRED_COLUMNS = ('name', 'filename', 'resolution', 'author', 'license', 'url')
+REQUIRED_COLUMNS = ('name', 'resolution', 'architecture', 'author', 'license', 'filename', 'url')
 
 
 def load_catalog():

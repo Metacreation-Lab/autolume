@@ -1,6 +1,13 @@
-name,filename,resolution,author,license,url
-Flickr Faces HQ,stylegan2-ffhq-1024x1024.pkl,1024,Nvidia,Nvidia Source Code License-NC,https://api.ngc.nvidia.com/v2/models/org/nvidia/team/research/stylegan2/1/files?redirect=true&path=stylegan2-ffhq-1024x1024.pkl
-Flickr Faces HQ,stylegan2-ffhq-512x512.pkl,512,Nvidia,Nvidia Source Code License-NC,https://api.ngc.nvidia.com/v2/models/org/nvidia/team/research/stylegan2/1/files?redirect=true&path=stylegan2-ffhq-512x512.pkl
-AFHQ Cats,stylegan2-afhqcat-512x512.pkl,512,Nvidia,Nvidia Source Code License-NC,https://api.ngc.nvidia.com/v2/models/org/nvidia/team/research/stylegan2/1/files?redirect=true&path=stylegan2-afhqcat-512x512.pkl
-AFHQ Dogs,stylegan2-afhqdog-512x512.pkl,512,Nvidia,Nvidia Source Code License-NC,https://api.ngc.nvidia.com/v2/models/org/nvidia/team/research/stylegan2/1/files?redirect=true&path=stylegan2-afhqdog-512x512.pkl
-Rivers,rivers-1024.pkl,1024,Philippe Pasquier,Creative Commons BY-NC,https://drive.google.com/uc?export=download&id=1ajIHlAtm97ooMIZCiQILS0guz4uBDHqY
+name,resolution,architecture,author,license,filename,url
+Rivers,1024,stylegan2,Philippe Pasquier,CC BY-NC 4.0,rivers-1024.pkl,https://drive.google.com/uc?export=download&id=1ajIHlAtm97ooMIZCiQILS0guz4uBDHqY
+WikiArt,1024,stylegan2,Peter Baylies,Not specified,wikiart-1024.pkl,https://archive.org/download/wikiart-stylegan2-conditional-model/WikiArt5.pkl
+Textures,1024,stylegan2,Bernat Cuni,Not specified,textures-1024.pkl,https://drive.google.com/uc?export=download&id=18SoDjbEfZ5kE28mgHlja2E6u2gnzFyaS
+Maps,1024,stylegan2,Topi Tjukanov,CC0 1.0,maps-1024.pkl,https://archive.org/download/mapdreamer/mapdreamer.pkl
+Animal Faces HQ V2,512,stylegan2,Nvidia,Nvidia Source Code License,stylegan2-afhqv2-512x512.pkl,https://api.ngc.nvidia.com/v2/models/org/nvidia/team/research/stylegan2/1/files?redirect=true&path=stylegan2-afhqv2-512x512.pkl
+Animal Faces HQ Cats,512,stylegan2,Nvidia,Nvidia Source Code License,stylegan2-afhqcat-512x512.pkl,https://api.ngc.nvidia.com/v2/models/org/nvidia/team/research/stylegan2/1/files?redirect=true&path=stylegan2-afhqcat-512x512.pkl
+Animal Faces HQ Dogs,512,stylegan2,Nvidia,Nvidia Source Code License,stylegan2-afhqdog-512x512.pkl,https://api.ngc.nvidia.com/v2/models/org/nvidia/team/research/stylegan2/1/files?redirect=true&path=stylegan2-afhqdog-512x512.pkl
+Animal Faces HQ Wild,512,stylegan2,Nvidia,Nvidia Source Code License,stylegan2-afhqwild-512x512.pkl,https://api.ngc.nvidia.com/v2/models/org/nvidia/team/research/stylegan2/1/files?redirect=true&path=stylegan2-afhqwild-512x512.pkl
+Flickr Faces HQ,256,stylegan2,Nvidia,Nvidia Source Code License,stylegan2-ffhq-256x256.pkl,https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan2/versions/1/files/stylegan2-ffhq-256x256.pkl
+Flickr Faces HQ,512,stylegan2,Nvidia,Nvidia Source Code License,stylegan2-ffhq-512x512.pkl,https://api.ngc.nvidia.com/v2/models/org/nvidia/team/research/stylegan2/1/files?redirect=true&path=stylegan2-ffhq-512x512.pkl
+Flickr Faces HQ,1024,stylegan2,Nvidia,Nvidia Source Code License,stylegan2-ffhq-1024x1024.pkl,https://api.ngc.nvidia.com/v2/models/org/nvidia/team/research/stylegan2/1/files?redirect=true&path=stylegan2-ffhq-1024x1024.pkl
+Flickr Faces HQ,1024,stylegan3-t,Nvidia,Nvidia Source Code License,stylegan3-t-ffhq-1024x1024.pkl,https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan3/versions/1/files/stylegan3-t-ffhq-1024x1024.pkl

@@ -108,15 +108,16 @@ class ModelDownloadWidget:
 
     def _set_catalog_columns(self, name):
         cw = imgui.get_content_region_available_width()
-        imgui.columns(5, name, border=False)
-        imgui.set_column_width(0, int(cw * 0.30))
-        imgui.set_column_width(1, int(cw * 0.12))
-        imgui.set_column_width(2, int(cw * 0.18))
-        imgui.set_column_width(3, int(cw * 0.25))
+        imgui.columns(6, name, border=False)
+        imgui.set_column_width(0, int(cw * 0.26))
+        imgui.set_column_width(1, int(cw * 0.11))
+        imgui.set_column_width(2, int(cw * 0.13))
+        imgui.set_column_width(3, int(cw * 0.15))
+        imgui.set_column_width(4, int(cw * 0.22))
 
     def _draw_catalog_rows(self):
         self._set_catalog_columns('##model_catalog_header')
-        for label in ('Name', 'Resolution', 'Author', 'License', ''):
+        for label in ('Name', 'Resolution', 'Architecture', 'Author', 'License', ''):
             imgui.text(label)
             imgui.next_column()
         imgui.columns(1)
@@ -124,7 +125,7 @@ class ModelDownloadWidget:
 
         self._set_catalog_columns('##model_catalog_rows')
         for entry in self.catalog:
-            for col in ('name', 'resolution', 'author', 'license'):
+            for col in ('name', 'resolution', 'architecture', 'author', 'license'):
                 imgui.text(entry[col])
                 imgui.next_column()
             downloaded = os.path.exists(os.path.join(self.models_dir, entry['filename']))
