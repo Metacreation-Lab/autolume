@@ -51,6 +51,12 @@ dependencies = [
     "zensical==0.0.23",
 ]
 
+[tool.uv]
+# Homebrew/system interpreters bake the build machine's OS version into
+# compiled stdlib modules and linked libs, breaking the release's declared
+# minimum OS. Managed (python-build-standalone) interpreters target macOS 11+.
+python-preference = "only-managed"
+
 [[tool.uv.index]]
 name = "pytorch-cu128"
 url = "https://download.pytorch.org/whl/cu128"
