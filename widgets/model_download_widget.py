@@ -92,11 +92,18 @@ class ModelDownloadWidget:
 
     def _draw_catalog_popup(self):
         imgui.set_next_window_size(self.app.content_width // 2, 0)
+        imgui.set_next_window_position(
+            self.app.content_width * 0.5, self.app.content_height * 0.5,
+            pivot_x=0.5, pivot_y=0.5)
         if imgui.begin_popup('get_models_popup'):
             if not self.catalog:
                 imgui.text('Could not load model list')
             else:
                 self._draw_catalog_rows()
+            imgui.separator()
+            imgui.spacing()
+            if imgui_utils.button('Close', width=self.app.button_w):
+                imgui.close_current_popup()
             imgui.end_popup()
 
     def _set_catalog_columns(self, name):
