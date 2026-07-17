@@ -187,8 +187,6 @@ Autolume allows users to control parameters using its interface but also provide
 
 ![](assets/live-module-osc-01.png)
 
-It displays the different parameters that can be controlled using OSC. By clicking on a parameter name, a popup opens which allows you to check the box Use OSC to activate the OSC control for that parameter. In the next field, you can provide the OSC channel name. The arrow button next to it lists the addresses currently being received by the OSC server, so you can pick one instead of typing it. Addresses whose name starts with an underscore are hidden from this list, as they carry sender metadata rather than control signals. For example, TouchDesigner sends a `/_samplerate` message alongside its channel data. The last field is a mapping function that can be used to perform post-processing on the control signal to make sure that the right data range is used. This follows the math format defined by Python.
-
-![](assets/live-module-osc-02.jpg)
+It displays the different parameters that can be controlled using OSC. By clicking on a parameter name, a popup opens which allows you to check the box Use OSC to activate the OSC control for that parameter. In the next field, you can provide the OSC channel name. The arrow button next to it lists the addresses currently being received by the OSC server, so you can pick one instead of typing it. The last field is a mapping function that can be used to perform post-processing on the control signal to make sure that the right data range is used. This follows the math format defined by Python.
 
 By default Autolume listens on all networks, so apps on your phone or another computer can send OSC to it directly. Please see [Performance and OSC](#performance-and-osc) about how to find the address and port to use in the software that sends the OSC signals.
