@@ -27,7 +27,8 @@ artifact is self-contained (Windows uses gyan.dev's essentials build).
 
 Pass ``--package`` to additionally wrap the build into the platform's
 distributable format: ``.AppImage`` (zstd) on Linux, ``.dmg`` (lzma) on macOS,
-an Inno Setup installer (lzma2) plus a portable ``.tar.xz`` on Windows.
+an Inno Setup installer (lzma2) on Windows. Linux and Windows also get a
+portable no-install ``.tar.xz``.
 ``--package-only`` skips the
 PyInstaller build and packages an existing ``dist/`` output.
 
@@ -390,6 +391,38 @@ def artifact_name(ext: str) -> str:
     return f"autolume-{get_version()}-{SYSTEM.lower()}-{platform.machine().lower()}{ext}"
 
 
+def package_portable_archive() -> None:
+    """Create the portable no-install ``.tar.xz`` from ``dist/Autolume``.
+
+    tar preserves the symlinks and executable bits in the Linux bundle, which
+    zip would not. Windows 11 23H2+ extracts .tar.xz natively (File Explorer
+    and bsdtar); older Windows needs 7-Zip. Prefers system tar piped into
+    multithreaded xz (minutes); falls back to stdlib lzma, which is
+    single-threaded and takes ~20 minutes for the ~5 GB bundle.
+    """
+    archive = REPO / "dist" / artifact_name(".tar.xz")
+    tar_bin, xz_bin = shutil.which("tar"), shutil.which("xz")
+    if tar_bin and xz_bin:
+        print(f"Creating {archive.name} (multithreaded xz)...")
+        with open(archive, "wb") as out:
+            tar_proc = subprocess.Popen(
+                [tar_bin, "-C", str(REPO / "dist"), "-cf", "-", "Autolume"],
+                stdout=subprocess.PIPE,
+            )
+            xz_proc = subprocess.Popen([xz_bin, "-T0"], stdin=tar_proc.stdout, stdout=out)
+            tar_proc.stdout.close()
+            xz_failed = xz_proc.wait() != 0
+            tar_failed = tar_proc.wait() != 0
+        if tar_failed or xz_failed:
+            archive.unlink(missing_ok=True)
+            fail("tar | xz pipeline failed")
+    else:
+        print(f"Creating {archive.name} (single-threaded xz; this takes a while)...")
+        with tarfile.open(archive, "w:xz") as tar:
+            tar.add(REPO / "dist" / "Autolume", arcname="Autolume")
+    print(f"Packaged {archive}")
+
+
 def appimagetool_path() -> Path:
     on_path = shutil.which("appimagetool")
     if on_path:
@@ -439,6 +472,8 @@ def package_linux() -> None:
         check=True, env=env,
     )
     print(f"Packaged {output}")
+
+    package_portable_archive()
 
 
 def package_macos() -> None:
@@ -552,15 +587,7 @@ Name: "{{autodesktop}}\\Autolume"; Filename: "{{app}}\\Autolume.exe"; Tasks: des
     subprocess.run([str(iscc_path()), str(iss)], check=True)
     print(f"Packaged {REPO / 'dist' / (output_base + '.exe')}")
 
-    # Portable no-install variant. Windows 11 23H2+ extracts .tar.xz natively
-    # (File Explorer and bsdtar); older Windows needs 7-Zip. stdlib lzma is
-    # single-threaded, so this takes ~20 minutes for the ~5 GB bundle — the
-    # price of the smallest archive with a conventional extension.
-    archive = REPO / "dist" / artifact_name(".tar.xz")
-    print(f"Creating {archive.name} (single-threaded xz; this takes a while)...")
-    with tarfile.open(archive, "w:xz") as tar:
-        tar.add(REPO / "dist" / "Autolume", arcname="Autolume")
-    print(f"Packaged {archive}")
+    package_portable_archive()
 
 
 def package() -> None:
@@ -576,7 +603,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Build the Autolume PyInstaller release.")
     parser.add_argument(
         "--package", action="store_true",
-        help="wrap the build into a distributable (.AppImage / .dmg / Inno Setup installer)",
+        help="wrap the build into a distributable (.AppImage / .dmg / Inno Setup "
+             "installer, plus a portable .tar.xz on Linux and Windows)",
     )
     parser.add_argument(
         "--package-only", action="store_true",
