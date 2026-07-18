@@ -1,12 +1,14 @@
 import os
 import subprocess
 import sys
+import webbrowser
 
 import imgui
 
 from assets import OPAQUEGREEN, RED
 from utils.gui_utils import imgui_utils
 from utils.resource_paths import get_version
+from utils.update_check import latest_release
 from utils.user_data import config_file, data_root, default_data_root, set_data_root
 from widgets.native_browser_widget import NativeBrowserWidget
 
@@ -30,8 +32,8 @@ class Settings:
 
     Drawn as an overlay over the menu: call :meth:`open` (via
     ``app.open_settings``) to show it while the menu keeps rendering
-    underneath. Closing the modal — Close button or the title-bar X —
-    lets ``app.close_settings`` drop the overlay flag.
+    underneath. Closing the modal via the title-bar X lets
+    ``app.close_settings`` drop the overlay flag.
     """
 
     def __init__(self, app):
@@ -149,11 +151,24 @@ class Settings:
             imgui.spacing()
             imgui.separator()
             imgui.spacing()
-            imgui.text_colored(f"Version {get_version()}", 0.7, 0.7, 0.7)
-
-            imgui.spacing()
-            if imgui.button("Close"):
-                imgui.close_current_popup()
+            imgui.text("Version")
+            value_x = (imgui.get_style().window_padding[0]
+                       + imgui.calc_text_size("Current version:").x + self.app.font_size)
+            imgui.text_colored("Current version:", 0.7, 0.7, 0.7)
+            imgui.same_line(position=value_x)
+            imgui.text(f"v{get_version()}")
+            latest = latest_release()
+            if latest:
+                if latest["newer"]:
+                    imgui.align_text_to_frame_padding()
+                    imgui.text_colored("Newer version:", 0.7, 0.7, 0.7)
+                    imgui.same_line(position=value_x)
+                    imgui.text_colored(f"v{latest['version']}", 1.0, 0.8, 0.2)
+                    imgui.same_line(spacing=self.app.font_size)
+                    if imgui_utils.button("View Release", width=self.app.font_size * 8):
+                        webbrowser.open(latest["url"])
+                else:
+                    imgui.text_colored("You are on the latest version.", 0.7, 0.7, 0.7)
 
             imgui.end_popup()
 

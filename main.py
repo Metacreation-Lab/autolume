@@ -64,6 +64,10 @@ def main():
     from utils.startup_loader import StartupLoader
     loader = StartupLoader()
 
+    # Non-blocking check for a newer GitHub release; result shows in Settings.
+    from utils.update_check import start_update_check
+    start_update_check()
+
     from modules.autolume_live import Autolume
 
     app = Autolume(loader)
