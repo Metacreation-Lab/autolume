@@ -107,9 +107,8 @@ class DataPreprocessing:
         tutorial_video_url = "https://www.youtube.com/watch?v=7Pc5-ULeXkM&feature=youtu.be"
         import_hyperlinks.append((tutorial_video_url, "Tutorial Video"))
 
-        self.help_icon.render_aligned("Import Data", first_column_width,
-                                      self.help_texts.get("import_data"),
-                                      hyperlinks=import_hyperlinks, trailing_offset=5)
+        self.help_icon.render(self.help_texts.get("import_data"),
+                              hyperlinks=import_hyperlinks, align_right=True)
 
         imgui.separator()
  
@@ -357,10 +356,9 @@ class DataPreprocessing:
         # Image options
         header_opened = imgui.collapsing_header("Image Options", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]
 
-        self.help_icon.render_aligned("Image Options", first_column_width,
-                                      self.help_texts.get("image_options"),
-                                      url=self.help_urls.get("image_options"),
-                                      trailing_offset=35)
+        self.help_icon.render(self.help_texts.get("image_options"),
+                              url=self.help_urls.get("image_options"),
+                              align_right=True)
 
         if header_opened:
             imgui.text("Resize Mode")
@@ -433,9 +431,7 @@ class DataPreprocessing:
 
         augmentation_header_opened = imgui.collapsing_header("Augmentation", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]
 
-        self.help_icon.render_aligned("Augmentation", first_column_width,
-                                      self.help_texts.get("augmentation"),
-                                      trailing_offset=35)
+        self.help_icon.render(self.help_texts.get("augmentation"), align_right=True)
 
         if augmentation_header_opened:
             xflip_clicked, new_xflip = imgui.checkbox("X-Flip", self.settings.augmentationSettings["xFlip"])

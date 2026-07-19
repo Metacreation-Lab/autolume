@@ -71,18 +71,10 @@ class ProjectionModule:
                     self.projected_texture.update(self.projected_img)     
 
         text = "Find the closest match to your image"
-        text_width = imgui.calc_text_size(text).x
-        window_width = imgui.get_window_width()
-        help_icon_size = imgui.get_font_size()
-        style = imgui.get_style()
-
         imgui.text(text)
-        
-        spacing = window_width - (style.window_padding[0] * 2) - text_width - help_icon_size - style.item_spacing[0] - 10
-        
-        imgui.same_line()
-        imgui.dummy(spacing, 0)
-        self.help_icon.render_with_url(self.help_texts.get("projection_module"), self.help_urls.get("projection_module"), "Read More")
+        self.help_icon.render(self.help_texts.get("projection_module"),
+                              url=self.help_urls.get("projection_module"),
+                              align_right=True)
 
         imgui.separator()
 

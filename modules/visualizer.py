@@ -578,13 +578,11 @@ class Visualizer:
     def clear_result(self):
         self._async_renderer.clear_result()
 
-    def _header_help_icon(self, header_label, help_key, hyperlink_text="Read More"):
+    def _header_help_icon(self, help_key, hyperlink_text="Read More"):
         """Position and render the help icon to the right of a collapsing header."""
-        self.help_icon.render_aligned(header_label, self.pane_w,
-                                      self.help_texts.get(help_key),
-                                      url=self.help_urls.get(help_key),
-                                      hyperlink_text=hyperlink_text,
-                                      trailing_offset=55)
+        self.help_icon.render(self.help_texts.get(help_key),
+                              url=self.help_urls.get(help_key),
+                              hyperlink_text=hyperlink_text, align_right=True)
 
     @imgui_utils.scoped_by_object_id
     def __call__(self):
@@ -607,54 +605,54 @@ class Visualizer:
 
         # Display & Capture
         header_opened = imgui_utils.collapsing_header('Display & Capture', default=True)[0]
-        self._header_help_icon('Display & Capture', 'display_capture')
+        self._header_help_icon('display_capture')
         self.display_capture_widget(header_opened)
 
         # Network & Latent
         header_opened = imgui_utils.collapsing_header('Network & Latent', default=True)[0]
-        self._header_help_icon('Network & Latent', 'network_latent')
+        self._header_help_icon('network_latent')
 
         self.pickle_widget(header_opened)
         self.latent_widget(header_opened)
 
         # Diversity & Noise
         header_opened = imgui_utils.collapsing_header('Diversity & Noise', default=True)[0]
-        self._header_help_icon('Diversity & Noise', 'diversity_noise')
+        self._header_help_icon('diversity_noise')
         self.trunc_noise_widget(header_opened)
 
         # Looping
         header_opened = imgui_utils.collapsing_header('Looping', default=True)[0]
-        self._header_help_icon('Looping', 'looping')
+        self._header_help_icon('looping')
         self.looping_widget(header_opened)
 
         # Performance & OSC
         header_opened = imgui_utils.collapsing_header('Performance & OSC', default=True)[0]
-        self._header_help_icon('Performance & OSC', 'performance_osc')
+        self._header_help_icon('performance_osc')
         self.perf_widget(header_opened)
 
         # Adjust Input
         header_opened = imgui_utils.collapsing_header('Adjust Input', default=True)[0]
-        self._header_help_icon('Adjust Input', 'adjust_input')
+        self._header_help_icon('adjust_input')
         self.adjuster_widget(header_opened)
 
         # Layer Transformations
         header_opened = imgui_utils.collapsing_header('Layer Transformations', default=True)[0]
-        self._header_help_icon('Layer Transformations', 'layer_transform')
+        self._header_help_icon('layer_transform')
         self.collapsed_widget(header_opened)
 
         # Model Mixing
         header_opened = imgui_utils.collapsing_header('Model Mixing', default=True)[0]
-        self._header_help_icon('Model Mixing', 'model_mixing')
+        self._header_help_icon('model_mixing')
         self.mixing_widget(header_opened)
 
         # Presets
         header_opened = imgui_utils.collapsing_header('Presets', default=True)[0]
-        self._header_help_icon('Presets', 'presets')
+        self._header_help_icon('presets')
         self.preset_widget(header_opened)
 
         # Audio Module
         header_opened = imgui_utils.collapsing_header('Audio Module', default=True)[0]
-        self._header_help_icon('Audio Module', 'audio')
+        self._header_help_icon('audio')
 
         if header_opened:
             button_label = "Enable" if not self.audio_widget_enabled else "Disable"

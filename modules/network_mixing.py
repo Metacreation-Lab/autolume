@@ -187,9 +187,9 @@ class MixingModule:
         
         text = "Mix two models together"
         imgui.text(text)
-        self.help_icon.render_aligned(text, imgui.get_window_width(),
-                                      self.help_texts.get("network_mixing_module"),
-                                      url=self.help_urls.get("network_mixing_module"))
+        self.help_icon.render(self.help_texts.get("network_mixing_module"),
+                              url=self.help_urls.get("network_mixing_module"),
+                              align_right=True)
 
         imgui.end_group()
 
@@ -274,7 +274,7 @@ class MixingModule:
         imgui.next_column()
         help_icon_size = imgui.get_font_size()
         imgui.dummy(max(imgui.get_content_region_available_width() - help_icon_size - 10, 0), 0)
-        self.help_icon.render_with_url(self.help_texts.get("combine_guide"), self.help_urls.get("combine_guide"), "Read More")
+        self.help_icon.render(self.help_texts.get("combine_guide"), url=self.help_urls.get("combine_guide"))
         imgui.next_column()
         imgui.columns(1)
         imgui.separator()

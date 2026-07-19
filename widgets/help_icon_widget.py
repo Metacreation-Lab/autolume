@@ -51,45 +51,30 @@ class HelpIconWidget:
         path = url_or_path if url_or_path.startswith("/") else "/" + url_or_path
         return base + path
 
-    def render(self, tooltip_text):
-        """Render help icon with tooltip (no URL)"""
-        if tooltip_text is None:
-            return
-        self._render_popup(tooltip_text, None)
-    
-    def render_with_url(self, tooltip_text, url, hyperlink_text="More Info"):
-        """Render help icon with tooltip and hyperlink"""
-        if tooltip_text is None:
-            return
-        if url:
-            self._render_popup(tooltip_text, [(url, hyperlink_text)])
-        else:
-            self._render_popup(tooltip_text, None)
-    
-    def render_with_urls(self, tooltip_text, hyperlinks):
-        """Render help icon with tooltip and multiple hyperlinks
+    def render(self, tooltip_text, url=None, hyperlink_text="Read More",
+               hyperlinks=None, align_right=False):
+        """Render help icon with tooltip and optional hyperlinks.
+
         Args:
             tooltip_text: The help text to display
+            url: Single hyperlink URL (ignored when hyperlinks is given)
+            hyperlink_text: Link text for url
             hyperlinks: List of tuples (url, link_text) for multiple hyperlinks
+            align_right: Place the icon at the right edge of the content region
+                instead of inline after the previous item
         """
         if tooltip_text is None:
             return
-        self._render_popup(tooltip_text, hyperlinks if hyperlinks else None)
-    
-    def render_aligned(self, label, container_width, tooltip_text,
-                       url=None, hyperlink_text="Read More",
-                       hyperlinks=None, trailing_offset=10):
-        """Right-align the help icon after a label or header within container_width."""
-        style = imgui.get_style()
-        spacing = (container_width - style.window_padding[0] * 2
-                   - imgui.calc_text_size(label).x - imgui.get_font_size()
-                   - style.item_spacing[0] - trailing_offset)
-        imgui.same_line()
-        imgui.dummy(max(spacing, 0), 0)
-        if hyperlinks:
-            self.render_with_urls(tooltip_text, hyperlinks)
-        else:
-            self.render_with_url(tooltip_text, url, hyperlink_text)
+        if align_right:
+            style = imgui.get_style()
+            imgui.same_line()
+            target_x = (imgui.get_content_region_max()[0] - imgui.calc_text_size("(?)").x
+                        - style.item_spacing[0])
+            spacing = target_x - imgui.get_cursor_pos_x() - style.item_spacing[0]
+            imgui.dummy(max(spacing, 0), 0)
+        if not hyperlinks and url:
+            hyperlinks = [(url, hyperlink_text)]
+        self._render_popup(tooltip_text, hyperlinks or None)
 
     def _render_popup(self, tooltip_text, hyperlinks=None):
         """Internal method to render the help icon and popup

@@ -270,7 +270,7 @@ class TrainingModule:
                 training_hyperlinks.append((augmentation_guide_url, "How to choose training augmentation"))
 
             if training_hyperlinks:
-                self.help_icon.render_with_urls(self.help_texts.get("training_module"), training_hyperlinks)
+                self.help_icon.render(self.help_texts.get("training_module"), hyperlinks=training_hyperlinks)
             else:
                 self.help_icon.render(self.help_texts.get("training_module"))
             imgui.separator()
@@ -370,10 +370,9 @@ class TrainingModule:
                 imgui.combo("##Configuration", self.config, configs)
 
             advanced_header_open = imgui.collapsing_header("Advanced Options")[0]
-            self.help_icon.render_aligned("Advanced Options", pane_width,
-                                          self.help_texts.get("advanced_options"),
-                                          url=self.help_urls.get("advanced_options"),
-                                          trailing_offset=35)
+            self.help_icon.render(self.help_texts.get("advanced_options"),
+                                  url=self.help_urls.get("advanced_options"),
+                                  align_right=True)
 
             if advanced_header_open:
                 imgui.text("Generator Learning Rate")
