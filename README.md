@@ -56,6 +56,13 @@ Start the program
 uv run main.py
 ```
 
+### Benchmarking
+
+Measure a generator's batch-1 forward latency (auto-selects CUDA, MPS, or CPU)
+```bash
+uv run bench.py path/to/network.pkl
+```
+
 ### Create a release
 
 Run the cross-platform release script on the OS you want to build for (PyInstaller
