@@ -322,7 +322,7 @@ class SynthesisLayer(torch.nn.Module):
         if self.noise_regulator != 0:
             noise_strength = self.noise_regulator * self.global_noise
         if self.use_noise and noise_mode == 'random':
-            noise = torch.randn([x.shape[0], 1, self.resolution * self.init_res[0]//4, self.resolution * self.init_res[1]//4], device=x.device) * noise_strength
+            noise = torch.randn([x.shape[0], 1, self.resolution * self.init_res[0]//4, self.resolution * self.init_res[1]//4], device=x.device, dtype=x.dtype) * noise_strength
         if self.use_noise and noise_mode == 'const':
             noise = self.noise_const * noise_strength
             noise = kornia.geometry.transform.resize(noise, (int(in_w * self.up * rx), int(in_h * self.up * ry)))
@@ -435,7 +435,10 @@ class SynthesisBlock(torch.nn.Module):
         _ = update_emas # unused
         misc.assert_shape(ws, [None, self.num_conv + self.num_torgb, self.w_dim])
         w_iter = iter(ws.unbind(dim=1))
-        if ws.device.type != 'cuda':
+        # fp16 synthesis is a measured win on MPS as well as CUDA (it halves the
+        # activation bytes on the large b128-b1024 blocks). CPU stays fp32 --
+        # fp16 conv is slow/unsupported there.
+        if ws.device.type not in ('cuda', 'mps'):
             force_fp32 = True
         dtype = torch.float16 if self.use_fp16 and not force_fp32 else torch.float32
         memory_format = torch.channels_last if self.channels_last and not force_fp32 else torch.contiguous_format
