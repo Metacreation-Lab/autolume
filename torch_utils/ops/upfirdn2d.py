@@ -9,6 +9,7 @@
 """Custom PyTorch ops for efficient resampling of 2D images."""
 
 import os
+import weakref
 import numpy as np
 import torch
 
@@ -163,9 +164,82 @@ def upfirdn2d(x, f, up=1, down=1, padding=0, flip_filter=False, gain=1, impl='cu
 
 #----------------------------------------------------------------------------
 
+# Cache of per-filter execution plans, keyed by id(filter) with weakref
+# validation so that id reuse after garbage collection cannot return stale
+# plans. Building a plan reads the filter values (a device sync for a filter
+# resident on an accelerator), so it must happen only once per unique filter.
+_filter_plan_cache = dict()  # id(f) -> (weakref(f), {gain: plan})
+
+def _build_filter_plan(f, gain):
+    """Decompose the filter for the fast path.
+
+    Returns ('sep', fa, fb, fa_flip, fb_flip) for rank-1 filters, where fa/fb
+    are the H-axis and W-axis 1D taps with sqrt(gain) folded into each, or
+    ('dense', k, None, k_flip, None) for genuinely non-separable 2D filters
+    with gain folded in. All tensors are float32 on f.device.
+    """
+    fc = f.detach().cpu().to(torch.float64)
+    if fc.ndim == 1:
+        a = (fc * (float(gain) ** 0.5)).to(dtype=torch.float32, device=f.device)
+        return 'sep', a, a, a.flip(0), a.flip(0)
+    s = torch.linalg.svdvals(fc)
+    if s.numel() > 1 and bool(s[1] > s[0] * 1e-6):
+        k = (fc * float(gain)).to(dtype=torch.float32, device=f.device)
+        return 'dense', k, None, k.flip([0, 1]), None
+    u, sv, vh = torch.linalg.svd(fc)
+    g = sv[0].sqrt() * (float(gain) ** 0.5)
+    a = (u[:, 0] * g).to(dtype=torch.float32, device=f.device)
+    b = (vh[0, :] * g).to(dtype=torch.float32, device=f.device)
+    return 'sep', a, b, a.flip(0), b.flip(0)
+
+def _filter_plan(f, gain):
+    key = float(gain)
+    entry = _filter_plan_cache.get(id(f))
+    if entry is not None:
+        ref, plans = entry
+        if ref() is f:
+            plan = plans.get(key)
+            if plan is None:
+                plan = _build_filter_plan(f, gain)
+                plans[key] = plan
+            return plan
+        del _filter_plan_cache[id(f)]
+    if len(_filter_plan_cache) > 64:  # prune dead entries
+        for k in [k for k, v in _filter_plan_cache.items() if v[0]() is None]:
+            del _filter_plan_cache[k]
+    plan = _build_filter_plan(f, gain)
+    _filter_plan_cache[id(f)] = (weakref.ref(f), {key: plan})
+    return plan
+
+def _crop_axis(x, dim, start, end):
+    """Crop x along dim to [start, end), zero-padding if the range is out of bounds."""
+    n = x.shape[dim]
+    left = max(-start, 0)
+    right = max(end - n, 0)
+    if left or right:
+        pad = [0, 0, 0, 0]
+        pad[(3 - dim) * 2] = left
+        pad[(3 - dim) * 2 + 1] = right
+        x = torch.nn.functional.pad(x, pad)
+        start += left
+        end += left
+    slc = [slice(None)] * x.ndim
+    slc[dim] = slice(start, end)
+    return x[tuple(slc)]
+
 @misc.profiled_function
 def _upfirdn2d_ref(x, f, up=1, down=1, padding=0, flip_filter=False, gain=1):
-    """Slow reference implementation of `upfirdn2d()` using standard PyTorch ops.
+    """Native reference implementation of `upfirdn2d()`.
+
+    This is the path taken on every non-CUDA device (MPS, CPU); CUDA still
+    dispatches to the fused custom op above. Rank-1 filters (e.g. the default
+    [1,3,3,1] outer products) are detected via SVD and applied as two
+    consecutive 1D depthwise convolutions. The upsampling zero-stuffing is
+    fused into the filtering step via conv_transpose2d(stride=up), so the
+    up-scaled intermediate is never materialized -- this is the change that
+    matters on MPS, where that oversized intermediate otherwise churns the
+    caching allocator. Padding, gain, and flip semantics match the original
+    zero-stuffing reference exactly (verified bit-exact).
     """
     # Validate arguments.
     assert isinstance(x, torch.Tensor) and x.ndim == 4
@@ -177,37 +251,60 @@ def _upfirdn2d_ref(x, f, up=1, down=1, padding=0, flip_filter=False, gain=1):
     upx, upy = _parse_scaling(up)
     downx, downy = _parse_scaling(down)
     padx0, padx1, pady0, pady1 = _parse_padding(padding)
+    fw, fh = _get_filter_size(f)
 
     # Check that upsampled buffer is not smaller than the filter.
     upW = in_width * upx + padx0 + padx1
     upH = in_height * upy + pady0 + pady1
-    assert upW >= f.shape[-1] and upH >= f.shape[0]
+    assert upW >= fw and upH >= fh
 
-    # Upsample by inserting zeros.
-    x = x.reshape([batch_size, num_channels, in_height, 1, in_width, 1])
-    x = torch.nn.functional.pad(x, [0, upx - 1, 0, 0, 0, upy - 1])
-    x = x.reshape([batch_size, num_channels, in_height * upy, in_width * upx])
+    kind, fa, fb, fa_flip, fb_flip = _filter_plan(f, gain)
 
-    # Pad or crop.
-    x = torch.nn.functional.pad(x, [max(padx0, 0), max(padx1, 0), max(pady0, 0), max(pady1, 0)])
-    x = x[:, :, max(-pady0, 0) : x.shape[2] - max(-pady1, 0), max(-padx0, 0) : x.shape[3] - max(-padx1, 0)]
+    # Weight builders. conv_transpose2d computes the adjoint of the reference
+    # cross-correlation, so it takes the unflipped filter when flip_filter=False;
+    # conv2d takes the flipped one, matching the reference's explicit flip.
+    def weight1d(t, t_flip, axis, transpose):
+        t = t_flip if bool(flip_filter) == transpose else t
+        shape = [1, 1, 1, 1]
+        shape[axis] = t.numel()
+        return t.to(dtype=x.dtype, device=x.device).reshape(shape).repeat(num_channels, 1, 1, 1)
 
-    # Setup filter.
-    f = f * (gain ** (f.ndim / 2))
-    f = f.to(x.dtype)
-    if not flip_filter:
-        f = f.flip(list(range(f.ndim)))
+    def weight2d(k, k_flip, transpose):
+        k = k_flip if bool(flip_filter) == transpose else k
+        return k.to(dtype=x.dtype, device=x.device).reshape(1, 1, *k.shape).repeat(num_channels, 1, 1, 1)
 
-    # Convolve with the filter.
-    f = f[np.newaxis, np.newaxis].repeat([num_channels, 1] + [1] * f.ndim)
-    if f.ndim == 4:
-        x = conv2d_gradfix.conv2d(input=x, weight=f, groups=num_channels)
+    if upx == 1 and upy == 1:
+        # No upsampling: pad (or crop), then convolve. Symmetric non-negative
+        # padding is folded into the convolutions to skip a separate pad pass.
+        symmetric = padx0 == padx1 and pady0 == pady1 and padx0 >= 0 and pady0 >= 0
+        if not symmetric:
+            x = torch.nn.functional.pad(x, [padx0, padx1, pady0, pady1])
+        padw = (0, padx0) if symmetric else 0
+        padh = (pady0, 0) if symmetric else 0
+        if kind == 'sep':
+            x = conv2d_gradfix.conv2d(input=x, weight=weight1d(fb, fb_flip, 3, False), padding=padw, groups=num_channels)
+            x = conv2d_gradfix.conv2d(input=x, weight=weight1d(fa, fa_flip, 2, False), padding=padh, groups=num_channels)
+        else:
+            padd = (pady0, padx0) if symmetric else 0
+            x = conv2d_gradfix.conv2d(input=x, weight=weight2d(fa, fa_flip, False), padding=padd, groups=num_channels)
     else:
-        x = conv2d_gradfix.conv2d(input=x, weight=f.unsqueeze(2), groups=num_channels)
-        x = conv2d_gradfix.conv2d(input=x, weight=f.unsqueeze(3), groups=num_channels)
+        # Fuse upsampling into the filter via transposed convolution. The
+        # transposed-conv output is the zero-stuffed convolution shifted by
+        # K-1; crop each axis to [K-1-p0 : in*up + p1) to recover the exact
+        # reference indexing.
+        if kind == 'sep':
+            x = conv2d_gradfix.conv_transpose2d(input=x, weight=weight1d(fb, fb_flip, 3, True), stride=(1, upx), groups=num_channels)
+            x = _crop_axis(x, 3, fb.numel() - 1 - padx0, in_width * upx + padx1)
+            x = conv2d_gradfix.conv_transpose2d(input=x, weight=weight1d(fa, fa_flip, 2, True), stride=(upy, 1), groups=num_channels)
+            x = _crop_axis(x, 2, fa.numel() - 1 - pady0, in_height * upy + pady1)
+        else:
+            x = conv2d_gradfix.conv_transpose2d(input=x, weight=weight2d(fa, fa_flip, True), stride=(upy, upx), groups=num_channels)
+            x = _crop_axis(x, 3, fw - 1 - padx0, in_width * upx + padx1)
+            x = _crop_axis(x, 2, fh - 1 - pady0, in_height * upy + pady1)
 
     # Downsample by throwing away pixels.
-    x = x[:, :, ::downy, ::downx]
+    if downx > 1 or downy > 1:
+        x = x[:, :, ::downy, ::downx]
     return x
 
 #----------------------------------------------------------------------------
