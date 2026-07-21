@@ -632,6 +632,13 @@ class Renderer:
                 img = img / img.norm(float('inf'), dim=[1, 2], keepdim=True).clip(1e-8, 1e8)
             img = img * (10 ** (img_scale_db / 20))
             img = (img * 127.5 + 128).clamp(0, 255).to(torch.uint8).permute(1, 2, 0)
+            # Make the HWC uint8 buffer C-contiguous before it crosses to CPU
+            # and gets pickled onto the render->UI multiprocessing.Queue. The
+            # permuted view is non-contiguous, and serializing that costs ~10 ms
+            # of strided gather per frame. On CUDA to_cpu already stages through
+            # a contiguous pinned buffer, so this is only needed off CUDA.
+            if img.device.type != 'cuda':
+                img = img.contiguous()
             res.image = img
 
 
