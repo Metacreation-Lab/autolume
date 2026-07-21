@@ -19,3 +19,6 @@ site/
 
 # OS artifacts
 .DS_Store
+
+# Benchmark output
+bench_results/
