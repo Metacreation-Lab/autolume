@@ -12,7 +12,6 @@ import numpy as np
 import queue
 import imgui
 import cv2
-import pyaudio
 
 import dnnlib
 from utils.gui_utils import imgui_utils
@@ -25,13 +24,11 @@ from widgets import trunc_noise_widget
 from widgets import performance_widget
 from widgets import layer_widget
 from widgets import adjuster_widget
-from widgets import audio_widget
 from widgets import looping_widget
 from widgets import preset_widget
 from widgets import mixing_widget
 from widgets import collapsable_layer
 from widgets.help_icon_widget import HelpIconWidget
-from audio.audio_stream import NoMicrophoneError
 
 from pythonosc.osc_server import BlockingOSCUDPServer
 from pythonosc.dispatcher import Dispatcher
@@ -74,15 +71,6 @@ class Visualizer:
         self.help_texts, self.help_urls = self.help_icon.load_help_texts("visualizer")
 
         #COMMUNICATIONS
-        self.has_microphone = False
-        self.pa = None
-        # check if microphone is available
-        try:
-            self.pa = pyaudio.PyAudio()
-            logger.debug("Default input device: %s", self.pa.get_default_input_device_info())
-            self.has_microphone = True
-        except Exception as exc:
-            logger.warning("No microphone found: %s", exc)
         self.in_ip = "0.0.0.0"
         self.in_port = 1338
         self.out_ip = "127.0.0.1"
@@ -127,9 +115,6 @@ class Visualizer:
         self.preset_widget = preset_widget.PresetWidget(self)
         self.mixing_widget = mixing_widget.MixingWidget(self)
         self.collapsed_widget = collapsable_layer.LayerWidget(self)
-        self.audio_widget = None
-        self.audio_widget_enabled = False
-        self.audio_widget_error = None
 
     #Screen capture and screen recording
         self.is_recording = False
@@ -150,40 +135,6 @@ class Visualizer:
 
         # reset scroll position on initialization
         self.reset_scroll = True
-
-    def enable_audio_widget(self):
-        if self.audio_widget_enabled:
-            return
-
-        self.audio_widget_error = None
-        if self.pa is None:
-            self.audio_widget_error = "No microphone found"
-            return
-
-        try:
-            logger.info("Setting up audio widget")
-            self.audio_widget = audio_widget.AudioWidget(self)
-            self.audio_widget_enabled = True
-        except NoMicrophoneError:
-            self.audio_widget_error = "No microphone found"
-            self.audio_widget = None
-        except Exception as exc:
-            self.audio_widget_error = f"Audio widget failed: {exc}"
-            self.audio_widget = None
-
-    def disable_audio_widget(self):
-        if not self.audio_widget_enabled:
-            return
-
-        if self.audio_widget is not None:
-            try:
-                self.audio_widget.close()
-            except Exception as exc:
-                logger.warning("Error closing audio widget: %s", exc)
-
-        self.audio_widget = None
-        self.audio_widget_enabled = False
-        self.audio_widget_error = None
 
     def create_shader_program(self):
         try:
@@ -549,8 +500,6 @@ class Visualizer:
             self.ndi_send = None
 
     def close(self):
-        self.disable_audio_widget()
-
         if self._async_renderer is not None:
             self._async_renderer.close()
             self._async_renderer = None
@@ -649,26 +598,6 @@ class Visualizer:
         header_opened = imgui_utils.collapsing_header('Presets', default=True)[0]
         self._header_help_icon('presets')
         self.preset_widget(header_opened)
-
-        # Audio Module
-        header_opened = imgui_utils.collapsing_header('Audio Module', default=True)[0]
-        self._header_help_icon('audio')
-
-        if header_opened:
-            button_label = "Enable" if not self.audio_widget_enabled else "Disable"
-            if imgui.button(button_label):
-                if self.audio_widget_enabled:
-                    self.disable_audio_widget()
-                else:
-                    self.enable_audio_widget()
-
-            if self.audio_widget_error:
-                imgui.text_colored(self.audio_widget_error, 1.0, 0.4, 0.4, 1.0)
-            elif not self.has_microphone:
-                imgui.text('No microphone found')
-
-        if self.audio_widget_enabled and self.audio_widget is not None:
-            self.audio_widget(header_opened)
 
         # Render.
         if self.app.is_skipping_frames():

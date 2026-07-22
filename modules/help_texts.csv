@@ -26,4 +26,3 @@ adjust_input,visualizer,"Tools for adjusting input parameters", /perform/#adjust
 layer_transform,visualizer,"Controls for layer-wise transformations", /perform/#layer-transformations
 model_mixing,visualizer,"Settings for mixing multiple models", /perform/#model-mixing-real-time
 presets,visualizer,"Save and load parameter presets", /perform/#presets
-audio,visualizer,"Audio input and visualization settings"
