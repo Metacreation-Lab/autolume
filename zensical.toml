@@ -10,6 +10,7 @@ nav = [
     { Train = ["train/index.md", "train/training-aug.md"] },
     "perform.md",
     "tools.md",
+    "feedback.md",
 ]
 
 [project.theme]

@@ -71,6 +71,11 @@ cannot cross-compile — a Windows build must run on Windows, etc.):
 uv run release.py
 ```
 
+The script requires a `.env` at the repo root with the crash report endpoint
+values (it fails fast without one). Copy `.env.example` and fill it in — see
+[tools/crash_endpoint/README.md](tools/crash_endpoint/README.md). Forks without
+their own endpoint can build with `--disable-crash-reporting` instead.
+
 ffmpeg/ffprobe are downloaded and bundled into the release automatically via
 `ffmpeg-downloader`.
 
