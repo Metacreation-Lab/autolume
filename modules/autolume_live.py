@@ -8,8 +8,8 @@ import time
 import gc
 
 from assets import RED, OPAQUEGREEN, HOVERGREEN
-from utils import user_data
-from utils.gui_utils import imgui_window, gl_utils
+from utils import crash_report, user_data
+from utils.gui_utils import imgui_window, gl_utils, imgui_utils
 from utils.resource_paths import resource_path
 from widgets.help_icon_widget import DOCS_BASE_URL
 from enum import IntEnum
@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 FEEDBACK_URL = "https://docs.google.com/forms/d/e/1FAIpQLSe6ovWLmktE_AYGqxnSC_Ce1X6-A4X0_DAKeaEaej_RrBUgHQ/viewform"
 
 DATA_ROOT_POPUP = "Data folder not found##Modal"
+CRASH_REPORT_POPUP = "Crash Report##popup"
 
 class States(IntEnum):
     ERROR = -2
@@ -107,6 +108,12 @@ class Autolume(imgui_window.ImguiWindow):
         self.settings_open = False
         self.failed_data_root = user_data.failed_data_root()
         self._data_root_warning_pending = self.failed_data_root is not None
+        self._crash_report_snapshot = (
+            crash_report.pending_unclean_report()
+            if crash_report.reporting_available()
+            and user_data.crash_report_mode() == crash_report.MODE_ASK else None)
+        self._crash_report_popup_pending = self._crash_report_snapshot is not None
+        self._crash_report_comment = ""
 
         self._training_module = None
         self._projection_module = None
@@ -293,6 +300,46 @@ class Autolume(imgui_window.ImguiWindow):
             imgui.same_line()
             if imgui.button('Dismiss'):
                 self.failed_data_root = None
+                imgui.close_current_popup()
+            imgui.end_popup()
+
+    def _draw_crash_report_popup(self):
+        if self._crash_report_popup_pending:
+            imgui.open_popup(CRASH_REPORT_POPUP)
+            self._crash_report_popup_pending = False
+
+        imgui.set_next_window_size(self.content_width * 0.4, 0)
+        imgui.set_next_window_position(
+            self.content_width * 0.5, self.content_height * 0.5,
+            pivot_x=0.5, pivot_y=0.5)
+        opened, _ = imgui.begin_popup_modal(
+            CRASH_REPORT_POPUP, flags=(imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE))
+        if opened:
+            imgui.text_wrapped('Autolume closed unexpectedly last time.')
+            imgui.spacing()
+            imgui.text_wrapped(
+                'You can send a crash report to the developers. '
+                'The report includes recent logs and system information.')
+            imgui.spacing()
+            imgui.text_wrapped('Describe what you were doing. This is optional.')
+            _, self._crash_report_comment = imgui_utils.input_text(
+                '##crash_comment', self._crash_report_comment, 1024, 0,
+                width=imgui.get_content_region_available_width())
+            imgui.spacing()
+            if imgui.button('Send Report'):
+                crash_report.send_pending_report(self._crash_report_comment)
+                self._crash_report_snapshot = None
+                imgui.close_current_popup()
+            imgui.same_line()
+            if imgui.button('Always Send'):
+                user_data.set_crash_report_mode(crash_report.MODE_ALWAYS)
+                crash_report.send_pending_report(self._crash_report_comment)
+                self._crash_report_snapshot = None
+                imgui.close_current_popup()
+            imgui.same_line()
+            if imgui.button("Don't Send"):
+                crash_report.clear_pending()
+                self._crash_report_snapshot = None
                 imgui.close_current_popup()
             imgui.end_popup()
 
@@ -554,6 +601,8 @@ class Autolume(imgui_window.ImguiWindow):
 
             if self.failed_data_root is not None:
                 self._draw_data_root_warning()
+            elif self._crash_report_snapshot is not None:
+                self._draw_crash_report_popup()
 
             if self.settings_open and self.settings is not None:
                 self.settings()

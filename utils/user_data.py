@@ -154,3 +154,21 @@ def cache_path(*parts: str) -> Path:
     """
     base = os.environ.get("XDG_CACHE_HOME") or (Path.home() / ".cache")
     return Path(base, "autolume", *parts)
+
+
+CRASH_REPORT_MODES = ("ask", "always", "never")
+
+
+def crash_report_mode() -> str:
+    """Crash report consent mode: ``ask`` (default), ``always`` or ``never``."""
+    mode = load_prefs().get("crash_report_mode")
+    return mode if mode in CRASH_REPORT_MODES else "ask"
+
+
+def set_crash_report_mode(mode: str) -> None:
+    """Persist the crash report consent mode to the preferences file."""
+    if mode not in CRASH_REPORT_MODES:
+        return
+    prefs = load_prefs()
+    prefs["crash_report_mode"] = mode
+    save_prefs(prefs)

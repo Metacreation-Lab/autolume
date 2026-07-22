@@ -22,3 +22,6 @@ site/
 
 # Benchmark output
 bench_results/
+
+# Crash reporting endpoint secrets (baked into releases at build time)
+.env
