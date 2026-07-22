@@ -20,25 +20,31 @@ from torch_utils import misc
 
 #----------------------------------------------------------------------------
 
-def create_networks(data, init=True, labels=None, **ex_kwargs):
-    from architectures import custom_stylegan2
-    oG = data["G"]
-    channel_dims = Get_Network_Shape(oG)
+def _rebuild_custom_generator(oNet, custom_stylegan2):
+    channel_dims = Get_Network_Shape(oNet)
     channels_dict = {2**(i+2):shape for i, shape in enumerate(channel_dims[::2])}
 
     init_res = (4,4)
-    if type(oG) == custom_stylegan2.Generator:
-        init_res = oG.init_res
+    if type(oNet) == custom_stylegan2.Generator:
+        init_res = oNet.init_res
 
-    G = custom_stylegan2.Generator(z_dim = oG.z_dim, w_dim = oG.w_dim, c_dim = oG.c_dim, img_channels= oG.img_channels,
-                                           img_resolution=oG.img_resolution, init_res=init_res,
-                                           mapping_kwargs=oG.init_kwargs.get('mapping_kwargs', {}),
-                                           synthesis_kwargs=oG.init_kwargs.get('synthesis_kwargs', {}),
+    net = custom_stylegan2.Generator(z_dim = oNet.z_dim, w_dim = oNet.w_dim, c_dim = oNet.c_dim, img_channels= oNet.img_channels,
+                                           img_resolution=oNet.img_resolution, init_res=init_res,
+                                           mapping_kwargs=oNet.init_kwargs.get('mapping_kwargs', {}),
+                                           synthesis_kwargs=oNet.init_kwargs.get('synthesis_kwargs', {}),
                                            channels_dict=channels_dict,)
+    net.load_state_dict(oNet.state_dict())
+    return net
 
-    G.load_state_dict(oG.state_dict())
-    data["G"] = G
-    data["G_ema"] = copy.deepcopy(G).eval()
+def create_networks(data, init=True, labels=None, **ex_kwargs):
+    from architectures import custom_stylegan2
+    # Rebuild G and G_ema separately, each from its own weights -- reusing
+    # G's weights for both discarded the checkpoint's real EMA snapshot.
+    data["G"] = _rebuild_custom_generator(data["G"], custom_stylegan2)
+    if "G_ema" in data:
+        data["G_ema"] = _rebuild_custom_generator(data["G_ema"], custom_stylegan2).eval()
+    else:
+        data["G_ema"] = copy.deepcopy(data["G"]).eval()
     return data
 
 
