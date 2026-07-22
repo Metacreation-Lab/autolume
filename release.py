@@ -76,7 +76,7 @@ APPIMAGETOOL_URL = "https://github.com/AppImage/appimagetool/releases/download/c
 # bumping torch.
 MACOS_MIN_VERSION = "14.0"
 
-# Hardened-runtime exceptions + microphone access for the signed macOS build.
+# Hardened-runtime exceptions for the signed macOS build.
 ENTITLEMENTS = REPO / "entitlements.plist"
 
 # notarytool keychain profile holding the App Store Connect API key.
@@ -424,9 +424,6 @@ def post_build() -> None:
         info["CFBundleShortVersionString"] = get_version()
         info["NSHumanReadableCopyright"] = (
             "Metacreation Lab for Creative AI\nmetacreation.net/autolume"
-        )
-        info["NSMicrophoneUsageDescription"] = (
-            "Autolume uses the microphone for audio-reactive visuals."
         )
         plist.write_bytes(plistlib.dumps(info))
         # Editing Info.plist invalidates the bundle signature; re-sign the
