@@ -31,7 +31,6 @@ uv run zensical serve    # serve the docs locally at http://127.0.0.1:8000
 |------|---------|
 | `main.py` | Application entry point |
 | `architectures/` | Generator and discriminator network definitions |
-| `audio/` | Audio capture and analysis (librosa, pyaudio) |
 | `bending/` | Network bending operators applied at inference |
 | `dnnlib/` | Vendored NVIDIA dnnlib utilities (StyleGAN2/3) |
 | `ganspace/` | GANSpace PCA-based latent direction discovery |
