@@ -9,7 +9,11 @@ from assets import OPAQUEGREEN, RED
 from utils.gui_utils import imgui_utils
 from utils.resource_paths import get_version
 from utils.update_check import latest_release
-from utils.user_data import config_file, data_root, default_data_root, set_data_root
+from utils.user_data import (CRASH_REPORT_MODES, config_file,
+                             crash_report_mode, data_root,
+                             default_data_root, set_crash_report_mode,
+                             set_data_root)
+from utils import crash_report
 from widgets.native_browser_widget import NativeBrowserWidget
 
 
@@ -147,6 +151,25 @@ class Settings:
             if imgui_utils.button("Default", width=self.app.font_size * 7):
                 self.app.set_ui_font_size(self.app.DEFAULT_UI_FONT_SIZE)
                 self.pending_font_size = self.app.ui_font_size
+
+            imgui.spacing()
+            imgui.separator()
+            imgui.spacing()
+            imgui.text("Crash reports")
+            imgui.text_colored(
+                "When Autolume crashes it can send a report to the developers. "
+                "The report includes recent logs and system information.",
+                0.7, 0.7, 0.7)
+            modes = list(CRASH_REPORT_MODES)
+            labels = ["Ask before sending", "Always send", "Never send"]
+            current = modes.index(crash_report_mode())
+            changed, current = imgui.combo("##crash_report_mode", current, labels)
+            if changed:
+                set_crash_report_mode(modes[current])
+            if not crash_report.reporting_available():
+                imgui.text_colored(
+                    "Crash reporting is not available in this build.",
+                    0.7, 0.7, 0.7)
 
             imgui.spacing()
             imgui.separator()
