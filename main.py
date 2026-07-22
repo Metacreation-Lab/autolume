@@ -57,7 +57,7 @@ def main():
     # feature writes to it. Category subfolders are still created lazily.
     init_data_root()
 
-    # Loads the heavy dependency stack (torch, audio, rendering) on a
+    # Loads the heavy dependency stack (torch, rendering) on a
     # background thread while the splash screen shows its progress. Started
     # by the splash once it is on screen: imports contend for the GIL, so
     # starting earlier delays the first frame on cold systems.
