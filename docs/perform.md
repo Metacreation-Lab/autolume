@@ -1,6 +1,6 @@
 # Perform
 
-The Perform screen is where you load a model and work with it in real time. It is the screen Autolume opens on after startup. It provides you with a diverse set of features to explore the latent space in different ways and to play with the parameters of the network. It also enables you to control the parameters via OSC protocol for audio-reactive and other kinds of interactive works.
+The Perform screen is where you load a model and work with it in real time. It is the screen Autolume opens on after startup. It provides you with a diverse set of features to explore the latent space in different ways and to play with the parameters of the network. It also enables you to control the parameters via OSC protocol for interactive works.
 
 ## Display and Capture
 
