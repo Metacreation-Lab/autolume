@@ -561,8 +561,10 @@ def package_windows() -> None:
     iss.write_text(f"""\
 [Setup]
 AppName=Autolume
+AppId=Autolume
 AppVersion={version}
 AppPublisher=Metacreation Lab
+CloseApplications=yes
 DefaultDirName={{autopf}}\\Autolume
 DefaultGroupName=Autolume
 ArchitecturesAllowed=x64compatible
@@ -576,6 +578,9 @@ OutputBaseFilename={output_base}
 
 [Tasks]
 Name: "desktopicon"; Description: "{{cm:CreateDesktopIcon}}"; Flags: unchecked
+
+[InstallDelete]
+Type: filesandordirs; Name: "{{app}}\\_internal"
 
 [Files]
 Source: "{REPO / 'dist' / 'Autolume'}\\*"; DestDir: "{{app}}"; Flags: recursesubdirs createallsubdirs
