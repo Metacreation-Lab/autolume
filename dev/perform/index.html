@@ -629,6 +629,34 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#audio-module" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Audio Module
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Audio Module">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#capturing-computer-audio" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Capturing computer audio
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#osc" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -922,6 +950,34 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#audio-module" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Audio Module
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Audio Module">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#capturing-computer-audio" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Capturing computer audio
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#osc" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1080,6 +1136,55 @@
 <p>The checkboxes allow you to choose which preset you want to load or save to. If a checkbox is grayed out, it means nothing is saved to that preset.</p>
 <p>At the bottom you can define the path where the presets are saved to and loaded from. Using the "Preset Path" opens a file browser to select a folder. While the "Recent" button opens a popup with the most recently used folders.</p>
 <p>The OSC controls of this widget allow you to switch between presets in the current folder, by sending the name of the preset. Please note that you can rename your presets.</p>
+<h2 id="audio-module">Audio Module<a class="headerlink" href="#audio-module" title="Permanent link">&para;</a></h2>
+<p><img alt="" src="../assets/live-module-audio-module-01.png" /></p>
+<p>The Audio Module turns live audio into control signals for your performance.</p>
+<p>Pick an input device from the dropdown and press Enable. While the module is running it analyzes the incoming audio and publishes five values, updated every frame:</p>
+<table>
+<thead>
+<tr>
+<th>Address</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/audio/level</code></td>
+<td>Overall loudness</td>
+</tr>
+<tr>
+<td><code>/audio/bass</code></td>
+<td>Low frequency energy</td>
+</tr>
+<tr>
+<td><code>/audio/mid</code></td>
+<td>Mid frequency energy</td>
+</tr>
+<tr>
+<td><code>/audio/high</code></td>
+<td>High frequency energy</td>
+</tr>
+<tr>
+<td><code>/audio/onset</code></td>
+<td>Fires on percussive hits</td>
+</tr>
+</tbody>
+</table>
+<p>All values range from 0 to 1 and adapt automatically to the input level.</p>
+<p><code>/audio/onset</code> reacts to transients such as drum hits. Use the <strong>Onset sensitivity</strong> slider to tune how easily it fires. Lower it if onset triggers too often on busy music, raise it if it misses hits you want. Setting it to zero turns onset off.</p>
+<p>To map a value, open the OSC menu of any widget, enable OSC for a parameter and pick the audio address from the dropdown. The addresses appear in every OSC address picker while the module is running. For example, map <code>/audio/bass</code> to the speed of a loop to make motion follow the music.</p>
+<p>If a device is plugged in after Autolume starts, press Refresh to rescan.</p>
+<h3 id="capturing-computer-audio">Capturing computer audio<a class="headerlink" href="#capturing-computer-audio" title="Permanent link">&para;</a></h3>
+<p>The input list shows any virtual audio device, so you can capture system audio by installing a loopback driver such as <a href="https://existential.audio/blackhole/">BlackHole</a> (macOS) or <a href="https://vb-audio.com/Cable/">VB-Cable</a> (Windows).</p>
+<p>On macOS, route sound to BlackHole while keeping your speakers active:</p>
+<ol>
+<li>Open <strong>Audio MIDI Setup</strong> (found in /Applications/Utilities/).</li>
+<li>Click <strong>+</strong> at the bottom left and choose <strong>Create Multi-Output Device</strong>.</li>
+<li>Check both your speakers and <strong>BlackHole</strong> in the device list.</li>
+<li>Open <strong>System Settings → Sound</strong> and set the Multi-Output Device as the output.</li>
+<li>In Autolume, pick <strong>BlackHole</strong> from the Audio Module input dropdown and press Enable.</li>
+</ol>
+<p>macOS treats BlackHole as a microphone input, so the app needs Microphone permission. When running from source, the terminal that launched Autolume must have that permission. If permission is denied, macOS delivers silence rather than an error. So if the meters stay flat after enabling, check <strong>System Settings → Privacy &amp; Security → Microphone</strong>.</p>
 <h2 id="osc">OSC<a class="headerlink" href="#osc" title="Permanent link">&para;</a></h2>
 <p>Autolume allows users to control parameters using its interface but also provides the option to control parameters using <a href="https://www.google.com/url?q=https://ccrma.stanford.edu/groups/osc/index.html&amp;sa=D&amp;source=editors&amp;ust=1769724592307780&amp;usg=AOvVaw0M9rZhdAGtobHhNvfkNj2x">OSC</a>. This allows you to control parameters in Autolume using other software, such as TouchDesigner, Max/MSP, or Processing. The OSC interface is available for all parameters on the Perform screen. Most widgets have an OSC menu similar to the following:</p>
 <p><img alt="" src="../assets/live-module-osc-01.png" /></p>
