@@ -8,12 +8,17 @@ import tomllib
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
+def is_frozen() -> bool:
+    """True when running from a PyInstaller bundle rather than a source checkout."""
+    return getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS")
+
+
 def resource_root() -> Path:
     """Root directory where bundled data files live.
 
     Source checkout: the repo root. PyInstaller bundle: ``sys._MEIPASS``.
     """
-    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+    if is_frozen():
         return Path(sys._MEIPASS)
     return _REPO_ROOT
 
