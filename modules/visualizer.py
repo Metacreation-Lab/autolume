@@ -26,6 +26,7 @@ from widgets import layer_widget
 from widgets import adjuster_widget
 from widgets import looping_widget
 from widgets import preset_widget
+from widgets import audio_widget
 from widgets import mixing_widget
 from widgets import collapsable_layer
 from widgets.help_icon_widget import HelpIconWidget
@@ -115,6 +116,7 @@ class Visualizer:
         self.preset_widget = preset_widget.PresetWidget(self)
         self.mixing_widget = mixing_widget.MixingWidget(self)
         self.collapsed_widget = collapsable_layer.LayerWidget(self)
+        self.audio_widget = audio_widget.AudioWidget(self)
 
     #Screen capture and screen recording
         self.is_recording = False
@@ -500,6 +502,7 @@ class Visualizer:
             self.ndi_send = None
 
     def close(self):
+        self.audio_widget.close()
         if self._async_renderer is not None:
             self._async_renderer.close()
             self._async_renderer = None
@@ -598,6 +601,11 @@ class Visualizer:
         header_opened = imgui_utils.collapsing_header('Presets', default=True)[0]
         self._header_help_icon('presets')
         self.preset_widget(header_opened)
+
+        # Audio Module
+        header_opened = imgui_utils.collapsing_header('Audio Module', default=True)[0]
+        self._header_help_icon('audio')
+        self.audio_widget(header_opened)
 
         # Render.
         if self.app.is_skipping_frames():
