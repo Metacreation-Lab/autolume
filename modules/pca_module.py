@@ -36,7 +36,7 @@ class PCA_Module:
         self.G = None
         self.user_pkl = ''
         self.pca_mode = 0
-        self.num_features = 0
+        self.num_features = 4
         self.alpha = 1
         self.running = False
         self.queue = mp.Queue()
@@ -99,16 +99,15 @@ class PCA_Module:
         with imgui_utils.item_width(input_width):
             _, self.pca_mode = imgui.combo("##pca_mode", self.pca_mode, pca_modes)
 
-        max_features = 0 if self.G is None else self.G.w_dim
         imgui.text("Features")
         imgui.same_line()
         with imgui_utils.item_width(input_width):
             _, self.num_features = imgui.input_int("##num_features", self.num_features)
 
-        if self.num_features > max_features:
-            self.num_features = max_features
-        if self.num_features < 0:
-            self.num_features = 0
+        if self.G is not None and self.num_features > self.G.w_dim:
+            self.num_features = self.G.w_dim
+        if self.num_features < 1:
+            self.num_features = 1
 
         imgui.text("Sparsity")
         imgui.same_line()
