@@ -78,6 +78,11 @@ def load_model(choice,path):
     model = SRVGGNetPlus(num_in_ch=3, num_out_ch=3, num_feat=48, upscale=4, act_type='prelu').to(device)
     model_sd=torch.load(path, map_location=device)
     model.load_state_dict(model_sd)
+  # Run the forward pass in fp16 on GPU. This roughly halves activation memory,
+  # which keeps the Quality model under the VRAM budget instead of spilling to
+  # system RAM (a ~13x slowdown on Windows/CUDA). CPU stays fp32 (no fp16 speedup).
+  if device.type in ('cuda', 'mps'):
+    model = model.half()
   return model
 
 
@@ -208,9 +213,9 @@ def process(args,file):
       img = reader.get_frame()
       if img is not None:
         input=torch.tensor(img).permute(2,0,1).float().to(get_device())/255
-        input=torch.unsqueeze(input,0)
+        input=torch.unsqueeze(input,0).to(next(upsampler.parameters()).dtype)
         with torch.inference_mode():
-          output = upsampler(input)
+          output = upsampler(input).float()
           output=F.adjust_sharpness(output,args.sharpen_scale)*255
 
           output = output[0].permute(1,2,0).cpu().numpy().astype(np.uint8)
@@ -246,10 +251,10 @@ def process(args,file):
     image = cv2.imread(file)
     input_width, input_height = image.shape[0], image.shape[1]
     image = data_transformer(image).to(get_device())
-    input = torch.unsqueeze(image, 0)
+    input = torch.unsqueeze(image, 0).to(next(upsampler.parameters()).dtype)
 
     with torch.inference_mode():
-          output = upsampler(input)
+          output = upsampler(input).float()
           output = F.adjust_sharpness(output, args.sharpen_scale) * 255
 
           output = output[0].permute(1, 2, 0).cpu().numpy().astype(np.uint8)
@@ -292,9 +297,9 @@ def _sr_image(model, args, file, tail, file_idx, reply_queue):
     image = cv2.imread(file)
     input_height, input_width = image.shape[0], image.shape[1]
     image = data_transformer(image).to(get_device())
-    inp = torch.unsqueeze(image, 0)
+    inp = torch.unsqueeze(image, 0).to(next(model.parameters()).dtype)
     with torch.inference_mode():
-        output = model(inp)
+        output = model(inp).float()
         output = F.adjust_sharpness(output, args.sharpen_scale) * 255
         output = output[0].permute(1, 2, 0).cpu().numpy().astype(np.uint8)
         if args.scale_mode:
@@ -323,6 +328,7 @@ def _sr_video(model, args, file, tail, file_idx, reply_queue):
     logger.info("Saving video to %s", video_save_path)
     writer = Writer(args, audio, video_height, video_width, video_save_path=video_save_path, fps=fps)
     reader = Reader(video_width, video_height, file)
+    model_dtype = next(model.parameters()).dtype
     start_time = time.time()
     last_put = start_time
     super_res_idx = 0
@@ -332,8 +338,8 @@ def _sr_video(model, args, file, tail, file_idx, reply_queue):
         if img is None:
             break
         with torch.inference_mode():
-            sr_input = torch.tensor(img).permute(2, 0, 1).unsqueeze(0).float().to(get_device()) / 255
-            sr_output = model(sr_input)
+            sr_input = (torch.tensor(img).permute(2, 0, 1).unsqueeze(0).float().to(get_device()) / 255).to(model_dtype)
+            sr_output = model(sr_input).float()
             sr_output = F.adjust_sharpness(sr_output, args.sharpen_scale) * 255
             sr_output = sr_output[0].permute(1, 2, 0).cpu().numpy().astype(np.uint8)
             if args.scale_mode:
