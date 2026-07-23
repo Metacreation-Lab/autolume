@@ -185,6 +185,10 @@ def input_text(label, value, buffer_length, flags, width=None, help_text=''):
 # the field actually changed, and round away float32 noise when it did.
 
 def input_float(label, value, *args, **kwargs):
+    # Default to %g so values render at their real precision without the
+    # trailing zeros of imgui's fixed-point %.3f default (e.g. 0.002, not
+    # 0.002000). Callers can still pass an explicit format.
+    kwargs.setdefault('format', '%g')
     changed, new_value = imgui.input_float(label, value, *args, **kwargs)
     return changed, round(new_value, 6) if changed else value
 

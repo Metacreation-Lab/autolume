@@ -406,7 +406,7 @@ class TrainingModule:
                     self.glr = value
 
                 imgui.text("Discriminator Learning Rate")
-                changed, value = imgui_utils.input_float("##Discriminator Learning Rate", self.dlr, format='%.6f')
+                changed, value = imgui_utils.input_float("##Discriminator Learning Rate", self.dlr)
                 if changed and not training_active:
                     self.dlr = value
 
