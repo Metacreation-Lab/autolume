@@ -3,6 +3,8 @@ Rivers,1024,stylegan2,Philippe Pasquier,CC BY-NC 4.0,rivers-1024.pkl,https://dri
 WikiArt,1024,stylegan2,Peter Baylies,Not specified,wikiart-1024.pkl,https://archive.org/download/wikiart-stylegan2-conditional-model/WikiArt5.pkl
 Textures,1024,stylegan2,Bernat Cuni,Not specified,textures-1024.pkl,https://drive.google.com/uc?export=download&id=18SoDjbEfZ5kE28mgHlja2E6u2gnzFyaS
 Maps,1024,stylegan2,Topi Tjukanov,CC0 1.0,maps-1024.pkl,https://archive.org/download/mapdreamer/mapdreamer.pkl
+Trypophobia,1024,stylegan2,Sid Black,Not specified,trypophobia-1024.pkl,https://drive.google.com/uc?export=download&id=12yYXZymadSIj74Yue1Q7RrlbIqrXggo3
+Floor Plans,1024,stylegan2,Mayur Mistri,Not specified,floor-plans-1024.pkl,https://drive.google.com/uc?export=download&id=10I56KgYGh6MbxgAnTooiWwaR46_UXTeZ
 Animal Faces HQ V2,512,stylegan2,Nvidia,Nvidia Source Code License,stylegan2-afhqv2-512x512.pkl,https://api.ngc.nvidia.com/v2/models/org/nvidia/team/research/stylegan2/1/files?redirect=true&path=stylegan2-afhqv2-512x512.pkl
 Animal Faces HQ Cats,512,stylegan2,Nvidia,Nvidia Source Code License,stylegan2-afhqcat-512x512.pkl,https://api.ngc.nvidia.com/v2/models/org/nvidia/team/research/stylegan2/1/files?redirect=true&path=stylegan2-afhqcat-512x512.pkl
 Animal Faces HQ Dogs,512,stylegan2,Nvidia,Nvidia Source Code License,stylegan2-afhqdog-512x512.pkl,https://api.ngc.nvidia.com/v2/models/org/nvidia/team/research/stylegan2/1/files?redirect=true&path=stylegan2-afhqdog-512x512.pkl
@@ -11,3 +13,4 @@ Flickr Faces HQ,256,stylegan2,Nvidia,Nvidia Source Code License,stylegan2-ffhq-2
 Flickr Faces HQ,512,stylegan2,Nvidia,Nvidia Source Code License,stylegan2-ffhq-512x512.pkl,https://api.ngc.nvidia.com/v2/models/org/nvidia/team/research/stylegan2/1/files?redirect=true&path=stylegan2-ffhq-512x512.pkl
 Flickr Faces HQ,1024,stylegan2,Nvidia,Nvidia Source Code License,stylegan2-ffhq-1024x1024.pkl,https://api.ngc.nvidia.com/v2/models/org/nvidia/team/research/stylegan2/1/files?redirect=true&path=stylegan2-ffhq-1024x1024.pkl
 Flickr Faces HQ,1024,stylegan3-t,Nvidia,Nvidia Source Code License,stylegan3-t-ffhq-1024x1024.pkl,https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan3/versions/1/files/stylegan3-t-ffhq-1024x1024.pkl
+Flickr Faces HQ,1024,stylegan3-r,Nvidia,Nvidia Source Code License,stylegan3-r-ffhq-1024x1024.pkl,https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan3/versions/1/files/stylegan3-r-ffhq-1024x1024.pkl
