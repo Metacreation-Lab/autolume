@@ -20,6 +20,7 @@ in the macOS windowed build where those streams are otherwise gone), installs
 append-only ``logs/crashes.log`` for native crashes.
 """
 import atexit
+import datetime
 import faulthandler
 import logging
 import logging.handlers
@@ -37,6 +38,14 @@ CRASH_FILE_NAME = "crashes.log"
 BACKUP_DAYS = 14
 LOG_FORMAT = "%(asctime)s %(levelname)-7s [%(processName)s] %(name)s: %(message)s"
 NOISY_THIRD_PARTY_LOGGERS = ("PIL", "matplotlib", "urllib3", "numba")
+
+
+class _ISOFormatter(logging.Formatter):
+    """Emit local, timezone-aware ISO 8601 timestamps, e.g. 2026-07-22T21:41:52.185+02:00."""
+
+    def formatTime(self, record, datefmt=None):
+        dt = datetime.datetime.fromtimestamp(record.created).astimezone()
+        return dt.isoformat(timespec="milliseconds")
 
 _log_queue = None
 _listener = None
@@ -160,7 +169,7 @@ def setup_main_logging(level=None):
     _configured = True
 
     level = (level or _log_level())
-    formatter = logging.Formatter(LOG_FORMAT)
+    formatter = _ISOFormatter(LOG_FORMAT)
     handlers = []
 
     log_dir = _resolve_log_dir()
