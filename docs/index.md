@@ -16,9 +16,30 @@ Training a model on macOS is expected to be extremely slow and impractical for a
 
 StyleGAN3 models are not supported on macOS as they perform too poorly on this platform.
 
-## Downloading Autolume
+## Installation
 
-Get the latest release from GitHub: [Download at github.com](https://github.com/Metacreation-Lab/autolume/releases/latest)
+[➡️ Download for Windows, macOS and Linux](https://github.com/Metacreation-Lab/autolume/releases/latest)
+
+### Brew (macOS)
+
+Add and trust the brew tap (one time)
+
+```
+brew tap metacreation-lab/tap
+brew trust metacreation-lab/tap
+```
+
+Install the app
+
+```
+brew install --cask autolume
+```
+
+Update the app
+
+```
+brew upgrade --cask autolume
+```
 
 ## Interface overview
 

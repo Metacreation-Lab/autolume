@@ -6,9 +6,30 @@ For detailed documentation and demos look at the [Metacreation Lab Website](http
 
 ![Autolume Screen](docs/assets/overview-user-interface-01.jpg)
 
-## Downloads
+## Installation
 
 [➡️ Download for Windows, macOS and Linux](https://github.com/Metacreation-Lab/autolume/releases/latest)
+
+### Brew (macOS)
+
+Add and trust the brew tap (one time)
+
+```
+brew tap metacreation-lab/tap
+brew trust metacreation-lab/tap
+```
+
+Install the app
+
+```
+brew install --cask autolume
+```
+
+Update the app
+
+```
+brew upgrade --cask autolume
+```
 
 ## Examples
 
