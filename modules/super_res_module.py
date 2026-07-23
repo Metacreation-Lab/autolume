@@ -2,6 +2,7 @@ import logging
 import os
 import threading
 import time
+from pathlib import Path
 
 import imgui
 
@@ -140,6 +141,8 @@ class SuperResModule:
             files = self.browser.select_media_files(initial_dir=self.input_path[0] if self.input_path else "")
             if files:
                 self.input_path = [str(f) for f in files]
+                if not self.result_path:
+                    self.result_path = Path(self.input_path[0]).parent.as_posix()
 
         # Result path
         imgui.text("Save Path")
