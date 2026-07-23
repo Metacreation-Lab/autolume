@@ -58,7 +58,7 @@ class RecordingDispatcher(Dispatcher):
         self._last_seen[address_pattern] = time.time()
         return super().handlers_for_address(address_pattern)
 
-    def streaming_addresses(self, window=10.0):
+    def streaming_addresses(self, window=60.0):
         # Segments starting with "_" are sender metadata (e.g. TouchDesigner's /_samplerate).
         cutoff = time.time() - window
         return sorted(addr for addr, seen in list(self._last_seen.items())
