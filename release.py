@@ -207,6 +207,25 @@ def glfw_native_libs() -> list[tuple[Path, str]]:
     return [(matches[0], "glfw")]
 
 
+def sounddevice_native_libs() -> list[tuple[Path, str]]:
+    """PortAudio shared library sounddevice loads from its own package data.
+
+    Windows/macOS wheels bundle it in _sounddevice_data/portaudio-binaries,
+    a package next to (not inside) the sounddevice module, which is why it
+    needs its own collection step rather than PyInstaller's normal module
+    tracing. Linux has no such data dir: sounddevice there talks to the
+    system libportaudio2 package instead, so there is nothing to bundle.
+    """
+    if IS_LINUX:
+        return []
+    data_dir = package_dir("_sounddevice_data") / "portaudio-binaries"
+    patterns = {"Windows": "libportaudio*.dll", "Darwin": "libportaudio*.dylib"}
+    matches = sorted(data_dir.glob(patterns[SYSTEM]))
+    if not matches:
+        fail(f"no PortAudio native library matching '{patterns[SYSTEM]}' in {data_dir}")
+    return [(match, "_sounddevice_data/portaudio-binaries") for match in matches]
+
+
 @functools.cache
 def signing_identity() -> str | None:
     """Find a Developer ID Application identity in the keychain, or None."""
@@ -270,7 +289,9 @@ def build_args(disable_crash_reporting: bool = False) -> tuple[list[str], str | 
     # with the `ffmpeg` (ffmpeg-python) package PyInstaller packs at the root.
     # main.py adds this bin/ dir to PATH at runtime.
     ffmpeg, ffprobe = ensure_ffmpeg()
-    binaries = [(ffmpeg, "bin"), (ffprobe, "bin"), *glfw_native_libs()]
+    binaries = [
+        (ffmpeg, "bin"), (ffprobe, "bin"), *glfw_native_libs(), *sounddevice_native_libs(),
+    ]
 
     # --- Data files shipped on every platform -----------------------------
     clip = package_dir("clip")
