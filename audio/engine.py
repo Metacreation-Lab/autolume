@@ -72,12 +72,17 @@ class AudioEngine:
     def refresh(self):
         if self.enabled:
             return
+        selected = (self.devices[self.device_pos][1]
+                    if 0 <= self.device_pos < len(self.devices) else None)
         try:
             refresh_devices()
         except Exception:
             logger.exception("Audio device refresh failed")
         self.devices = list_input_devices()
-        self.device_pos = 0
+        # Keep the prior selection if that device is still present (indices can
+        # shift after re-enumeration, so match by name).
+        self.device_pos = next((pos for pos, (_, label) in enumerate(self.devices)
+                                if label == selected), 0)
 
     def update(self):
         """Read the stream, compute features, publish them. Call once per frame."""

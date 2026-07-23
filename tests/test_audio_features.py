@@ -76,3 +76,4 @@ def test_onset_sensitivity_reduces_triggers():
 
     assert count(0.0) == 0  # sensitivity 0 disables onset entirely
     assert count(1.0) > 0  # the loose end fires on the same input
+    assert count(0.3) <= count(1.0)  # higher sensitivity never fires less

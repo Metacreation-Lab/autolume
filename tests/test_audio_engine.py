@@ -94,6 +94,17 @@ def test_disable_clears_features(patched):
     assert all(value == 0.0 for value in eng.features.values())
 
 
+def test_refresh_preserves_selected_device(monkeypatch):
+    devices = [(1, "Mic A"), (2, "Mic B")]
+    monkeypatch.setattr(engine_mod, "refresh_devices", lambda: None)
+    monkeypatch.setattr(engine_mod, "list_input_devices", lambda: list(devices))
+    eng = AudioEngine(FakeDispatcher())
+    eng.select_device(1)  # Mic B
+    devices[:] = [(5, "Mic B"), (9, "Mic A")]  # re-enumeration reshuffles indices
+    eng.refresh()
+    assert eng.devices[eng.device_pos][1] == "Mic B"
+
+
 def test_onset_sensitivity_forwards_and_clamps(patched):
     eng = AudioEngine(FakeDispatcher())
     eng.set_onset_sensitivity(0.8)
