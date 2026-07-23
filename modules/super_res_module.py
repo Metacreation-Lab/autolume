@@ -29,7 +29,7 @@ class SuperResModule:
         self.result_path = args.result_path
         self.input_path = args.input_path
         self.models = ['Quality','Balance','Fast']
-        self.model_selected = 0
+        self.model_selected = 1
         self.model_type = self.models[self.model_selected]
         self.width = args.width
         self.height = args.height
