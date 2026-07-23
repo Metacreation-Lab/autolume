@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+      <url>
+        <loc>https://metacreation-lab.github.io/2.17.0/</loc>
+      </url>
+      <url>
+        <loc>https://metacreation-lab.github.io/2.17.0/prepare/</loc>
+      </url>
+      <url>
+        <loc>https://metacreation-lab.github.io/2.17.0/train/</loc>
+      </url>
+      <url>
+        <loc>https://metacreation-lab.github.io/2.17.0/train/training-aug/</loc>
+      </url>
+      <url>
+        <loc>https://metacreation-lab.github.io/2.17.0/perform/</loc>
+      </url>
+      <url>
+        <loc>https://metacreation-lab.github.io/2.17.0/tools/</loc>
+      </url>
+      <url>
+        <loc>https://metacreation-lab.github.io/2.17.0/feedback/</loc>
+      </url>
+</urlset>
