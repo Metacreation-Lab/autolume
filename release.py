@@ -32,6 +32,11 @@ portable no-install ``.tar.xz``.
 ``--package-only`` skips the
 PyInstaller build and packages an existing ``dist/`` output.
 
+Pass ``--split`` to slice any ``dist/`` artifact over GitHub's 2 GiB
+release-asset limit into ``<name>.partNN`` pieces (recombine with
+``cat <name>.part* > <name>``). It runs after packaging when combined with
+``--package``, or standalone against an existing ``dist/``.
+
 PyInstaller cannot cross-compile: each artifact must be built on its own OS.
 """
 
@@ -68,6 +73,12 @@ NEEDS_JIT_TOOLCHAIN = IS_WINDOWS or IS_LINUX
 PRECOMPILED_OPS_DIR = REPO / "build" / "torch_extensions"
 
 APPIMAGETOOL_URL = "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
+
+# GitHub rejects release assets larger than 2 GiB. --split slices anything over
+# that into <name>.partNN pieces safely under the limit; recombine with
+# `cat <name>.part* > <name>` (Linux/macOS) or `copy /b` on Windows.
+GITHUB_ASSET_LIMIT = 2 * 1024**3
+SPLIT_CHUNK = 1900 * 1024**2
 
 # torch 2.8 wheels ship a libomp.dylib stamped minos 14.0 despite the
 # macosx_11_0_arm64 tag (pytorch/pytorch#177140), so the bundle cannot load on
@@ -660,6 +671,49 @@ def package() -> None:
         package_windows()
 
 
+def split_large_artifacts() -> None:
+    """Split any dist/ file over GitHub's 2 GiB asset limit into upload-ready parts.
+
+    Only top-level files in dist/ are considered (the unpacked bundle folder is
+    left alone). Each oversized file is sliced into <name>.partNN pieces under
+    the limit; the original is kept (upload only the parts). Streamed in a small
+    buffer so it never loads a whole part into memory.
+    """
+    dist = REPO / "dist"
+    if not dist.exists():
+        fail(f"{dist} not found; build or package first")
+
+    oversized = [
+        f for f in sorted(dist.iterdir())
+        if f.is_file() and f.stat().st_size > GITHUB_ASSET_LIMIT
+    ]
+    if not oversized:
+        print(f"No dist/ artifact exceeds {GITHUB_ASSET_LIMIT // 1024**3} GiB; nothing to split")
+        return
+
+    buffer_size = 8 * 1024**2
+    for artifact in oversized:
+        size = artifact.stat().st_size
+        parts = -(-size // SPLIT_CHUNK)  # ceil division
+        print(f"Splitting {artifact.name} ({size / 1024**3:.1f} GiB) into {parts} parts...")
+        with open(artifact, "rb") as src:
+            index = 0
+            part = None
+            written = 0
+            while chunk := src.read(buffer_size):
+                if part is None or written >= SPLIT_CHUNK:
+                    if part is not None:
+                        part.close()
+                    index += 1
+                    part = open(artifact.with_name(f"{artifact.name}.part{index:03d}"), "wb")
+                    written = 0
+                part.write(chunk)
+                written += len(chunk)
+            if part is not None:
+                part.close()
+        print(f"  split into {index} parts; recombine with `cat {artifact.name}.part* > {artifact.name}`")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build the Autolume PyInstaller release.")
     parser.add_argument(
@@ -678,6 +732,12 @@ def main() -> None:
              "an existing .dmg",
     )
     parser.add_argument(
+        "--split", action="store_true",
+        help="slice any dist/ artifact over GitHub's 2 GiB asset limit into "
+             ".partNN pieces (keeping the original); combine with --package or "
+             "run alone against an existing dist/",
+    )
+    parser.add_argument(
         "--disable-crash-reporting", action="store_true",
         help="build without a crash report endpoint (no .env required); crash "
              "dialogs and uploads are disabled. For forks without their own "
@@ -688,12 +748,16 @@ def main() -> None:
     if opts.notarize and not IS_MACOS:
         fail("--notarize only applies to the macOS .dmg")
 
+    # --notarize and --split are post-steps that run against an existing dist/;
+    # requesting only those (without --package) must not trigger a rebuild.
+    post_only = opts.notarize or opts.split
+
     if opts.package_only:
         bundle = REPO / "dist" / ("Autolume.app" if IS_MACOS else "Autolume")
         if not bundle.exists():
             fail(f"{bundle} not found; run `uv run release.py` first")
         package()
-    elif opts.package or not opts.notarize:
+    elif opts.package or not post_only:
         print(f"Building Autolume for {SYSTEM}...")
         clean()
         if NEEDS_JIT_TOOLCHAIN:
@@ -714,6 +778,9 @@ def main() -> None:
         if not dmg.exists():
             fail(f"{dmg} not found; run `uv run release.py --package` first")
         notarize(dmg)
+
+    if opts.split:
+        split_large_artifacts()
 
 
 if __name__ == "__main__":

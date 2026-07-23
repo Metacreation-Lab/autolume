@@ -8,9 +8,7 @@ Explore features and published artworks on the [Autolume website](https://www.me
 
 Autolume is supported on Windows 10+, Ubuntu 24+, and macOS 14+ on Apple Silicon.
 
-For best performance, an Nvidia GPU is required (RTX 2070 or higher recommended).
-
-Linux users need to run Autolume from sources following the [development instructions](https://github.com/Metacreation-Lab/autolume/blob/main/README.md#development-instructions).
+For best performance, a Nvidia GPU is required (RTX 2070 or higher recommended).
 
 ### Apple Silicon limitations (macOS / MPS)
 
