@@ -181,6 +181,40 @@ At the bottom you can define the path where the presets are saved to and loaded 
 
 The OSC controls of this widget allow you to switch between presets in the current folder, by sending the name of the preset. Please note that you can rename your presets.
 
+## Audio Module
+
+The Audio Module turns live audio into control signals for your performance.
+
+Pick an input device from the dropdown and press Enable. While the module is running it analyzes the incoming audio and publishes five values, updated every frame:
+
+| Address | Meaning |
+| --- | --- |
+| `/audio/level` | Overall loudness |
+| `/audio/bass` | Low frequency energy |
+| `/audio/mid` | Mid frequency energy |
+| `/audio/high` | High frequency energy |
+| `/audio/onset` | Fires on percussive hits |
+
+All values range from 0 to 1 and adapt automatically to the input level.
+
+To map a value, open the OSC menu of any widget, enable OSC for a parameter and pick the audio address from the dropdown. The addresses appear in every OSC address picker while the module is running. For example, map `/audio/bass` to the speed of a loop to make motion follow the music.
+
+If a device is plugged in after Autolume starts, press Refresh to rescan.
+
+### Capturing computer audio
+
+The input list shows any virtual audio device, so you can capture system audio by installing a loopback driver such as [BlackHole](https://existential.audio/blackhole/) (macOS) or [VB-Cable](https://vb-audio.com/Cable/) (Windows).
+
+On macOS, route sound to BlackHole while keeping your speakers active:
+
+1. Open **Audio MIDI Setup** (found in /Applications/Utilities/).
+2. Click **+** at the bottom left and choose **Create Multi-Output Device**.
+3. Check both your speakers and **BlackHole** in the device list.
+4. Open **System Settings → Sound** and set the Multi-Output Device as the output.
+5. In Autolume, pick **BlackHole** from the Audio Module input dropdown and press Enable.
+
+macOS treats BlackHole as a microphone input, so the app needs Microphone permission. When running from source, the terminal that launched Autolume must have that permission. If permission is denied, macOS delivers silence rather than an error. So if the meters stay flat after enabling, check **System Settings → Privacy & Security → Microphone**.
+
 ## OSC
 
 Autolume allows users to control parameters using its interface but also provides the option to control parameters using [OSC](https://www.google.com/url?q=https://ccrma.stanford.edu/groups/osc/index.html&sa=D&source=editors&ust=1769724592307780&usg=AOvVaw0M9rZhdAGtobHhNvfkNj2x). This allows you to control parameters in Autolume using other software, such as TouchDesigner, Max/MSP, or Processing. The OSC interface is available for all parameters on the Perform screen. Most widgets have an OSC menu similar to the following:
