@@ -8,9 +8,7 @@ For detailed documentation and demos look at the [Metacreation Lab Website](http
 
 ## Downloads
 
-[➡️ Download for Windows and macOS](https://github.com/Metacreation-Lab/autolume/releases/latest)
-
-Linux users need to run Autolume from sources following the [development instructions](#development-instructions).
+[➡️ Download for Windows, macOS and Linux](https://github.com/Metacreation-Lab/autolume/releases/latest)
 
 ## Examples
 
