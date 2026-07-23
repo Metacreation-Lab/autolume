@@ -18,7 +18,7 @@ from widgets.native_browser_widget import NativeBrowserWidget
 from widgets.help_icon_widget import HelpIconWidget
 
 args = EasyDict(result_path="", input_path=[""], model_type="Balance",
-                outscale=3, width=4096, height=4096, sharpen_scale=1, scale_mode=0)
+                outscale=3, width=4096, height=4096, sharpen_scale=1, scale_mode=1)
 scale_factor = ['1', '2', '3', '4', '5', '6', '7', '8']
 
 logger = logging.getLogger(__name__)
@@ -39,7 +39,7 @@ class SuperResModule:
         self.app = menu.app
         # self.show_help = False  
         self.browser = NativeBrowserWidget()
-        self.scale_mode = 0
+        self.scale_mode = args.scale_mode
         self.running = False
         self.writer = None
         self.reader = None
