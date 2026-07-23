@@ -25,7 +25,7 @@ augs = ["ADA", "DiffAUG"]
 ada_pipes = ['blit', 'geom', 'color', 'filter', 'noise', 'cutout', 'bg', 'bgc', 'bgcf', 'bgcfn', 'bgcfnc']
 diffaug_pipes = ['color,translation,cutout', 'color,translation', 'color,cutout', 'color',
                  'translation', 'cutout,translation', 'cutout']
-configs = ['auto', 'stylegan2', 'paper256', 'paper512', 'paper1024', 'cifar']
+configs = ['stylegan2', 'stylegan3-t', 'stylegan3-r']
 # Mirrors augpipe_specs in train.py; used to recover the pipe name from
 # the augment_kwargs flags stored in a run's training_options.json.
 augpipe_specs = {
@@ -55,7 +55,7 @@ class TrainingModule:
         self.save_path = str(data_path("training-runs"))
         self.data_path = str(data_path("datasets"))
         self.app = menu.app
-        self.config = 1
+        self.config = 0
         self.resume_pkl = ""
         self.aug = 0
         self.ada_pipe = 7
@@ -82,7 +82,7 @@ class TrainingModule:
         self.training_process = LoggedProcess(target=train_main, args=(self.queue, self.reply), name='training')
         self._zipfile = None
         self.gamma = 10
-        self.glr = 0.002
+        self.glr = ''  # blank = use the selected config's default G learning rate
         self.dlr = 0.002
         self.snap = 4
         self.mirror = False # Mirror only accesible in preprocessing module
@@ -150,11 +150,17 @@ class TrainingModule:
                     self.ada_pipe = ada_pipes.index(name)
                     break
 
-        run_dir = options.get("run_dir")
-        if run_dir:
-            tokens = Path(run_dir).name.split("-")
-            if len(tokens) > 1 and tokens[1] in configs:
-                self.config = configs.index(tokens[1])
+        # Infer the config preset from the resolved generator options rather
+        # than the run directory name. use_radial_filters/conv_kernel are only
+        # written to G_kwargs by the stylegan3-r branch in train.py.
+        class_name = options.get("G_kwargs", {}).get("class_name", "")
+        if class_name:
+            if "stylegan3" not in class_name:
+                self.config = configs.index("stylegan2")
+            elif options["G_kwargs"].get("use_radial_filters"):
+                self.config = configs.index("stylegan3-r")
+            else:
+                self.config = configs.index("stylegan3-t")
 
         gamma = options.get("loss_kwargs", {}).get("r1_gamma")
         if isinstance(gamma, (int, float)):
@@ -162,7 +168,7 @@ class TrainingModule:
 
         glr = options.get("G_opt_kwargs", {}).get("lr")
         if isinstance(glr, (int, float)):
-            self.glr = float(glr)
+            self.glr = repr(glr)
 
         dlr = options.get("D_opt_kwargs", {}).get("lr")
         if isinstance(dlr, (int, float)):
@@ -174,6 +180,13 @@ class TrainingModule:
 
     def _start_training(self):
         target_data_path = self.data_path
+
+        # Blank (or unparseable) G learning rate means "use the config default",
+        # which train.py resolves from cfg when glr is None.
+        try:
+            glr = float(self.glr) if self.glr.strip() else None
+        except ValueError:
+            glr = None
 
         kwargs = dnnlib.EasyDict(
             outdir=self.save_path,
@@ -196,9 +209,9 @@ class TrainingModule:
             batch_gpu=self.batch_size//1, #gpus param?
             cbase=32768,
             cmax=512,
-            glr=self.glr,
+            glr=glr,
             dlr=self.dlr,
-            map_depth=8,
+            map_depth=None,
             mbstd_group=MBSTD_GROUP,
             initstrength=None,
             projected=False,
@@ -376,7 +389,19 @@ class TrainingModule:
 
             if advanced_header_open:
                 imgui.text("Generator Learning Rate")
-                changed, value = imgui_utils.input_float("##Generator Learning Rate", self.glr, format='%.6f')
+                glr_default = '0.002' if configs[self.config] == 'stylegan2' else '0.0025'
+                changed, value = imgui_utils.input_text(
+                    "##Generator Learning Rate", self.glr, buffer_length=64,
+                    flags=imgui.INPUT_TEXT_CHARS_DECIMAL)
+                if self.glr == '':
+                    # Overlay a dimmed "default: <value>" hint over the empty
+                    # field so it's clear it can be left blank. The hint is drawn
+                    # on top, not stored in the editable buffer.
+                    rect_min = imgui.get_item_rect_min()
+                    pad = imgui.get_style().frame_padding
+                    color = imgui.get_color_u32_rgba(*imgui.get_style().colors[imgui.COLOR_TEXT_DISABLED])
+                    imgui.get_window_draw_list().add_text(
+                        rect_min[0] + pad.x, rect_min[1] + pad.y, color, f'default: {glr_default}')
                 if changed and not training_active:
                     self.glr = value
 

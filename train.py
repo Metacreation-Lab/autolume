@@ -229,8 +229,8 @@ def main(queue, reply):
         c = dnnlib.EasyDict() # Main config dict.
         reply.put(['Configuring Models...', False])
         c.G_kwargs = dnnlib.EasyDict(class_name=None, z_dim=opts.z_dim, w_dim=opts.w_dim, mapping_kwargs=dnnlib.EasyDict())
-        c.G_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=[0, 0.99], eps=1e-8)
-        c.D_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=[0, 0.99], eps=1e-8)
+        c.G_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=[0.0, 0.99], eps=1e-8)
+        c.D_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=[0.0, 0.99], eps=1e-8)
         c.loss_kwargs = dnnlib.EasyDict(class_name='training.losses.scratch_loss.StyleGAN2Loss', kd_l1_lambda=opts.kd_l1_lambda, kd_lpips_lambda=opts.kd_lpips_lambda, kd_mode=opts.kd_mode,
                                         content_aware_KD=opts.content_aware_kd, LPIPS_IMAGE_SIZE=opts.lpips_image_size)
         c.data_loader_kwargs = dnnlib.EasyDict(pin_memory=True, prefetch_factor=2)
