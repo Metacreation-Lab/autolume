@@ -92,3 +92,16 @@ def test_disable_clears_features(patched):
     eng.disable()
     assert not eng.enabled
     assert all(value == 0.0 for value in eng.features.values())
+
+
+def test_onset_sensitivity_forwards_and_clamps(patched):
+    eng = AudioEngine(FakeDispatcher())
+    eng.set_onset_sensitivity(0.8)
+    eng.enable()
+    assert eng.extractor.onset_sensitivity == 0.8
+    eng.set_onset_sensitivity(0.2)
+    assert eng.extractor.onset_sensitivity == 0.2
+    eng.set_onset_sensitivity(5.0)
+    assert eng.onset_sensitivity == 1.0
+    eng.set_onset_sensitivity(-1.0)
+    assert eng.onset_sensitivity == 0.0

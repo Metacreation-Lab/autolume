@@ -9,6 +9,17 @@ FEATURE_NAMES = ["level", "bass", "mid", "high", "onset"]
 # Band edges in Hz. high runs to Nyquist.
 BANDS = {"bass": (20, 150), "mid": (150, 2000), "high": (2000, None)}
 
+# Onset never fires below this raw RMS level, so pure silence cannot trigger it.
+# This is a fixed floor, not a user control.
+ONSET_SILENCE_FLOOR = 0.01
+
+# Onset sensitivity runs 0 (off) to 1 (many hits). Above 0 it maps to the
+# spectral-flux threshold as mean + K*std, with K interpolated MAX -> MIN.
+# Exactly 0 disables onset entirely. Default keeps K near 3.4.
+ONSET_SENSITIVITY_DEFAULT = 0.65
+ONSET_K_MIN = 1.0
+ONSET_K_MAX = 8.0
+
 
 class AutoGain:
     """Normalize a nonnegative value to 0-1 against a decaying running max."""
@@ -42,9 +53,10 @@ class Smoother:
 class FeatureExtractor:
     """Compute normalized scalar features from the latest mono sample window."""
 
-    def __init__(self, sample_rate, n_fft=2048):
+    def __init__(self, sample_rate, n_fft=2048, onset_sensitivity=ONSET_SENSITIVITY_DEFAULT):
         self.sample_rate = sample_rate
         self.n_fft = n_fft
+        self.onset_sensitivity = onset_sensitivity
         self._window = np.hanning(n_fft).astype(np.float32)
         self._freqs = np.fft.rfftfreq(n_fft, 1.0 / sample_rate)
         self._band_masks = {}
@@ -71,10 +83,10 @@ class FeatureExtractor:
 
         features = {name: self._smoothers[name](self._gains[name](value))
                     for name, value in raw.items()}
-        features["onset"] = self._detect_onset(mag)
+        features["onset"] = self._detect_onset(mag, raw["level"])
         return features, mag
 
-    def _detect_onset(self, mag):
+    def _detect_onset(self, mag, level):
         if self._prev_mag is None:
             self._prev_mag = mag
             return 0.0
@@ -84,9 +96,11 @@ class FeatureExtractor:
         onset = 0.0
         if self._refractory > 0:
             self._refractory -= 1
-        elif len(self._flux_history) >= 10:
+        elif (self.onset_sensitivity > 0.0 and len(self._flux_history) >= 10
+              and level >= ONSET_SILENCE_FLOOR):
+            k = ONSET_K_MAX - self.onset_sensitivity * (ONSET_K_MAX - ONSET_K_MIN)
             history = np.array(self._flux_history)
-            threshold = history.mean() + 1.5 * history.std()
+            threshold = history.mean() + k * history.std()
             if flux > threshold and flux > 1e-4:
                 onset = 1.0
                 self._refractory = 5
