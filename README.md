@@ -35,11 +35,14 @@ For examples of artworks created with Autolume see: https://www.metacreation.net
 - CUDA ([download link](https://developer.nvidia.com/cuda-12-8-0-download-archive))
   - Minimum components: CUDA Development + CUDA Runtime
 - FFmpeg: `sudo apt install ffmpeg`
+- PortAudio runtime (for audio input): `sudo apt install libportaudio2`
 
 #### macOS
 
 - FFmpeg: `brew install ffmpeg`
 - Command Line Tools for Xcode: `xcode-select --install`
+
+On macOS and Windows, PortAudio ships inside the `sounddevice` wheel, so no extra install is needed for audio input.
 
 ### Initial setup
 

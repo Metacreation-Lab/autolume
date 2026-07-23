@@ -27,6 +27,7 @@ autolume/
   release.py                  # Cross-platform release script (drives PyInstaller)
 
   architectures/              # Generator/discriminator network definitions
+  audio/                      # Audio capture and analysis (sounddevice, numpy)
   bending/                    # Network bending operators applied at inference
   dnnlib/                     # Vendored NVIDIA dnnlib (StyleGAN2/3)
   ganspace/                   # GANSpace PCA latent direction discovery
