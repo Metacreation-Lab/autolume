@@ -68,22 +68,20 @@ class AudioWidget:
             imgui.same_line()
             imgui.text("Not running")
 
+        spectrum_w = viz.app.font_size * 24
+        spectrum_h = imgui.get_text_line_height_with_spacing() * 2
         if engine.spectrum is not None:
             values = engine.spectrum.astype(np.float32)
             self._scale_max = 0.2 * float(values.max()) + 0.8 * self._scale_max
-            imgui.plot_histogram("##audio_spectrum", values,
-                                 graph_size=(viz.app.font_size * 24,
-                                             imgui.get_text_line_height_with_spacing() * 2),
+            imgui.plot_histogram("##audio_spectrum", values, graph_size=(spectrum_w, spectrum_h),
                                  scale_min=0.0, scale_max=max(self._scale_max, 1e-6))
         else:
             imgui.plot_histogram("##audio_spectrum", np.zeros(64, dtype=np.float32),
-                                 graph_size=(viz.app.font_size * 24,
-                                             imgui.get_text_line_height_with_spacing() * 2),
-                                 scale_min=0.0, scale_max=1.0)
+                                 graph_size=(spectrum_w, spectrum_h), scale_min=0.0, scale_max=1.0)
 
         imgui.separator()
         meter_x = viz.app.font_size * 5
-        meter_w = viz.app.font_size * 10
+        meter_w = viz.app.font_size * 14
         with imgui_utils.grayed_out(not engine.enabled):
             for name in FEATURE_NAMES:
                 value = engine.features[name]
@@ -93,6 +91,13 @@ class AudioWidget:
                     self._onset_glow = max(value, self._onset_glow * 0.85)
                     color = ACTIVE_RED if engine.enabled and self._onset_glow > 0.05 else (0.5, 0.5, 0.5, 1.0)
                     self._dot(color)
+                    imgui.same_line()
+                    slider_w = meter_x + meter_w - imgui.get_cursor_pos_x()
+                    with imgui_utils.item_width(slider_w):
+                        changed, sensitivity = imgui.slider_float(
+                            "##onset_sensitivity", engine.onset_sensitivity, 0.0, 1.0, "Sensitivity %.2f")
+                        if changed:
+                            engine.set_onset_sensitivity(sensitivity)
                 else:
                     imgui.progress_bar(value, (meter_w, 0), "")
                 imgui.same_line(meter_x + meter_w + viz.app.font_size)

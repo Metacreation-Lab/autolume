@@ -54,3 +54,25 @@ def test_onset_fires_on_burst_after_silence():
     assert features["onset"] == 1.0
     features, _ = extractor.compute(sine(200, amplitude=0.9))
     assert features["onset"] == 0.0  # refractory
+
+
+def test_onset_gated_by_silence_floor():
+    # A burst whose RMS sits under the silence floor must not fire, whatever the flux.
+    extractor = FeatureExtractor(SR)
+    for _ in range(15):
+        features, _ = extractor.compute(np.zeros(N_FFT, dtype=np.float32))
+    features, _ = extractor.compute(sine(200, amplitude=0.01))  # RMS ~0.007 < floor
+    assert features["onset"] == 0.0
+
+
+def test_onset_sensitivity_reduces_triggers():
+    # Same input, fewer onsets at low sensitivity than at high sensitivity.
+    rng = np.random.default_rng(1)
+    frames = [rng.uniform(-0.5, 0.5, N_FFT).astype(np.float32) for _ in range(120)]
+
+    def count(sensitivity):
+        extractor = FeatureExtractor(SR, onset_sensitivity=sensitivity)
+        return sum(extractor.compute(frame)[0]["onset"] for frame in frames)
+
+    assert count(0.0) == 0  # sensitivity 0 disables onset entirely
+    assert count(1.0) > 0  # the loose end fires on the same input

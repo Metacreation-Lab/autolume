@@ -183,6 +183,8 @@ The OSC controls of this widget allow you to switch between presets in the curre
 
 ## Audio Module
 
+![](assets/live-module-audio-module-01.png)
+
 The Audio Module turns live audio into control signals for your performance.
 
 Pick an input device from the dropdown and press Enable. While the module is running it analyzes the incoming audio and publishes five values, updated every frame:
@@ -196,6 +198,8 @@ Pick an input device from the dropdown and press Enable. While the module is run
 | `/audio/onset` | Fires on percussive hits |
 
 All values range from 0 to 1 and adapt automatically to the input level.
+
+`/audio/onset` reacts to transients such as drum hits. Use the **Onset sensitivity** slider to tune how easily it fires. Lower it if onset triggers too often on busy music, raise it if it misses hits you want. Setting it to zero turns onset off.
 
 To map a value, open the OSC menu of any widget, enable OSC for a parameter and pick the audio address from the dropdown. The addresses appear in every OSC address picker while the module is running. For example, map `/audio/bass` to the speed of a loop to make motion follow the music.
 

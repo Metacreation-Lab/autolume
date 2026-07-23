@@ -4,7 +4,8 @@ import logging
 
 from audio.capture import (AudioStream, AudioStreamError, list_input_devices,
                            refresh_devices)
-from audio.features import FEATURE_NAMES, FeatureExtractor
+from audio.features import (FEATURE_NAMES, ONSET_SENSITIVITY_DEFAULT,
+                            FeatureExtractor)
 from audio.publisher import FeaturePublisher
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,7 @@ class AudioEngine:
         self.error = None
         self.features = {name: 0.0 for name in FEATURE_NAMES}
         self.spectrum = None
+        self.onset_sensitivity = ONSET_SENSITIVITY_DEFAULT
         self._compute_warned = False
 
     @property
@@ -36,6 +38,11 @@ class AudioEngine:
         if not self.enabled:
             self.device_pos = pos
 
+    def set_onset_sensitivity(self, value):
+        self.onset_sensitivity = min(1.0, max(0.0, value))
+        if self.extractor is not None:
+            self.extractor.onset_sensitivity = self.onset_sensitivity
+
     def enable(self):
         self.error = None
         self._compute_warned = False
@@ -45,7 +52,8 @@ class AudioEngine:
         index, label = self.devices[self.device_pos]
         try:
             self.stream = AudioStream(index)
-            self.extractor = FeatureExtractor(self.stream.sample_rate)
+            self.extractor = FeatureExtractor(self.stream.sample_rate,
+                                              onset_sensitivity=self.onset_sensitivity)
         except AudioStreamError as exc:
             self.error = str(exc)
             self.stream = None
