@@ -16,6 +16,8 @@ Linux users need to run Autolume from sources following the [development instruc
 
 Training a model on macOS is expected to be extremely slow and impractical for any resolution above 64x64.
 
+StyleGAN3 models are not supported on macOS as they perform too poorly on this platform.
+
 ## Downloading Autolume
 
 Get the latest release from GitHub: [Download at github.com](https://github.com/Metacreation-Lab/autolume/releases/latest)

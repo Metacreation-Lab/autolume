@@ -6,6 +6,7 @@ import time
 
 import imgui
 
+from utils import device_utils
 from utils.downloads import download_file, load_catalog
 from utils.gui_utils import imgui_utils
 
@@ -19,6 +20,9 @@ class ModelDownloadWidget:
         self.models_dir = models_dir
         self.on_complete = on_complete
         self.catalog = load_catalog()
+        # StyleGAN3 is unusably slow on the MPS backend, so hide those models on Apple Silicon.
+        if device_utils.get_device().type == 'mps':
+            self.catalog = [e for e in self.catalog if not e['architecture'].startswith('stylegan3')]
         self.show_browser = False
         # Dropdown that opened the catalog, auto-selected when its download finishes.
         self.requester = None
