@@ -66,3 +66,14 @@ def test_seed_y_end_to_end_through_menu():
     w.seed_osc_menu.use_osc["seed y"] = True
     w.seed_osc_menu.funcs["seed y"]("/pad/y", 0.6)
     assert w.latent.y == 0.6
+
+
+def test_seed_mapping_expression_end_to_end():
+    w = make_widget()
+    menu = w.seed_osc_menu
+    menu.use_osc["seed"] = True
+    menu.mappings["seed"] = "x*20"
+    menu.wrapped_funcs["seed"] = menu.map_func(menu.funcs["seed"], "seed")
+    menu.wrapped_funcs["seed"]("/fader", 0.25)
+    assert w.latent.x == 5.0
+    assert w.viz.errors == []
