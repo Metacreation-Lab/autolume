@@ -207,7 +207,7 @@ If a device is plugged in after Autolume starts, press Refresh to rescan.
 
 ### Capturing computer audio
 
-The input list shows any virtual audio device, so you can capture system audio by installing a loopback driver such as [BlackHole](https://existential.audio/blackhole/) (macOS) or [VB-Cable](https://vb-audio.com/Cable/) (Windows).
+The input list shows any virtual audio device, so you can capture system audio by installing a loopback driver such as [BlackHole](https://existential.audio/blackhole/) (macOS).
 
 On macOS, route sound to BlackHole while keeping your speakers active:
 
