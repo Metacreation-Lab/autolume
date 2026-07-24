@@ -1,8 +1,6 @@
 import threading
 import time
 
-import pytest
-
 from autolume.live.core.generator import ModelHost, corner_seeds
 
 

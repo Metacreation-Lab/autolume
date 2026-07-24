@@ -5,8 +5,6 @@ osc server. The UI is not part of the runtime; it is one more producer
 of control events and one consumer of the preview mailbox.
 """
 
-import logging
-
 from autolume.live.core.control import ControlLoop
 from autolume.live.core.generator import ModelHost
 from autolume.live.core.engine import RenderLoop
@@ -14,8 +12,6 @@ from autolume.live.core.params import ControlState, to_render_params
 from autolume.live.core.sinks import PreviewMailbox
 from autolume.live.core.store import LatestValueStore
 from autolume.live.io.osc import OscInput
-
-logger = logging.getLogger(__name__)
 
 
 class Runtime:

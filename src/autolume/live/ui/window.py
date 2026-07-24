@@ -26,7 +26,6 @@ def _build_runner_params(runtime) -> hello_imgui.RunnerParams:
     )
     controls = hello_imgui.DockableWindow()
     controls.label = "Controls"
-    controls.dock_space_name = "MainDockSpace"
     controls.gui_function = perform.gui
     view = hello_imgui.DockableWindow()
     view.label = "Preview"

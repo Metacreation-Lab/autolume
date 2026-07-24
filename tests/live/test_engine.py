@@ -43,7 +43,7 @@ def test_render_one_feeds_sinks_with_increasing_seq():
     mailbox = PreviewMailbox()
     loop = RenderLoop(make_store(fps_cap=0), FakeHost(FakeModel()), [mailbox])
     assert loop.render_one() is True
-    seq1, frame1 = mailbox.latest()
+    seq1, _ = mailbox.latest()
     assert loop.render_one() is True
     seq2, frame2 = mailbox.latest()
     assert seq2 == seq1 + 1
