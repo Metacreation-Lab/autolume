@@ -75,6 +75,7 @@ dependencies = [
     { name = "imageio" },
     { name = "imageio-ffmpeg" },
     { name = "imgui" },
+    { name = "imgui-bundle" },
     { name = "kmeans-pytorch" },
     { name = "kornia" },
     { name = "lmdb" },
@@ -126,6 +127,7 @@ requires-dist = [
     { name = "imageio", specifier = "==2.31.5" },
     { name = "imageio-ffmpeg", specifier = "==0.4.9" },
     { name = "imgui", specifier = "==1.4.1" },
+    { name = "imgui-bundle", specifier = ">=1.92.801" },
     { name = "kmeans-pytorch", specifier = "==0.3" },
     { name = "kornia", specifier = "==0.7.0" },
     { name = "lmdb", specifier = "==1.5.1" },
@@ -519,6 +521,21 @@ name = "imgui"
 version = "1.4.1"
 source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/c7/15/1384f3a7bb52a2666f364e3d3ea02cfeae6fe1e9b72d3a3684d18ae7f10c/imgui-1.4.1.tar.gz", hash = "sha256:012fd8d581171bd04ebfa649ca92c7f382a2806c7027bc7c31c8b39899899e7d", size = 855055, upload-time = "2021-11-10T14:14:28.248Z" }
+
+[[package]]
+name = "imgui-bundle"
+version = "1.92.801"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/c1/b9/4217165c5fa832dbe662c2d96f0810aa7280eb2cc3bcae2b7ac4260e3f08/imgui_bundle-1.92.801.tar.gz", hash = "sha256:7d790708affe7476969d397784b40eb91760a201ce752131e5bedf4d514e3a45", size = 48343289, upload-time = "2026-05-13T13:34:13.972Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0e/6e/6c3410fe48ff09e1a37d122e57177e1ea4a2eed0728f2650cb3f68cc2c84/imgui_bundle-1.92.801-cp312-cp312-macosx_14_0_arm64.whl", hash = "sha256:bab99cc3f65febca9fdc58b62ebdd57a387ab5ae1b2923b9734ad23bfb5af8bd", size = 10160297, upload-time = "2026-05-13T13:33:09.037Z" },
+    { url = "https://files.pythonhosted.org/packages/d2/fb/ade9538a47d8ace618cebd447de2d7c2c540a03eede908fb800f54ca9b76/imgui_bundle-1.92.801-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:a325c52ab7bf13db0be807c8bcdce333f6c8233ef230cdc2c216b42392e04f42", size = 12239382, upload-time = "2026-05-13T13:33:12.226Z" },
+    { url = "https://files.pythonhosted.org/packages/17/c4/4ff13f08b54c0acb804b549a130b9c35491be04aa333b8cd1cc5197d9738/imgui_bundle-1.92.801-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:236821210d1afad1db51a01a54149a346040866e288cf42429208693b63fc686", size = 13337854, upload-time = "2026-05-13T13:33:15.283Z" },
+    { url = "https://files.pythonhosted.org/packages/d9/43/0429c1cd9b55912b67fa7dec8ce4bfeb18412a2a95e70f6e8449c93e241f/imgui_bundle-1.92.801-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:7ce5d9f5240fb37134d8f93bde3466d8b2dc1b7461166d8db7b4e88beeb9864a", size = 13292818, upload-time = "2026-05-13T13:33:18.461Z" },
+    { url = "https://files.pythonhosted.org/packages/fc/51/ac98270731facf697f1dd867a8e5cec651651c487f1c8ceba888c695561b/imgui_bundle-1.92.801-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:bdba78cc0383648dbce5784131c7f3ebcf7c9be2114f33096c67d0987ed5ba2f", size = 14198585, upload-time = "2026-05-13T13:33:21.63Z" },
+    { url = "https://files.pythonhosted.org/packages/20/e8/2dd88ec1d8e4557b04b2393b545cbaa74138eaae03a394eb790ca19030cd/imgui_bundle-1.92.801-cp312-cp312-win_amd64.whl", hash = "sha256:266518a51510d5a37168a5ab156fb116424b141eb8fc21cbfd6f659b7245f40b", size = 11219820, upload-time = "2026-05-13T13:33:24.852Z" },
+    { url = "https://files.pythonhosted.org/packages/b1/c8/2bef9dfab0a295bf95ca1104406e1337affd96b95749fc8da4dfd88844d8/imgui_bundle-1.92.801-cp312-cp312-win_arm64.whl", hash = "sha256:c199f36e85f2953ad1f618e18e68580b4c00dc8ec90a0d0823d22b1ee9a78621", size = 10730354, upload-time = "2026-05-13T13:33:27.697Z" },
+]
 
 [[package]]
 name = "iniconfig"

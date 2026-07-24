@@ -14,6 +14,7 @@ dependencies = [
     "glfw>=2.8.0",
     "imageio-ffmpeg==0.4.9",
     "imageio==2.31.5",
+    "imgui-bundle>=1.92.801",
     "imgui==1.4.1",
     "kmeans-pytorch==0.3",
     "kornia==0.7.0",
