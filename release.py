@@ -318,7 +318,7 @@ def build_args(disable_crash_reporting: bool = False) -> tuple[list[str], str | 
         (REPO / "architectures", "architectures"),
         (REPO / "assets", "assets"),
         (REPO / "training", "training"),
-        (REPO / "torch_utils", "torch_utils"),
+        (REPO / "src" / "torch_utils", "torch_utils"),
         (REPO / "sr_models" / "Fast.pt", "sr_models"),  # Quality/Balance download on first use
         (clip / "bpe_simple_vocab_16e6.txt.gz", "clip"),
     ]
