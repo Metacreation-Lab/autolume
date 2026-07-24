@@ -119,7 +119,9 @@ The GUI and Render rows show the frame time and frame rate of the interface and 
 
 ![](assets/live-module-adjust-input-01.png)
 
-This widget allows you to move the latent vector in adjustable directions. By default, the sliders correspond to random directions, each controllable also through OSC. You can also use Browse (on the right) to load the vectors calculated from the [Feature Extractor](tools.md#feature-extractor) tool so that all the sliders correspond to the extracted features. It is also possible to load individual vectors for each slider or to randomize directions altogether or individually.
+This widget moves the latent vector along adjustable directions. Click **Extract features** to compute meaningful directions for the loaded model using the [GANSpace](https://github.com/harskish/ganspace) method. Extraction runs in the background and takes a few minutes. It only needs to be done once per model. The directions are stored with your Autolume data and load automatically whenever you open that model.
+
+Each slider controls one direction and can also be driven through OSC. **Randomize** replaces a slider's direction with a random one and **Reset** restores the extracted direction. Before extraction the sliders hold random directions, so the widget is usable with any model right away.
 
 ## Layer Transformations
 
