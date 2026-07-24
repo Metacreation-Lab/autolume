@@ -125,17 +125,16 @@ class LatentWidget:
         with imgui_utils.item_width(viz.app.font_size * 8):
             _changed, seed = imgui.input_int("##seed", seed)
         if _changed:
-            self.latent.x = seed
-            self.latent.y = 0
+            self.latent.x = float(seed)
+            self.latent.y = 0.0
         imgui.same_line()
-        frac_x = self.latent.x - round(self.latent.x)
-        frac_y = self.latent.y - round(self.latent.y)
         with imgui_utils.item_width(viz.app.font_size * 5):
-            _changed, (new_frac_x, new_frac_y) = imgui.input_float2('##frac', frac_x, frac_y, format='%+.2f',
-                                                                    flags=imgui.INPUT_TEXT_ENTER_RETURNS_TRUE)
+            _changed, (new_x, new_y) = imgui.input_float2('##xy', self.latent.x, self.latent.y,
+                                                          format='%.2f',
+                                                          flags=imgui.INPUT_TEXT_ENTER_RETURNS_TRUE)
         if _changed:
-            self.latent.x += new_frac_x - frac_x
-            self.latent.y += new_frac_y - frac_y
+            self.latent.x = new_x
+            self.latent.y = new_y
         imgui.same_line(spacing=0)
         _clicked, dragging, dx, dy = imgui_utils.drag_button('Drag', width=viz.app.button_w)
         if dragging:
