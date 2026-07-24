@@ -313,13 +313,30 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#downloading-autolume" class="md-nav__link">
+  <a href="#installation" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Downloading Autolume
+        Installation
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Installation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#brew-macos" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Brew (macOS)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -610,13 +627,30 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#downloading-autolume" class="md-nav__link">
+  <a href="#installation" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Downloading Autolume
+        Installation
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Installation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#brew-macos" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Brew (macOS)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -669,8 +703,19 @@
 <h3 id="apple-silicon-limitations-macos-mps">Apple Silicon limitations (macOS / MPS)<a class="headerlink" href="#apple-silicon-limitations-macos-mps" title="Permanent link">&para;</a></h3>
 <p>Training a model on macOS is expected to be extremely slow and impractical for any resolution above 64x64.</p>
 <p>StyleGAN3 models are not supported on macOS as they perform too poorly on this platform.</p>
-<h2 id="downloading-autolume">Downloading Autolume<a class="headerlink" href="#downloading-autolume" title="Permanent link">&para;</a></h2>
-<p>Get the latest release from GitHub: <a href="https://github.com/Metacreation-Lab/autolume/releases/latest">Download at github.com</a></p>
+<h2 id="installation">Installation<a class="headerlink" href="#installation" title="Permanent link">&para;</a></h2>
+<p><a href="https://github.com/Metacreation-Lab/autolume/releases/latest">➡️ Download for Windows, macOS and Linux</a></p>
+<h3 id="brew-macos">Brew (macOS)<a class="headerlink" href="#brew-macos" title="Permanent link">&para;</a></h3>
+<p>Add and trust the brew tap (one time)</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>brew tap metacreation-lab/tap
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>brew trust metacreation-lab/tap
+</span></code></pre></div>
+<p>Install the app</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>brew install --cask autolume
+</span></code></pre></div>
+<p>Update the app</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>brew upgrade --cask autolume
+</span></code></pre></div>
 <h2 id="interface-overview">Interface overview<a class="headerlink" href="#interface-overview" title="Permanent link">&para;</a></h2>
 <p><img alt="" src="assets/overview-user-interface-01.jpg" /></p>
 <p>Autolume opens on the <strong>Perform</strong> screen after the startup splash. The navbar at the top of the window gives access to the four screens at any time:</p>
