@@ -76,3 +76,53 @@ def test_model_host_coalesces_to_newest_request():
     assert host.current().pkl_path == "/tmp/c.pkl"
     assert "/tmp/b.pkl" not in loaded
     host.stop()
+
+
+class _FakeMapping:
+    def __init__(self, w_avg, num_ws):
+        self.w_avg = w_avg
+        self.c_dim = 0
+        self._num_ws = num_ws
+
+    def __call__(self, z, c, truncation_psi):
+        import torch
+
+        return torch.zeros([z.shape[0], self._num_ws, self.w_avg.shape[0]])
+
+
+def _fake_generator(synthesis):
+    import torch
+
+    class FakeG:
+        z_dim = 4
+        mapping = _FakeMapping(torch.zeros([8]), num_ws=2)
+
+    FakeG.synthesis = staticmethod(synthesis)
+    return FakeG()
+
+
+def test_render_frame_with_tensor_synthesis_output():
+    import torch
+
+    from autolume.live.core.generator import LoadedModel
+
+    def synthesis(ws, noise_mode):
+        return torch.zeros([1, 3, 8, 8])
+
+    model = LoadedModel("/tmp/fake.pkl", _fake_generator(synthesis), torch.device("cpu"))
+    frame = model.render_frame(0.0, 0.0, 0.7)
+    assert frame.shape == (8, 8, 3)
+    assert frame.dtype.name == "uint8"
+
+
+def test_render_frame_with_tuple_synthesis_output():
+    import torch
+
+    from autolume.live.core.generator import LoadedModel
+
+    def synthesis(ws, noise_mode):
+        return torch.zeros([1, 3, 8, 8]), []
+
+    model = LoadedModel("/tmp/fake.pkl", _fake_generator(synthesis), torch.device("cpu"))
+    frame = model.render_frame(0.0, 0.0, 0.7)
+    assert frame.shape == (8, 8, 3)

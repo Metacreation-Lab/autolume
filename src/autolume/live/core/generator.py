@@ -82,8 +82,12 @@ class LoadedModel:
 
         with torch.no_grad():
             ws = self._blended_w(latent_x, latent_y, truncation_psi)
-            image = self.G.synthesis(ws.unsqueeze(0), noise_mode="const")[0]
-            image = (image * 127.5 + 128).clamp(0, 255).to(torch.uint8)
+            output = self.G.synthesis(ws.unsqueeze(0), noise_mode="const")
+            # Autolume's custom stylegan2 synthesis returns (img, rgb_list);
+            # standard stylegan synthesis returns the img tensor directly.
+            if isinstance(output, tuple):
+                output = output[0]
+            image = (output[0] * 127.5 + 128).clamp(0, 255).to(torch.uint8)
             return image.permute(1, 2, 0).contiguous().cpu().numpy()
 
 
