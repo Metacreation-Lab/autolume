@@ -42,9 +42,14 @@ class RenderLoop:
         if model is None:
             self._next_deadline = None
             return False
-        frame = model.render_frame(
-            params.latent_x, params.latent_y, params.truncation_psi
-        )
+        try:
+            frame = model.render_frame(
+                params.latent_x, params.latent_y, params.truncation_psi
+            )
+        except Exception:
+            logger.exception("Frame render failed")
+            self._next_deadline = None
+            return False
         self._seq += 1
         for sink in self._sinks:
             try:

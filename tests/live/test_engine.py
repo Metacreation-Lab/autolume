@@ -69,6 +69,27 @@ def test_sink_error_does_not_kill_loop():
     assert mailbox.latest()[1] is not None
 
 
+def test_render_error_does_not_kill_loop():
+    class FlakyModel:
+        pkl_path = "/tmp/flaky.pkl"
+
+        def __init__(self):
+            self.calls = 0
+
+        def render_frame(self, latent_x, latent_y, truncation_psi):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("synthesis exploded")
+            return np.full((4, 4, 3), 7, dtype=np.uint8)
+
+    mailbox = PreviewMailbox()
+    loop = RenderLoop(make_store(fps_cap=0), FakeHost(FlakyModel()), [mailbox])
+    assert loop.render_one() is False
+    assert mailbox.latest() == (0, None)
+    assert loop.render_one() is True
+    assert mailbox.latest()[1] is not None
+
+
 def test_thread_start_stop_produces_frames():
     mailbox = PreviewMailbox()
     loop = RenderLoop(make_store(fps_cap=0), FakeHost(FakeModel()), [mailbox])
