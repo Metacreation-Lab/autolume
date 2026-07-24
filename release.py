@@ -457,6 +457,9 @@ def post_build() -> None:
         info["NSHumanReadableCopyright"] = (
             "Metacreation Lab for Creative AI\nmetacreation.net/autolume"
         )
+        info["NSMicrophoneUsageDescription"] = (
+            "Autolume uses the microphone for audio-reactive visuals."
+        )
         plist.write_bytes(plistlib.dumps(info))
         # Editing Info.plist invalidates the bundle signature; re-sign the
         # outer bundle (nested binaries are untouched and stay valid).
