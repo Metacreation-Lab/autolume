@@ -589,6 +589,7 @@ class Renderer:
             synthesis_kwargs = dnnlib.EasyDict(noise_mode=noise_mode, force_fp32=force_fp32)
             cache_key = (G.synthesis, tuple(sorted(synthesis_kwargs.items())))
             torch.manual_seed(random_seed)
+            res.w_dim = int(G.w_dim)
             w += self.to_device(direction)
             out, manip_layers, = self.run_synthesis_net( w, capture_layer=layer_name, transforms=latent_transforms,
                                                  adjustments=adjustments, noise_adjustments=noise_adjustments, ratios=ratios, use_superres=use_superres,global_noise=global_noise,
