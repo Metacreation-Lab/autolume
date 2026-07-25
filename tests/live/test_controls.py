@@ -4,6 +4,8 @@ The widgets themselves cannot be exercised: imgui-bundle's null backend
 asserts at runtime, so everything below stops at the module boundary.
 """
 
+import struct
+
 import pytest
 
 from autolume.live.core.params import REGISTRY, Binding, ParamKind
@@ -12,14 +14,22 @@ from autolume.live.ui.controls import (
     BINDING_COLOR,
     BINDING_ERROR_COLOR,
     BINDING_OFF_COLOR,
+    Override,
     binding_for,
     displayed_value,
     drag_bounds,
     indicator_color,
+    next_override,
     require_spec,
     slider_bounds,
+    values_agree,
     widget_events,
 )
+
+
+def _as_float32(value: float) -> float:
+    """The value as imgui would hand it back, rounded through a C float."""
+    return struct.unpack("f", struct.pack("f", value))[0]
 
 
 def _events(**flags):
@@ -97,11 +107,69 @@ def test_displayed_value_is_the_snapshot_when_nothing_is_held():
 
 
 def test_displayed_value_is_the_local_one_while_the_widget_is_held():
-    assert displayed_value({"latent_x": 0.9}, "latent_x", 0.5) == 0.9
+    held = {"latent_x": Override(0.9, 0.5)}
+    assert displayed_value(held, "latent_x", 0.5) == 0.9
 
 
 def test_displayed_value_of_one_parameter_does_not_leak_to_another():
-    assert displayed_value({"latent_x": 0.9}, "latent_y", 0.5) == 0.5
+    held = {"latent_x": Override(0.9, 0.5)}
+    assert displayed_value(held, "latent_y", 0.5) == 0.5
+
+
+def test_values_agree_at_the_precision_the_widget_works_in():
+    # imgui rounds through a C float, so the value coming back from a slider
+    # can differ from the stored double in the last bits and still be the very
+    # same value the performer asked for.
+    assert values_agree(0.1, _as_float32(0.1))
+    assert not values_agree(0.1, 0.2)
+
+
+def test_values_agree_exactly_on_whole_numbers():
+    # A seed two thousand apart is a different seed, however large it is.
+    assert not values_agree(2**31 - 1, 2**31 - 2001)
+    assert values_agree(7, 7)
+    assert values_agree(True, True)
+    assert not values_agree(True, False)
+
+
+def test_a_change_holds_the_value_against_the_stored_one():
+    assert next_override(None, 0.5, 0.9, changed=True, active=True) == Override(
+        0.9, 0.5
+    )
+
+
+def test_a_change_that_releases_in_the_same_frame_still_holds():
+    # Every checkbox click. The value only reaches the store on the next
+    # control tick, so dropping the hold here draws the old state for a frame.
+    assert next_override(None, False, True, changed=True, active=False) == Override(
+        True, False
+    )
+
+
+def test_the_hold_is_dropped_once_the_store_agrees():
+    held = Override(0.9, 0.5)
+    assert next_override(held, 0.9, 0.9, changed=False, active=True) is None
+
+
+def test_the_hold_outlasts_a_binding_writing_underneath_a_held_widget():
+    held = Override(0.9, 0.5)
+    assert next_override(held, 0.2, 0.9, changed=False, active=True) == held
+
+
+def test_the_hold_outlasts_a_release_while_the_value_is_still_in_flight():
+    held = Override(True, False)
+    assert next_override(held, False, True, changed=False, active=False) == held
+
+
+def test_the_hold_is_dropped_when_the_store_moves_on_after_release():
+    # Nothing else clears it: the widget may never be drawn again, and a
+    # binding driving this parameter would otherwise show a frozen number.
+    held = Override(0.9, 0.5)
+    assert next_override(held, 0.2, 0.9, changed=False, active=False) is None
+
+
+def test_nothing_held_stays_nothing():
+    assert next_override(None, 0.5, 0.5, changed=False, active=False) is None
 
 
 def test_an_untouched_widget_emits_nothing():

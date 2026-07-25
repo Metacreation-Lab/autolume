@@ -17,11 +17,12 @@ class PerformPanel:
         self._open_dialog: pfd.open_file | None = None
 
     def gui(self) -> None:
-        state = self._runtime.control_store.snapshot()
-        self._model_row(state)
-        self._latent_rows(state)
-        self._noise_rows(state)
-        self._render_rows(state)
+        # The binder's snapshot rather than one of our own, so the model row
+        # and the controls beside it always describe the same frame.
+        self._model_row(self._binder.state())
+        self._latent_rows()
+        self._noise_rows()
+        self._render_rows()
         self._status_row()
 
     def _emit(self, address: str, value) -> None:
@@ -48,34 +49,28 @@ class PerformPanel:
         if error:
             imgui.text_colored(imgui.ImVec4(1.0, 0.3, 0.3, 1.0), error)
 
-    def _latent_rows(self, state) -> None:
+    def _latent_rows(self) -> None:
         imgui.separator_text("Latent")
-        self._binder.drag_float("latent_x", "Latent x", state.latent_x)
-        self._binder.drag_float("latent_y", "Latent y", state.latent_y)
-        self._binder.checkbox("anim_playing", "Animate", state.anim_playing)
-        self._binder.slider_float("anim_speed_x", "Speed x", state.anim_speed_x)
-        self._binder.slider_float("anim_speed_y", "Speed y", state.anim_speed_y)
-        self._binder.slider_float(
-            "truncation_psi", "Truncation", state.truncation_psi
-        )
+        self._binder.drag_float("latent_x", "Latent x")
+        self._binder.drag_float("latent_y", "Latent y")
+        self._binder.checkbox("anim_playing", "Animate")
+        self._binder.slider_float("anim_speed_x", "Speed x")
+        self._binder.slider_float("anim_speed_y", "Speed y")
+        self._binder.slider_float("truncation_psi", "Truncation")
 
-    def _noise_rows(self, state) -> None:
+    def _noise_rows(self) -> None:
         imgui.separator_text("Noise")
-        self._binder.checkbox("noise_enabled", "Noise on", state.noise_enabled)
-        live = state.noise_enabled
-        self._binder.slider_float(
-            "global_noise", "Amount", state.global_noise, enabled=live
-        )
-        self._binder.drag_int(
-            "noise_seed", "Seed", state.noise_seed, enabled=live
-        )
-        self._binder.checkbox(
-            "noise_anim", "Animate noise", state.noise_anim, enabled=live
-        )
+        self._binder.checkbox("noise_enabled", "Noise on")
+        # What the box shows, not what the store holds, so the rows grey in the
+        # same frame as the click that greys them.
+        live = bool(self._binder.value("noise_enabled"))
+        self._binder.slider_float("global_noise", "Amount", enabled=live)
+        self._binder.drag_int("noise_seed", "Seed", enabled=live)
+        self._binder.checkbox("noise_anim", "Animate noise", enabled=live)
 
-    def _render_rows(self, state) -> None:
+    def _render_rows(self) -> None:
         imgui.separator_text("Render")
-        self._binder.slider_int("fps_cap", "Frame limit", state.fps_cap)
+        self._binder.slider_int("fps_cap", "Frame limit")
 
     def _status_row(self) -> None:
         imgui.separator()
