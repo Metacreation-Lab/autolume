@@ -34,6 +34,7 @@ from autolume.live.core.touch import TOUCH_BEGIN, TOUCH_END, TouchTracker
 logger = logging.getLogger(__name__)
 
 _QUEUE_LIMIT = 1024
+_GUARD_REPEAT_INTERVAL = 1000
 _EXPRESSION_LIMIT = 128
 _TOUCH_ADDRESSES = (TOUCH_BEGIN, TOUCH_END)
 
@@ -59,6 +60,7 @@ class ControlLoop:
         self._queue_lock = threading.Lock()
         self._expressions: dict[str, Callable[[float], float] | str] = {}
         self._logged_errors: set[tuple[str, str]] = set()
+        self._guard_hits: dict[tuple[str, str], int] = {}
         self._last_tick: float | None = None
         self._thread: threading.Thread | None = None
         self._running = threading.Event()
@@ -87,8 +89,9 @@ class ControlLoop:
             # it, so it is dropped and the rest of the drain goes through.
             try:
                 state, sources = self._apply(state, sources, event, now)
-            except Exception:
-                logger.exception("Dropping control event %r", event)
+            except Exception as exc:
+                key = (event.address, type(exc).__name__)
+                self._report_guard(key, "Dropping control event %r", event)
         state = integrate(state, dt)
 
         self._control_store.set(state)
@@ -114,8 +117,8 @@ class ControlLoop:
         while self._running.is_set():
             try:
                 self.tick()
-            except Exception:
-                logger.exception("Control tick failed")
+            except Exception as exc:
+                self._report_guard(("tick", type(exc).__name__), "Control tick failed")
             remaining = deadline - time.monotonic()
             if remaining > 0.0:
                 time.sleep(remaining)
@@ -138,10 +141,37 @@ class ControlLoop:
         state = apply_event(state, event)
         return self._drive_bindings(state, event.address, number, now), sources
 
+    def _report_guard(self, key: tuple[str, str], message: str, *args: object) -> None:
+        """Log a last resort guard hit, throttled to protect the tick budget.
+
+        The first hit of a `key` carries the full traceback, then only every
+        `_GUARD_REPEAT_INTERVAL`-th one reports, with the count it stands for.
+        Formatting a traceback costs hundreds of microseconds, so a poisonous
+        input arriving at 200 Hz would otherwise eat the heartbeat that these
+        guards exist to keep alive.
+
+        Must be called from an `except` block: the first report uses the
+        exception currently being handled.
+        """
+        count = self._guard_hits.get(key, 0) + 1
+        if count == 1 and len(self._guard_hits) >= _EXPRESSION_LIMIT:
+            self._guard_hits.clear()
+        self._guard_hits[key] = count
+        if count == 1:
+            logger.exception(message, *args)
+        elif count % _GUARD_REPEAT_INTERVAL == 0:
+            logger.error(
+                message + " (%d more suppressed)", *args, _GUARD_REPEAT_INTERVAL - 1
+            )
+
     def _track_touch(self, event: ControlEvent, now: float) -> None:
         name = event.value
-        # Only registry parameters can be held, which also bounds the tracker
-        # against an open OSC port sending arbitrary names.
+        # Touch is a UI concept. Accepting it from anywhere else would let an
+        # open OSC port wedge a parameter by beginning a touch it never ends.
+        if event.source != "ui":
+            logger.debug("Ignoring %s from %s", event.address, event.source)
+            return
+        # Only registry parameters can be held, which also bounds the tracker.
         if not isinstance(name, str) or name not in REGISTRY:
             logger.debug("Ignoring touch event for %r", name)
             return

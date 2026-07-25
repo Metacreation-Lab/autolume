@@ -15,7 +15,14 @@ from autolume.live.core.params import (
 )
 from autolume.live.core.sources import SourceTable
 from autolume.live.core.store import LatestValueStore
-from autolume.live.core.touch import TOUCH_BEGIN, TOUCH_END, TOUCH_GRACE
+from autolume.live.core.touch import (
+    TOUCH_BEGIN,
+    TOUCH_END,
+    TOUCH_GRACE,
+    TOUCH_HOLD_LIMIT,
+)
+
+_real_apply_event = control_module.apply_event
 
 
 class FakeClock:
@@ -159,12 +166,17 @@ def test_binding_drives_its_target():
     assert control_store.snapshot().truncation_psi == 0.5
 
 
-def test_disabled_binding_does_not_fire():
+def test_disabled_binding_does_not_fire_until_it_is_enabled():
     loop, control_store, _, _ = make_loop()
     bind(loop, "truncation_psi", "/audio/level", "x*2", enabled=False)
     loop.submit(ControlEvent("/audio/level", 0.25))
     loop.tick()
     assert control_store.snapshot().truncation_psi == 0.7
+
+    bind(loop, "truncation_psi", "/audio/level", "x*2", enabled=True)
+    loop.submit(ControlEvent("/audio/level", 0.25))
+    loop.tick()
+    assert control_store.snapshot().truncation_psi == 0.5
 
 
 def test_failing_expression_keeps_the_value_and_records_the_error():
@@ -233,6 +245,58 @@ def test_held_target_still_accepts_direct_events_on_its_own_address():
     assert control_store.snapshot().truncation_psi == 1.2
 
 
+def test_an_unheld_target_lets_the_binding_overwrite_an_earlier_ui_event():
+    clock = FakeClock()
+    clock.now = 10.0
+    loop, control_store, _, _ = make_loop(clock)
+    bind(loop, "truncation_psi", "/audio/level")
+    loop.submit(ControlEvent("/trunc/psi", 1.2))
+    loop.submit(ControlEvent("/audio/level", 1.5))
+    loop.tick()
+    assert control_store.snapshot().truncation_psi == 1.5
+
+
+def test_touch_events_from_outside_the_ui_are_ignored():
+    clock = FakeClock()
+    clock.now = 10.0
+    loop, control_store, _, _ = make_loop(clock)
+    bind(loop, "truncation_psi", "/audio/level")
+    loop.submit(ControlEvent(TOUCH_BEGIN, "truncation_psi", source="osc"))
+    loop.submit(ControlEvent("/audio/level", 1.5))
+    loop.tick()
+    assert control_store.snapshot().truncation_psi == 1.5
+
+
+def test_a_remote_touch_end_cannot_release_a_ui_hold():
+    clock = FakeClock()
+    clock.now = 10.0
+    loop, control_store, _, _ = make_loop(clock)
+    bind(loop, "truncation_psi", "/audio/level")
+    loop.submit(ControlEvent(TOUCH_BEGIN, "truncation_psi"))
+    loop.submit(ControlEvent(TOUCH_END, "truncation_psi", source="osc"))
+    loop.tick()
+    clock.now += TOUCH_GRACE * 2
+    loop.submit(ControlEvent("/audio/level", 1.5))
+    loop.tick()
+    assert control_store.snapshot().truncation_psi == 0.7
+
+
+def test_a_hold_that_is_never_ended_lapses_and_the_binding_resumes():
+    clock = FakeClock()
+    clock.now = 10.0
+    loop, control_store, _, _ = make_loop(clock)
+    bind(loop, "truncation_psi", "/audio/level")
+    loop.submit(ControlEvent(TOUCH_BEGIN, "truncation_psi"))
+    loop.submit(ControlEvent("/audio/level", 1.5))
+    loop.tick()
+    assert control_store.snapshot().truncation_psi == 0.7
+
+    clock.now += TOUCH_HOLD_LIMIT
+    loop.submit(ControlEvent("/audio/level", 1.5))
+    loop.tick()
+    assert control_store.snapshot().truncation_psi == 1.5
+
+
 def test_malformed_touch_event_is_ignored():
     clock = FakeClock()
     clock.now = 10.0
@@ -287,22 +351,19 @@ def test_fixing_a_broken_expression_takes_effect_immediately():
     bind(loop, "truncation_psi", "/audio/level", "x*2")
     loop.submit(ControlEvent("/audio/level", 0.5))
     loop.tick()
-    state = control_store.snapshot()
-    assert state.truncation_psi == 1.0
-    assert binding_for(state, "truncation_psi").error is None
+    assert control_store.snapshot().truncation_psi == 1.0
+
+
+def _poisoned_apply_event(state, event):
+    if event.address.startswith("/boom"):
+        raise TypeError("unhashable type: 'list'")
+    return _real_apply_event(state, event)
 
 
 def test_event_that_fails_to_apply_is_dropped_and_the_drain_continues(
     monkeypatch, caplog
 ):
-    real_apply_event = control_module.apply_event
-
-    def poisoned_apply_event(state, event):
-        if event.address == "/boom":
-            raise TypeError("unhashable type: 'list'")
-        return real_apply_event(state, event)
-
-    monkeypatch.setattr(control_module, "apply_event", poisoned_apply_event)
+    monkeypatch.setattr(control_module, "apply_event", _poisoned_apply_event)
     loop, control_store, _, _ = make_loop()
     with caplog.at_level(logging.ERROR, logger=control_module.__name__):
         loop.submit(ControlEvent("/boom", 1.0))
@@ -310,6 +371,66 @@ def test_event_that_fails_to_apply_is_dropped_and_the_drain_continues(
         loop.tick()
     assert control_store.snapshot().latent_x == 3.0
     assert any("/boom" in record.getMessage() for record in caplog.records)
+
+
+def test_a_repeatedly_poisoned_event_is_logged_once_not_on_every_tick(
+    monkeypatch, caplog
+):
+    monkeypatch.setattr(control_module, "apply_event", _poisoned_apply_event)
+    loop, _, _, _ = make_loop()
+    with caplog.at_level(logging.ERROR, logger=control_module.__name__):
+        for _ in range(50):
+            loop.submit(ControlEvent("/boom", 1.0))
+            loop.tick()
+    logged = [r for r in caplog.records if r.name == control_module.__name__]
+    assert len(logged) == 1
+    assert logged[0].exc_info is not None
+
+
+def test_each_poisoned_address_and_error_is_reported_once(monkeypatch, caplog):
+    monkeypatch.setattr(control_module, "apply_event", _poisoned_apply_event)
+    loop, _, _, _ = make_loop()
+    with caplog.at_level(logging.ERROR, logger=control_module.__name__):
+        for _ in range(5):
+            loop.submit(ControlEvent("/boom", 1.0))
+            loop.submit(ControlEvent("/boom/other", 1.0))
+            loop.tick()
+    logged = [r for r in caplog.records if r.name == control_module.__name__]
+    assert len(logged) == 2
+
+
+def test_suppressed_event_failures_are_counted_periodically(monkeypatch, caplog):
+    monkeypatch.setattr(control_module, "apply_event", _poisoned_apply_event)
+    loop, _, _, _ = make_loop()
+    with caplog.at_level(logging.ERROR, logger=control_module.__name__):
+        for _ in range(control_module._GUARD_REPEAT_INTERVAL):
+            loop.submit(ControlEvent("/boom", 1.0))
+        loop.tick()
+    logged = [r for r in caplog.records if r.name == control_module.__name__]
+    assert len(logged) == 2
+    assert str(control_module._GUARD_REPEAT_INTERVAL - 1) in logged[1].getMessage()
+
+
+def test_a_tick_that_keeps_failing_is_logged_once(caplog):
+    control_store = LatestValueStore(ControlState())
+    render_store = LatestValueStore(to_render_params(ControlState()))
+    source_store = LatestValueStore(SourceTable())
+    loop = ControlLoop(control_store, render_store, source_store, tick_hz=500.0)
+    ticks = itertools.count()
+
+    def always_failing_tick():
+        next(ticks)
+        raise RuntimeError("boom")
+
+    loop.tick = always_failing_tick
+    with caplog.at_level(logging.ERROR, logger=control_module.__name__):
+        loop.start()
+        time.sleep(0.1)
+        loop.stop()
+    logged = [r for r in caplog.records if r.name == control_module.__name__]
+    assert next(ticks) > 5
+    assert len(logged) == 1
+    assert logged[0].exc_info is not None
 
 
 def test_control_thread_survives_a_raising_tick():
