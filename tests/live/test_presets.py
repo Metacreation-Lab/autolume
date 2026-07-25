@@ -1,22 +1,33 @@
+import base64
 import dataclasses
 import json
 import logging
-from pathlib import PureWindowsPath
+from pathlib import Path, PureWindowsPath
 
+import numpy as np
 import pytest
 
 from autolume.live.core import params, presets
 from autolume.live.core.events import ControlEvent
 from autolume.live.core.mapping import apply_event
-from autolume.live.core.params import Binding, ControlState
+from autolume.live.core.params import Binding, ControlState, Keyframe
 
 PRESETS_LOGGER = "autolume.live.core.presets"
 
+# Exact multiples of 0.5 and 0.25 so the float32 round trip loses nothing: the
+# round trip test below compares whole `ControlState` equality, and a value
+# that is not exactly representable in float32 would make that assertion flaky.
+SAMPLE_LATENT_VEC = tuple(i * 0.5 for i in range(512))
+SAMPLE_KEYFRAME_VEC = tuple(i * -0.25 for i in range(512))
+
 # Every preset parameter differs from its default, so a round trip that keeps a
 # value by accident cannot pass. `test_sample_state_is_non_default_everywhere`
-# holds this honest as the registry grows.
+# holds this honest as the registry grows. `keyframe_count` and `keyframes`
+# agree on four stops on purpose: the two used to be able to disagree after a
+# preset load (see mapping.py's `_apply_preset`), and a fixture that itself
+# held them out of sync would hide a regression instead of catching one.
 SAMPLE = ControlState(
-    pkl_path="/models/look.pkl",
+    pkl_path=None,
     latent_x=1.5,
     latent_y=-2.25,
     anim_playing=True,
@@ -43,11 +54,38 @@ SAMPLE = ControlState(
     pulse_address="/loop/pulse",
     pulse_ip="10.0.0.5",
     pulse_port=9000,
+    latent_vec=SAMPLE_LATENT_VEC,
+    keyframes=(
+        Keyframe("seed", 0.0, 0.0, (), True),
+        Keyframe("vec", 1.0, -1.0, SAMPLE_KEYFRAME_VEC, False),
+        Keyframe("seed", 2.0, 1.5, (), True),
+        Keyframe("seed", 3.0, 0.0, (), True),
+    ),
     bindings=(
         Binding("truncation_psi", "/audio/bass", "0.4+x"),
         Binding("latent_x", "/ctl/1", "x*2", enabled=False),
     ),
 )
+
+
+def _use_data_root(monkeypatch, root: Path) -> None:
+    """Point `data_path` at `root` so model resolution is hermetic in tests."""
+    from utils import user_data
+
+    monkeypatch.setattr(user_data, "_prefs", {"version": 1, "data_root": str(root)})
+    monkeypatch.setattr(user_data, "_data_root", str(root))
+
+
+def _array_payload(values, **overrides) -> dict:
+    payload = {
+        "dtype": "float32",
+        "shape": [len(values)],
+        "b64": base64.b64encode(
+            np.asarray(values, dtype="<f4").tobytes()
+        ).decode("ascii"),
+    }
+    payload.update(overrides)
+    return payload
 
 
 def warnings_from(caplog):
@@ -71,6 +109,8 @@ def test_sample_state_is_non_default_everywhere():
     for name in preset_names():
         assert getattr(SAMPLE, name) != getattr(default, name), name
     assert SAMPLE.bindings != default.bindings
+    assert SAMPLE.latent_vec != default.latent_vec
+    assert SAMPLE.keyframes != default.keyframes
 
 
 def test_apply_address_is_reserved():
@@ -79,6 +119,11 @@ def test_apply_address_is_reserved():
 
 
 def test_round_trip_restores_every_preset_param_and_bindings(tmp_path):
+    """Also the vector and the mixed seed/vec keyframe loop, exactly.
+
+    `SAMPLE` carries a latent vector and a loop mixing both keyframe kinds, so
+    this one round trip covers the format's whole payload, not just scalars.
+    """
     path = tmp_path / "look.json"
     presets.save(SAMPLE, path)
     assert apply_payload(ControlState(), presets.load(path)) == SAMPLE
@@ -91,9 +136,19 @@ def test_saved_file_is_json_with_the_expected_envelope(tmp_path):
         payload = json.load(fp)
     assert payload["format"] == presets.FORMAT
     assert payload["version"] == presets.VERSION
+    assert payload["model"] is None
     assert set(payload["params"]) == preset_names()
+    assert "pkl_path" not in payload["params"]
     assert payload["params"]["truncation_psi"] == 1.25
     assert payload["params"]["noise_enabled"] is False
+    assert payload["latent_vec"]["dtype"] == "float32"
+    assert payload["latent_vec"]["shape"] == [512]
+    assert len(payload["keyframes"]) == 4
+    assert payload["keyframes"][0] == {
+        "kind": "seed", "seed_x": 0.0, "seed_y": 0.0, "project": True, "vec": None
+    }
+    assert payload["keyframes"][1]["kind"] == "vec"
+    assert payload["keyframes"][1]["vec"]["dtype"] == "float32"
     assert payload["bindings"] == [
         {
             "target": "truncation_psi",
@@ -139,18 +194,26 @@ def test_a_preset_with_no_record_for_a_parameter_leaves_it_off_the_network(tmp_p
     assert state.bindings == ()
 
 
-def test_the_frame_limit_is_a_property_of_the_machine_not_of_the_look(tmp_path):
+def test_the_frame_limit_is_a_property_of_the_machine_not_of_the_look(
+    tmp_path, monkeypatch
+):
     """A look saved on a laptop capped at 30 must not cap the stage machine.
 
     The model path is the opposite case and stays persisted: it is what the
     look looks like, while the frame limit is what the hardware can do.
     """
+    _use_data_root(monkeypatch, tmp_path)
+    model_file = tmp_path / "models" / "look.pkl"
+    model_file.parent.mkdir(parents=True)
+    model_file.write_bytes(b"")
+    state = dataclasses.replace(SAMPLE, fps_cap=30, pkl_path=str(model_file))
     path = tmp_path / "look.json"
-    presets.save(dataclasses.replace(SAMPLE, fps_cap=30), path)
+    presets.save(state, path)
     payload = presets.load(path)
     assert "fps_cap" not in payload["params"]
-    assert "pkl_path" in payload["params"]
+    assert payload["model"] == {"name": "look.pkl"}
     assert apply_payload(ControlState(fps_cap=144), payload).fps_cap == 144
+    assert presets.from_payload(payload).params["pkl_path"] == str(model_file)
 
 
 def test_params_written_follow_the_registry_preset_flag(monkeypatch):
@@ -170,9 +233,9 @@ def test_non_preset_param_in_file_is_skipped_on_read(monkeypatch, caplog):
         params.REGISTRY, "latent_y", dataclasses.replace(spec, preset=False)
     )
     with caplog.at_level(logging.WARNING):
-        values, _ = presets.from_payload(payload)
-    assert "latent_y" not in values
-    assert values["latent_x"] == 1.5
+        data = presets.from_payload(payload)
+    assert "latent_y" not in data.params
+    assert data.params["latent_x"] == 1.5
     assert any("latent_y" in message for message in warnings_from(caplog))
 
 
@@ -187,17 +250,18 @@ def test_binding_error_is_never_written_and_loads_as_none(tmp_path):
         raw = fp.read()
     assert "boom" not in raw
     assert "error" not in json.loads(raw)["bindings"][0]
-    _, bindings = presets.from_payload(json.loads(raw))
+    bindings = presets.from_payload(json.loads(raw)).bindings
     assert bindings[0].error is None
 
 
-def test_path_values_are_str_wrapped(tmp_path):
+def test_path_values_are_str_wrapped(tmp_path, monkeypatch):
+    _use_data_root(monkeypatch, tmp_path)
     state = dataclasses.replace(SAMPLE, pkl_path=PureWindowsPath(r"C:\models\m.pkl"))
     path = tmp_path / "look.json"
     presets.save(state, path)
     with open(path, "r", encoding="utf-8") as fp:
-        stored = json.load(fp)["params"]["pkl_path"]
-    assert stored == r"C:\models\m.pkl"
+        stored = json.load(fp)["model"]
+    assert stored == {"path": r"C:\models\m.pkl"}
 
 
 def test_unknown_param_key_is_skipped_and_the_rest_applied(caplog):
@@ -220,10 +284,11 @@ def test_missing_param_key_keeps_the_current_value():
 
 
 def test_null_param_value_keeps_the_current_value():
-    payload = presets.to_payload(dataclasses.replace(SAMPLE, pkl_path=None))
-    assert payload["params"]["pkl_path"] is None
-    state = apply_payload(ControlState(pkl_path="/models/current.pkl"), payload)
-    assert state.pkl_path == "/models/current.pkl"
+    payload = presets.to_payload(SAMPLE)
+    payload["params"]["truncation_psi"] = None
+    state = apply_payload(ControlState(truncation_psi=0.42), payload)
+    assert state.truncation_psi == 0.42
+    assert state.latent_x == 1.5
 
 
 def test_newer_version_loads_with_a_warning(tmp_path, caplog):
@@ -333,7 +398,7 @@ def test_duplicate_binding_targets_collapse_to_one(caplog):
         {"target": "truncation_psi", "source": "/ctl/9", "expression": "x"}
     )
     with caplog.at_level(logging.WARNING):
-        _, bindings = presets.from_payload(payload)
+        bindings = presets.from_payload(payload).bindings
     assert [b.target for b in bindings] == ["truncation_psi", "latent_x"]
     assert bindings[0].source == "/audio/bass"
     assert any("truncation_psi" in message for message in warnings_from(caplog))
@@ -354,7 +419,7 @@ def test_malformed_binding_entry_is_skipped(entry, caplog):
     payload = presets.to_payload(SAMPLE)
     payload["bindings"].append(entry)
     with caplog.at_level(logging.WARNING):
-        _, bindings = presets.from_payload(payload)
+        bindings = presets.from_payload(payload).bindings
     assert [b.target for b in bindings] == ["truncation_psi", "latent_x"]
     assert warnings_from(caplog)
 
@@ -362,7 +427,7 @@ def test_malformed_binding_entry_is_skipped(entry, caplog):
 def test_binding_fields_default_when_absent():
     payload = presets.to_payload(SAMPLE)
     payload["bindings"] = [{"target": "latent_y", "source": "/ctl/2"}]
-    _, bindings = presets.from_payload(payload)
+    bindings = presets.from_payload(payload).bindings
     assert bindings == (Binding("latent_y", "/ctl/2", "x", True, None),)
 
 
@@ -371,17 +436,259 @@ def test_bad_expression_is_kept_so_it_can_be_fixed():
     payload["bindings"] = [
         {"target": "latent_y", "source": "/ctl/2", "expression": "x +* 2"}
     ]
-    _, bindings = presets.from_payload(payload)
+    bindings = presets.from_payload(payload).bindings
     assert bindings[0].expression == "x +* 2"
 
 
 def test_non_mapping_params_and_non_list_bindings_are_ignored(caplog):
     payload = {"format": presets.FORMAT, "version": 1, "params": 3, "bindings": "x"}
     with caplog.at_level(logging.WARNING):
-        values, bindings = presets.from_payload(payload)
-    assert values == {}
-    assert bindings == ()
+        data = presets.from_payload(payload)
+    assert data.params == {}
+    assert data.bindings == ()
+    assert data.latent_vec == ControlState().latent_vec
+    assert data.keyframes == ControlState().keyframes
+    assert data.missing_model is None
     assert len(warnings_from(caplog)) == 2
+
+
+# --- keyframe_count / keyframes divergence (bug fixed in mapping.py) -------
+
+
+def test_preset_apply_keeps_keyframe_count_and_keyframes_in_sync():
+    """Reproduces the bug: a preset used to be able to set one without the other.
+
+    `_apply_preset` (mapping.py) now derives `keyframe_count` from the loaded
+    `keyframes` tuple instead of applying the payload's scalar directly, so the
+    two can never disagree after a preset load.
+    """
+    payload = presets.to_payload(SAMPLE)
+    state = apply_payload(ControlState(), payload)
+    assert state.keyframe_count == len(state.keyframes) == 4
+
+
+def test_preset_apply_ignores_a_keyframe_count_that_disagrees_with_keyframes():
+    payload = presets.to_payload(SAMPLE)
+    # A hand edited or stale file: keyframe_count claims 3 but the keyframes
+    # list still holds 4 entries. The list wins.
+    payload["params"]["keyframe_count"] = 3
+    state = apply_payload(ControlState(), payload)
+    assert len(state.keyframes) == 4
+    assert state.keyframe_count == 4
+
+
+# --- latent_vec / keyframes defaults and array descriptor rejection -------
+
+
+def test_missing_latent_vec_and_keyframes_load_at_their_defaults():
+    payload = presets.to_payload(SAMPLE)
+    del payload["latent_vec"]
+    del payload["keyframes"]
+    data = presets.from_payload(payload)
+    assert data.latent_vec == ControlState().latent_vec
+    assert data.keyframes == ControlState().keyframes
+    state = apply_payload(ControlState(), payload)
+    assert state.latent_vec == ()
+    assert state.keyframes == ControlState().keyframes
+    assert state.keyframe_count == len(ControlState().keyframes)
+
+
+def test_array_wrong_dtype_is_rejected(caplog):
+    payload = presets.to_payload(SAMPLE)
+    payload["latent_vec"]["dtype"] = "float64"
+    with caplog.at_level(logging.WARNING):
+        data = presets.from_payload(payload)
+    assert data.latent_vec == ControlState().latent_vec
+    assert data.params["truncation_psi"] == 1.25
+    assert any("latent_vec" in m for m in warnings_from(caplog))
+
+
+def test_array_shape_and_byte_length_disagreement_is_rejected(caplog):
+    payload = presets.to_payload(SAMPLE)
+    payload["latent_vec"]["shape"] = [len(SAMPLE.latent_vec) + 1]
+    with caplog.at_level(logging.WARNING):
+        data = presets.from_payload(payload)
+    assert data.latent_vec == ControlState().latent_vec
+    assert data.params["truncation_psi"] == 1.25
+    assert any("latent_vec" in m for m in warnings_from(caplog))
+
+
+def test_array_undecodable_base64_is_rejected(caplog):
+    payload = presets.to_payload(SAMPLE)
+    payload["latent_vec"]["b64"] = "not base64 at all!!"
+    with caplog.at_level(logging.WARNING):
+        data = presets.from_payload(payload)
+    assert data.latent_vec == ControlState().latent_vec
+    assert data.params["truncation_psi"] == 1.25
+    assert any("latent_vec" in m for m in warnings_from(caplog))
+
+
+def test_array_non_finite_value_after_decode_is_rejected(caplog):
+    payload = presets.to_payload(SAMPLE)
+    corrupt = [float("nan")] + [0.0] * (len(SAMPLE.latent_vec) - 1)
+    payload["latent_vec"]["b64"] = base64.b64encode(
+        np.asarray(corrupt, dtype="<f4").tobytes()
+    ).decode("ascii")
+    with caplog.at_level(logging.WARNING):
+        data = presets.from_payload(payload)
+    assert data.latent_vec == ControlState().latent_vec
+    assert data.params["truncation_psi"] == 1.25
+    assert any("latent_vec" in m for m in warnings_from(caplog))
+
+
+def test_array_endianness_is_explicit_not_native():
+    """The wire format is always little-endian, regardless of the encoding
+    host's own native order.
+
+    There is no hardware here with a different native order, so this proves it
+    without one: build the same values from an array explicitly typed
+    big-endian and convert it the way the wire format requires. If the code
+    depended on the host's native order rather than forcing `<f4`, this
+    conversion could differ on a big-endian host; forcing it makes the bytes,
+    and therefore the decoded values, identical no matter where they came from.
+    """
+    values = (1.5, -2.25, 100.0, 0.0, -8.0, 0.25)
+    little_native = presets._encode_array(values)
+    big_source = np.asarray(values, dtype=">f4").astype("<f4")
+    big_twin = _array_payload(values, b64=base64.b64encode(big_source.tobytes()).decode("ascii"))
+    assert big_twin["b64"] == little_native["b64"]
+    assert presets._decode_array(big_twin, "x") == values
+    assert presets._decode_array(little_native, "x") == values
+
+
+# --- model reference --------------------------------------------------
+
+
+def test_model_under_models_folder_saves_as_a_name(tmp_path, monkeypatch):
+    _use_data_root(monkeypatch, tmp_path)
+    model_file = tmp_path / "models" / "rivers-1024.pkl"
+    model_file.parent.mkdir(parents=True)
+    model_file.write_bytes(b"")
+    payload = presets.to_payload(dataclasses.replace(SAMPLE, pkl_path=str(model_file)))
+    assert payload["model"] == {"name": "rivers-1024.pkl"}
+
+
+def test_model_outside_models_folder_saves_as_a_path(tmp_path, monkeypatch):
+    _use_data_root(monkeypatch, tmp_path)
+    (tmp_path / "models").mkdir()
+    outside = tmp_path / "elsewhere" / "rivers-1024.pkl"
+    outside.parent.mkdir()
+    outside.write_bytes(b"")
+    payload = presets.to_payload(dataclasses.replace(SAMPLE, pkl_path=str(outside)))
+    assert payload["model"] == {"path": str(outside)}
+
+
+def test_model_name_resolves_against_the_local_models_folder_on_load(
+    tmp_path, monkeypatch
+):
+    _use_data_root(monkeypatch, tmp_path)
+    model_file = tmp_path / "models" / "rivers-1024.pkl"
+    model_file.parent.mkdir(parents=True)
+    model_file.write_bytes(b"")
+    payload = presets.to_payload(SAMPLE)
+    payload["model"] = {"name": "rivers-1024.pkl"}
+    data = presets.from_payload(payload)
+    assert data.params["pkl_path"] == str(model_file)
+    assert data.missing_model is None
+
+
+def test_missing_model_name_reports_rather_than_raising(tmp_path, monkeypatch, caplog):
+    _use_data_root(monkeypatch, tmp_path)
+    (tmp_path / "models").mkdir()
+    payload = presets.to_payload(SAMPLE)
+    payload["model"] = {"name": "ghost.pkl"}
+    with caplog.at_level(logging.WARNING):
+        data = presets.from_payload(payload)
+    assert data.missing_model == "ghost.pkl"
+    assert "pkl_path" not in data.params
+    assert data.params["truncation_psi"] == 1.25
+    state = apply_payload(ControlState(pkl_path="/current/model.pkl"), payload)
+    assert state.pkl_path == "/current/model.pkl"
+
+
+def test_missing_model_path_reports_rather_than_raising(tmp_path, monkeypatch):
+    _use_data_root(monkeypatch, tmp_path)
+    payload = presets.to_payload(SAMPLE)
+    payload["model"] = {"path": str(tmp_path / "nowhere" / "ghost.pkl")}
+    data = presets.from_payload(payload)
+    assert data.missing_model == "ghost.pkl"
+    assert "pkl_path" not in data.params
+
+
+def test_null_or_missing_model_key_leaves_the_current_model_alone():
+    payload = presets.to_payload(SAMPLE)
+    payload["model"] = None
+    data = presets.from_payload(payload)
+    assert "pkl_path" not in data.params
+    assert data.missing_model is None
+    del payload["model"]
+    data = presets.from_payload(payload)
+    assert "pkl_path" not in data.params
+    assert data.missing_model is None
+    state = apply_payload(ControlState(pkl_path="/current/model.pkl"), payload)
+    assert state.pkl_path == "/current/model.pkl"
+
+
+def test_legacy_params_pkl_path_with_no_model_key_loads_without_raising(caplog):
+    """The one existing test preset, written in the older shape, still opens.
+
+    Its `params.pkl_path` is a non-preset key now and is ignored; its other
+    params and bindings load normally, and it arrives with no model.
+    """
+    payload = {
+        "format": presets.FORMAT,
+        "version": 1,
+        "params": {
+            "pkl_path": "/Users/ucodia/autolume/models/rivers-1024.pkl",
+            "truncation_psi": 1.1,
+        },
+        "bindings": [{"target": "latent_x", "source": "/ctl/1", "expression": "x"}],
+    }
+    with caplog.at_level(logging.WARNING):
+        data = presets.from_payload(payload)
+    assert "pkl_path" not in data.params
+    assert data.params["truncation_psi"] == 1.1
+    assert data.missing_model is None
+    assert data.bindings == (Binding("latent_x", "/ctl/1", "x"),)
+    state = apply_payload(ControlState(), payload)
+    assert state.pkl_path is None
+    assert state.truncation_psi == 1.1
+
+
+# --- hostile input never raises -----------------------------------------
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda p: p.__setitem__("model", "not a dict"),
+        lambda p: p.__setitem__("model", {"name": 12345}),
+        lambda p: p.__setitem__("model", {"path": 12345}),
+        lambda p: p.__setitem__("model", {}),
+        lambda p: p.__setitem__("latent_vec", "not a dict"),
+        lambda p: p.__setitem__(
+            "latent_vec", {"dtype": "float32", "shape": "bad", "b64": "AA=="}
+        ),
+        lambda p: p.__setitem__(
+            "latent_vec", {"dtype": "float32", "shape": [0], "b64": ""}
+        ),
+        lambda p: p.__setitem__(
+            "latent_vec", {"dtype": "float32", "shape": [-1], "b64": "AA=="}
+        ),
+        lambda p: p.__setitem__("keyframes", "not a list"),
+        lambda p: p.__setitem__("keyframes", []),
+        lambda p: p.__setitem__("keyframes", [None, 1, "x"]),
+        lambda p: p.__setitem__("keyframes", [{"kind": "vec"}]),
+        lambda p: p.__setitem__("keyframes", [{"kind": "nope"}]),
+        lambda p: p.__setitem__("keyframes", [{"kind": "seed", "seed_x": float("nan")}]),
+    ],
+)
+def test_nothing_in_the_read_path_raises_on_hostile_input(mutate):
+    payload = presets.to_payload(SAMPLE)
+    mutate(payload)
+    data = presets.from_payload(payload)
+    assert isinstance(data, presets.PresetData)
+    apply_payload(ControlState(), payload)
 
 
 def test_list_presets_returns_sorted_names_without_suffix(tmp_path):

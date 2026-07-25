@@ -79,19 +79,31 @@ def _apply_preset(state: ControlState, value: object) -> ControlState:
 
     Every value goes through `apply_value`, so a hand edited file cannot push a
     parameter out of range, and the caller only ever sees the finished state.
+
+    `keyframe_count` is not applied from `params`: it is derived from the
+    loaded `keyframes` tuple instead, here, so the two can never disagree the
+    way they used to when a preset set one without the other.
     """
     if not isinstance(value, dict):
         logger.warning("Ignoring non preset value %r on %s", value, PRESET_APPLY)
         return state
     try:
-        values, bindings = from_payload(value)
+        data = from_payload(value)
     except ValueError as exc:
         logger.warning("Ignoring malformed preset payload: %s", exc)
         return state
     applied = state
-    for name, param_value in values.items():
+    for name, param_value in data.params.items():
+        if name == "keyframe_count":
+            continue
         applied = apply_value(applied, name, param_value)
-    return dataclasses.replace(applied, bindings=bindings)
+    return dataclasses.replace(
+        applied,
+        bindings=data.bindings,
+        latent_vec=data.latent_vec,
+        keyframes=data.keyframes,
+        keyframe_count=len(data.keyframes),
+    )
 
 
 def _coerce_vector(raw: object) -> tuple[float, ...] | None:

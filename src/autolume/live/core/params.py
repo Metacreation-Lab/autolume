@@ -32,7 +32,9 @@ class ParamSpec:
 
 
 _SPECS = (
-    ParamSpec("pkl_path", ParamKind.STR, None, "/model/path"),
+    # Persisted separately as the preset's `model` key, not as a plain param:
+    # it needs path resolution a scalar value cannot express. See presets.py.
+    ParamSpec("pkl_path", ParamKind.STR, None, "/model/path", preset=False),
     ParamSpec("latent_x", ParamKind.FLOAT, 0.0, "/latent/x"),
     ParamSpec("latent_y", ParamKind.FLOAT, 0.0, "/latent/y"),
     ParamSpec("anim_playing", ParamKind.BOOL, False, "/anim/playing"),

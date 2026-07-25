@@ -25,6 +25,7 @@ _LIST_EMS = 10.0
 _LIST_INTERVAL = 1.0
 
 _NO_PRESETS = "No presets saved yet. Name one and press Save."
+_MISSING_MODEL_POPUP = "Missing model"
 
 
 def is_valid_name(name: str) -> bool:
@@ -54,11 +55,15 @@ class PresetsPanel:
         self._list_error: str | None = None
         self._names_cache: list[str] | None = None
         self._names_read = 0.0
+        # Name of the model a just loaded preset could not find, or None. Set
+        # alongside `imgui.open_popup`, cleared when the performer dismisses it.
+        self._missing_model: str | None = None
 
     def gui(self) -> None:
         self._save_row()
         self._preset_list()
         self._report()
+        self._missing_model_modal()
 
     def directory(self) -> Path:
         return self._directory if self._directory is not None else presets.preset_dir()
@@ -140,6 +145,33 @@ class PresetsPanel:
             return
         self._submit(presets.PRESET_APPLY, payload)
         self._message = f"Loaded {name}."
+        # Parsed a second time here, alongside the control thread's own parse,
+        # because reporting a missing model is a UI concern and the control
+        # thread has no channel back to this panel.
+        try:
+            missing = presets.from_payload(payload).missing_model
+        except ValueError:
+            missing = None
+        if missing is not None:
+            self._missing_model = missing
+            imgui.open_popup(_MISSING_MODEL_POPUP)
+
+    def _missing_model_modal(self) -> None:
+        if self._missing_model is None:
+            return
+        visible, _ = imgui.begin_popup_modal(
+            _MISSING_MODEL_POPUP, None, imgui.WindowFlags_.always_auto_resize
+        )
+        if not visible:
+            return
+        imgui.text_wrapped(
+            f"Model file {self._missing_model} is missing. "
+            "The preset loaded without it."
+        )
+        if imgui.button("OK"):
+            self._missing_model = None
+            imgui.close_current_popup()
+        imgui.end_popup()
 
     def report_error(self) -> str | None:
         """The failure the panel shows, the last action's before the listing's.
