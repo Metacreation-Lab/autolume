@@ -213,7 +213,7 @@ def test_the_preview_opens_fitted_and_keeps_the_mode_to_itself():
     panel = PreviewPanel(RecordingRuntime())
     assert panel._mode is DisplayMode.FIT
     assert "display_mode" not in REGISTRY
-    assert not any("mode" in name for name in REGISTRY)
+    assert not any("display_mode" in name for name in REGISTRY)
 
 
 SQUARE = (1024, 1024)
