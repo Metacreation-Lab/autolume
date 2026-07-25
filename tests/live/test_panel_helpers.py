@@ -199,9 +199,10 @@ def test_every_preview_status_says_something_the_bundled_font_can_draw():
 def test_the_display_modes_are_named_for_what_they_actually_do():
     """The old app called these "Raw" and "Fit" and had both backwards.
 
-    Its "Raw" kept the aspect ratio, which is what everyone means by fit, and
-    its "Fit" filled the area while distorting, which is stretching. Carrying
-    those names over would have carried the confusion with them.
+    Its "Raw" kept the aspect ratio and the native size, which is what everyone
+    means by fit, and its "Fit" grew the frame to meet the area, which is
+    stretching. Carrying those names over would have carried the confusion with
+    them.
     """
     assert [mode.value for mode in DisplayMode] == ["Fit", "Stretch"]
     assert "Raw" not in {mode.value for mode in DisplayMode}
@@ -217,6 +218,9 @@ def test_the_preview_opens_fitted_and_keeps_the_mode_to_itself():
 
 
 SQUARE = (1024, 1024)
+# Device pixels per point on a display that does not scale, which is what
+# these cases are stated in. The scaled display has tests of its own.
+ONE_TO_ONE = 1.0
 FIT = DisplayMode.FIT
 STRETCH = DisplayMode.STRETCH
 
@@ -224,9 +228,9 @@ STRETCH = DisplayMode.STRETCH
 def test_fit_scales_by_whichever_axis_runs_out_first():
     # A square frame in a wide panel is bounded by the height, and the width
     # left over is letterboxing.
-    assert displayed_size(SQUARE, (1200.0, 600.0), FIT) == (600, 600)
-    assert displayed_size(SQUARE, (600.0, 1200.0), FIT) == (600, 600)
-    assert displayed_size((1024, 512), (600.0, 600.0), FIT) == (600, 300)
+    assert displayed_size(SQUARE, (1200.0, 600.0), FIT, ONE_TO_ONE) == (600, 600)
+    assert displayed_size(SQUARE, (600.0, 1200.0), FIT, ONE_TO_ONE) == (600, 600)
+    assert displayed_size((1024, 512), (600.0, 600.0), FIT, ONE_TO_ONE) == (600, 300)
 
 
 def test_fit_never_magnifies_a_frame_smaller_than_the_panel():
@@ -236,37 +240,37 @@ def test_fit_never_magnifies_a_frame_smaller_than_the_panel():
     the size a model renders at is worth being able to see for what it is.
     This is the old app's "Raw" behaviour under a name that describes it.
     """
-    assert displayed_size((256, 256), (900.0, 900.0), FIT) == (256, 256)
-    assert displayed_size((256, 128), (900.0, 900.0), FIT) == (256, 128)
+    assert displayed_size((256, 256), (900.0, 900.0), FIT, ONE_TO_ONE) == (256, 256)
+    assert displayed_size((256, 128), (900.0, 900.0), FIT, ONE_TO_ONE) == (256, 128)
 
 
 def test_fit_leaves_a_frame_that_fits_exactly_alone():
     # The boundary between native and shrunk, from both sides.
-    assert displayed_size((600, 600), (600.0, 600.0), FIT) == (600, 600)
-    assert displayed_size((601, 601), (600.0, 600.0), FIT) == (600, 600)
-    assert displayed_size((599, 599), (600.0, 600.0), FIT) == (599, 599)
+    assert displayed_size((600, 600), (600.0, 600.0), FIT, ONE_TO_ONE) == (600, 600)
+    assert displayed_size((601, 601), (600.0, 600.0), FIT, ONE_TO_ONE) == (600, 600)
+    assert displayed_size((599, 599), (600.0, 600.0), FIT, ONE_TO_ONE) == (599, 599)
 
 
 def test_magnifying_is_the_only_thing_the_two_modes_disagree_about():
     # A square panel, so the shape cannot confuse the one real difference.
-    assert displayed_size((256, 256), (900.0, 900.0), STRETCH) == (900, 900)
-    assert displayed_size((256, 256), (900.0, 900.0), FIT) == (256, 256)
+    assert displayed_size((256, 256), (900.0, 900.0), STRETCH, ONE_TO_ONE) == (900, 900)
+    assert displayed_size((256, 256), (900.0, 900.0), FIT, ONE_TO_ONE) == (256, 256)
 
 
 def test_the_modes_agree_exactly_on_a_frame_too_big_for_the_panel():
     # Above native size Fit's cap never binds, so there is nothing left to
     # tell them apart. A Stretch that cropped or distorted would fail here.
     for area in ((1200.0, 600.0), (599.5, 601.5), (300.0, 900.0)):
-        assert displayed_size((1024, 1024), area, FIT) == displayed_size(
-            (1024, 1024), area, STRETCH
+        assert displayed_size((1024, 1024), area, FIT, ONE_TO_ONE) == displayed_size(
+            (1024, 1024), area, STRETCH, ONE_TO_ONE
         )
 
 
 def test_a_frame_smaller_than_the_panel_is_still_centred_in_it():
     # Both modes letterbox, so both leave room, and both split it evenly.
-    small = displayed_size((256, 256), (900.0, 700.0), FIT)
+    small = displayed_size((256, 256), (900.0, 700.0), FIT, ONE_TO_ONE)
     assert centred_offset(small, (900.0, 700.0)) == (322.0, 222.0)
-    grown = displayed_size((256, 256), (900.0, 700.0), STRETCH)
+    grown = displayed_size((256, 256), (900.0, 700.0), STRETCH, ONE_TO_ONE)
     assert grown == (700, 700)
     assert centred_offset(grown, (900.0, 700.0)) == (100.0, 0.0)
 
@@ -278,8 +282,11 @@ def test_stretch_keeps_the_aspect_ratio_whatever_shape_the_panel_is():
     wide frame leaves the height over. A mode that filled the panel would
     return the panel's own size in both cases and distort the picture.
     """
-    assert displayed_size(SQUARE, (1200.0, 600.0), STRETCH) == (600, 600)
-    assert displayed_size((1024, 512), (300.0, 900.0), STRETCH) == (300, 150)
+    assert displayed_size(SQUARE, (1200.0, 600.0), STRETCH, ONE_TO_ONE) == (600, 600)
+    assert displayed_size((1024, 512), (300.0, 900.0), STRETCH, ONE_TO_ONE) == (
+        300,
+        150,
+    )
 
 
 def test_neither_mode_ever_exceeds_the_panel_it_is_drawn_in():
@@ -294,7 +301,7 @@ def test_neither_mode_ever_exceeds_the_panel_it_is_drawn_in():
     for frame in frames:
         for area in areas:
             for mode in DisplayMode:
-                width, height = displayed_size(frame, area, mode)
+                width, height = displayed_size(frame, area, mode, ONE_TO_ONE)
                 left, top = centred_offset((width, height), area)
                 assert width <= area[0] and height <= area[1]
                 assert left + width <= area[0] and top + height <= area[1]
@@ -307,11 +314,11 @@ def test_a_panel_or_a_frame_with_no_area_leaves_nothing_to_draw():
     the first one arrives.
     """
     for mode in DisplayMode:
-        assert displayed_size(SQUARE, (0.0, 600.0), mode) == (0, 0)
-        assert displayed_size(SQUARE, (600.0, 0.0), mode) == (0, 0)
-        assert displayed_size(SQUARE, (-5.0, -5.0), mode) == (0, 0)
-        assert displayed_size((0, 0), (600.0, 600.0), mode) == (0, 0)
-        assert displayed_size((1024, 0), (600.0, 600.0), mode) == (0, 0)
+        assert displayed_size(SQUARE, (0.0, 600.0), mode, ONE_TO_ONE) == (0, 0)
+        assert displayed_size(SQUARE, (600.0, 0.0), mode, ONE_TO_ONE) == (0, 0)
+        assert displayed_size(SQUARE, (-5.0, -5.0), mode, ONE_TO_ONE) == (0, 0)
+        assert displayed_size((0, 0), (600.0, 600.0), mode, ONE_TO_ONE) == (0, 0)
+        assert displayed_size((1024, 0), (600.0, 600.0), mode, ONE_TO_ONE) == (0, 0)
 
 
 def test_only_a_viewport_with_a_frame_in_it_is_dimmed():
@@ -384,6 +391,21 @@ def test_magnifying_by_an_uneven_scale_keeps_every_pixel():
     assert bigger[0, :, 0].tolist() == [0, 0, 1, 2, 2, 3, 4]
 
 
+def test_the_whole_number_shortcut_agrees_with_the_general_case():
+    """The fast path is a shortcut, not a second definition of the result.
+
+    It runs on every frame at native size on a scaled display, so a divergence
+    here would be the ordinary case being wrong and the awkward one right.
+    """
+    frame = np.arange(4 * 5 * 3, dtype=np.uint8).reshape(4, 5, 3)
+    for size in ((10, 8), (15, 12), (5, 4)):
+        general = magnified(frame, (size[0] - 1, size[1]))
+        assert general.shape == (size[1], size[0] - 1, 3)
+        columns = (np.arange(size[0]) * 5) // size[0]
+        rows = (np.arange(size[1]) * 4) // size[1]
+        assert np.array_equal(magnified(frame, size), frame[rows[:, None], columns])
+
+
 def test_magnifying_gives_the_uploader_an_array_it_will_accept():
     """The frames arrive read-only and immvision rejects those outright."""
     frame = np.zeros((4, 4, 3), dtype=np.uint8)
@@ -393,24 +415,34 @@ def test_magnifying_gives_the_uploader_an_array_it_will_accept():
     assert bigger.flags.c_contiguous
 
 
-def test_a_frame_that_fits_is_drawn_one_pixel_per_pixel_on_a_scaled_display():
-    """The bug this whole conversion exists for.
+def test_native_size_is_one_frame_pixel_per_point_on_every_display():
+    """A model is the same physical size whatever the display scale.
 
-    A panel 900 points across is 1800 pixels on a 2x display. A 256 frame fits
-    in it either way, but a quad asked for 256 *points* covers 512 pixels, so
-    the frame is magnified 2x and interpolated while the mode is still called
-    Fit. Asking for 128 points draws its 256 pixels over 256 pixels.
+    A 256 frame at native size asks for 256 points on a 1x display and on a 2x
+    one. What changes is how many device pixels that covers, which is what the
+    texture then has to hold: 256 on the first and 512 on the second.
+
+    Sizing it in device pixels instead would halve a model on a 2x screen,
+    against the app's own convention that nothing changes physical size with
+    the display, and against the old app, which draws through a projection in
+    points and so lands here too.
     """
-    place = frame_placement((256, 256), (900.0, 900.0), FIT, 2.0)
-    assert place.pixels == (256, 256)
-    assert place.size == (128.0, 128.0)
+    for scale in (1.0, 2.0):
+        place = frame_placement((256, 256), (900.0, 900.0), FIT, scale)
+        assert place.size == (256.0, 256.0)
+        assert place.pixels == (int(256 * scale), int(256 * scale))
 
 
-def test_an_unscaled_display_draws_points_and_pixels_alike():
-    # The same frame and the same panel, where a point is a pixel.
-    place = frame_placement((256, 256), (900.0, 900.0), FIT, 1.0)
-    assert place.pixels == (256, 256)
-    assert place.size == (256.0, 256.0)
+def test_a_frame_at_native_size_is_uploaded_at_the_pixels_it_covers():
+    """Which is what keeps it crisp rather than interpolated.
+
+    On a 2x display native size covers four device pixels per frame pixel, and
+    the GPU would blend them. Uploading at the covered size sends the enlarging
+    through `magnified`, which repeats pixels instead.
+    """
+    place = frame_placement((64, 64), (900.0, 900.0), FIT, 2.0)
+    assert place.pixels == (128, 128)
+    assert upload_size((64, 64), place.pixels) == (128, 128)
 
 
 def test_stretch_fills_the_panel_in_pixels_it_can_actually_draw():
@@ -425,10 +457,10 @@ def test_stretch_fills_the_panel_in_pixels_it_can_actually_draw():
 
 
 def test_a_centred_frame_is_offset_in_points_and_stays_on_the_pixel_grid():
-    # 1800 pixels of panel and 256 of frame leaves 772 pixels either side,
-    # which is 386 points, and lands the frame on a whole pixel.
+    # 1800 pixels of panel and 512 drawn leaves 644 pixels either side, which
+    # is 322 points, and lands the frame on a whole pixel.
     place = frame_placement((256, 256), (900.0, 900.0), FIT, 2.0)
-    assert place.offset == (386.0, 386.0)
+    assert place.offset == (322.0, 322.0)
     assert (place.offset[0] * 2.0).is_integer()
 
 
