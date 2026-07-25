@@ -66,6 +66,17 @@ class Binding:
 
 
 @dataclass(frozen=True)
+class ClearBinding:
+    """Request to remove the binding driving one registry parameter.
+
+    A dedicated value object rather than a bare target string, so that no OSC
+    message can express a clear and reconfigure a performance remotely.
+    """
+
+    target: str
+
+
+@dataclass(frozen=True)
 class ControlState:
     pkl_path: str | None = None
     latent_x: float = 0.0
@@ -117,10 +128,14 @@ def _coerce(spec: ParamSpec, value: object) -> object:
     return coerced
 
 
-def apply_value(state: ControlState, name: str, value: object) -> ControlState:
+def apply_value(
+    state: ControlState, name: str, value: object, address: str | None = None
+) -> ControlState:
     """Return `state` with parameter `name` set to a coerced, clamped `value`.
 
-    An unknown name or an uncoercible value leaves the state unchanged.
+    An unknown name or an uncoercible value leaves the state unchanged. Pass the
+    wire `address` the value arrived on so the warning names what the operator
+    sent rather than our internal field name.
     """
     spec = REGISTRY.get(name)
     if spec is None:
@@ -129,6 +144,6 @@ def apply_value(state: ControlState, name: str, value: object) -> ControlState:
     try:
         coerced = _coerce(spec, value)
     except (TypeError, ValueError):
-        logger.warning("Ignoring uncoercible value %r for %s", value, name)
+        logger.warning("Ignoring uncoercible value %r on %s", value, address or name)
         return state
     return dataclasses.replace(state, **{name: coerced})

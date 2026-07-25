@@ -1,13 +1,26 @@
 import logging
 
+import pytest
+
 from autolume.live.core.events import ControlEvent
 from autolume.live.core.mapping import apply_event
 from autolume.live.core.params import (
     BINDING_CLEAR,
     BINDING_SET,
     Binding,
+    ClearBinding,
     ControlState,
 )
+
+MAPPING_LOGGER = "autolume.live.core.mapping"
+
+
+def warnings_from(caplog, logger_name):
+    return [
+        r.getMessage()
+        for r in caplog.records
+        if r.name == logger_name and r.levelname == "WARNING"
+    ]
 
 
 def test_float_event_applies():
@@ -51,12 +64,20 @@ def test_uncoercible_value_ignored():
     assert after == before
 
 
+def test_uncoercible_value_warning_names_the_wire_address(caplog):
+    with caplog.at_level(logging.WARNING):
+        apply_event(ControlState(), ControlEvent("/latent/x", "not a number"))
+    messages = warnings_from(caplog, "autolume.live.core.params")
+    assert messages
+    assert any("/latent/x" in message for message in messages)
+
+
 def set_binding(state, binding):
     return apply_event(state, ControlEvent(BINDING_SET, binding))
 
 
 def clear_binding(state, target):
-    return apply_event(state, ControlEvent(BINDING_CLEAR, target))
+    return apply_event(state, ControlEvent(BINDING_CLEAR, ClearBinding(target)))
 
 
 def test_binding_set_appends_then_replaces_in_place():
@@ -75,7 +96,7 @@ def test_binding_set_with_non_binding_value_ignored(caplog):
     with caplog.at_level(logging.WARNING):
         after = apply_event(before, ControlEvent(BINDING_SET, 1.0))
     assert after == before
-    assert caplog.records
+    assert any("non binding value" in m for m in warnings_from(caplog, MAPPING_LOGGER))
 
 
 def test_binding_set_with_unknown_target_ignored(caplog):
@@ -83,7 +104,33 @@ def test_binding_set_with_unknown_target_ignored(caplog):
     with caplog.at_level(logging.WARNING):
         after = set_binding(before, Binding("nope", "/audio/level"))
     assert after == before
-    assert caplog.records
+    assert any("unknown parameter" in m for m in warnings_from(caplog, MAPPING_LOGGER))
+
+
+@pytest.mark.parametrize("expression", [None, 3.0, b"x", ["x"]])
+def test_binding_set_with_non_str_expression_ignored(caplog, expression):
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = set_binding(before, Binding("latent_x", "/audio/level", expression))
+    assert after == before
+    assert any("malformed binding" in m for m in warnings_from(caplog, MAPPING_LOGGER))
+
+
+@pytest.mark.parametrize("target", [["latent_x"], {"latent_x"}, None, 1.0])
+def test_binding_set_with_non_str_target_ignored(caplog, target):
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = set_binding(before, Binding(target, "/audio/level"))
+    assert after == before
+    assert any("malformed binding" in m for m in warnings_from(caplog, MAPPING_LOGGER))
+
+
+def test_binding_set_with_non_str_source_ignored(caplog):
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = set_binding(before, Binding("latent_x", None))
+    assert after == before
+    assert any("malformed binding" in m for m in warnings_from(caplog, MAPPING_LOGGER))
 
 
 def test_binding_set_with_bad_expression_stores_error():
@@ -112,9 +159,23 @@ def test_binding_clear_unbound_target_is_noop():
     assert clear_binding(before, "truncation_psi") == before
 
 
-def test_binding_clear_with_non_str_value_ignored(caplog):
+@pytest.mark.parametrize("value", [1.0, "latent_x", None, ["latent_x"]])
+def test_binding_clear_with_non_clear_binding_value_ignored(caplog, value):
     before = set_binding(ControlState(), Binding("latent_x", "/audio/level"))
     with caplog.at_level(logging.WARNING):
-        after = apply_event(before, ControlEvent(BINDING_CLEAR, 1.0))
+        after = apply_event(before, ControlEvent(BINDING_CLEAR, value))
     assert after == before
-    assert caplog.records
+    assert any(
+        "non clear binding value" in m for m in warnings_from(caplog, MAPPING_LOGGER)
+    )
+
+
+@pytest.mark.parametrize("target", [None, 1.0, ["latent_x"]])
+def test_binding_clear_with_non_str_target_ignored(caplog, target):
+    before = set_binding(ControlState(), Binding("latent_x", "/audio/level"))
+    with caplog.at_level(logging.WARNING):
+        after = apply_event(before, ControlEvent(BINDING_CLEAR, ClearBinding(target)))
+    assert after == before
+    assert any(
+        "malformed clear binding" in m for m in warnings_from(caplog, MAPPING_LOGGER)
+    )

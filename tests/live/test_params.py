@@ -12,6 +12,7 @@ RESERVED_PREFIXES = ("/binding/", "/touch/", "/preset/")
 
 def test_registry_covers_control_state_fields():
     field_names = {f.name for f in dataclasses.fields(params.ControlState)}
+    assert NON_PARAM_FIELDS <= field_names
     assert field_names - NON_PARAM_FIELDS == set(params.REGISTRY.keys())
 
 

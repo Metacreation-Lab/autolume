@@ -11,6 +11,7 @@ from autolume.live.core.params import (
     BY_ADDRESS,
     REGISTRY,
     Binding,
+    ClearBinding,
     ControlState,
     apply_value,
 )
@@ -21,6 +22,10 @@ logger = logging.getLogger(__name__)
 def _set_binding(state: ControlState, value: object) -> ControlState:
     if not isinstance(value, Binding):
         logger.warning("Ignoring non binding value %r on %s", value, BINDING_SET)
+        return state
+    fields = (value.target, value.source, value.expression)
+    if not all(isinstance(field, str) for field in fields):
+        logger.warning("Ignoring malformed binding %r on %s", value, BINDING_SET)
         return state
     if value.target not in REGISTRY:
         logger.warning("Ignoring binding for unknown parameter %s", value.target)
@@ -42,10 +47,17 @@ def _set_binding(state: ControlState, value: object) -> ControlState:
 
 
 def _clear_binding(state: ControlState, value: object) -> ControlState:
-    if not isinstance(value, str):
-        logger.warning("Ignoring non target value %r on %s", value, BINDING_CLEAR)
+    if not isinstance(value, ClearBinding):
+        logger.warning(
+            "Ignoring non clear binding value %r on %s", value, BINDING_CLEAR
+        )
         return state
-    remaining = tuple(b for b in state.bindings if b.target != value)
+    if not isinstance(value.target, str):
+        logger.warning(
+            "Ignoring malformed clear binding %r on %s", value, BINDING_CLEAR
+        )
+        return state
+    remaining = tuple(b for b in state.bindings if b.target != value.target)
     if len(remaining) == len(state.bindings):
         return state
     return dataclasses.replace(state, bindings=remaining)
@@ -60,4 +72,4 @@ def apply_event(state: ControlState, event: ControlEvent) -> ControlState:
     if spec is None:
         logger.debug("Ignoring event for unknown address %s", event.address)
         return state
-    return apply_value(state, spec.name, event.value)
+    return apply_value(state, spec.name, event.value, event.address)
