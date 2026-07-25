@@ -5,6 +5,7 @@ import pytest
 
 from autolume.live.core.generator import (
     ModelHost,
+    ModelInfo,
     corner_seeds,
     effective_noise_seed,
     noise_mode,
@@ -39,6 +40,8 @@ def test_corner_seeds_deterministic():
 class FakeModel:
     def __init__(self, path):
         self.pkl_path = path
+        self.z_dim = 4
+        self.num_ws = 2
 
 
 def test_model_host_loads_in_background():
@@ -90,6 +93,43 @@ def test_model_host_coalesces_to_newest_request():
     host.stop()
 
 
+def test_model_host_publishes_model_info_on_successful_load():
+    host = ModelHost(loader=FakeModel)
+    assert host.info_store.snapshot() is None
+    host.request_load("/tmp/a.pkl")
+    deadline = time.monotonic() + 2.0
+    while host.info_store.snapshot() is None and time.monotonic() < deadline:
+        time.sleep(0.005)
+    assert host.info_store.snapshot() == ModelInfo(
+        pkl_path="/tmp/a.pkl", z_dim=4, num_ws=2
+    )
+    host.stop()
+
+
+def test_model_host_clears_model_info_on_load_failure():
+    should_fail = threading.Event()
+
+    def loader(path):
+        if should_fail.is_set():
+            raise RuntimeError("bad pkl")
+        return FakeModel(path)
+
+    host = ModelHost(loader=loader)
+    host.request_load("/tmp/a.pkl")
+    deadline = time.monotonic() + 2.0
+    while host.info_store.snapshot() is None and time.monotonic() < deadline:
+        time.sleep(0.005)
+    assert host.info_store.snapshot() is not None
+
+    should_fail.set()
+    host.request_load("/tmp/bad.pkl")
+    deadline = time.monotonic() + 2.0
+    while host.info_store.snapshot() is not None and time.monotonic() < deadline:
+        time.sleep(0.005)
+    assert host.info_store.snapshot() is None
+    host.stop()
+
+
 class _FakeMapping:
     def __init__(self, w_avg, num_ws):
         self.w_avg = w_avg
@@ -104,6 +144,7 @@ class _FakeMapping:
 
 class _FakeG:
     z_dim = 4
+    num_ws = 2
 
     def __init__(self, synthesis, modules=()):
         import torch

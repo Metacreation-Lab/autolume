@@ -5,7 +5,7 @@ import pytest
 
 from autolume.live.core import presets
 from autolume.live.core.events import ControlEvent
-from autolume.live.core.generator import ModelHost
+from autolume.live.core.generator import ModelHost, ModelInfo
 from autolume.live.core.params import BINDING_SET, Binding
 from autolume.live.core.presets import PRESET_APPLY
 from autolume.live.runtime import build_runtime
@@ -14,6 +14,8 @@ from autolume.live.runtime import build_runtime
 class FakeModel:
     def __init__(self, path):
         self.pkl_path = path
+        self.z_dim = 4
+        self.num_ws = 2
 
     def render_frame(self, params, frame_index):
         value = int(abs(params.latent_x) * 10) % 256
@@ -90,6 +92,21 @@ def test_end_to_end_headless_flow():
         x0 = runtime.control_store.snapshot().latent_x
         time.sleep(0.3)
         assert runtime.control_store.snapshot().latent_x > x0
+    finally:
+        runtime.stop()
+
+
+def test_runtime_exposes_model_info_store_and_the_control_loop_sees_it():
+    host = ModelHost(loader=FakeModel)
+    runtime = build_runtime(model_host=host, start_osc=False, start_audio=False)
+    assert runtime.model_info_store is host.info_store
+    assert runtime.control_loop.model_info is None
+    runtime.start()
+    try:
+        runtime.submit(ControlEvent("/model/path", "/tmp/fake.pkl", source="ui"))
+        expected = ModelInfo(pkl_path="/tmp/fake.pkl", z_dim=4, num_ws=2)
+        assert wait_for(lambda: runtime.model_info_store.snapshot() == expected)
+        assert wait_for(lambda: runtime.control_loop.model_info == expected)
     finally:
         runtime.stop()
 

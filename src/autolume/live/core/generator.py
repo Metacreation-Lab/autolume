@@ -10,11 +10,13 @@ Ported from balagan (latent_navigator.py).
 import logging
 import math
 import threading
+from dataclasses import dataclass
 from typing import Callable
 
 import numpy as np
 
 from autolume.live.core.params import RenderParams
+from autolume.live.core.store import LatestValueStore
 
 logger = logging.getLogger(__name__)
 
@@ -69,13 +71,45 @@ def pick_device():
     return torch.device("cpu")
 
 
+@dataclass(frozen=True)
+class ModelInfo:
+    """Immutable dimensions of a loaded model, published on the loader thread.
+
+    The control plane needs `z_dim` to materialize latent vectors and
+    `num_ws` for the layer catalog (Plan 4); one snapshot channel serves
+    both instead of poking through to the model itself.
+    """
+
+    pkl_path: str
+    z_dim: int
+    num_ws: int
+
+
+def _model_info(path: str, model: object) -> ModelInfo | None:
+    """Build a `ModelInfo` from whatever the loader returned, or None.
+
+    Duck-typed rather than an isinstance check: tests and future loaders
+    stand in objects that are not `LoadedModel`. A double that omits the
+    dimensions simply does not publish, never raises the loader thread.
+    """
+    z_dim = getattr(model, "z_dim", None)
+    num_ws = getattr(model, "num_ws", None)
+    if z_dim is None or num_ws is None:
+        return None
+    try:
+        return ModelInfo(pkl_path=str(path), z_dim=int(z_dim), num_ws=int(num_ws))
+    except (TypeError, ValueError):
+        return None
+
+
 class LoadedModel:
     def __init__(self, pkl_path: str, G, device) -> None:
         self.pkl_path = pkl_path
         self.G = G
         self.device = device
         self._w_avg = G.mapping.w_avg
-        self._z_dim = int(G.z_dim)
+        self.z_dim = int(G.z_dim)
+        self.num_ws = int(G.num_ws)
         self._c_dim = int(G.mapping.c_dim)
         self._applied_global_noise: float | None = None
 
@@ -84,11 +118,11 @@ class LoadedModel:
 
         corners = corner_seeds(latent_x, latent_y)
         unique_seeds = sorted({seed for seed, _ in corners})
-        zs = np.zeros([len(unique_seeds), self._z_dim], dtype=np.float32)
+        zs = np.zeros([len(unique_seeds), self.z_dim], dtype=np.float32)
         cs = np.zeros([len(unique_seeds), self._c_dim], dtype=np.float32)
         for index, seed in enumerate(unique_seeds):
             rnd = np.random.RandomState(seed)
-            zs[index] = rnd.randn(self._z_dim)
+            zs[index] = rnd.randn(self.z_dim)
             if self._c_dim > 0:
                 cs[index, rnd.randint(self._c_dim)] = 1
         z_batch = torch.from_numpy(zs).to(self.device)
@@ -164,6 +198,7 @@ class ModelHost:
         self._current: LoadedModel | None = None
         self._error: str | None = None
         self._pending: str | None = None
+        self.info_store: LatestValueStore[ModelInfo | None] = LatestValueStore(None)
         self._wakeup = threading.Event()
         self._running = True
         self._thread = threading.Thread(
@@ -216,16 +251,22 @@ class ModelHost:
             try:
                 model = self._loader(path)
                 with self._lock:
-                    if self._pending == path:
+                    won = self._pending == path
+                    if won:
                         self._current = model
                         self._error = None
                         self._pending = None
                     # else: a newer request arrived while loading; loop again
+                if won:
+                    self.info_store.set(_model_info(path, model))
             except Exception as exc:
                 logger.exception("Failed to load model %s", path)
                 with self._lock:
-                    if self._pending == path:
+                    won = self._pending == path
+                    if won:
                         self._error = str(exc)
                         self._pending = None
+                if won:
+                    self.info_store.set(None)
             if self.loading():
                 self._wakeup.set()

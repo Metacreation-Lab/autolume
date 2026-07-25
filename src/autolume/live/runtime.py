@@ -29,9 +29,14 @@ class Runtime:
         self.render_store = LatestValueStore(to_render_params(ControlState()))
         self.source_store = LatestValueStore(SourceTable())
         self.model_host = model_host
+        self.model_info_store = model_host.info_store
         self.preview = PreviewMailbox()
         self.control_loop = _ModelWatchingControlLoop(
-            self.control_store, self.render_store, self.source_store, model_host
+            self.control_store,
+            self.render_store,
+            self.source_store,
+            model_host,
+            model_info_store=self.model_info_store,
         )
         self.render_loop = RenderLoop(
             self.render_store, self.model_host, [self.preview]

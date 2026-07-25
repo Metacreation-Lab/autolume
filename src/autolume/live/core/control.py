@@ -18,6 +18,7 @@ from typing import Callable
 
 from autolume.live.core.events import ControlEvent
 from autolume.live.core.expr import ExpressionError, compile_expression
+from autolume.live.core.generator import ModelInfo
 from autolume.live.core.mapping import apply_event
 from autolume.live.core.models import ModelFolder
 from autolume.live.core.motion import integrate
@@ -53,6 +54,7 @@ class ControlLoop:
         tick_hz: float = 125.0,
         clock: Callable[[], float] = time.monotonic,
         models: ModelFolder | None = None,
+        model_info_store: LatestValueStore[ModelInfo | None] | None = None,
     ) -> None:
         self._control_store = control_store
         self._render_store = render_store
@@ -63,6 +65,11 @@ class ControlLoop:
         # looked up per message: it caches its listing, which is what keeps a
         # swept fader from reading the folder once per value.
         self._models = models or ModelFolder()
+        # Read-only; ModelHost is the sole writer. Refreshed once per tick so
+        # later motion writers (Plan 3+) see a stable value for the whole tick
+        # rather than racing the loader thread mid computation.
+        self._model_info_store = model_info_store or LatestValueStore(None)
+        self._model_info: ModelInfo | None = self._model_info_store.snapshot()
         self.touch = TouchTracker()
         self._queue: collections.deque[ControlEvent] = collections.deque(
             maxlen=_QUEUE_LIMIT
@@ -81,10 +88,16 @@ class ControlLoop:
         with self._queue_lock:
             self._queue.append(event)
 
+    @property
+    def model_info(self) -> ModelInfo | None:
+        """The loaded model's dimensions, as of the most recent tick."""
+        return self._model_info
+
     def tick(self) -> RenderParams:
         now = self._clock()
         dt = now - self._last_tick if self._last_tick is not None else 0.0
         self._last_tick = now
+        self._model_info = self._model_info_store.snapshot()
 
         with self._queue_lock:
             events = list(self._queue)
