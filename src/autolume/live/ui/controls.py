@@ -12,13 +12,58 @@ The chip in the gutter left of the widget names what is driving the parameter.
 A binding writes an absolute value, so it takes the control away from the hand
 and the widget is drawn read only. Motion is relative and carries on from
 wherever the value is, so an animated control stays live and dragging it is
-scrubbing. Input arriving on the parameter's own address stays live too, since
-that is the default state of every parameter and the moment a controller
-misbehaves is the moment the performer must be able to take it back. The chip
-is clickable in every state and opens the mapping editor, which is what a read
-only control has instead of its own right click menu.
+scrubbing. A control a remote writer is playing stays live too, because the
+moment a controller misbehaves is the moment the performer must be able to take
+it back. The chip is clickable in every state and opens the mapping editor,
+which is what a read only control has instead of its own right click menu.
+
+The vocabulary is one rectangle, four colours and two fills.
+
+    grey            nothing drives it
+    green           motion drives it
+    blue, filled    remote input on and receiving
+    blue, outline   remote input on, nothing arriving right now
+    red             the expression is failing
+
+One rectangle in every row, whatever drives the parameter, which is what tells
+the performer the column is there to click without making them find it with the
+mouse first. Earlier passes drew an empty container instead, in the frame
+colour, and that could not work in this theme by construction: darcula_darker
+puts `frame_bg` at (0.145, 0.122, 0.122) against a `window_bg` of (0.138,
+0.142, 0.149), so an empty widget is the background. The idle rectangle is the
+theme's disabled text colour instead, which is the one grey a theme guarantees
+reads as inactive and still legible, in a light theme as well as a dark one.
+
+With one shape, colour carries who, so the four differ in brightness as well as
+hue rather than in hue alone. Grey is the dimmest, because it is the state that
+should be quiet on eleven rows at once, and green the brightest, because grey
+against green is the pair that collapses for a red green colour deficiency and
+a difference in value is what survives it. Fill is the second channel and it
+carries the state that changes during a show: whether anything is arriving.
+
+Blue means remote input is on, whether the row carries a source of its own or
+falls back to the parameter's address. That difference changes what the mapping
+row says and whether the control is read only, and both are already visible
+where they matter, so drawing it again here would spend the performer's glance
+on a distinction they never act on. Across twelve rows, "something remote
+drives this" is one fact.
+
+Fill is liveness, on the same window the marker uses, which turns the marker
+into a diagnostic: a blue outline on a parameter bound to /audio/bass says the
+audio module is off or the room is silent, which otherwise takes another panel
+to work out.
+
+Traffic arriving at a parameter nobody switched on is not shown here at all.
+Remote input is off until a row says otherwise, so that is most traffic most of
+the time, and this gutter answers one question only: what is driving this
+parameter right now. Discovering that a controller is reaching Autolume is a
+deliberate act in the Mapping panel, where the address picker lists everything
+that has arrived. That is what makes it load bearing that the control loop
+records a blocked write as a source, since the picker is the only place it
+surfaces.
 """
 
+import dataclasses
 import math
 import time
 from dataclasses import dataclass
@@ -41,10 +86,14 @@ from autolume.live.core.params import (
 from autolume.live.core.sources import SourceTable
 from autolume.live.core.touch import TOUCH_BEGIN, TOUCH_END
 
+# Remote input, on. Filled when something is arriving, outlined when it is not.
 BINDING_COLOR = (0.35, 0.75, 1.0, 1.0)
-BINDING_OFF_COLOR = (0.5, 0.5, 0.5, 1.0)
-MOTION_COLOR = (0.55, 0.8, 0.55, 0.9)
-REMOTE_COLOR = (0.95, 0.7, 0.25, 1.0)
+# Brighter and more saturated than the pale green this used to be. Every marker
+# is the same rectangle now, so motion and the idle grey are told apart by
+# colour alone, and a desaturated green sits at almost exactly a mid grey's
+# brightness, which is the one pair a red green deficiency turns into one
+# colour. Raising its value puts a step between them that hue loss cannot take.
+MOTION_COLOR = (0.45, 0.92, 0.45, 1.0)
 # Every failure the UI shows is this colour, wherever it is shown, so that one
 # definition here is what makes a broken binding, a missing device and a preset
 # that would not save look alike.
@@ -53,12 +102,25 @@ ERROR_COLOR = (1.0, 0.3, 0.3, 1.0)
 # Wide enough to click at, since the chip in it is the way back from a control
 # a binding has taken over.
 _GUTTER_RATIO = 0.7
-_MARKER_RATIO = 0.3
+# Was 0.3 while every marker was solid. An outline needs a hole to be read as
+# one: at 0.3 the square is about six pixels at 100 percent display scale and a
+# stroke thick enough to survive rounding leaves nothing inside it, so the
+# outline and the fill would differ by a pixel of ink and the liveness channel
+# would be lost. At 0.4 the square is about eight pixels with a five pixel
+# hole, still well inside the fifteen pixel slot around it.
+_MARKER_RATIO = 0.4
 _PLATE_INSET = 0.15
-# How much of the frame colour the empty slot keeps. Enough to find the column
-# without looking for it, and well under any marker, so a dozen empty gutters
-# stay quiet next to the one parameter something is driving.
-_SLOT_ALPHA = 0.7
+# Stroke weight of an outline, as a fraction of the frame height.
+_OUTLINE_RATIO = 0.07
+# What the idle grey keeps of the theme's disabled text colour. Under 1.0 so
+# the quietest state is also the dimmest, which is what puts a brightness step
+# between it and the green beside it, and still near four to one against the
+# panel so it is plainly visible without a hover.
+_IDLE_MARKER_ALPHA = 0.7
+# What an outlined marker keeps of its colour. The fill difference already
+# carries most of the signal, and this makes it degrade to dim against bright
+# rather than to nothing when a display scale rounds the hole away.
+_IDLE_ALPHA = 0.8
 # A widget hands its value back through a C float, so it cannot express a
 # difference finer than this. Anything closer is the same value.
 _FLOAT_TOLERANCE = 1e-6
@@ -102,57 +164,102 @@ def drag_bounds(spec: ParamSpec) -> tuple[float, float]:
     return spec.minimum, spec.maximum
 
 
-def indicator_color(binding: Binding | None) -> Color | None:
-    """The colour of the binding marker, or None when nothing drives this."""
-    if binding is None:
-        return None
-    if binding.error is not None:
-        return ERROR_COLOR
-    if not binding.enabled:
-        return BINDING_OFF_COLOR
-    return BINDING_COLOR
-
-
 class Marker(Enum):
-    """What the gutter left of a control shows."""
+    """Who drives the parameter the gutter sits beside.
+
+    Not a shape any more: every state is the same rectangle, and colour is what
+    separates them. This still names the driver rather than the colour, so the
+    decision and the palette can be argued about one at a time.
+    """
 
     NONE = "none"
     MOTION = "motion"
     BINDING = "binding"
-    REMOTE = "remote"
 
 
 @dataclass(frozen=True)
 class Gutter:
-    """Everything one control needs to know about who is driving it."""
+    """Everything one control needs to know about who is driving it.
+
+    `filled` is the marker's liveness. It is a field rather than two more
+    markers because it is one fact about one driver, and because outline
+    against fill is the only thing fill ever means in this gutter.
+    """
 
     marker: Marker
     color: Color | None
     read_only: bool
     tooltip: str
+    filled: bool = True
 
 
 _UNBOUND_TIP = "Nothing is driving this. Click to map it to a source."
+_ERROR_TIP = "This binding is failing. Click to fix it."
 _MOTION_TIP = (
     "Animation is driving this. Drag it and the animation carries on from there."
 )
 
 
-def _binding_tip(binding: Binding) -> str:
-    if binding.error is not None:
-        return "This binding is failing. Click to fix it."
-    if binding.source:
-        if not binding.enabled:
-            return f"Bound to {binding.source}. The binding is off. Click to edit it."
-        return f"Bound to {binding.source}. Click to edit it."
+def idle_color() -> Color:
+    """The grey a parameter nothing drives is drawn in.
+
+    Read from the style rather than stated as a constant so it keeps its
+    polarity in a light theme and stays the grey the rest of the interface
+    already means "present but inactive" with. A function so the drawing and
+    anything checking it cannot pick different colours.
+    """
+    disabled = imgui.get_style_color_vec4(imgui.Col_.text_disabled)
+    return (
+        disabled.x,
+        disabled.y,
+        disabled.z,
+        disabled.w * _IDLE_MARKER_ALPHA,
+    )
+
+
+def _binding_tip(binding: Binding, live: bool) -> str:
+    """What an enabled row says, told apart by whether anything is arriving.
+
+    The idle wording is the whole point of drawing liveness at all: a row on
+    /audio/bass with nothing coming in means the audio module is off or the
+    room is silent, and reading that off the chip beats going to look.
+    """
     address = listens_on(binding)
-    if not binding.enabled:
-        return f"Remote input on {address} is off. Click to turn it back on."
-    return f"Remote input on {address} goes through this mapping. Click to edit it."
+    if live:
+        return f"{address} is driving this right now. Click to edit it."
+    return (
+        f"Remote input is on for {address}. "
+        "Nothing is arriving on it. "
+        "Click to edit it."
+    )
 
 
-def _remote_tip(address: str) -> str:
-    return f"{address} is being sent right now. Switch it off in the mapping row."
+def _off_tip(binding: Binding) -> str:
+    return f"Remote input on {listens_on(binding)} is off. Click to turn it on."
+
+
+def _live_address(
+    state: ControlState,
+    name: str,
+    sources: SourceTable | None,
+    now: float,
+) -> str | None:
+    """The address `name`'s row listens on, if something is sending on it now.
+
+    The address a row would take, whether or not the row lets it through: a
+    parameter with no row at all still has the one the registry gives it, which
+    is what a controller aimed at Autolume will be sending on.
+    """
+    if sources is None:
+        return None
+    spec = REGISTRY.get(name)
+    if spec is None:
+        return None
+    binding = binding_for(state.bindings, name)
+    address = listens_on(binding) if binding is not None else spec.address
+    if not address or not sources.active(address, now):
+        return None
+    return address
 
 
 def remote_writer(
@@ -161,24 +268,16 @@ def remote_writer(
     sources: SourceTable | None,
     now: float,
 ) -> str | None:
-    """The address something remote is writing `name` on, or None.
+    """The address something remote is writing `name` on right now, or None.
 
-    Only the parameter's own canonical address, and only when the mapping row
-    lets it through and has no expression failure to report. A row with a
-    source of its own is a binding, which the gutter already names, and a row
-    switched off means nothing arriving is reaching the parameter at all.
+    An enabled row only, on whichever address it listens on. Whether that is a
+    source the performer picked or the parameter's own is not a difference they
+    act on from the gutter, so it is not one the gutter draws.
     """
-    if sources is None:
-        return None
     binding = binding_for(state.bindings, name)
-    if binding is not None and (
-        binding.source or not binding.enabled or binding.error is not None
-    ):
+    if binding is None or not binding.enabled or binding.error is not None:
         return None
-    spec = REGISTRY.get(name)
-    if spec is None or not sources.active(spec.address, now):
-        return None
-    return spec.address
+    return _live_address(state, name, sources, now)
 
 
 def gutter_for(
@@ -187,31 +286,34 @@ def gutter_for(
     sources: SourceTable | None = None,
     now: float = 0.0,
 ) -> Gutter:
-    """Who drives `name`, in the terms the control is drawn in.
+    """Who drives `name` right now, in the terms the control is drawn in.
 
     A binding writes an absolute value, so the next message from its source
     erases anything the hand did in between and a control it drives is read
     only rather than futile. Motion is relative and advances from wherever the
     value is, so dragging an animated parameter is scrubbing and stays live.
 
-    A remote writer on the parameter's own address stays playable too, and that
-    is deliberate rather than an oversight: it is the default state of every
-    parameter, so read only there would lock the whole panel, and a misbehaving
-    controller is exactly the moment the performer has to be able to grab the
-    parameter back. The control loop's touch grace is what makes that grab
-    stick.
+    A row with no source of its own stays playable too, and that is deliberate
+    rather than an oversight: a misbehaving controller is exactly the moment
+    the performer has to be able to grab the parameter back, and the control
+    loop's touch grace is what makes that grab stick.
 
-    Precedence is the control loop's own, with the remote marker slotted where
-    it answers a question nothing else on screen does. An enabled binding with a
-    source beats everything and is read only. A remote writer comes next: it is
-    transient, invisible anywhere else in the app, and the reason a control
-    seems to have a mind of its own, while motion is already legible in the
-    Animate box. Motion follows, from `motion.drives` rather than a restatement
-    of it, so this cannot disagree with the integrator. A row that drives
-    nothing right now, switched off or parked without a source, is shown last.
+    Precedence over the collapsed vocabulary. An enabled row comes first when
+    something is arriving on it, because then it is genuinely writing the
+    parameter and motion is not: a stream at 60 Hz and an integrator adding to
+    the same value cannot both be named, and the one the performer cannot see
+    anywhere else wins. An enabled row with nothing arriving yields to motion,
+    which is the honest answer between messages, and is why the blue outline
+    only shows on a parameter motion is leaving alone. A row that is off drives
+    nothing and gets no marker at all, only its own tooltip, because whether a
+    parked row exists is what the Mapping panel is for.
 
-    `sources` may be omitted by a caller that has no source table, and then no
-    remote marker is ever shown.
+    `motion.drives` is called rather than restated, so this cannot disagree
+    with the integrator, and it already stands down for an enabled row with a
+    source of its own.
+
+    `sources` may be omitted by a caller that has no source table, and then
+    nothing is ever drawn as live.
 
     No touch tracker is passed, which is the one skip of the integrator's this
     does not follow: a hand on the widget pauses motion for the drag and its
@@ -219,19 +321,23 @@ def gutter_for(
     blinking off for the length of every drag would be noise.
     """
     binding = binding_for(state.bindings, name)
-    if binding is not None and binding.enabled and binding.source:
-        return Gutter(
-            Marker.BINDING, indicator_color(binding), True, _binding_tip(binding)
-        )
-    address = remote_writer(state, name, sources, now)
-    if address is not None:
-        return Gutter(Marker.REMOTE, REMOTE_COLOR, False, _remote_tip(address))
+    if binding is not None and binding.enabled:
+        read_only = bool(binding.source)
+        if binding.error is not None:
+            return Gutter(Marker.BINDING, ERROR_COLOR, read_only, _ERROR_TIP)
+        live = remote_writer(state, name, sources, now) is not None
+        if live or not motion.drives(state, name):
+            return Gutter(
+                Marker.BINDING,
+                BINDING_COLOR,
+                read_only,
+                _binding_tip(binding, live),
+                filled=live,
+            )
     if motion.drives(state, name):
         return Gutter(Marker.MOTION, MOTION_COLOR, False, _MOTION_TIP)
     if binding is not None:
-        return Gutter(
-            Marker.BINDING, indicator_color(binding), False, _binding_tip(binding)
-        )
+        return Gutter(Marker.NONE, None, False, _off_tip(binding))
     return Gutter(Marker.NONE, None, False, _UNBOUND_TIP)
 
 
@@ -505,9 +611,8 @@ class ControlBinder:
 
         The gutter is reserved whether or not anything drives the parameter, so
         a binding appearing does not shift the control under the performer's
-        cursor. The markers are drawn shapes because the bundled font has no
-        symbol glyphs, a square for a binding and a dot for motion, so the two
-        differ in shape as well as colour.
+        cursor. The marker is a drawn rectangle rather than a glyph because the
+        bundled font has no symbols.
 
         The chip is a real clickable item and it is drawn before any disabled
         block, which is what makes disabling a bound control safe: imgui
@@ -530,7 +635,7 @@ class ControlBinder:
         else:
             imgui.dummy(imgui.ImVec2(width, height))
             hovered = explain = False
-        self._chip_shape(origin, width, height, gutter, hovered, clickable)
+        self._chip_shape(origin, width, height, gutter, hovered)
         if explain:
             imgui.set_tooltip(gutter.tooltip)
         if clickable and imgui.begin_popup("chip"):
@@ -545,24 +650,24 @@ class ControlBinder:
         height: float,
         gutter: Gutter,
         hovered: bool,
-        clickable: bool = True,
     ) -> None:
-        """Paint the chip: an empty slot, a hover plate, then the driver's marker.
+        """Paint the chip: the slot, a hover plate, then the driver's marker.
 
-        The container is the affordance and the contents are the state. The
-        slot is drawn on every row whether or not anything drives the
-        parameter, because the chip is the only way into the mapping editor
-        from a control a binding has taken read only, and before this the
-        column advertised itself with a plate that only appeared once the
-        cursor was already on it. It is an outline in the frame colour, so it
-        reads as an empty version of the widgets beside it and follows whatever
-        theme they do, and it is faint enough that a panel of undriven
-        parameters stays quiet while any marker plainly outranks it.
+        One rectangle on every row, because the chip is the only way into the
+        mapping editor from a control a binding has taken read only, and a
+        column that only appears once the cursor is already on it is a column
+        nobody finds.
 
-        Each driver has its own shape as well as its own colour, a square for a
-        binding, a dot for motion and an arrowhead for input arriving from
-        outside, so the three stay apart for a performer who cannot tell them
-        apart by colour and on a projector that eats saturation.
+        Colour says who drives it and the four differ in brightness as well as
+        hue, because with one shape there is nothing else left to differ in.
+        Against darcula_darker the idle grey lands near four to one on the
+        panel, the blue near eight and the green near eleven, so the pair a red
+        green deficiency flattens is also the pair furthest apart in value.
+
+        Fill is the second channel and it says one thing: whether input is
+        arriving right now. The outline also drops a little colour, so where a
+        display scale rounds the hole away the difference degrades into dim
+        against bright instead of into nothing.
 
         Nothing here changes the layout: the gutter is reserved by the item in
         `_indicator` and every shape is painted inside what it already took.
@@ -573,42 +678,29 @@ class ControlBinder:
         top_left = imgui.ImVec2(origin.x, origin.y + inset)
         bottom_right = imgui.ImVec2(origin.x + width, origin.y + height - inset)
         rounding = imgui.get_style().frame_rounding
-        if clickable and not hovered:
-            slot = imgui.get_style_color_vec4(imgui.Col_.frame_bg)
-            draw_list.add_rect(
-                top_left,
-                bottom_right,
-                imgui.get_color_u32(
-                    imgui.ImVec4(slot.x, slot.y, slot.z, slot.w * _SLOT_ALPHA)
-                ),
-                rounding,
-            )
-        elif hovered:
+        stroke = max(1.0, height * _OUTLINE_RATIO)
+        if hovered:
             draw_list.add_rect_filled(
                 top_left,
                 bottom_right,
                 imgui.get_color_u32(imgui.Col_.button_hovered),
                 rounding,
             )
-        if gutter.color is None:
-            return
-        color = imgui.get_color_u32(imgui.ImVec4(*gutter.color))
+        red, green, blue, alpha = gutter.color if gutter.color else idle_color()
+        if not gutter.filled:
+            alpha *= _IDLE_ALPHA
+        color = imgui.get_color_u32(imgui.ImVec4(red, green, blue, alpha))
         side = round(height * _MARKER_RATIO)
-        if gutter.marker is Marker.MOTION:
-            draw_list.add_circle_filled(middle, side * 0.5, color)
-        elif gutter.marker is Marker.REMOTE:
-            draw_list.add_triangle_filled(
-                imgui.ImVec2(middle.x - side * 0.5, middle.y - side * 0.6),
-                imgui.ImVec2(middle.x + side * 0.6, middle.y),
-                imgui.ImVec2(middle.x - side * 0.5, middle.y + side * 0.6),
-                color,
-            )
+        corner_min = imgui.ImVec2(middle.x - side * 0.5, middle.y - side * 0.5)
+        corner_max = imgui.ImVec2(middle.x + side * 0.5, middle.y + side * 0.5)
+        # Outline is the arriving state of remote input and nothing else, so
+        # every other colour, which carries no liveness, is always solid.
+        if gutter.filled:
+            draw_list.add_rect_filled(corner_min, corner_max, color)
         else:
-            draw_list.add_rect_filled(
-                imgui.ImVec2(middle.x - side * 0.5, middle.y - side * 0.5),
-                imgui.ImVec2(middle.x + side * 0.5, middle.y + side * 0.5),
-                color,
-            )
+            # Scaled from the frame so the outline keeps its weight at 200
+            # percent, floored at a pixel so it never disappears at 100.
+            draw_list.add_rect(corner_min, corner_max, color, 0.0, stroke)
 
     def _mapping_menu(self, name: str) -> None:
         if self._mapping_popup is None:

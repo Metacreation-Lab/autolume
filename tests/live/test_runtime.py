@@ -75,18 +75,18 @@ def test_end_to_end_headless_flow():
     runtime = build_runtime(model_host=host, start_osc=False, start_audio=False)
     runtime.start()
     try:
-        runtime.submit(ControlEvent("/model/path", "/tmp/fake.pkl"))
+        runtime.submit(ControlEvent("/model/path", "/tmp/fake.pkl", source="ui"))
         assert wait_for(lambda: host.current() is not None)
         assert wait_for(lambda: runtime.preview.latest()[1] is not None)
 
-        runtime.submit(ControlEvent("/latent/x", 5.0))
+        runtime.submit(ControlEvent("/latent/x", 5.0, source="ui"))
         assert wait_for(
             lambda: runtime.preview.latest()[1] is not None
             and runtime.preview.latest()[1][0, 0, 0] == 50
         )
 
-        runtime.submit(ControlEvent("/anim/playing", 1.0))
-        runtime.submit(ControlEvent("/anim/speed/x", 4.0))
+        runtime.submit(ControlEvent("/anim/playing", 1.0, source="ui"))
+        runtime.submit(ControlEvent("/anim/speed/x", 4.0, source="ui"))
         x0 = runtime.control_store.snapshot().latent_x
         time.sleep(0.3)
         assert runtime.control_store.snapshot().latent_x > x0
@@ -172,7 +172,7 @@ def test_preset_saved_from_a_running_runtime_is_restored_by_apply(tmp_path):
     runtime = make_runtime()
     runtime.start()
     try:
-        runtime.submit(ControlEvent("/trunc/psi", 1.25))
+        runtime.submit(ControlEvent("/trunc/psi", 1.25, source="ui"))
         runtime.submit(
             ControlEvent(
                 BINDING_SET,
@@ -189,7 +189,7 @@ def test_preset_saved_from_a_running_runtime_is_restored_by_apply(tmp_path):
         presets.save(runtime.control_store.snapshot(), path)
         assert presets.list_presets(tmp_path) == ["look"]
 
-        runtime.submit(ControlEvent("/trunc/psi", 0.0))
+        runtime.submit(ControlEvent("/trunc/psi", 0.0, source="ui"))
         assert wait_for(lambda: runtime.control_store.snapshot().truncation_psi == 0.0)
 
         runtime.submit(

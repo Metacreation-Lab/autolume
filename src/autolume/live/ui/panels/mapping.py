@@ -7,9 +7,12 @@ mapping the same way and neither can drift from the other.
 
 The row governs every remote writer of its parameter, which is the whole point
 of there being one row per parameter rather than one per configured mapping.
-An empty source means the parameter's own address, so an untouched row is not
-an inert row, and the switch beside it is the one honest answer to what may
-write this parameter from outside. It never governs the hand.
+Nothing outside reaches a parameter until its row is switched on, so an
+untouched row is an inert one and the switch beside it is the one honest answer
+to what may write this parameter from outside. It never governs the hand.
+
+An empty source means the parameter's own address, so a row that says only On
+opens the address the registry gives the parameter without anyone typing it.
 
 Every edit leaves as a control event. Nothing here writes state directly, and
 a clear travels as a `ClearBinding` object rather than a target string, so no
@@ -44,11 +47,11 @@ _ENTER = imgui.InputTextFlags_.enter_returns_true
 
 _NO_SOURCES = "No input detected"
 _HINT = (
-    "Every parameter can be mapped here. "
-    "A row with no source follows the parameter's own address, shown in grey. "
-    "On is what lets remote input in, so a row switched off can only be moved "
-    "by hand. "
-    "Pick lists the addresses arriving right now."
+    "Nothing outside can move a parameter until you tick On for it. "
+    "A row with no source then listens on the parameter's own address, shown "
+    "in grey. "
+    "Pick lists the addresses arriving right now, which is how you find out "
+    "what your controller is sending."
 )
 
 
@@ -133,9 +136,9 @@ class MappingPanel:
     def _source_field(self, name: str, binding: Binding | None) -> None:
         current = binding.source if binding is not None else ""
         imgui.set_next_item_width(imgui.get_font_size() * _SOURCE_EMS)
-        # The empty field is not "nothing", it is the parameter's own address,
-        # so the field says which one rather than leaving the performer to work
-        # out what an empty row means.
+        # An empty field is not "nothing", it is the address this row will
+        # listen on once it is switched on, so the field says which one rather
+        # than leaving the performer to work out what an empty row means.
         entered, text = imgui.input_text_with_hint(
             "##source",
             REGISTRY[name].address,
@@ -181,12 +184,13 @@ class MappingPanel:
     def _enable_box(self, name: str, binding: Binding | None) -> None:
         """The row's switch, which governs every remote writer of the parameter.
 
-        Always live, and on by default: a parameter with no row still answers
-        its own address, so a switch that could not be reached until a source
-        was typed would be a switch that does not govern what it appears to.
+        Always live, and off by default: a parameter nobody has switched on is
+        deaf to the network, so this box is the whole of the opt in and has to
+        be reachable before a source is typed. Ticking it with the source left
+        empty is the shortest way to open a parameter, on its own address.
         """
         changed, enabled = imgui.checkbox(
-            "On", binding.enabled if binding is not None else True
+            "On", binding.enabled if binding is not None else False
         )
         if changed:
             self._commit(name, binding, enabled=enabled)
@@ -211,12 +215,12 @@ class MappingPanel:
     ) -> None:
         """Send the edited row, or clear it when it says nothing anymore.
 
-        A row with no source, switched on, passing the value through is exactly
-        what a parameter with no row does, so it is cleared rather than stored.
-        That keeps the default state out of presets and makes switching a row
-        off and on again land back where it started. Any other row is kept,
-        including one with nothing but its switch turned off, which is how
-        "no remote input on this parameter" is recorded and persisted.
+        A row with no source, switched off, passing the value through is
+        exactly what a parameter with no row does, so it is cleared rather than
+        stored. That keeps the default state out of presets and makes switching
+        a row on and off again land back where it started. Any other row is
+        kept, including one with nothing but its switch ticked, which is how
+        "remote input on this parameter" is recorded and persisted.
         """
         if source is None:
             source = self._shown(name, "source", binding.source if binding else "")
@@ -224,12 +228,17 @@ class MappingPanel:
             expression = self._shown(
                 name, "expression", binding.expression if binding else "x"
             )
-        if enabled is None:
-            enabled = binding.enabled if binding is not None else True
         address = canonical_address(source)
         expression = expression.strip() or "x"
+        if enabled is None:
+            # Naming a source is the ask, so the first one switches the row on
+            # rather than leaving a mapping the performer picked doing nothing
+            # until they find the box beside it. Off by default protects them
+            # from traffic they did not configure, and an address they just
+            # typed is not that. An existing row keeps whatever it was set to.
+            enabled = binding.enabled if binding is not None else bool(address)
         enabled = bool(enabled)
-        if not address and enabled and expression == "x":
+        if not address and not enabled and expression == "x":
             if binding is not None:
                 self._submit(BINDING_CLEAR, ClearBinding(name))
                 self._forget(name)

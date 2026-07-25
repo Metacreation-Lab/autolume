@@ -129,6 +129,11 @@ def commit_panel():
 
 
 def test_typed_source_becomes_a_binding_with_a_canonical_address():
+    """And a live one. Naming a source is the ask, so the first one switches
+    the row on rather than leaving a mapping the performer just picked doing
+    nothing until they find the box beside it. Off by default protects them
+    from traffic they did not configure, not from an address they typed.
+    """
     panel = commit_panel()
     panel._commit("latent_x", None, source="audio/bass")
     (event,) = panel._runtime.events
@@ -137,9 +142,19 @@ def test_typed_source_becomes_a_binding_with_a_canonical_address():
     assert event.source == "ui"
 
 
+def test_typing_a_source_into_a_row_that_is_off_leaves_it_off():
+    # The performer switched that one off on purpose, and retyping an address
+    # is not them taking it back.
+    panel = commit_panel()
+    off = Binding("latent_x", "/audio/bass", "x", False)
+    panel._commit("latent_x", off, source="/td/knob")
+    (event,) = panel._runtime.events
+    assert event.value == Binding("latent_x", "/td/knob", "x", False)
+
+
 def test_emptying_the_source_clears_with_an_object_never_a_string():
     panel = commit_panel()
-    bound = Binding("latent_x", "/audio/bass", "x", True)
+    bound = Binding("latent_x", "/audio/bass", "x", False)
     panel._commit("latent_x", bound, source="")
     (event,) = panel._runtime.events
     assert event.address == BINDING_CLEAR
@@ -155,49 +170,60 @@ def test_emptying_an_unbound_source_submits_nothing():
     assert panel._runtime.events == []
 
 
-def test_switching_an_unmapped_row_off_records_it_as_a_sourceless_binding():
-    """Off has to be written down somewhere, and this is the somewhere.
+def test_switching_an_unmapped_row_on_records_it_as_a_sourceless_binding():
+    """On has to be written down somewhere, and this is the somewhere.
 
-    Absence of a row means the default, which is remote input on through the
-    parameter's own address, so switching one off cannot be expressed by
-    leaving the state alone. As an ordinary binding it persists in a preset for
-    free rather than needing a parallel set of disabled names.
+    Absence of a row now means remote input is off, so switching one on cannot
+    be expressed by leaving the state alone. As an ordinary binding it persists
+    in a preset for free rather than needing a parallel set of enabled names.
     """
     panel = commit_panel()
-    panel._commit("latent_x", None, enabled=False)
+    panel._commit("latent_x", None, enabled=True)
     (event,) = panel._runtime.events
     assert event.address == BINDING_SET
-    assert event.value == Binding("latent_x", "", "x", False)
+    assert event.value == Binding("latent_x", "", "x", True)
 
 
-def test_switching_a_sourceless_row_back_on_returns_it_to_the_default():
-    # And leaves nothing behind in the preset, so off and on again lands where
+def test_switching_a_sourceless_row_back_off_returns_it_to_the_default():
+    # And leaves nothing behind in the preset, so on and off again lands where
     # it started rather than storing a row that says what absence already says.
     panel = commit_panel()
-    off = Binding("latent_x", "", "x", False)
-    panel._commit("latent_x", off, enabled=True)
+    on = Binding("latent_x", "", "x", True)
+    panel._commit("latent_x", on, enabled=False)
     (event,) = panel._runtime.events
     assert event.address == BINDING_CLEAR
     assert event.value == ClearBinding("latent_x")
 
 
-def test_emptying_the_source_of_a_row_that_is_off_keeps_the_row():
-    # Clearing it would switch remote input back on behind the performer.
+def test_emptying_the_source_of_a_row_that_is_on_keeps_the_row():
+    # Clearing it would switch remote input off behind the performer, and the
+    # row still says something: listen on the parameter's own address.
+    panel = commit_panel()
+    bound = Binding("latent_x", "/audio/bass", "x", True)
+    panel._commit("latent_x", bound, source="")
+    (event,) = panel._runtime.events
+    assert event.address == BINDING_SET
+    assert event.value == Binding("latent_x", "", "x", True)
+
+
+def test_emptying_the_source_of_a_row_that_is_off_clears_it():
+    # Nothing is left to say: no address, off, and the value passed through is
+    # exactly what a parameter with no row does.
     panel = commit_panel()
     bound = Binding("latent_x", "/audio/bass", "x", False)
     panel._commit("latent_x", bound, source="")
     (event,) = panel._runtime.events
-    assert event.address == BINDING_SET
-    assert event.value == Binding("latent_x", "", "x", False)
+    assert event.address == BINDING_CLEAR
+    assert event.value == ClearBinding("latent_x")
 
 
 def test_a_sourceless_row_with_an_expression_is_kept():
-    # It transforms what arrives on the parameter's own address, which is not
-    # what an absent row does.
+    # It shapes what will arrive on the parameter's own address, which is not
+    # what an absent row does, so the typing survives even switched off.
     panel = commit_panel()
     panel._commit("latent_x", None, expression="x*2")
     (event,) = panel._runtime.events
-    assert event.value == Binding("latent_x", "", "x*2", True)
+    assert event.value == Binding("latent_x", "", "x*2", False)
 
 
 def test_editing_only_the_expression_preserves_the_source_and_enabled_flag():

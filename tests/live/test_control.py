@@ -70,15 +70,15 @@ def binding_for(state, target):
 
 def test_tick_applies_events_in_order():
     loop, control_store, _, _ = make_loop()
-    loop.submit(ControlEvent("/latent/x", 1.0))
-    loop.submit(ControlEvent("/latent/x", 2.0))
+    loop.submit(ControlEvent("/latent/x", 1.0, source="ui"))
+    loop.submit(ControlEvent("/latent/x", 2.0, source="ui"))
     loop.tick()
     assert control_store.snapshot().latent_x == 2.0
 
 
 def test_tick_publishes_render_params():
     loop, _, render_store, _ = make_loop()
-    loop.submit(ControlEvent("/trunc/psi", 1.2))
+    loop.submit(ControlEvent("/trunc/psi", 1.2, source="ui"))
     result = loop.tick()
     assert isinstance(result, RenderParams)
     assert render_store.snapshot().truncation_psi == 1.2
@@ -87,8 +87,8 @@ def test_tick_publishes_render_params():
 def test_tick_integrates_motion_with_measured_dt():
     clock = FakeClock()
     loop, control_store, _, _ = make_loop(clock)
-    loop.submit(ControlEvent("/anim/playing", True))
-    loop.submit(ControlEvent("/anim/speed/x", 2.0))
+    loop.submit(ControlEvent("/anim/playing", True, source="ui"))
+    loop.submit(ControlEvent("/anim/speed/x", 2.0, source="ui"))
     loop.tick()
     clock.now = 0.5
     loop.tick()
@@ -99,8 +99,8 @@ def test_motion_leaves_alone_the_parameter_the_hand_is_holding():
     clock = FakeClock()
     clock.now = 10.0
     loop, control_store, _, _ = make_loop(clock)
-    loop.submit(ControlEvent("/anim/playing", True))
-    loop.submit(ControlEvent("/anim/speed/x", 2.0))
+    loop.submit(ControlEvent("/anim/playing", True, source="ui"))
+    loop.submit(ControlEvent("/anim/speed/x", 2.0, source="ui"))
     loop.submit(ControlEvent(TOUCH_BEGIN, "latent_x", source="ui"))
     loop.tick()
     clock.now += 0.5
@@ -118,8 +118,8 @@ def test_motion_leaves_alone_a_parameter_a_binding_is_driving():
     clock = FakeClock()
     loop, control_store, _, _ = make_loop(clock)
     bind(loop, "latent_x", "/audio/level")
-    loop.submit(ControlEvent("/anim/playing", True))
-    loop.submit(ControlEvent("/anim/speed/x", 2.0))
+    loop.submit(ControlEvent("/anim/playing", True, source="ui"))
+    loop.submit(ControlEvent("/anim/speed/x", 2.0, source="ui"))
     loop.submit(ControlEvent("/audio/level", 1.5, source="osc"))
     loop.tick()
     clock.now = 0.5
@@ -131,7 +131,7 @@ def test_first_tick_has_zero_dt():
     clock = FakeClock()
     clock.now = 100.0
     loop, control_store, _, _ = make_loop(clock)
-    loop.submit(ControlEvent("/anim/playing", True))
+    loop.submit(ControlEvent("/anim/playing", True, source="ui"))
     loop.tick()
     assert control_store.snapshot().latent_x == 0.0
 
@@ -139,7 +139,7 @@ def test_first_tick_has_zero_dt():
 def test_submit_overflow_drops_oldest():
     loop, control_store, _, _ = make_loop()
     for i in range(2000):
-        loop.submit(ControlEvent("/latent/x", float(i)))
+        loop.submit(ControlEvent("/latent/x", float(i), source="ui"))
     loop.tick()
     assert control_store.snapshot().latent_x == 1999.0
 
@@ -159,7 +159,7 @@ def test_thread_start_stop():
     source_store = LatestValueStore(SourceTable())
     loop = ControlLoop(control_store, render_store, source_store, tick_hz=500.0)
     loop.start()
-    loop.submit(ControlEvent("/latent/x", 7.0))
+    loop.submit(ControlEvent("/latent/x", 7.0, source="ui"))
     deadline = time.monotonic() + 2.0
     while control_store.snapshot().latent_x != 7.0 and time.monotonic() < deadline:
         time.sleep(0.005)
@@ -215,6 +215,7 @@ def test_a_slash_less_address_reaches_the_binding_it_is_listed_as():
 
 def test_a_slash_less_address_still_reaches_its_own_parameter():
     loop, control_store, _, _ = make_loop()
+    bind(loop, "truncation_psi", "", enabled=True)
     loop.submit(ControlEvent("trunc/psi", 1.2, source="osc"))
     loop.tick()
     assert control_store.snapshot().truncation_psi == 1.2
@@ -252,15 +253,29 @@ def test_disabled_binding_does_not_fire_until_it_is_enabled():
     assert control_store.snapshot().truncation_psi == 0.5
 
 
-def test_a_row_switched_off_stops_input_on_the_parameters_own_address():
+def test_a_stream_moves_nothing_until_a_row_is_switched_on():
     """The reported bug, in the terms it was hit in.
 
-    TouchDesigner streaming /anim/playing, the Animate box refusing to stay
-    off, and a mapping row that showed no source and read as switched off. The
-    row governed a binding while the parameter's own address stayed open beside
-    it, so the performer's every click lost the next race to the stream.
+    TouchDesigner streaming /anim/playing at a runtime nobody had configured,
+    the Animate box ticking itself on and refusing to stay off, and no way in
+    the app to refuse it. A parameter now sits still until it is asked to
+    move, and the row is where the asking happens.
     """
     loop, control_store, _, _ = make_loop()
+    loop.submit(ControlEvent("/anim/playing", 1.0, source="osc"))
+    loop.tick()
+    assert control_store.snapshot().anim_playing is False
+
+    bind(loop, "anim_playing", "", enabled=True)
+    loop.submit(ControlEvent("/anim/playing", 1.0, source="osc"))
+    loop.tick()
+    assert control_store.snapshot().anim_playing is True
+
+
+def test_a_row_switched_off_stops_input_on_the_parameters_own_address():
+    # Off again is off again, whether it was never on or was just turned back.
+    loop, control_store, _, _ = make_loop()
+    bind(loop, "anim_playing", "", enabled=True)
     loop.submit(ControlEvent("/anim/playing", 1.0, source="osc"))
     loop.tick()
     assert control_store.snapshot().anim_playing is True
@@ -293,11 +308,24 @@ def test_a_row_switched_on_lets_input_through_the_parameters_own_address():
     assert control_store.snapshot().truncation_psi == 1.2
 
 
-def test_an_unmapped_parameter_still_answers_its_own_address():
-    # The default, and the behavior worth keeping: nothing configured and
-    # sending the address in the docs just works.
+def test_an_unmapped_parameter_ignores_its_own_address():
+    """The default, and the point of the whole change.
+
+    A controller that finds the port cannot move a parameter nobody offered
+    it. On a shared network at a venue that is the difference between a show
+    and someone else's stray traffic.
+    """
     loop, control_store, _, _ = make_loop()
     loop.submit(ControlEvent("/trunc/psi", 1.2, source="osc"))
+    loop.tick()
+    assert control_store.snapshot().truncation_psi == 0.7
+
+
+def test_an_unmapped_parameter_still_answers_the_hand():
+    # The default takes the parameter off the network, not away from the
+    # performer. Nothing about the switch is allowed to reach the mouse.
+    loop, control_store, _, _ = make_loop()
+    loop.submit(ControlEvent("/trunc/psi", 1.2, source="ui"))
     loop.tick()
     assert control_store.snapshot().truncation_psi == 1.2
 
@@ -340,6 +368,7 @@ def test_a_held_parameter_ignores_remote_writes_to_its_own_address():
     clock = FakeClock()
     clock.now = 10.0
     loop, control_store, _, _ = make_loop(clock)
+    bind(loop, "truncation_psi", "", enabled=True)
     loop.submit(ControlEvent(TOUCH_BEGIN, "truncation_psi", source="ui"))
     loop.submit(ControlEvent("/trunc/psi", 1.5, source="osc"))
     loop.tick()
@@ -378,6 +407,27 @@ def test_a_blocked_remote_write_is_still_offered_as_an_input_source():
     loop.tick()
     assert control_store.snapshot().truncation_psi == 0.7
     assert source_store.snapshot().recent(clock.now) == ["/trunc/psi"]
+
+
+def test_traffic_at_a_parameter_with_no_row_is_still_recorded_as_a_source():
+    """The one thing that must not be gated along with the write.
+
+    Every parameter starts deaf, so every address a performer is trying to set
+    up arrives blocked. If recording followed acceptance the picker would be
+    empty for exactly the controller they are pointing at us, and the gutter
+    would have nothing to show them either. They would be left telling a wrong
+    port from a wrong address from a switch they have not found, with no
+    evidence at all.
+    """
+    clock = FakeClock()
+    clock.now = 5.0
+    loop, control_store, _, source_store = make_loop(clock)
+    loop.submit(ControlEvent("/trunc/psi", 1.2, source="osc"))
+    loop.tick()
+    assert control_store.snapshot().truncation_psi == 0.7
+    table = source_store.snapshot()
+    assert table.recent(clock.now) == ["/trunc/psi"]
+    assert table.active("/trunc/psi", clock.now)
 
 
 def test_failing_expression_keeps_the_value_and_records_the_error():
@@ -586,7 +636,7 @@ def test_event_that_fails_to_apply_is_dropped_and_the_drain_continues(
     loop, control_store, _, _ = make_loop()
     with caplog.at_level(logging.ERROR, logger=control_module.__name__):
         loop.submit(ControlEvent("/boom", 1.0))
-        loop.submit(ControlEvent("/latent/x", 3.0))
+        loop.submit(ControlEvent("/latent/x", 3.0, source="ui"))
         loop.tick()
     assert control_store.snapshot().latent_x == 3.0
     assert any("/boom" in record.getMessage() for record in caplog.records)
@@ -667,7 +717,7 @@ def test_control_thread_survives_a_raising_tick():
 
     loop.tick = flaky_tick
     loop.start()
-    loop.submit(ControlEvent("/latent/x", 7.0))
+    loop.submit(ControlEvent("/latent/x", 7.0, source="ui"))
     deadline = time.monotonic() + 2.0
     while control_store.snapshot().latent_x != 7.0 and time.monotonic() < deadline:
         time.sleep(0.005)

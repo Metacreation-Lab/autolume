@@ -61,13 +61,17 @@ BINDING_CLEAR = "/binding/clear"
 class Binding:
     """One parameter's mapping row: what may write it, and through what.
 
+    Remote input is off until a row says otherwise, so the row is what turns it
+    on rather than what takes it away. A parameter with no row here accepts
+    nothing from outside, whatever address arrives.
+
     `source` is the one address that reaches the parameter, and an empty source
-    means the parameter's own canonical address, so a parameter nobody has
-    mapped still answers the address the registry gives it. `enabled` is the
-    row's switch and governs every remote writer, which is why a row exists at
-    all for a parameter with no source: switching remote input off is a state
-    that has to be recorded somewhere, and recorded here it persists in a
-    preset like any other mapping instead of needing a parallel set of names.
+    means the parameter's own canonical address, so a row that only says On
+    opens the address the registry gives the parameter. `enabled` is the row's
+    switch and governs every remote writer, which is why a row exists at all
+    for a parameter with no source: switching remote input on is a state that
+    has to be recorded somewhere, and recorded here it persists in a preset
+    like any other mapping instead of needing a parallel set of names.
 
     `error` holds the last compile or evaluation failure so the mapping panel
     can show it. It is runtime state and is never persisted.
@@ -102,9 +106,9 @@ def binding_for(bindings: tuple[Binding, ...], name: str) -> Binding | None:
 def listens_on(binding: Binding) -> str:
     """The one address a row lets through to its parameter.
 
-    An empty source is not a broken row, it is the default one: the parameter's
-    own canonical address. That is what keeps a bare `/anim/playing` working
-    with nothing configured, while leaving the row's switch in charge of it.
+    An empty source is not a broken row, it is the plainest one: the
+    parameter's own canonical address. A row that only says On is how a
+    performer opens `/anim/playing` without having to type it.
     """
     if binding.source:
         return binding.source

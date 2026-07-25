@@ -94,16 +94,33 @@ def test_saved_file_is_json_with_the_expected_envelope(tmp_path):
     ]
 
 
-def test_a_parameter_taken_off_the_network_stays_off_it_through_a_reload(tmp_path):
-    """A row with no source and no switch is how remote input is turned off.
+def test_a_parameter_put_on_the_network_stays_on_it_through_a_reload(tmp_path):
+    """A row with a switch and no source is how remote input is turned on.
 
-    It has to survive the round trip, or a performer who took a runaway
-    parameter off the network gets it back the moment they recall the look.
+    It is the one record the new default cannot infer, so it has to survive the
+    round trip. Without it a performer recalls the look they set up before the
+    show and every controller they wired to it is deaf.
     """
     path = tmp_path / "look.json"
-    off = ControlState(bindings=(Binding("anim_playing", "", "x", enabled=False),))
-    presets.save(off, path)
-    assert apply_payload(ControlState(), presets.load(path)).bindings == off.bindings
+    on = ControlState(bindings=(Binding("anim_playing", "", "x", enabled=True),))
+    presets.save(on, path)
+    assert apply_payload(ControlState(), presets.load(path)).bindings == on.bindings
+
+
+def test_a_preset_with_no_record_for_a_parameter_leaves_it_off_the_network(tmp_path):
+    """Absence means off, on recall as much as at startup.
+
+    A preset written before remote input became opt in carries no row for a
+    parameter that was listening by default, so recalling it now leaves that
+    parameter deaf. That is deliberate and unmigrated: the absent row recorded
+    a default nobody chose, and synthesizing one for every parameter would
+    reinstate the very state this change exists to abolish.
+    """
+    path = tmp_path / "look.json"
+    presets.save(ControlState(truncation_psi=1.25), path)
+    state = apply_payload(ControlState(), presets.load(path))
+    assert state.truncation_psi == 1.25
+    assert state.bindings == ()
 
 
 def test_the_frame_limit_is_a_property_of_the_machine_not_of_the_look(tmp_path):

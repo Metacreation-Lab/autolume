@@ -26,7 +26,6 @@ from autolume.live.core.params import (
     ControlState,
     RenderParams,
     apply_value,
-    binding_for,
     listens_on,
     to_render_params,
 )
@@ -147,37 +146,35 @@ class ControlLoop:
         # The source table is the picker's list of available inputs, so what
         # this app writes out has no business in it. Recording UI events would
         # fill it with the parameters' own transport addresses and put binding
-        # a parameter to itself two clicks away. Recorded before the gate below,
-        # because an address the picker should offer is an address that arrived,
-        # whether or not the parameter it names accepted it.
+        # a parameter to itself two clicks away.
+        #
+        # Recorded before the gate below, and this ordering is now load
+        # bearing rather than tidy: with remote input off until a row says
+        # otherwise, every address a performer is trying to set up arrives
+        # blocked. Record only what was accepted and the picker would be empty
+        # for exactly the controller they are pointing at us, and the gutter
+        # would have nothing to show them either.
         if number is not None and remote:
             stamp = now if event.timestamp is None else event.timestamp
             sources = sources.observe(address, number, stamp)
-        if self._accepts_direct(state, address, remote, now):
+        if self._accepts_direct(address, remote):
             state = apply_event(state, event)
         if number is None:
             return state, sources
         return self._drive_bindings(state, address, number, now, remote), sources
 
-    def _accepts_direct(
-        self, state: ControlState, address: str, remote: bool, now: float
-    ) -> bool:
+    def _accepts_direct(self, address: str, remote: bool) -> bool:
         """Whether an event may write the parameter its own address names.
 
         The performer's hand is never gated: a UI event passes here whatever
-        the mapping says, because the switch in a mapping row stops the
-        network, not the mouse.
+        the mapping says, because a mapping row stops the network, not the
+        mouse.
 
-        A remote write has to pass two checks. The mapping row governs all
-        remote input to its parameter, so once a row exists the row decides and
-        the direct path stands down: `_drive_bindings` applies the row, whether
-        its source is an address the performer picked or, left empty, the
-        parameter's own. And a parameter the performer is holding is theirs for
-        the length of the hold plus its grace, exactly as it is against a
-        binding. This is the only case where a hand and an automated writer can
-        both reach an interactive control, since a bound control is drawn read
-        only, so without it grabbing a slider a stream is writing produces the
-        jitter the touch grace exists to prevent.
+        Nothing remote passes. A parameter is written from outside only through
+        its mapping row, and a parameter with no row has not been offered to
+        the network at all, so a controller that finds the port cannot move a
+        show nobody pointed at it. `_drive_bindings` is the one remote path,
+        and it applies the row's switch, its expression and the touch grace.
 
         Everything that is not a parameter address passes: the structured
         addresses carry their own validation, and an unknown one is dropped
@@ -185,12 +182,7 @@ class ControlLoop:
         """
         if not remote:
             return True
-        spec = BY_ADDRESS.get(address)
-        if spec is None:
-            return True
-        if binding_for(state.bindings, spec.name) is not None:
-            return False
-        return not self.touch.is_held(spec.name, now)
+        return BY_ADDRESS.get(address) is None
 
     def _report_guard(self, key: tuple[str, str], message: str, *args: object) -> None:
         """Log a last resort guard hit, throttled to protect the tick budget.
@@ -240,6 +232,9 @@ class ControlLoop:
         remote: bool,
     ) -> ControlState:
         """Run every enabled row listening on `address`.
+
+        This is the only way anything remote reaches a parameter, so a
+        parameter with no row here is one nothing outside can move.
 
         A row with no source listens on its parameter's own address, and only
         for remote input: its expression is there to shape what arrives from
