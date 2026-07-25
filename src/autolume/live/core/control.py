@@ -92,7 +92,7 @@ class ControlLoop:
             except Exception as exc:
                 key = (event.address, type(exc).__name__)
                 self._report_guard(key, "Dropping control event %r", event)
-        state = integrate(state, dt)
+        state = integrate(state, dt, self.touch, now)
 
         self._control_store.set(state)
         if sources is not published_sources:

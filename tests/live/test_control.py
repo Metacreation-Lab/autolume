@@ -95,6 +95,38 @@ def test_tick_integrates_motion_with_measured_dt():
     assert abs(control_store.snapshot().latent_x - 1.0) < 1e-9
 
 
+def test_motion_leaves_alone_the_parameter_the_hand_is_holding():
+    clock = FakeClock()
+    clock.now = 10.0
+    loop, control_store, _, _ = make_loop(clock)
+    loop.submit(ControlEvent("/anim/playing", True))
+    loop.submit(ControlEvent("/anim/speed/x", 2.0))
+    loop.submit(ControlEvent(TOUCH_BEGIN, "latent_x", source="ui"))
+    loop.tick()
+    clock.now += 0.5
+    loop.tick()
+    assert control_store.snapshot().latent_x == 0.0
+
+    loop.submit(ControlEvent(TOUCH_END, "latent_x", source="ui"))
+    loop.tick()
+    clock.now += TOUCH_GRACE + 0.5
+    loop.tick()
+    assert control_store.snapshot().latent_x > 0.0
+
+
+def test_motion_leaves_alone_a_parameter_a_binding_is_driving():
+    clock = FakeClock()
+    loop, control_store, _, _ = make_loop(clock)
+    bind(loop, "latent_x", "/audio/level")
+    loop.submit(ControlEvent("/anim/playing", True))
+    loop.submit(ControlEvent("/anim/speed/x", 2.0))
+    loop.submit(ControlEvent("/audio/level", 1.5, source="osc"))
+    loop.tick()
+    clock.now = 0.5
+    loop.tick()
+    assert control_store.snapshot().latent_x == 1.5
+
+
 def test_first_tick_has_zero_dt():
     clock = FakeClock()
     clock.now = 100.0
