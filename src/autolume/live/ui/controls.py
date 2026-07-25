@@ -8,13 +8,14 @@ hand it another one's value. The
 performer's hand wins over a binding while a widget is held. A parameter that
 something else drives says so.
 
-The chip in the gutter left of the widget names what is driving the parameter.
+The driver marker in the gutter left of the widget names what drives the
+parameter.
 A binding writes an absolute value, so it takes the control away from the hand
 and the widget is drawn read only. Motion is relative and carries on from
 wherever the value is, so an animated control stays live and dragging it is
 scrubbing. A control a remote writer is playing stays live too, because the
 moment a controller misbehaves is the moment the performer must be able to take
-it back. The chip is clickable in every state and opens the mapping editor,
+it back. The marker is clickable in every state and opens the mapping editor,
 which is what a read only control has instead of its own right click menu.
 
 The vocabulary is one rectangle, four colours and two fills.
@@ -87,7 +88,7 @@ from autolume.live.core.sources import SourceTable
 from autolume.live.core.touch import TOUCH_BEGIN, TOUCH_END
 from autolume.live.ui.theme import BINDING_COLOR, ERROR_COLOR, MOTION_COLOR
 
-# Wide enough to click at, since the chip in it is the way back from a control
+# Wide enough to click at, since the marker in it is the way back from a control
 # a binding has taken over.
 _GUTTER_RATIO = 0.7
 # Was 0.3 while every marker was solid. An outline needs a hole to be read as
@@ -123,7 +124,7 @@ _ENTER = imgui.InputTextFlags_.enter_returns_true
 # exists only so the width can never reach zero, where imgui reads an item
 # width as a distance from the right edge instead and the field would grow as
 # the panel shrinks. Everything on the row keeps its size while the field gives
-# up its own, so the chip and the button beside it are the last things to go.
+# up its own, so the marker and the button beside it are the last things to go.
 _FIELD_MIN_EMS = 1.0
 
 T = TypeVar("T")
@@ -218,7 +219,7 @@ def _binding_tip(binding: Binding, live: bool) -> str:
 
     The idle wording is the whole point of drawing liveness at all: a row on
     /audio/bass with nothing coming in means the audio module is off or the
-    room is silent, and reading that off the chip beats going to look.
+    room is silent, and reading that off the marker beats going to look.
     """
     address = listens_on(binding)
     if live:
@@ -789,7 +790,7 @@ class ControlBinder:
     ) -> bool:
         """One frame of a text field, wired like every other control.
 
-        The same contract as `_widget`: the chip first and outside the disabled
+        The same contract as `_widget`: the marker first and outside the disabled
         block, a touch around the edit, the local hold while it is open, and
         read only when an explicit source drives the parameter. What differs is
         when a value leaves, because a text field has no gesture that ends. It
@@ -881,14 +882,14 @@ class ControlBinder:
         )
 
     def _indicator(self, name: str, gutter: Gutter) -> None:
-        """Draw the chip left of the widget: who drives it, and a way to change it.
+        """Draw the driver marker left of the widget: who drives it, and a way in.
 
         The gutter is reserved whether or not anything drives the parameter, so
         a binding appearing does not shift the control under the performer's
         cursor. The marker is a drawn rectangle rather than a glyph because the
         bundled font has no symbols.
 
-        The chip is a real clickable item and it is drawn before any disabled
+        The marker is a real clickable item and it is drawn before any disabled
         block, which is what makes disabling a bound control safe: imgui
         suppresses hover inside a disabled block, so a read only control cannot
         open its own right click menu, and without this the Mapping panel would
@@ -899,8 +900,8 @@ class ControlBinder:
         origin = imgui.get_cursor_screen_pos()
         clickable = self._mapping_popup is not None
         if clickable:
-            if imgui.invisible_button("##chip", imgui.ImVec2(width, height)):
-                imgui.open_popup("chip")
+            if imgui.invisible_button("##driver_marker", imgui.ImVec2(width, height)):
+                imgui.open_popup("driver_marker")
             hovered = imgui.is_item_hovered()
             # The plate answers the cursor at once, the words wait for the
             # cursor to settle, so crossing the column does not fire a row of
@@ -909,15 +910,15 @@ class ControlBinder:
         else:
             imgui.dummy(imgui.ImVec2(width, height))
             hovered = explain = False
-        self._chip_shape(origin, width, height, gutter, hovered)
+        self._driver_marker_shape(origin, width, height, gutter, hovered)
         if explain:
             imgui.set_tooltip(gutter.tooltip)
-        if clickable and imgui.begin_popup("chip"):
+        if clickable and imgui.begin_popup("driver_marker"):
             self._mapping_popup(name)
             imgui.end_popup()
         imgui.same_line()
 
-    def _chip_shape(
+    def _driver_marker_shape(
         self,
         origin,
         width: int,
@@ -925,9 +926,9 @@ class ControlBinder:
         gutter: Gutter,
         hovered: bool,
     ) -> None:
-        """Paint the chip: the slot, a hover plate, then the driver's marker.
+        """Paint the driver marker: the slot, a hover plate, then the colour.
 
-        One rectangle on every row, because the chip is the only way into the
+        One rectangle on every row, because the marker is the only way into the
         mapping editor from a control a binding has taken read only, and a
         column that only appears once the cursor is already on it is a column
         nobody finds.
@@ -937,7 +938,7 @@ class ControlBinder:
         Against the near black panel the idle grey lands near three to one, the
         blue near ten and the green near thirteen, so the pair a red green
         deficiency flattens is also the pair furthest apart in value. These are
-        not Autolume's teal and red: a surface colour sits behind text, a chip
+        not Autolume's teal and red: a surface colour sits behind text, a marker
         colour has to survive being one of four at a glance, and the brand pair
         misses the ratios above. `ui/theme.py` records that split.
 

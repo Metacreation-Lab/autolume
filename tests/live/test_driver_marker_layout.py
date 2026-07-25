@@ -1,10 +1,10 @@
-"""The chip column, drawn for real against the real theme.
+"""The driver marker column, drawn for real against the real theme.
 
 imgui cannot be driven with a window here, but it can be driven without one:
 a context, a display size and the textures backend flag are enough to run a
 frame and let the layout resolve. That is worth the setup for exactly one
 question, because it is the question a screenshot raised and nothing else can
-answer. A performer reported the chip appearing on some rows and not others,
+answer. A performer reported the marker appearing on some rows and not others,
 which would have meant a rule that quietly applied to five parameters and not
 six. It did not, but nothing in the suite could say so, and the only reason it
 could be checked at all was by hand at the end of a build.
@@ -62,7 +62,7 @@ def frame():
     """One imgui frame, with the theme the app actually runs under.
 
     The theme matters: `darcula_darker` puts the frame colour within a hair of
-    the window colour, which is what made an earlier chip drawn in it invisible.
+    the window colour, which is what made an earlier marker drawn in it invisible.
     Anything asserting about what a performer can see has to run under it.
     """
     context = imgui.create_context()
@@ -85,7 +85,7 @@ def frame():
 
 
 def painted(state, sources, name):
-    """How many vertices the chip for `name` puts in the draw list.
+    """How many vertices the driver marker for `name` puts in the draw list.
 
     Zero means nothing was painted. Otherwise the count separates a solid shape
     from an outline of the same shape, which is the one visual distinction in
@@ -94,7 +94,7 @@ def painted(state, sources, name):
     differently does not fail the suite.
     """
     counts = {}
-    original = ControlBinder._chip_shape
+    original = ControlBinder._driver_marker_shape
     try:
 
         def measure(self, origin, width, height, gutter, hovered):
@@ -103,7 +103,7 @@ def painted(state, sources, name):
             original(self, origin, width, height, gutter, hovered)
             counts[measure.name] = draw_list.vtx_buffer.size() - before
 
-        ControlBinder._chip_shape = measure
+        ControlBinder._driver_marker_shape = measure
         original_indicator = ControlBinder._indicator
 
         def label(self, parameter, gutter):
@@ -116,7 +116,7 @@ def painted(state, sources, name):
         finally:
             ControlBinder._indicator = original_indicator
     finally:
-        ControlBinder._chip_shape = original
+        ControlBinder._driver_marker_shape = original
     return counts[name]
 
 
@@ -184,7 +184,7 @@ def test_every_row_carries_a_marker_even_when_nothing_drives_it(frame):
 def luminance(color):
     """Relative luminance of `color` composited onto the panel background.
 
-    The chip is painted straight onto the panel, so a colour carrying alpha is
+    The marker is painted straight onto the panel, so a colour carrying alpha is
     only as bright as what shows through, and comparing raw tuples would flatter
     every translucent one.
     """
@@ -205,7 +205,7 @@ def contrast(one, other):
 def test_the_idle_marker_stands_off_the_panel_it_is_drawn_on(frame):
     """The grey has to be visible without a hover, in the real theme.
 
-    An earlier pass drew the idle chip in the frame colour, which in this theme
+    An earlier pass drew the idle marker in the frame colour, which in this theme
     is (0.145, 0.122, 0.122) against a window of (0.138, 0.142, 0.149). That is
     the background, so it could not have worked whatever the alpha. Asserting a
     real separation is what stops the next choice from going the same way, and

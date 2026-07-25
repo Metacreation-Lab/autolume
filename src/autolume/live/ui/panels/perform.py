@@ -1,6 +1,6 @@
 """Perform panel: the parameters played during a show.
 
-Every row is the same row: a chip saying what drives the parameter, then the
+Every row is the same row: a driver marker saying what drives it, then the
 control. The model is one of them. It used to be a button and a label, drawn by
 hand, which was already the odd one out and became a wrong one once a mapping
 row could switch models from a controller: the parameter could be driven and
@@ -50,14 +50,14 @@ class PerformPanel:
         self._runtime.submit(ControlEvent(address, value, source="ui"))
 
     def _model_row(self) -> None:
-        """The model, as an ordinary row: chip, path, Browse.
+        """The model, as an ordinary row: driver marker, path, Browse.
 
         The field holds the path itself, so a path can be pasted or typed as
         well as picked, and it commits on Enter or on losing focus.
 
         Browse is drawn disabled exactly when the field is, which the binder
         reports: a source driving the parameter would overwrite whatever the
-        dialog picked. The chip is drawn before either of them and stays
+        dialog picked. The marker is drawn before either of them and stays
         clickable, so it is still the way back.
         """
         imgui.separator_text("Model")

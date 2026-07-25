@@ -41,12 +41,12 @@ def test_every_palette_entry_is_a_normalised_rgba(name):
     assert all(0.0 <= part <= 1.0 for part in color)
 
 
-def test_the_chip_colours_are_not_surface_colours():
+def test_the_driver_marker_colours_are_not_surface_colours():
     """The two palettes stay apart, and this is the reminder of why.
 
     Reaching for `TEAL` and `RED` here is the obvious tidying and it is wrong:
     both fail the gutter's contrast guards, which is what the module docstring
-    records and `test_chip_layout.py` measures. This fails first and points
+    records and `test_driver_marker_layout.py` measures. This fails first and points
     there, rather than leaving the tidier to find out from a contrast ratio.
     """
     surfaces = set(PALETTE.values())

@@ -16,14 +16,14 @@ descriptive (``GREEN`` is teal, ``DARKGRAY`` is white at five percent) and they
 still appear throughout the legacy widgets, so the mapping is recorded in
 ``plan-theme.md`` rather than carried into the names here.
 
-The chip colours below are deliberately not drawn from it. A surface colour is
-chosen to sit quietly behind text; a chip colour has to be told apart from
-three others at a glance, on eleven rows at once, by an eye that may not
-separate hues. Autolume's teal lands at 1.75 to 1 against the idle grey and its
-red at 2.99 to 1 over a bright frame, where the gutter needs 2.0 and 4.0, so
+The driver marker colours below are deliberately not drawn from it. A surface
+colour is chosen to sit quietly behind text. A marker colour has to be told
+apart from three others at a glance, on eleven rows at once, by an eye that may
+not separate hues. Autolume's teal lands at 1.75 to 1 against the idle grey and
+its red at 2.99 to 1 over a bright frame, where the gutter needs 2.0 and 4.0, so
 using the brand values here would trade a real distinction for a nominal one.
-The tests in ``tests/live/test_chip_layout.py`` hold those ratios, and they are
-the reason this file carries two palettes instead of one.
+``tests/live/test_driver_marker_layout.py`` holds those ratios, and they are the
+reason this file carries two palettes instead of one.
 """
 
 from __future__ import annotations
