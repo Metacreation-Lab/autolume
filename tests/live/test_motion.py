@@ -1,6 +1,11 @@
-from autolume.live.core.motion import MOTION_PARAMS, drives, integrate
+import numpy as np
+
+from autolume.live.core.generator import ModelInfo
+from autolume.live.core.motion import MOTION_PARAMS, WalkState, drives, integrate
 from autolume.live.core.params import Binding, ControlState
 from autolume.live.core.touch import TOUCH_GRACE, TouchTracker
+
+_INFO = ModelInfo(pkl_path="model.pkl", z_dim=2, num_ws=8)
 
 
 def test_not_playing_is_identity():
@@ -112,8 +117,8 @@ def test_motion_drives_an_axis_only_while_the_animation_plays():
 
 
 def test_motion_drives_nothing_it_does_not_write():
-    playing = ControlState(anim_playing=True)
-    assert MOTION_PARAMS == ("latent_x", "latent_y")
+    playing = ControlState(anim_playing=True, vector_mode=True)
+    assert MOTION_PARAMS == ("latent_x", "latent_y", "latent_vec")
     assert not drives(playing, "truncation_psi")
     assert not drives(playing, "anim_speed_x")
 
@@ -177,3 +182,133 @@ def test_the_predicate_answers_exactly_what_the_integrator_does():
         for name in MOTION_PARAMS:
             moved = getattr(out, name) != getattr(state, name)
             assert drives(state, name, tracker, 10.0) is moved, (state, tracker, name)
+
+
+# --- vector walk ---------------------------------------------------------
+
+
+def test_vector_walk_drifts_toward_the_target_by_gain_times_speed_times_dt():
+    walk = WalkState(np.random.RandomState(0))
+    walk.target = np.array([10.0, 0.0])
+    state = ControlState(
+        anim_playing=True, vector_mode=True, anim_speed_x=0.5, latent_vec=(0.0, 0.0)
+    )
+    out = integrate(state, 0.1, model_info=_INFO, walk=walk)
+    assert out.latent_vec == (0.5, 0.0)
+
+
+def test_negative_speed_drifts_the_same_direction_toward_the_target():
+    walk = WalkState(np.random.RandomState(0))
+    walk.target = np.array([10.0, 0.0])
+    state = ControlState(
+        anim_playing=True, vector_mode=True, anim_speed_x=-0.5, latent_vec=(0.0, 0.0)
+    )
+    out = integrate(state, 0.1, model_info=_INFO, walk=walk)
+    assert out.latent_vec == (0.5, 0.0)
+
+
+def test_retarget_fires_under_the_threshold_and_draws_from_the_injected_rng():
+    expected_target = np.random.RandomState(123).randn(2)
+    walk = WalkState(np.random.RandomState(123))
+    walk.target = np.array([0.5, 0.0])  # distance 0.5 from (0, 0), under 1.0
+    state = ControlState(
+        anim_playing=True, vector_mode=True, anim_speed_x=1.0, latent_vec=(0.0, 0.0)
+    )
+    integrate(state, 0.1, model_info=_INFO, walk=walk)
+    assert np.array_equal(walk.target, expected_target)
+
+
+def test_a_held_vector_does_not_walk():
+    walk = WalkState(np.random.RandomState(0))
+    state = ControlState(
+        anim_playing=True, vector_mode=True, anim_speed_x=1.0, latent_vec=(5.0, 5.0)
+    )
+    touch = TouchTracker()
+    touch.begin("latent_vec", 10.0)
+    out = integrate(state, 0.5, touch, 10.0, model_info=_INFO, walk=walk)
+    assert out.latent_vec == state.latent_vec
+
+
+def test_a_binding_on_latent_x_does_not_suppress_the_vector_walk():
+    walk = WalkState(np.random.RandomState(0))
+    state = ControlState(
+        anim_playing=True,
+        vector_mode=True,
+        anim_speed_x=1.0,
+        latent_vec=(5.0, 5.0),
+        bindings=(Binding("latent_x", "/audio/level"),),
+    )
+    out = integrate(state, 0.1, model_info=_INFO, walk=walk)
+    assert out.latent_x == state.latent_x
+    assert out.latent_vec != state.latent_vec
+
+
+def test_loop_active_freezes_both_the_seed_walk_and_the_vector_walk():
+    walk = WalkState(np.random.RandomState(0))
+    state = ControlState(
+        anim_playing=True,
+        vector_mode=True,
+        loop_active=True,
+        anim_speed_x=1.0,
+        anim_speed_y=1.0,
+        latent_vec=(5.0, 5.0),
+    )
+    out = integrate(state, 0.5, model_info=_INFO, walk=walk)
+    assert out == state
+
+
+def test_an_empty_vector_with_the_walk_on_is_a_no_op():
+    walk = WalkState(np.random.RandomState(0))
+    state = ControlState(anim_playing=True, vector_mode=True, anim_speed_x=1.0)
+    out = integrate(state, 0.5, model_info=_INFO, walk=walk)
+    assert out.latent_vec == ()
+    assert walk.target is None
+
+
+def test_a_vector_that_no_longer_matches_z_dim_is_left_alone():
+    walk = WalkState(np.random.RandomState(0))
+    state = ControlState(
+        anim_playing=True,
+        vector_mode=True,
+        anim_speed_x=1.0,
+        latent_vec=(1.0, 2.0, 3.0),
+    )
+    out = integrate(state, 0.5, model_info=_INFO, walk=walk)
+    assert out.latent_vec == state.latent_vec
+
+
+def test_the_walk_runs_without_model_info_as_long_as_the_vector_is_not_empty():
+    walk = WalkState(np.random.RandomState(0))
+    state = ControlState(
+        anim_playing=True, vector_mode=True, anim_speed_x=1.0, latent_vec=(5.0, 5.0)
+    )
+    out = integrate(state, 0.5, walk=walk)
+    assert out.latent_vec != state.latent_vec
+
+
+def test_vector_mode_off_leaves_the_vector_alone_even_with_a_walk_state():
+    walk = WalkState(np.random.RandomState(0))
+    state = ControlState(
+        anim_playing=True, anim_speed_x=1.0, latent_vec=(5.0, 5.0)
+    )
+    out = integrate(state, 0.5, model_info=_INFO, walk=walk)
+    assert out.latent_vec == state.latent_vec
+
+
+def test_no_walk_state_means_the_vector_never_moves():
+    state = ControlState(
+        anim_playing=True, vector_mode=True, anim_speed_x=1.0, latent_vec=(5.0, 5.0)
+    )
+    out = integrate(state, 0.5, model_info=_INFO)
+    assert out.latent_vec == state.latent_vec
+
+
+def test_drives_answers_for_the_vector_too():
+    assert drives(ControlState(anim_playing=True, vector_mode=True), "latent_vec")
+    assert not drives(ControlState(anim_playing=True, vector_mode=False), "latent_vec")
+    loop_state = ControlState(
+        anim_playing=True, vector_mode=True, loop_active=True
+    )
+    assert not drives(loop_state, "latent_vec")
+    assert not drives(ControlState(anim_playing=True, loop_active=True), "latent_x")
+    assert not drives(ControlState(anim_playing=True, loop_active=True), "latent_y")

@@ -2,12 +2,16 @@ import itertools
 import logging
 import time
 
+import numpy as np
+
 from autolume.live.core import control as control_module
 from autolume.live.core.control import ControlLoop
 from autolume.live.core.events import ControlEvent
 from autolume.live.core.expr import compile_expression
+from autolume.live.core.generator import ModelInfo
 from autolume.live.core.params import (
     BINDING_SET,
+    VECTOR_RANDOMIZE,
     Binding,
     ControlState,
     RenderParams,
@@ -55,6 +59,21 @@ def make_loop(clock=None, store=LatestValueStore):
     source_store = store(SourceTable())
     loop = ControlLoop(
         control_store, render_store, source_store, clock=clock or FakeClock()
+    )
+    return loop, control_store, render_store, source_store
+
+
+def make_loop_with_model(clock, info):
+    control_store = LatestValueStore(ControlState())
+    render_store = LatestValueStore(to_render_params(ControlState()))
+    source_store = LatestValueStore(SourceTable())
+    model_info_store = LatestValueStore(info)
+    loop = ControlLoop(
+        control_store,
+        render_store,
+        source_store,
+        clock=clock,
+        model_info_store=model_info_store,
     )
     return loop, control_store, render_store, source_store
 
@@ -729,3 +748,91 @@ def test_control_thread_survives_a_raising_tick():
         time.sleep(0.005)
     loop.stop()
     assert control_store.snapshot().latent_x == 7.0
+
+
+def test_vector_randomize_is_not_left_inert_by_the_mapping_layer():
+    """The regression this task exists to fix.
+
+    `mapping.apply_event` recognizes `/vector/randomize` but deliberately
+    leaves state untouched, because it cannot reach `ModelInfo`. If the
+    control loop's own handling of this address were ever removed, the event
+    would fall back to that inert path and this would fail.
+    """
+    clock = FakeClock()
+    info = ModelInfo(pkl_path="model.pkl", z_dim=4, num_ws=8)
+    loop, control_store, _, _ = make_loop_with_model(clock, info)
+    loop.submit(ControlEvent(VECTOR_RANDOMIZE, 7, source="ui"))
+    loop.tick()
+    vec = control_store.snapshot().latent_vec
+    assert vec == tuple(np.random.RandomState(7).randn(4).tolist())
+
+
+def test_vector_randomize_from_osc_also_materializes():
+    clock = FakeClock()
+    info = ModelInfo(pkl_path="model.pkl", z_dim=3, num_ws=8)
+    loop, control_store, _, _ = make_loop_with_model(clock, info)
+    loop.submit(ControlEvent(VECTOR_RANDOMIZE, 42, source="osc"))
+    loop.tick()
+    vec = control_store.snapshot().latent_vec
+    assert vec == tuple(np.random.RandomState(42).randn(3).tolist())
+
+
+def test_vector_randomize_without_a_model_logs_and_changes_nothing(caplog):
+    loop, control_store, _, _ = make_loop()
+    with caplog.at_level(logging.INFO, logger=control_module.__name__):
+        loop.submit(ControlEvent(VECTOR_RANDOMIZE, 7, source="ui"))
+        loop.tick()
+    assert control_store.snapshot().latent_vec == ()
+    logged = [r for r in caplog.records if r.name == control_module.__name__]
+    assert len(logged) == 1
+    assert VECTOR_RANDOMIZE in logged[0].getMessage()
+
+
+def test_vector_randomize_with_a_non_numeric_seed_is_ignored():
+    clock = FakeClock()
+    info = ModelInfo(pkl_path="model.pkl", z_dim=2, num_ws=8)
+    loop, control_store, _, _ = make_loop_with_model(clock, info)
+    loop.submit(ControlEvent(VECTOR_RANDOMIZE, "not a seed", source="ui"))
+    loop.tick()
+    assert control_store.snapshot().latent_vec == ()
+
+
+def test_vector_randomize_updates_when_the_model_changes_between_ticks():
+    """`model_info` is refreshed once per tick, not read at construction."""
+    clock = FakeClock()
+    small = ModelInfo(pkl_path="small.pkl", z_dim=2, num_ws=8)
+    loop, control_store, _, _ = make_loop_with_model(clock, small)
+    loop.submit(ControlEvent(VECTOR_RANDOMIZE, 1, source="ui"))
+    loop.tick()
+    assert len(control_store.snapshot().latent_vec) == 2
+
+    loop._model_info_store.set(ModelInfo(pkl_path="big.pkl", z_dim=6, num_ws=8))
+    loop.submit(ControlEvent(VECTOR_RANDOMIZE, 1, source="ui"))
+    loop.tick()
+    assert len(control_store.snapshot().latent_vec) == 6
+
+
+def test_the_vector_walk_is_wired_into_the_control_loop():
+    clock = FakeClock()
+    info = ModelInfo(pkl_path="model.pkl", z_dim=2, num_ws=8)
+    control_store = LatestValueStore(
+        ControlState(vector_mode=True, anim_playing=True, anim_speed_x=1.0)
+    )
+    render_store = LatestValueStore(to_render_params(ControlState()))
+    source_store = LatestValueStore(SourceTable())
+    model_info_store = LatestValueStore(info)
+    loop = ControlLoop(
+        control_store,
+        render_store,
+        source_store,
+        clock=clock,
+        model_info_store=model_info_store,
+        walk_rng=np.random.RandomState(0),
+    )
+    loop.submit(ControlEvent(VECTOR_RANDOMIZE, 1, source="ui"))
+    loop.tick()
+    first = control_store.snapshot().latent_vec
+    clock.now += 0.1
+    loop.tick()
+    second = control_store.snapshot().latent_vec
+    assert second != first

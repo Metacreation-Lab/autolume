@@ -16,15 +16,18 @@ import threading
 import time
 from typing import Callable
 
+import numpy as np
+
 from autolume.live.core.events import ControlEvent
 from autolume.live.core.expr import ExpressionError, compile_expression
 from autolume.live.core.generator import ModelInfo
 from autolume.live.core.mapping import apply_event
 from autolume.live.core.models import ModelFolder
-from autolume.live.core.motion import integrate
+from autolume.live.core.motion import WalkState, integrate
 from autolume.live.core.params import (
     BY_ADDRESS,
     REGISTRY,
+    VECTOR_RANDOMIZE,
     Binding,
     ControlState,
     ParamKind,
@@ -43,6 +46,8 @@ _QUEUE_LIMIT = 1024
 _GUARD_REPEAT_INTERVAL = 1000
 _EXPRESSION_LIMIT = 128
 _TOUCH_ADDRESSES = (TOUCH_BEGIN, TOUCH_END)
+# np.random.RandomState only accepts a uint32 seed; an OSC int can be anything.
+_SEED_MASK = (1 << 32) - 1
 
 
 class ControlLoop:
@@ -55,6 +60,7 @@ class ControlLoop:
         clock: Callable[[], float] = time.monotonic,
         models: ModelFolder | None = None,
         model_info_store: LatestValueStore[ModelInfo | None] | None = None,
+        walk_rng: np.random.RandomState | None = None,
     ) -> None:
         self._control_store = control_store
         self._render_store = render_store
@@ -71,6 +77,9 @@ class ControlLoop:
         self._model_info_store = model_info_store or LatestValueStore(None)
         self._model_info: ModelInfo | None = self._model_info_store.snapshot()
         self.touch = TouchTracker()
+        # Seeded once at construction, never persisted: the vector walk's
+        # target is runtime-only state, not part of the show (design.md).
+        self.walk = WalkState(walk_rng or np.random.RandomState())
         self._queue: collections.deque[ControlEvent] = collections.deque(
             maxlen=_QUEUE_LIMIT
         )
@@ -115,7 +124,9 @@ class ControlLoop:
             except Exception as exc:
                 key = (event.address, type(exc).__name__)
                 self._report_guard(key, "Dropping control event %r", event)
-        state = integrate(state, dt, self.touch, now)
+        state = integrate(
+            state, dt, self.touch, now, model_info=self._model_info, walk=self.walk
+        )
 
         self._control_store.set(state)
         if sources is not published_sources:
@@ -179,7 +190,10 @@ class ControlLoop:
             stamp = now if event.timestamp is None else event.timestamp
             sources = sources.observe(address, number, stamp)
         if self._accepts_direct(address, remote):
-            state = apply_event(state, event)
+            if address == VECTOR_RANDOMIZE:
+                state = self._randomize_vector(state, number)
+            else:
+                state = apply_event(state, event)
         # The raw value travels alongside the number it may not be. A text
         # value carries no number and used to stop here, which left a text
         # parameter with no remote path at all once the gate closed.
@@ -229,6 +243,27 @@ class ControlLoop:
             logger.error(
                 message + " (%d more suppressed)", *args, _GUARD_REPEAT_INTERVAL - 1
             )
+
+    def _randomize_vector(
+        self, state: ControlState, seed_number: float | None
+    ) -> ControlState:
+        """Materialize `/vector/randomize` now that `ModelInfo` can be reached.
+
+        `mapping.apply_event` recognizes this address but leaves state
+        untouched: it has no way to reach the loaded model's `z_dim`. This is
+        where the event actually does something, so a `latent_vec` that never
+        changes after this call is a real no-op, not the mapping's inert one.
+        """
+        info = self._model_info
+        if info is None:
+            logger.info("Ignoring %s, no model is loaded yet", VECTOR_RANDOMIZE)
+            return state
+        if seed_number is None:
+            logger.warning("Ignoring non numeric seed on %s", VECTOR_RANDOMIZE)
+            return state
+        seed = int(round(seed_number)) & _SEED_MASK
+        vec = tuple(np.random.RandomState(seed).randn(info.z_dim).tolist())
+        return dataclasses.replace(state, latent_vec=vec)
 
     def _track_touch(self, event: ControlEvent, now: float) -> None:
         name = event.value
