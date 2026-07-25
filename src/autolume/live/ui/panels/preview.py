@@ -75,7 +75,9 @@ copy this panel does make is for immvision, which will not accept a read-only
 array at all. See `_displayable`.
 """
 
+import logging
 import os
+import warnings
 from dataclasses import dataclass
 from enum import Enum
 
@@ -83,6 +85,12 @@ import numpy as np
 from imgui_bundle import imgui, immvision
 
 from autolume.live.ui.controls import ERROR_COLOR
+
+logger = logging.getLogger(__name__)
+
+# Set once if the sampling hint cannot be applied, so a preview that has to
+# stay smooth says so a single time instead of once per uploaded frame.
+_SMOOTHING_WARNED = False
 
 _NO_MODEL = "No model loaded. Click Browse in the Controls panel to open one."
 _NO_FRAMES = "Waiting for frames."
@@ -218,6 +226,51 @@ def centred_offset(
     )
 
 
+def _magnify_without_smoothing(texture_id: int) -> None:
+    """Sample the frame at its own pixels when the quad is bigger than it is.
+
+    A texture is smoothed on magnification by default, which turns the output
+    of a 256 model filling a large panel into something soft and soupy. The
+    pixel grid is part of what a generative model produces, and a performer
+    scaling a small model up wants to see it, not a blurred interpolation of
+    it.
+
+    Only magnification. Minification stays smooth, because a 1024 frame shrunk
+    into a docked panel is the case where sampling every nth pixel aliases and
+    crawls as the image moves, and there the blend is what keeps it readable.
+
+    Never fatal. This is a hint about how a picture looks, and it runs where a
+    GL context is assumed but not guaranteed, so a failure here is logged once
+    and the preview keeps drawing the smooth way.
+
+    The context is checked rather than the call being attempted and caught:
+    calling into GL without one does not raise, it takes the process down, and
+    the suite draws real frames against a fake texture with no window behind
+    it.
+    """
+    global _SMOOTHING_WARNED
+    try:
+        import glfw
+        from OpenGL import GL
+
+        with warnings.catch_warnings():
+            # Asking before glfw is initialised is the answer we want, not a
+            # mistake: it means no window, so no context. glfw warns about it
+            # anyway, and a suite that draws frames without a window would
+            # carry that warning on every uploaded frame.
+            warnings.simplefilter("ignore")
+            if not glfw.get_current_context():
+                return
+        previous = GL.glGetIntegerv(GL.GL_TEXTURE_BINDING_2D)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, texture_id)
+        GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_NEAREST)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, int(previous))
+    except Exception:
+        if not _SMOOTHING_WARNED:
+            _SMOOTHING_WARNED = True
+            logger.exception("Could not set the preview to sample without smoothing")
+
+
 def needs_refresh(seq: int, last_seq: int) -> bool:
     """Whether the frame has to be uploaded to the GPU again.
 
@@ -306,6 +359,7 @@ class PreviewPanel:
             self._texture.update_from_image(
                 self._displayable(frame), is_color_order_bgr=False
             )
+            _magnify_without_smoothing(self._texture.texture_id)
         return self._texture.texture_id
 
     def _displayable(self, frame: np.ndarray) -> np.ndarray:
