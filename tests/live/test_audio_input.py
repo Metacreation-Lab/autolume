@@ -1,10 +1,11 @@
+import threading
 import time
 
 import numpy as np
 import pytest
 
 from autolume.live.io import audio as audio_module
-from autolume.live.io.audio import AudioInput
+from autolume.live.io.audio import AudioInput, AudioStatus
 
 
 class FakeEngine:
@@ -50,6 +51,19 @@ class FakeEngine:
         self.disable()
 
 
+class StuckThread:
+    """A thread that never finishes joining, to force the stop() timeout path."""
+
+    def __init__(self):
+        self.joins = []
+
+    def join(self, timeout=None):
+        self.joins.append(timeout)
+
+    def is_alive(self):
+        return True
+
+
 def make_input(engine, **kwargs):
     events = []
     return AudioInput(events.append, engine=engine, **kwargs), events
@@ -68,14 +82,14 @@ def test_disabled_tick_submits_nothing():
 
 def test_enabled_tick_submits_one_event_per_feature():
     engine = FakeEngine(enabled=True, features={"level": 0.25, "onset": 1.0})
-    audio, events = make_input(engine)
+    audio, events = make_input(engine, clock=lambda: 1234.5)
 
     audio.tick()
 
     assert [event.address for event in events] == ["/audio/level", "/audio/onset"]
     assert [event.value for event in events] == [0.25, 1.0]
     assert {event.source for event in events} == {"audio"}
-    assert all(event.timestamp is not None for event in events)
+    assert [event.timestamp for event in events] == [1234.5, 1234.5]
 
 
 def test_commands_apply_on_the_tick_not_at_call_time():
@@ -130,6 +144,19 @@ def test_status_reflects_the_engine_and_is_a_snapshot():
         status.features["level"] = 9.0
 
 
+def test_status_can_be_compared_and_hashed():
+    engine = FakeEngine(enabled=True)
+    audio, _ = make_input(engine)
+    audio.tick()
+    status = audio.status()
+
+    # A generated __eq__ raises on the ndarray field and a generated __hash__
+    # raises on the mapping, so both of these are about not raising.
+    assert status == status
+    assert status != AudioStatus()
+    assert hash(status) == hash(status)
+
+
 def test_update_error_surfaces_and_the_loop_continues():
     engine = FakeEngine(enabled=True)
     engine.update_raises = RuntimeError("device exploded")
@@ -153,7 +180,14 @@ def test_start_and_stop_are_idempotent_and_release_the_device():
 
     audio.start()
     audio.start()
-    audio.stop()
+    try:
+        threads = [thread for thread in threading.enumerate() if thread.name == "audio"]
+        # Named so a crash dump or profiler says which thread this is, and a
+        # daemon so a stalled device cannot hold the process open at exit.
+        assert len(threads) == 1
+        assert threads[0].daemon is True
+    finally:
+        audio.stop()
     audio.stop()
 
     assert engine.enabled is False
@@ -167,6 +201,7 @@ def test_stop_without_start_is_safe():
 
     audio.stop()
 
+    assert ("disable",) in engine.calls
     assert engine.enabled is False
 
 
@@ -204,6 +239,68 @@ def test_a_failing_engine_build_is_not_retried(monkeypatch):
 
     assert len(attempts) == 1
     assert "no portaudio" in audio.status().error
+
+
+def test_refresh_retries_a_failed_engine_build_and_applies_the_command(monkeypatch):
+    engine = FakeEngine()
+    attempts = []
+
+    def build():
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise RuntimeError("no portaudio")
+        return engine
+
+    monkeypatch.setattr(audio_module, "_build_default_engine", build)
+    audio = AudioInput(lambda event: None)
+
+    audio.tick()
+    assert "no portaudio" in audio.status().error
+
+    audio.refresh()
+    audio.tick()
+
+    assert len(attempts) == 2
+    assert ("refresh",) in engine.calls
+    assert audio.status().error is None
+
+
+def test_a_stuck_thread_is_reported_and_still_blocks_a_restart():
+    engine = FakeEngine(enabled=True)
+    audio, _ = make_input(engine)
+    stuck = StuckThread()
+    audio._thread = stuck
+
+    audio.stop()
+
+    assert stuck.joins == [2.0]
+    assert "did not stop" in audio.status().error
+    # The engine belongs to the live thread, so nothing here may touch it.
+    assert ("disable",) not in engine.calls
+
+    audio.start()
+
+    assert audio._thread is stuck
+
+
+def test_the_thread_survives_a_tick_that_raises_outside_its_own_guard(monkeypatch):
+    engine = FakeEngine()
+    audio, _ = make_input(engine, rate_hz=200.0)
+    calls = []
+
+    def broken_tick():
+        calls.append(1)
+        raise RuntimeError("guard bypassed")
+
+    monkeypatch.setattr(audio, "tick", broken_tick)
+
+    audio.start()
+    try:
+        time.sleep(0.2)
+    finally:
+        audio.stop()
+
+    assert len(calls) > 1
 
 
 def test_threaded_run_submits_at_about_the_requested_rate():

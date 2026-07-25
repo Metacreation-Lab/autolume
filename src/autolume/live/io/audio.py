@@ -26,20 +26,28 @@ ADDRESS_PREFIX = "/audio/"
 SOURCE = "audio"
 
 _COMMAND_LIMIT = 64
+_GUARD_REPEAT_INTERVAL = 1000
 _IDLE_FEATURES = MappingProxyType({name: 0.0 for name in FEATURE_NAMES})
+_STUCK_THREAD_ERROR = "Audio thread did not stop. Restart Autolume to use audio again."
 
 
 class AudioEngineLike(Protocol):
     """The engine surface the audio thread depends on."""
 
-    enabled: bool
     devices: tuple[tuple[int, str], ...]
     device_pos: int
     features: Mapping[str, float]
     spectrum: np.ndarray | None
     error: str | None
     onset_sensitivity: float
-    sample_rate: int
+
+    # Read only on the real engine, so they are declared read only here: an
+    # attribute member would not be satisfied by a property.
+    @property
+    def enabled(self) -> bool: ...
+
+    @property
+    def sample_rate(self) -> int: ...
 
     def enable(self) -> None: ...
     def disable(self) -> None: ...
@@ -49,7 +57,10 @@ class AudioEngineLike(Protocol):
     def update(self) -> None: ...
 
 
-@dataclasses.dataclass(frozen=True)
+# eq=False: the ndarray field makes a generated __eq__ raise and the mapping
+# makes the matching __hash__ raise, so identity comparison is the safe default
+# for a snapshot that only ever needs to be read.
+@dataclasses.dataclass(frozen=True, eq=False)
 class AudioStatus:
     enabled: bool = False
     devices: tuple[tuple[int, str], ...] = ()
@@ -93,6 +104,7 @@ class AudioInput:
         self._thread: threading.Thread | None = None
         self._running = threading.Event()
         self._engine_failed = False
+        self._tick_failures = 0
 
     def status(self) -> AudioStatus:
         return self._store.snapshot()
@@ -110,6 +122,10 @@ class AudioInput:
         self._command("set_onset_sensitivity", float(value))
 
     def refresh(self) -> None:
+        # Refresh is the one command a user reaches for when audio is missing,
+        # so it also lifts a terminal build failure and lets the next tick try
+        # again. Without it a failed build would swallow every later command.
+        self._engine_failed = False
         self._command("refresh")
 
     def tick(self) -> None:
@@ -154,8 +170,14 @@ class AudioInput:
             thread.join(timeout=2.0)
             if thread.is_alive():
                 # The reference stays so a later start cannot put a second
-                # thread on the same engine.
+                # thread on the same engine, which also means this instance is
+                # done for good. The UI has to be able to say so.
                 logger.warning("Audio thread did not stop, leaving the device open")
+                self._store.set(
+                    dataclasses.replace(
+                        self._store.snapshot(), error=_STUCK_THREAD_ERROR
+                    )
+                )
                 return
             self._thread = None
         # The thread is gone, so the engine is unowned and this is the only
@@ -172,7 +194,14 @@ class AudioInput:
     def _run(self) -> None:
         deadline = time.monotonic() + self._period
         while self._running.is_set():
-            self.tick()
+            # tick() guards its own body, so reaching this is near impossible,
+            # but an unguarded raise here would kill audio silently: the status
+            # would freeze, the device would stay open and nothing would
+            # restart the thread.
+            try:
+                self.tick()
+            except Exception:
+                self._report_tick_failure()
             remaining = deadline - time.monotonic()
             if remaining > 0.0:
                 time.sleep(remaining)
@@ -180,6 +209,24 @@ class AudioInput:
             now = time.monotonic()
             if deadline < now:
                 deadline = now + self._period
+
+    def _report_tick_failure(self) -> None:
+        """Log a guard hit, throttled like the control loop throttles its own.
+
+        Whatever breaks tick()'s own guard is a persistent condition, not a bad
+        input, so it recurs on every tick: at 60 Hz an unthrottled traceback
+        would bury the log and eat the budget. One call site and no input
+        derived keys, so a single counter replaces the control loop's keyed
+        bookkeeping. Must be called from an `except` block.
+        """
+        self._tick_failures += 1
+        if self._tick_failures == 1:
+            logger.exception("Audio tick failed outside its own guard")
+        elif self._tick_failures % _GUARD_REPEAT_INTERVAL == 0:
+            logger.error(
+                "Audio tick failed outside its own guard (%d more suppressed)",
+                _GUARD_REPEAT_INTERVAL - 1,
+            )
 
     def _command(self, name: str, *args: object) -> None:
         with self._command_lock:

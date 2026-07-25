@@ -12,12 +12,25 @@ def test_observe_returns_new_table_and_leaves_original_untouched():
     assert table.get("/latent/x").timestamp == 1.0
 
 
-def test_repeated_observation_updates_in_place_without_growing():
+def test_repeated_observation_updates_the_value_without_growing():
     table = SourceTable().observe("/latent/x", 0.5, 1.0)
     table = table.observe("/latent/x", 0.9, 2.0)
     assert len(table.entries) == 1
     assert table.get("/latent/x").value == 0.9
     assert table.get("/latent/x").timestamp == 2.0
+
+
+def test_observing_leaves_a_captured_non_empty_snapshot_untouched():
+    # What the copy on write exists for: a reader holds this snapshot while the
+    # control thread keeps observing, including on an address it already has.
+    captured = SourceTable().observe("/latent/x", 0.5, 1.0)
+    table = captured.observe("/latent/x", 0.9, 2.0).observe("/latent/y", 0.1, 3.0)
+
+    assert len(captured.entries) == 1
+    assert captured.get("/latent/x").value == 0.5
+    assert captured.get("/latent/x").timestamp == 1.0
+    assert captured.get("/latent/y") is None
+    assert table.get("/latent/x").value == 0.9
 
 
 def test_get_returns_none_for_unknown_address():
