@@ -4,37 +4,60 @@ import dataclasses
 import logging
 
 from autolume.live.core.events import ControlEvent
-from autolume.live.core.params import BY_ADDRESS, ControlState, ParamKind, ParamSpec
+from autolume.live.core.expr import ExpressionError, compile_expression
+from autolume.live.core.params import (
+    BINDING_CLEAR,
+    BINDING_SET,
+    BY_ADDRESS,
+    REGISTRY,
+    Binding,
+    ControlState,
+    apply_value,
+)
 
 logger = logging.getLogger(__name__)
 
 
-def _coerce(spec: ParamSpec, value: object) -> object:
-    if spec.kind is ParamKind.FLOAT:
-        coerced = float(value)
-    elif spec.kind is ParamKind.INT:
-        coerced = int(round(float(value)))
-    elif spec.kind is ParamKind.BOOL:
-        return bool(float(value)) if not isinstance(value, bool) else value
+def _set_binding(state: ControlState, value: object) -> ControlState:
+    if not isinstance(value, Binding):
+        logger.warning("Ignoring non binding value %r on %s", value, BINDING_SET)
+        return state
+    if value.target not in REGISTRY:
+        logger.warning("Ignoring binding for unknown parameter %s", value.target)
+        return state
+    try:
+        compile_expression(value.expression)
+    except ExpressionError as exc:
+        binding = dataclasses.replace(value, error=str(exc))
     else:
-        return str(value)
-    if spec.minimum is not None:
-        coerced = max(coerced, type(coerced)(spec.minimum))
-    if spec.maximum is not None:
-        coerced = min(coerced, type(coerced)(spec.maximum))
-    return coerced
+        binding = dataclasses.replace(value, error=None)
+    bindings = list(state.bindings)
+    for index, existing in enumerate(bindings):
+        if existing.target == binding.target:
+            bindings[index] = binding
+            break
+    else:
+        bindings.append(binding)
+    return dataclasses.replace(state, bindings=tuple(bindings))
+
+
+def _clear_binding(state: ControlState, value: object) -> ControlState:
+    if not isinstance(value, str):
+        logger.warning("Ignoring non target value %r on %s", value, BINDING_CLEAR)
+        return state
+    remaining = tuple(b for b in state.bindings if b.target != value)
+    if len(remaining) == len(state.bindings):
+        return state
+    return dataclasses.replace(state, bindings=remaining)
 
 
 def apply_event(state: ControlState, event: ControlEvent) -> ControlState:
+    if event.address == BINDING_SET:
+        return _set_binding(state, event.value)
+    if event.address == BINDING_CLEAR:
+        return _clear_binding(state, event.value)
     spec = BY_ADDRESS.get(event.address)
     if spec is None:
         logger.debug("Ignoring event for unknown address %s", event.address)
         return state
-    try:
-        coerced = _coerce(spec, event.value)
-    except (TypeError, ValueError):
-        logger.warning(
-            "Ignoring uncoercible value %r for %s", event.value, event.address
-        )
-        return state
-    return dataclasses.replace(state, **{spec.name: coerced})
+    return apply_value(state, spec.name, event.value)
