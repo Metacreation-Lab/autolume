@@ -1,26 +1,18 @@
-"""Presets panel: save a look, recall a look, bring an old one across.
+"""Presets panel: save a look, recall a look.
 
 Saving reads the control snapshot and writes a file. Loading sends the whole
 payload as one control event, so the control thread swaps the state in a
 single step and a half applied preset is not a state the runtime can be in.
-
-Importing an old preset folder is deliberately not a save followed by a load.
-The importer attaches an error to every legacy expression the new evaluator
-refuses, and a preset payload does not carry errors, so a round trip through
-one would hand the performer a switched off mapping with no reason given.
-Each imported value and binding is sent on its own instead.
 """
 
 import logging
 from pathlib import Path
 from typing import Callable
 
-from imgui_bundle import imgui, portable_file_dialogs as pfd
+from imgui_bundle import imgui
 
 from autolume.live.core import presets
 from autolume.live.core.events import ControlEvent
-from autolume.live.core.params import BINDING_SET, REGISTRY
-from autolume.live.core.presets_legacy import import_legacy_preset
 from autolume.live.errors import describe
 from autolume.live.ui.controls import ERROR_COLOR
 
@@ -29,15 +21,10 @@ logger = logging.getLogger(__name__)
 # Sized in multiples of the font size so the panel holds its proportions on
 # every display scale.
 _NAME_EMS = 13.0
-_NOTES_EMS = 9.0
 _LIST_EMS = 10.0
 _LIST_INTERVAL = 1.0
 
 _NO_PRESETS = "No presets saved yet. Name one and press Save."
-_NOTHING_IMPORTED = (
-    "Nothing was imported from that folder. "
-    "It may not be an old preset folder, or Autolume may not be allowed to read it."
-)
 
 
 def is_valid_name(name: str) -> bool:
@@ -65,16 +52,12 @@ class PresetsPanel:
         # asked for. Listing happens on a timer nobody asked for, so it clears
         # itself and may not speak over a save that failed.
         self._list_error: str | None = None
-        self._notes: list[str] = []
-        self._imported = False
-        self._folder_dialog: pfd.select_folder | None = None
         self._names_cache: list[str] | None = None
         self._names_read = 0.0
 
     def gui(self) -> None:
         self._save_row()
         self._preset_list()
-        self._import_row()
         self._report()
 
     def directory(self) -> Path:
@@ -158,50 +141,6 @@ class PresetsPanel:
         self._submit(presets.PRESET_APPLY, payload)
         self._message = f"Loaded {name}."
 
-    def _import_row(self) -> None:
-        imgui.separator_text("Old presets")
-        if imgui.button("Import old preset"):
-            self._folder_dialog = pfd.select_folder("Choose an old preset folder")
-        if self._folder_dialog is None or not self._folder_dialog.ready():
-            return
-        folder = self._folder_dialog.result()
-        self._folder_dialog = None
-        if folder:
-            self._import(folder)
-
-    def _import(self, folder: str) -> None:
-        self._reset_report()
-        values, bindings, skipped = import_legacy_preset(folder)
-        notes = list(skipped)
-        applied = 0
-        for name, value in values.items():
-            spec = REGISTRY.get(name)
-            if spec is None:
-                # No legacy target misses the registry today. It is still noted
-                # rather than dropped, because this list is the only account the
-                # performer gets of what did not come across, and a setting that
-                # vanished from it would be one they go looking for later.
-                notes.append(f"This version has no {name} setting to import into.")
-                continue
-            self._submit(spec.address, value)
-            applied += 1
-        # Sent one at a time rather than through a preset payload, so the error
-        # the importer put on a rejected legacy expression survives.
-        for binding in bindings:
-            self._submit(BINDING_SET, binding)
-        self._notes = notes
-        self._imported = True
-        if not values and not bindings:
-            # Reported plainly. The importer cannot tell an unreadable folder
-            # from an absent one, so a folder the user has no permission on
-            # would otherwise make the Import button look broken.
-            self._message = _NOTHING_IMPORTED
-            return
-        self._message = (
-            f"Imported {applied} settings and {len(bindings)} mappings "
-            f"from {Path(folder).name}."
-        )
-
     def report_error(self) -> str | None:
         """The failure the panel shows, the last action's before the listing's.
 
@@ -218,17 +157,6 @@ class PresetsPanel:
             imgui.pop_style_color()
         elif self._message:
             imgui.text_wrapped(self._message)
-        if not self._imported:
-            return
-        imgui.begin_child(
-            "##notes", imgui.ImVec2(0.0, imgui.get_font_size() * _NOTES_EMS)
-        )
-        if not self._notes:
-            imgui.text_disabled("Everything in that folder came across.")
-        for note in self._notes:
-            imgui.bullet()
-            imgui.text_wrapped(note)
-        imgui.end_child()
 
     def _submit(self, address: str, value: object) -> None:
         self._runtime.submit(ControlEvent(address, value, source="ui"))
@@ -236,5 +164,3 @@ class PresetsPanel:
     def _reset_report(self) -> None:
         self._message = None
         self._error = None
-        self._notes = []
-        self._imported = False

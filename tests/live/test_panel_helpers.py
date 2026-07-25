@@ -338,17 +338,3 @@ def test_a_saved_preset_is_reported_after_a_transient_listing_failure(
     # An error takes precedence over the message, so a stale one hides "Saved".
     assert panel.report_error() is None
     assert panel._message == "Saved evening."
-
-
-def test_a_legacy_setting_this_version_has_no_home_for_is_reported(monkeypatch):
-    panel = presets_at(None)
-    monkeypatch.setattr(
-        "autolume.live.ui.panels.presets.import_legacy_preset",
-        lambda folder: ({"truncation_psi": 0.7, "moon_phase": 2.0}, (), []),
-    )
-
-    panel._import("/old/evening set")
-
-    addresses = [event.address for event in panel._runtime.events]
-    assert addresses == ["/trunc/psi"]
-    assert any("moon_phase" in note for note in panel._notes)
