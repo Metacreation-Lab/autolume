@@ -436,6 +436,21 @@ def test_empty_vector_fallback_is_deterministic_and_logged_once(caplog):
     assert len(warnings) == 1
 
 
+def test_vec_unprojected_empty_vector_fallback_is_deterministic_and_logged_once(
+    caplog,
+):
+    sink = []
+    model = _vec_model(z_dim=4, num_ws=3, synthesis=_recording_synthesis(sink))
+    params = render_params(vector_mode=True, latent_project=False, latent_vec=())
+    with caplog.at_level(logging.WARNING):
+        model.render_frame(params, 0)
+        model.render_frame(params, 1)
+    first, second = sink[-2].tolist(), sink[-1].tolist()
+    assert first == second
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+
+
 def test_loop_endpoint_cache_reuses_mapping_per_endpoint():
     model = _vec_model(z_dim=4, num_ws=3)
     kf0 = Keyframe("vec", vec=(1.0, 2.0, 3.0, 4.0), project=True)
@@ -450,6 +465,41 @@ def test_loop_endpoint_cache_reuses_mapping_per_endpoint():
     model.render_frame(params, 0)
     model.render_frame(params, 1)
     assert len(model.G.mapping.calls) == 2
+
+
+def test_loop_endpoint_cache_is_bounded_to_the_cap():
+    model = _vec_model(z_dim=4, num_ws=3)
+    keyframes = tuple(
+        Keyframe("vec", vec=(float(i),) * 4, project=True) for i in range(6)
+    )
+    for index in range(len(keyframes)):
+        params = render_params(
+            loop_active=True,
+            keyframes=keyframes,
+            loop_index=index,
+            loop_alpha=0.5,
+            truncation_psi=0.6,
+        )
+        model.render_frame(params, index)
+    assert len(model._keyframe_w_cache) <= 4
+
+
+def test_loop_vec_keyframe_wrong_length_falls_back_without_raising(caplog):
+    model = _vec_model(z_dim=4, num_ws=3)
+    kf0 = Keyframe("seed", seed_x=0.0, seed_y=0.0)
+    kf1 = Keyframe("vec", vec=(1.0, 2.0), project=True)
+    params = render_params(
+        loop_active=True,
+        keyframes=(kf0, kf1),
+        loop_index=1,
+        loop_alpha=0.5,
+        truncation_psi=0.6,
+    )
+    with caplog.at_level(logging.WARNING):
+        model.render_frame(params, 0)
+    assert len(model.G.mapping.calls) == 2
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
 
 
 def test_loop_alpha_zero_matches_previous_keyframe():
