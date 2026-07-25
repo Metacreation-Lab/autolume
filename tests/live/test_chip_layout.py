@@ -470,12 +470,23 @@ def test_the_dim_leaves_the_frame_underneath_visible(frame):
     assert _DIM_ALPHA <= 0.85
 
 
+def rendered(value=0, shape=(8, 8, 3)):
+    """A frame as the render loop hands it out: read-only.
+
+    Anything standing in for the mailbox has to produce one of these, or it is
+    testing a preview that no longer exists.
+    """
+    frame = np.full(shape, value, dtype=np.uint8)
+    frame.flags.writeable = False
+    return frame
+
+
 class FramePreview:
     """A mailbox with a frame in it, so the preview has something to be quiet
     about. What it holds never reaches immvision, which needs a GL context."""
 
     def latest(self):
-        return 7, np.zeros((8, 8, 3), dtype=np.uint8)
+        return 7, rendered()
 
 
 def overlay_paint(runtime):
@@ -504,6 +515,12 @@ def overlay_paint(runtime):
             result.append((draw_list.vtx_buffer.size() - before, moved))
 
         def display(label, image, size=None, refresh_image=False, **kwargs):
+            # The real binding converts through a mutable cv::Mat and refuses a
+            # read-only array with exactly this error. Frames arrive read-only
+            # from the render loop now, so a stand-in that accepted one would
+            # let the panel pass here and fail on the first frame in the app.
+            if not image.flags.writeable:
+                raise TypeError("image_display(): incompatible function arguments")
             shown.append((image, size, refresh_image))
             # immvision places an item of the size it was asked for, and the
             # cursor having been moved to centre it is only legal because
@@ -575,7 +592,7 @@ def test_the_dim_never_reaches_the_frame_the_sinks_are_handed(frame):
     rectangle on a draw list, and this is what says the array is not part of
     it.
     """
-    original = np.full((8, 8, 3), 210, dtype=np.uint8)
+    original = rendered(210)
     untouched = original.copy()
 
     class OneFrame:
@@ -586,11 +603,66 @@ def test_the_dim_never_reaches_the_frame_the_sinks_are_handed(frame):
     runtime.preview = OneFrame()
     ink, _, shown = overlay_paint(runtime)
     assert ink > 0
-    # Dimmed on screen, and the very same array, byte for byte, on its way to
-    # the drawing. Nothing copied it and nothing wrote to it.
+    # Dimmed on screen, and byte for byte the frame that arrived on its way to
+    # the drawing. The panel copies for immvision's sake and for nothing else,
+    # so the copy carries the picture and not the dim, and the frame the other
+    # sinks hold is the one it came in as.
     (image, _size, _refresh), = shown
-    assert image is original
+    assert np.array_equal(image, original)
     assert np.array_equal(original, untouched)
+    assert not np.shares_memory(image, original)
+
+
+def test_the_preview_draws_a_frame_it_is_not_allowed_to_write_to(frame):
+    """End to end on the array the render loop actually hands out.
+
+    Read-only is what keeps one sink from corrupting every other, and it is
+    also the one thing immvision will not accept: its binding converts through
+    a mutable cv::Mat. So the panel copies, and this is what says the copy is
+    there and that the picture survived it.
+    """
+    runtime = PanelRuntime(host=FakeModelHost(current=object()))
+    runtime.preview = type(
+        "OneFrame", (), {"latest": lambda self: (3, rendered(140))}
+    )()
+    _ink, _moved, shown = overlay_paint(runtime)
+    (image, _size, refresh), = shown
+    assert image.flags.writeable
+    assert refresh is True
+    assert np.array_equal(image, rendered(140))
+
+
+def test_a_still_preview_copies_the_frame_once_rather_than_every_gui_pass(frame):
+    """immvision ignores the pixels when it is not refreshing its texture.
+
+    A megabyte image recopied on every UI pass would be paying for uploads that
+    are not happening, several times per rendered frame, on the UI thread. The
+    buffer is the panel's and it is refilled when the texture is.
+    """
+    runtime = PanelRuntime(host=FakeModelHost(current=object()))
+    runtime.preview = FramePreview()
+    panel = PreviewPanel(runtime)
+    shown = []
+    original_display = immvision.image_display
+    try:
+
+        def display(label, image, size=None, refresh_image=False, **kwargs):
+            shown.append((image, refresh_image, image.copy()))
+            imgui.dummy(imgui.ImVec2(float(size[0]), float(size[1])))
+            return (0.0, 0.0)
+
+        immvision.image_display = display
+        for index in range(3):
+            imgui.begin_child(f"##panel{index}", imgui.ImVec2(400.0, 300.0))
+            panel.gui()
+            imgui.end_child()
+    finally:
+        immvision.image_display = original_display
+    assert [refresh for _image, refresh, _pixels in shown] == [True, False, False]
+    # One buffer throughout, and it still holds the frame on the passes that
+    # did not refill it, so a preview sitting on a still frame keeps drawing it.
+    assert shown[0][0] is shown[1][0] is shown[2][0]
+    assert all(np.array_equal(pixels, rendered()) for _i, _r, pixels in shown)
 
 
 def test_the_preview_never_makes_its_panel_scroll(frame):

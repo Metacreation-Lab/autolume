@@ -44,13 +44,18 @@ with it.
 
 **The dim is presentation and stops here.** It is a rectangle painted on this
 panel's draw list after the image, so it exists only in this window: the frame
-array is never read for it, never copied, and never written. That has to stay
-true. The render loop fans the same frames out to every sink, and the parity
-plan adds NDI, a recorder and a fullscreen output, so a dim that reached the
-frame would dim the show and the recording every time a model was switched. The
-consequence, accepted deliberately, is that this panel will not look like the
-show output once separate outputs exist. It is an affordance for the person
-driving, not a property of the performance.
+array is never read for it and never written. That has to stay true. The render
+loop fans the same frames out to every sink, and the parity plan adds NDI, a
+recorder and a fullscreen output, so a dim that reached the frame would dim the
+show and the recording every time a model was switched. The consequence,
+accepted deliberately, is that this panel will not look like the show output
+once separate outputs exist. It is an affordance for the person driving, not a
+property of the performance.
+
+The render loop marks each frame read-only before handing it out, which is what
+makes that guarantee structural rather than a promise this file keeps. The one
+copy this panel does make is for immvision, which will not accept a read-only
+array at all. See `_displayable`.
 """
 
 import os
@@ -221,6 +226,7 @@ class PreviewPanel:
         self._last_seq = -1
         self._last_size = (0, 0)
         self._mode = DisplayMode.FIT
+        self._display: np.ndarray | None = None
 
     def gui(self) -> None:
         seq, frame = self._runtime.preview.latest()
@@ -262,7 +268,34 @@ class PreviewPanel:
         refresh = needs_refresh(seq, self._last_seq, size, self._last_size)
         self._last_seq = seq
         self._last_size = size
-        immvision.image_display("##preview", frame, size, refresh_image=refresh)
+        immvision.image_display(
+            "##preview", self._displayable(frame, refresh), size, refresh_image=refresh
+        )
+
+    def _displayable(self, frame: np.ndarray, refresh: bool) -> np.ndarray:
+        """A writeable copy of the frame, because immvision will not take one.
+
+        Frames come off the render loop read-only, so that no sink can corrupt
+        what the others are handed. immvision converts a numpy array through a
+        mutable cv::Mat and rejects a read-only buffer outright, which makes the
+        copy unavoidable rather than a choice, and this panel is where it
+        belongs: it is the one consumer that needs it.
+
+        Into a buffer it keeps, and only when the texture is being refreshed.
+        immvision does not look at the pixels otherwise, so copying a megabyte
+        image on every UI frame would be paying for uploads that are not
+        happening, several times per rendered frame.
+        """
+        stale = (
+            self._display is None
+            or self._display.shape != frame.shape
+            or self._display.dtype != frame.dtype
+        )
+        if stale:
+            self._display = np.empty(frame.shape, dtype=frame.dtype)
+        if refresh or stale:
+            np.copyto(self._display, frame)
+        return self._display
 
     def _mode_menu(self) -> None:
         """The mode picker, until the display options panel that owns it exists.

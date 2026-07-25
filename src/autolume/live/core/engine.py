@@ -52,6 +52,17 @@ class RenderLoop:
             self._next_deadline = None
             return False
         self._seq = seq + 1
+        # Every sink is about to be handed this one array, so nothing may write
+        # to it. Marked here, once, before the fan-out, so a sink added later is
+        # covered by construction rather than by whoever adds it remembering.
+        # A consumer that tinted its frame in place would tint the show and the
+        # recording too, and this turns that into a ValueError in the code that
+        # did it instead of a picture nobody can account for. Anything that
+        # genuinely needs to change a frame, super-res and the recorder's
+        # encoder being the likely ones, copies it first. Copying here instead
+        # would be megabytes of memcpy per sink per frame on the render thread,
+        # paid every frame, against a fault that should never happen.
+        frame.flags.writeable = False
         for sink in self._sinks:
             try:
                 sink.on_frame(frame, seq)
