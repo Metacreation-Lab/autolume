@@ -69,6 +69,15 @@ def test_render_passes_increasing_frame_index():
     assert [frame_index for _, frame_index in model.calls] == [0, 1, 2]
 
 
+def test_sink_seq_is_the_index_the_frame_was_rendered_with():
+    model = FakeModel()
+    mailbox = PreviewMailbox()
+    loop = RenderLoop(make_store(fps_cap=0), FakeHost(model), [mailbox])
+    for _ in range(3):
+        loop.render_one()
+        assert mailbox.latest()[0] == model.calls[-1][1]
+
+
 def test_sink_error_does_not_kill_loop():
     class BadSink:
         def on_frame(self, frame, seq):

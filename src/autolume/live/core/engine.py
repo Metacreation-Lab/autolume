@@ -42,16 +42,19 @@ class RenderLoop:
         if model is None:
             self._next_deadline = None
             return False
+        # One number names this frame everywhere: the index the noise animation
+        # advances with is the sequence the sinks are told about.
+        seq = self._seq
         try:
-            frame = model.render_frame(params, self._seq)
+            frame = model.render_frame(params, seq)
         except Exception:
             logger.exception("Frame render failed")
             self._next_deadline = None
             return False
-        self._seq += 1
+        self._seq = seq + 1
         for sink in self._sinks:
             try:
-                sink.on_frame(frame, self._seq)
+                sink.on_frame(frame, seq)
             except Exception:
                 logger.exception("Frame sink %r failed", sink)
         self._track_fps()

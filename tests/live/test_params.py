@@ -1,5 +1,7 @@
 import dataclasses
 
+import pytest
+
 from autolume.live.core import params
 
 # Fields of ControlState that hold user intent rather than a registry parameter.
@@ -120,3 +122,29 @@ def test_apply_value_unknown_name_ignored():
 def test_apply_value_uncoercible_ignored():
     before = params.ControlState()
     assert params.apply_value(before, "latent_x", "not a number") == before
+
+
+# A non finite value cannot be clamped: max and min propagate a NaN instead of
+# bounding it, so it would land in the state claiming to be within its declared
+# range. It is a broken input rather than an extreme one, so it is refused.
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_apply_value_rejects_non_finite_float(value):
+    before = params.ControlState(global_noise=0.5)
+    assert params.apply_value(before, "global_noise", value) == before
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_apply_value_rejects_non_finite_int(value):
+    before = params.ControlState(noise_seed=7)
+    assert params.apply_value(before, "noise_seed", value) == before
+
+
+@pytest.mark.parametrize("name", ["latent_x", "noise_seed"])
+def test_apply_value_rejects_a_number_too_large_for_a_float(name):
+    before = params.ControlState()
+    assert params.apply_value(before, name, 10**400) == before
+
+
+def test_apply_value_keeps_unbounded_extremes_finite():
+    state = params.apply_value(params.ControlState(), "latent_x", 1e30)
+    assert state.latent_x == 1e30

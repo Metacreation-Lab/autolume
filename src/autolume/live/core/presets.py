@@ -2,14 +2,17 @@
 
 Which parameters persist is driven by `ParamSpec.preset`, so the format cannot
 drift from the parameters that exist. Reading is forgiving in one direction
-only: unknown or malformed entries are logged and skipped, missing ones keep
-their current value, but a file that is not a preset raises. Values are applied
+only: unknown or malformed entries are logged and skipped, missing parameters
+keep their current value, but a file that is not a preset raises. Bindings are
+the exception to missing meaning unchanged, since a preset recalls a whole look:
+no bindings section clears every mapping. Values are applied
 through `apply_value`, so a hand edited file cannot push a parameter out of
 range, and expressions are never evaluated here.
 """
 
 import json
 import logging
+import math
 import os
 from pathlib import Path
 
@@ -25,6 +28,11 @@ VERSION = 1
 PRESET_APPLY = "/preset/apply"
 
 _BINDING_FIELDS = ("target", "source", "expression")
+
+# Tells a key that is absent from the payload apart from one that is present and
+# holds something unusable. The two mean different things and are reported
+# differently, and `None` cannot stand in because it is a value a file can hold.
+_ABSENT = object()
 
 
 def _jsonable(value: object) -> object:
@@ -81,6 +89,9 @@ def _check_envelope(payload: object) -> None:
 
 
 def _read_params(raw: object) -> dict:
+    if raw is _ABSENT:
+        logger.info("Preset holds no parameters, current values are kept")
+        return {}
     if not isinstance(raw, dict):
         logger.warning("Ignoring preset params of type %s", type(raw).__name__)
         return {}
@@ -92,6 +103,14 @@ def _read_params(raw: object) -> dict:
                 "Skipping preset parameter %s, this build does not persist it", name
             )
             continue
+        # `json.load` accepts bare NaN, Infinity and -Infinity, so a hand edited
+        # file carries them in. They cannot be clamped into range, so they are
+        # rejected here where the rest of the malformed entry handling lives.
+        if isinstance(value, float) and not math.isfinite(value):
+            logger.warning(
+                "Skipping preset parameter %s, %r is not a finite number", name, value
+            )
+            continue
         # A null is how an unset parameter is written. Keeping the current value
         # matches how a missing key behaves and stops a loaded model from being
         # replaced by the string "None".
@@ -101,6 +120,11 @@ def _read_params(raw: object) -> dict:
 
 
 def _read_bindings(raw: object) -> tuple[Binding, ...]:
+    if raw is _ABSENT:
+        # A preset is a whole look, so no bindings section means no bindings.
+        # Said plainly, because it discards mappings the performer set up.
+        logger.warning("Preset holds no bindings, clearing every mapping")
+        return ()
     if not isinstance(raw, list):
         logger.warning("Ignoring preset bindings of type %s", type(raw).__name__)
         return ()
@@ -148,14 +172,28 @@ def from_payload(payload: dict) -> tuple[dict, tuple[Binding, ...]]:
     uncoerced; clamping happens when they are applied to a state.
     """
     _check_envelope(payload)
-    return _read_params(payload.get("params")), _read_bindings(payload.get("bindings"))
+    return (
+        _read_params(payload.get("params", _ABSENT)),
+        _read_bindings(payload.get("bindings", _ABSENT)),
+    )
 
 
 def save(state: ControlState, path: str | Path) -> None:
+    """Write a preset, replacing any existing one only once it is complete.
+
+    A performer's saved look is not worth losing to an interrupted or full disk
+    write, so the new file is built beside the old one and swapped in.
+    """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as fp:
-        json.dump(to_payload(state), fp, indent=2)
+    temporary = path.with_name(f"{path.name}.tmp")
+    try:
+        with open(temporary, "w", encoding="utf-8") as fp:
+            json.dump(to_payload(state), fp, indent=2)
+        os.replace(temporary, path)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
 
 
 def load(path: str | Path) -> dict:

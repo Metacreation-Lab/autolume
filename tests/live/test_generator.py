@@ -189,8 +189,11 @@ def test_effective_noise_seed_animated_advances_with_frame_index():
 
 def test_effective_noise_seed_stays_within_32_bits():
     params = render_params(noise_seed=2**31 - 1, noise_anim=True)
-    seed = effective_noise_seed(params, 2**34)
-    assert 0 <= seed < 2**32
+    # 2**34 is a whole number of 32 bit wraps, so the seed comes back untouched.
+    assert effective_noise_seed(params, 2**34) == 2**31 - 1
+    # One step past the sign bit, which a 31 bit mask would fold back to zero.
+    assert effective_noise_seed(params, 1) == 2**31
+    assert effective_noise_seed(params, 2**32 + 1) == 2**31
 
 
 def test_render_frame_passes_noise_mode_to_synthesis():
@@ -216,6 +219,27 @@ def test_render_frame_seeds_torch_with_effective_seed(monkeypatch):
     model = _fake_model(_zeros_synthesis)
     model.render_frame(render_params(noise_seed=11, noise_anim=True), 4)
     assert seeds == [15]
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"noise_enabled": False},
+        {"noise_seed": 0, "noise_anim": False},
+    ],
+)
+def test_render_frame_leaves_the_global_rng_alone_outside_random_noise(
+    monkeypatch, changes
+):
+    # The network never samples in "none" or "const" mode, so reseeding there
+    # only pins torch's global stream for whatever else runs on this thread.
+    import torch
+
+    seeds = []
+    monkeypatch.setattr(torch, "manual_seed", seeds.append)
+    model = _fake_model(_zeros_synthesis)
+    model.render_frame(render_params(**changes), 3)
+    assert seeds == []
 
 
 def test_global_noise_applied_only_to_modules_that_declare_it():

@@ -62,6 +62,11 @@ _LATENT_UNSUPPORTED = {
     "next": "The queued latent vector was not imported.",
 }
 
+_VECTOR_MENU_NOTE = (
+    "The OSC mappings for vector mode were not imported. "
+    "Vector mode is not available yet."
+)
+
 _TRUNC_PARAMS = (
     ("trunc_psi", "truncation_psi", float),
     ("global_noise", "global_noise", float),
@@ -227,6 +232,16 @@ def _read_menu(
         bindings.append(binding)
 
 
+def _has_configured_address(section: object) -> bool:
+    """True if an OSC menu section holds at least one address worth reporting."""
+    if not isinstance(section, (list, tuple)) or len(section) < 5:
+        return False
+    addresses = section[2]
+    if not isinstance(addresses, dict):
+        return False
+    return any(_address(raw) is not None for raw in addresses.values())
+
+
 def _import_latent(root: Path, params: dict, bindings: list, skipped: list) -> None:
     data = _read_pickle(root / LATENT_FILE, skipped)
     if data is None:
@@ -252,6 +267,10 @@ def _import_latent(root: Path, params: dict, bindings: list, skipped: list) -> N
             bindings,
             skipped,
         )
+    # The third section is the vector mode OSC menu. Nothing in it has a home in
+    # the new runtime, so it is only reported, and only when it was configured.
+    if len(parts) > 2 and _has_configured_address(parts[2]):
+        skipped.append(_VECTOR_MENU_NOTE)
 
 
 def _import_trunc(root: Path, params: dict, bindings: list, skipped: list) -> None:

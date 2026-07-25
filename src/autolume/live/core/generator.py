@@ -123,8 +123,12 @@ class LoadedModel:
             ws = self._blended_w(
                 params.latent_x, params.latent_y, params.truncation_psi
             )
-            torch.manual_seed(effective_noise_seed(params, frame_index))
-            output = self.G.synthesis(ws.unsqueeze(0), noise_mode=noise_mode(params))
+            mode = noise_mode(params)
+            # Only "random" draws from torch's global generator, and seeding it
+            # is a process wide side effect, so the other modes leave it alone.
+            if mode == "random":
+                torch.manual_seed(effective_noise_seed(params, frame_index))
+            output = self.G.synthesis(ws.unsqueeze(0), noise_mode=mode)
             # Autolume's custom stylegan2 synthesis returns (img, rgb_list);
             # standard stylegan synthesis returns the img tensor directly.
             if isinstance(output, tuple):

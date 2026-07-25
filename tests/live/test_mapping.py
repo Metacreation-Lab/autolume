@@ -65,6 +65,22 @@ def test_uncoercible_value_ignored():
     assert after == before
 
 
+@pytest.mark.parametrize(
+    "address,value",
+    [
+        ("/noise/global", float("nan")),
+        ("/noise/global", float("inf")),
+        ("/trunc/psi", float("-inf")),
+        ("/noise/seed", float("inf")),
+        ("/render/fps", float("nan")),
+    ],
+)
+def test_non_finite_wire_value_ignored(address, value):
+    # A float NaN or infinity is legal on the OSC wire, so it reaches here.
+    before = ControlState(global_noise=0.5, truncation_psi=0.5, noise_seed=7)
+    assert apply_event(before, ControlEvent(address, value)) == before
+
+
 def test_uncoercible_value_warning_names_the_wire_address(caplog):
     with caplog.at_level(logging.WARNING):
         apply_event(ControlState(), ControlEvent("/latent/x", "not a number"))

@@ -216,6 +216,59 @@ def test_uncoercible_value_leaves_the_current_value():
     assert state.latent_y == -2.25
 
 
+def test_non_finite_value_is_skipped_and_the_rest_applied(caplog):
+    payload = presets.to_payload(SAMPLE)
+    payload["params"]["global_noise"] = float("nan")
+    payload["params"]["noise_seed"] = float("inf")
+    current = ControlState(global_noise=0.25, noise_seed=3)
+    with caplog.at_level(logging.WARNING):
+        state = apply_payload(current, payload)
+    assert state.global_noise == 0.25
+    assert state.noise_seed == 3
+    assert state.truncation_psi == 1.25
+    assert state.latent_x == 1.5
+    messages = warnings_from(caplog)
+    assert any("global_noise" in message for message in messages)
+    assert any("noise_seed" in message for message in messages)
+
+
+def test_non_finite_json_literals_from_a_hand_edited_file_are_skipped(tmp_path):
+    # json.load accepts bare NaN and Infinity, so a hand edited file carries
+    # them straight in.
+    path = tmp_path / "hand_edited.json"
+    raw = json.dumps(presets.to_payload(SAMPLE))
+    raw = raw.replace('"global_noise": 0.5', '"global_noise": NaN')
+    raw = raw.replace('"latent_y": -2.25', '"latent_y": -Infinity')
+    path.write_text(raw, encoding="utf-8")
+    current = ControlState(global_noise=0.25, latent_y=1.0)
+    state = apply_payload(current, presets.load(path))
+    assert state.global_noise == 0.25
+    assert state.latent_y == 1.0
+    assert state.truncation_psi == 1.25
+
+
+def test_absent_bindings_key_clears_mappings_and_says_so(caplog):
+    payload = presets.to_payload(SAMPLE)
+    del payload["bindings"]
+    current = ControlState(bindings=(Binding("latent_x", "/ctl/1", "x"),))
+    with caplog.at_level(logging.WARNING):
+        state = apply_payload(current, payload)
+    assert state.bindings == ()
+    messages = warnings_from(caplog)
+    assert any("clear" in message.lower() for message in messages)
+    assert not any("NoneType" in message for message in messages)
+
+
+def test_absent_params_key_keeps_current_values_without_a_parse_complaint(caplog):
+    payload = presets.to_payload(SAMPLE)
+    del payload["params"]
+    current = ControlState(truncation_psi=0.33)
+    with caplog.at_level(logging.WARNING):
+        state = apply_payload(current, payload)
+    assert state.truncation_psi == 0.33
+    assert not any("NoneType" in message for message in warnings_from(caplog))
+
+
 def test_duplicate_binding_targets_collapse_to_one(caplog):
     payload = presets.to_payload(SAMPLE)
     payload["bindings"].append(
@@ -305,3 +358,15 @@ def test_save_creates_missing_parent_directories(tmp_path):
 def test_save_accepts_a_str_path(tmp_path):
     presets.save(SAMPLE, str(tmp_path / "look.json"))
     assert presets.list_presets(str(tmp_path)) == ["look"]
+
+
+def test_a_failed_save_leaves_the_previous_file_intact(tmp_path):
+    path = tmp_path / "look.json"
+    presets.save(SAMPLE, path)
+    # Not serializable, so the write dies partway through, standing in for the
+    # interrupted or full disk write a performer would otherwise lose a look to.
+    doomed = dataclasses.replace(SAMPLE, pkl_path=object())
+    with pytest.raises(TypeError):
+        presets.save(doomed, path)
+    assert presets.load(path)["params"]["truncation_psi"] == 1.25
+    assert [entry.name for entry in tmp_path.iterdir()] == ["look.json"]

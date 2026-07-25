@@ -212,6 +212,24 @@ def test_vector_mode_preset_is_reported_as_unavailable(tmp_path):
     assert mentions(skipped, "Vector mode")
 
 
+def test_vector_mode_osc_mappings_are_reported(tmp_path):
+    directory = tmp_path / "old"
+    write_latent(
+        directory,
+        vec_menu=make_menu(VEC_KEYS, addresses={"vector": "ctl/vec", "anim": "ctl/va"}),
+    )
+    _, bindings, skipped = import_legacy_preset(directory)
+    assert bindings == ()
+    assert mentions(skipped, "vector mode")
+
+
+def test_unconfigured_vector_mode_menu_is_not_reported(tmp_path):
+    directory = tmp_path / "old"
+    write_latent(directory)
+    _, _, skipped = import_legacy_preset(directory)
+    assert not mentions(skipped, "vector mode")
+
+
 def test_missing_latent_file_still_imports_truncation(tmp_path):
     directory = tmp_path / "old"
     write_trunc(directory, params=make_trunc_params(trunc_psi=1.4, noise_seed=12))
