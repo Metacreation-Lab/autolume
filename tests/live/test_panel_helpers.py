@@ -41,9 +41,12 @@ from autolume.live.ui.panels.preview import (
     centred_offset,
     dims_the_frame,
     displayed_size,
+    frame_placement,
+    magnified,
     model_name,
     needs_refresh,
     preview_status,
+    upload_size,
 )
 
 
@@ -345,13 +348,119 @@ def test_centred_offset_never_starts_something_off_the_left_edge():
     assert centred_offset((900.0, 20.0), (300.0, 300.0)) == (0.0, 140.0)
 
 
+def test_centred_offset_lands_on_a_whole_pixel():
+    """Half a pixel of offset resamples the image across the whole grid.
+
+    However exactly the frame was sized to the panel, an odd amount of spare
+    room either side would undo it, so the split is rounded down and the extra
+    pixel goes to the far side.
+    """
+    assert centred_offset((100.0, 100.0), (301.0, 303.0)) == (100.0, 101.0)
+
+
+def test_magnifying_repeats_pixels_rather_than_blending_them():
+    """Every value in the result is a value that was in the frame.
+
+    A blend is exactly what the GPU would have done, so a magnify that
+    introduced one would have been pointless.
+    """
+    frame = np.array([[[0, 0, 0], [255, 255, 255]]], dtype=np.uint8)
+    bigger = magnified(frame, (6, 3))
+    assert bigger.shape == (3, 6, 3)
+    assert set(np.unique(bigger).tolist()) == {0, 255}
+    assert bigger[0, :, 0].tolist() == [0, 0, 0, 255, 255, 255]
+
+
+def test_magnifying_by_an_uneven_scale_keeps_every_pixel():
+    """Stretch fills the panel, and a panel is not a multiple of a model.
+
+    The blocks come out uneven and that is the accepted half of the trade:
+    uneven and crisp reads as pixels, even and blurred does not. What may not
+    happen is a pixel being dropped or the picture being sheared, so the first
+    and last pixel of the frame are still the first and last of the result.
+    """
+    frame = np.arange(5, dtype=np.uint8).reshape(1, 5, 1)
+    bigger = magnified(frame, (7, 1))
+    assert bigger[0, :, 0].tolist() == [0, 0, 1, 2, 2, 3, 4]
+
+
+def test_magnifying_gives_the_uploader_an_array_it_will_accept():
+    """The frames arrive read-only and immvision rejects those outright."""
+    frame = np.zeros((4, 4, 3), dtype=np.uint8)
+    frame.flags.writeable = False
+    bigger = magnified(frame, (8, 8))
+    assert bigger.flags.writeable
+    assert bigger.flags.c_contiguous
+
+
+def test_a_frame_that_fits_is_drawn_one_pixel_per_pixel_on_a_scaled_display():
+    """The bug this whole conversion exists for.
+
+    A panel 900 points across is 1800 pixels on a 2x display. A 256 frame fits
+    in it either way, but a quad asked for 256 *points* covers 512 pixels, so
+    the frame is magnified 2x and interpolated while the mode is still called
+    Fit. Asking for 128 points draws its 256 pixels over 256 pixels.
+    """
+    place = frame_placement((256, 256), (900.0, 900.0), FIT, 2.0)
+    assert place.pixels == (256, 256)
+    assert place.size == (128.0, 128.0)
+
+
+def test_an_unscaled_display_draws_points_and_pixels_alike():
+    # The same frame and the same panel, where a point is a pixel.
+    place = frame_placement((256, 256), (900.0, 900.0), FIT, 1.0)
+    assert place.pixels == (256, 256)
+    assert place.size == (256.0, 256.0)
+
+
+def test_stretch_fills_the_panel_in_pixels_it_can_actually_draw():
+    """A stretched frame is measured against the pixels, then asked for in points.
+
+    The quad still meets the panel edge, and the texture behind it holds one
+    pixel for every pixel the panel has rather than a quarter of them.
+    """
+    place = frame_placement((256, 256), (450.0, 450.0), STRETCH, 2.0)
+    assert place.pixels == (900, 900)
+    assert place.size == (450.0, 450.0)
+
+
+def test_a_centred_frame_is_offset_in_points_and_stays_on_the_pixel_grid():
+    # 1800 pixels of panel and 256 of frame leaves 772 pixels either side,
+    # which is 386 points, and lands the frame on a whole pixel.
+    place = frame_placement((256, 256), (900.0, 900.0), FIT, 2.0)
+    assert place.offset == (386.0, 386.0)
+    assert (place.offset[0] * 2.0).is_integer()
+
+
 def test_an_unchanged_frame_is_never_uploaded_again():
     # The whole reason the mailbox carries a sequence number.
-    assert not needs_refresh(7, 7)
+    assert not needs_refresh(7, 7, (256, 256), (256, 256))
 
 
 def test_a_new_frame_is_uploaded():
-    assert needs_refresh(8, 7)
+    assert needs_refresh(8, 7, (256, 256), (256, 256))
+
+
+def test_a_magnified_frame_is_uploaded_again_when_the_panel_resizes():
+    """The enlarging happens before the upload, so the panel's size is in it.
+
+    Without this the picture would keep whatever width the panel had when the
+    frame arrived, and a dock split dragged wider would draw a small texture
+    over a large quad, which is the interpolation the enlarging exists to
+    avoid.
+    """
+    assert needs_refresh(7, 7, (900, 900), (700, 700))
+
+
+def test_only_a_magnified_frame_is_uploaded_at_the_panel_size():
+    """A frame being shrunk stays at its own resolution, whatever the panel does.
+
+    The upload is then independent of the split being dragged, and the GPU is
+    left to interpolate, which is what a shrink wants.
+    """
+    assert upload_size((1024, 1024), (600, 600)) == (1024, 1024)
+    assert upload_size((1024, 1024), (1024, 1024)) == (1024, 1024)
+    assert upload_size((256, 256), (900, 900)) == (900, 900)
 
 
 def test_model_name_falls_back_to_the_whole_path_when_there_is_no_filename():

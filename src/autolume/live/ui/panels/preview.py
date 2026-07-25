@@ -26,6 +26,29 @@ not a registry parameter: it describes this window, not the performance, so
 nothing carries it into a preset or out over OSC. It lives in the right click
 menu until the display options panel that owns it exists.
 
+**The geometry is in device pixels, not in imgui's points.** Everything imgui
+is told is in points, and on a display that scales them the two are not the
+same number: a frame drawn at "its own size" in points covers twice as many
+pixels on a 2x screen, which is a 2x magnification wearing the name native. So
+the fitting is done in pixels, against a panel measured in pixels, and only
+converted to points at the two calls that need points. That is what makes Fit
+mean what it says on every display, and it is what lets a frame that fits land
+on the pixel grid exactly rather than half a pixel off it. See `display_scale`.
+
+**Magnification is done to the frame, not to the quad.** A texture magnified by
+the GPU is interpolated, and there is no per-texture escape from it: imgui's
+OpenGL renderer binds a sampler object for every draw it makes, and a sampler
+overrides whatever filtering the texture itself was given, so
+`glTexParameteri(GL_TEXTURE_MAG_FILTER, GL_NEAREST)` on our texture changes
+nothing at all. The pixel grid is part of what a generative model produces, and
+a performer scaling a small model up wants to see it rather than a blurred
+interpolation of it, so a magnified frame is enlarged into the texture before
+it is uploaded and the quad then draws it one for one. See `magnified`.
+
+Minification is left to the GPU, where the interpolation is the right
+behaviour: a 1024 frame shrunk into a docked panel would alias and crawl if it
+were sampled every nth pixel, and the blend is what keeps it readable.
+
 The frame is drawn as a textured quad rather than through
 `immvision.image_display`, and that is not a preference. `image_display` fits
 whatever it is given into the size it is asked for **with the aspect ratio
@@ -75,7 +98,6 @@ copy this panel does make is for immvision, which will not accept a read-only
 array at all. See `_displayable`.
 """
 
-import logging
 import os
 from dataclasses import dataclass
 from enum import Enum
@@ -84,12 +106,6 @@ import numpy as np
 from imgui_bundle import imgui, immvision
 
 from autolume.live.ui.controls import ERROR_COLOR
-
-logger = logging.getLogger(__name__)
-
-# Set once if the sampling hint cannot be applied, so a preview that has to
-# stay smooth says so a single time instead of once per uploaded frame.
-_SMOOTHING_WARNED = False
 
 _NO_MODEL = "No model loaded. Click Browse in the Controls panel to open one."
 _NO_FRAMES = "Waiting for frames."
@@ -116,6 +132,21 @@ class DisplayMode(Enum):
 
     FIT = "Fit"
     STRETCH = "Stretch"
+
+
+@dataclass(frozen=True)
+class Placement:
+    """Where the frame goes in the panel, how big, and what it is made of.
+
+    `offset` and `size` are in imgui's points, because points are the only
+    unit imgui accepts. `pixels` is that same size in device pixels, which is
+    what the texture has to hold: the picture is made of pixels, and the size
+    in points is only a statement of how big to draw them.
+    """
+
+    offset: tuple[float, float]
+    size: tuple[float, float]
+    pixels: tuple[int, int]
 
 
 @dataclass(frozen=True)
@@ -178,10 +209,61 @@ def dims_the_frame(status: PreviewStatus, has_frame: bool) -> bool:
     return bool(status.text) and has_frame
 
 
+def display_scale() -> float:
+    """Device pixels per imgui point, on the display the window is on.
+
+    One on a display that does not scale, two on a Retina Mac, and whatever
+    the window manager says elsewhere. Everything imgui is told is in points,
+    and this is the only number that turns them into what the screen actually
+    draws.
+
+    Falls back to one rather than to nothing, because a scale of zero would
+    divide the geometry by zero and every backend that reports honestly
+    reports at least one.
+    """
+    scale = imgui.get_io().display_framebuffer_scale.x
+    return float(scale) if scale > 0.0 else 1.0
+
+
+def magnified(frame: np.ndarray, size: tuple[int, int]) -> np.ndarray:
+    """`frame` enlarged to `size` by repeating pixels, never blending them.
+
+    Each output pixel is one input pixel, chosen by where it falls in the
+    frame, so the result is the frame's own pixels drawn bigger and its edges
+    stay where they were. That is the whole point: the alternative is the
+    GPU's interpolation, which is the soft result this exists to avoid.
+
+    The scale does not have to be a whole number and the blocks are allowed to
+    come out uneven, because Stretch fills the panel and a panel is not an
+    exact multiple of a model's resolution except by accident. Uneven and
+    crisp reads as pixels. Even and blurred does not.
+
+    Returns a new array every time. That is what the uploader needs anyway,
+    since it will not take the read-only frames the render loop hands out.
+    """
+    width, height = size
+    columns = (np.arange(width) * frame.shape[1]) // width
+    rows = (np.arange(height) * frame.shape[0]) // height
+    return frame[rows[:, None], columns]
+
+
+def upload_size(frame: tuple[int, int], size: tuple[int, int]) -> tuple[int, int]:
+    """The resolution to put on the GPU to draw the frame at `size`.
+
+    Its own, unless it is being magnified, in which case the enlarging is done
+    to the pixels before they are uploaded and the texture is the size of the
+    quad. Shrinking is left at native resolution and handed to the GPU, which
+    interpolates, which is what a frame being made smaller wants.
+    """
+    if size[0] > frame[0] or size[1] > frame[1]:
+        return size
+    return frame
+
+
 def displayed_size(
     frame: tuple[int, int], area: tuple[float, float], mode: DisplayMode
 ) -> tuple[int, int]:
-    """How big the frame is drawn in `area`, in whole pixels.
+    """How big the frame is drawn in `area`, in whole device pixels.
 
     Both modes scale by whichever axis runs out first, so the aspect ratio is
     kept, the whole image stays visible, and what is left of the panel is
@@ -218,79 +300,68 @@ def centred_offset(
     the edge and runs off the far side rather than off both. That is the case
     of a status line longer than a narrow panel, and losing the end of it beats
     losing the beginning as well.
+
+    Whole pixels, never half of one. An image landing on a half pixel is
+    resampled across the whole grid however exactly it was sized, so the
+    centring would undo the fitting. Down rather than to the nearest, so a
+    frame measured to fit its area cannot be pushed a pixel past it.
     """
     return (
-        max((area[0] - size[0]) * 0.5, 0.0),
-        max((area[1] - size[1]) * 0.5, 0.0),
+        float(int(max((area[0] - size[0]) * 0.5, 0.0))),
+        float(int(max((area[1] - size[1]) * 0.5, 0.0))),
     )
 
 
-def _magnify_without_smoothing(texture_id: int) -> None:
-    """Sample the frame at its own pixels when the quad is bigger than it is.
+def frame_placement(
+    frame: tuple[int, int],
+    area: tuple[float, float],
+    mode: DisplayMode,
+    scale: float,
+) -> Placement:
+    """Where to draw the frame in a panel `area` points across.
 
-    A texture is smoothed on magnification by default, which turns the output
-    of a 256 model filling a large panel into something soft and soupy. The
-    pixel grid is part of what a generative model produces, and a performer
-    scaling a small model up wants to see it, not a blurred interpolation of
-    it.
-
-    Only magnification. Minification stays smooth, because a 1024 frame shrunk
-    into a docked panel is the case where sampling every nth pixel aliases and
-    crawls as the image moves, and there the blend is what keeps it readable.
-
-    Never fatal. This is a hint about how a picture looks, and it runs where a
-    GL context is assumed but not guaranteed, so a failure here is logged once
-    and the preview keeps drawing the smooth way.
-
-    Guarded rather than attempted and caught, because calling into GL with no
-    context does not raise, it takes the process down, and the suite draws real
-    frames against a fake texture with no window behind it.
-
-    The guard asks imgui whether a renderer backend is attached, which is the
-    same library that owns the texture being adjusted. An earlier version asked
-    the `glfw` package for a current context and silently never fired: that
-    package is its own copy of glfw, not the one imgui-bundle bundles, so it
-    answers about a library this app never initialises and reports no context
-    even with a window on screen.
+    The fitting and the centring both happen in device pixels, and the result
+    is converted back to points at the end, because a panel measured in points
+    is a different number of pixels on every display and it is the pixels the
+    picture is made of. Sizing the quad in points instead would draw a frame at
+    "its own size" over twice as many pixels as it has wherever points are
+    scaled, and every mode would magnify without saying so.
     """
-    global _SMOOTHING_WARNED
-    try:
-        from OpenGL import GL
-
-        if not imgui.get_io().backend_renderer_name:
-            return
-        previous = GL.glGetIntegerv(GL.GL_TEXTURE_BINDING_2D)
-        GL.glBindTexture(GL.GL_TEXTURE_2D, texture_id)
-        GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_NEAREST)
-        GL.glBindTexture(GL.GL_TEXTURE_2D, int(previous))
-    except Exception:
-        if not _SMOOTHING_WARNED:
-            _SMOOTHING_WARNED = True
-            logger.exception("Could not set the preview to sample without smoothing")
+    pixels = (area[0] * scale, area[1] * scale)
+    size = displayed_size(frame, pixels, mode)
+    offset = centred_offset(size, pixels)
+    return Placement(
+        (offset[0] / scale, offset[1] / scale),
+        (size[0] / scale, size[1] / scale),
+        size,
+    )
 
 
-def needs_refresh(seq: int, last_seq: int) -> bool:
+def needs_refresh(
+    seq: int, last_seq: int, size: tuple[int, int], last_size: tuple[int, int]
+) -> bool:
     """Whether the frame has to be uploaded to the GPU again.
 
-    A new frame from the render loop and nothing else, which is the whole
-    reason the mailbox carries a sequence number rather than the panel
-    comparing arrays. An unchanged frame never re-uploads, however many UI
-    frames are drawn from it.
+    A new frame from the render loop, which is the whole reason the mailbox
+    carries a sequence number rather than the panel comparing arrays. An
+    unchanged frame never re-uploads, however many UI frames are drawn from it.
 
-    The displayed size is deliberately not part of this. The texture holds the
-    frame at its own resolution and the quad drawn from it carries the scaling,
-    so dragging a dock split or switching mode changes the quad and never the
-    texture. An earlier pass did include the size, because
-    `immvision.image_display` builds its texture at the size it is asked for,
-    and drawing the quad here is what made that unnecessary.
+    And a change in the resolution it is uploaded at, which is the frame's own
+    until the frame is magnified and the size of the quad after that. So in
+    Fit, and in Stretch below native size, dragging a dock split changes the
+    quad and never the texture. Above native size it changes both, because that
+    is where the enlarging lives, and an upload that ignored the size would
+    leave the picture at whatever width the panel happened to be when the frame
+    arrived.
     """
-    return seq != last_seq
+    return seq != last_seq or size != last_size
 
 
 class PreviewPanel:
     def __init__(self, runtime) -> None:
         self._runtime = runtime
         self._last_seq = -1
+        self._last_upload = (0, 0)
         self._mode = DisplayMode.FIT
         self._display: np.ndarray | None = None
         self._texture: immvision.GlTexture | None = None
@@ -324,44 +395,48 @@ class PreviewPanel:
         imgui.end_child()
 
     def _draw_frame(self, seq: int, frame: np.ndarray, area: tuple[float, float]):
-        size = displayed_size((frame.shape[1], frame.shape[0]), area, self._mode)
-        if size[0] <= 0 or size[1] <= 0:
+        place = frame_placement(
+            (frame.shape[1], frame.shape[0]), area, self._mode, display_scale()
+        )
+        if place.pixels[0] <= 0 or place.pixels[1] <= 0:
             return
-        offset = centred_offset(size, area)
         start = imgui.get_cursor_pos()
-        imgui.set_cursor_pos(imgui.ImVec2(start.x + offset[0], start.y + offset[1]))
-        texture = self._texture_id(frame, needs_refresh(seq, self._last_seq))
-        self._last_seq = seq
+        imgui.set_cursor_pos(
+            imgui.ImVec2(start.x + place.offset[0], start.y + place.offset[1])
+        )
         imgui.image(
-            imgui.ImTextureRef(texture),
-            imgui.ImVec2(float(size[0]), float(size[1])),
+            imgui.ImTextureRef(self._texture_id(seq, frame, place.pixels)),
+            imgui.ImVec2(*place.size),
         )
 
-    def _texture_id(self, frame: np.ndarray, refresh: bool) -> int:
-        """The texture holding the newest frame, uploaded only when it is new.
+    def _texture_id(self, seq: int, frame: np.ndarray, size: tuple[int, int]) -> int:
+        """The texture the quad is drawn from, uploaded only when it changes.
 
-        Always at the frame's own resolution. The quad drawn from it carries
-        all the scaling, which is what makes both modes cost nothing at draw
-        time and keeps the upload independent of the panel's size: dragging a
-        dock split or switching mode changes the quad and never the texture.
+        At the frame's own resolution while the frame is being shrunk, so that
+        dragging a dock split changes the quad and never the texture and the
+        GPU does the interpolating that a shrink wants. At the size of the quad
+        once the frame is being magnified, because that is the case the GPU
+        cannot be left to do: see the module docstring.
 
         Built on first use rather than in the constructor, because it takes a
         GL context and a panel is built before there is one.
         """
         if self._texture is None:
             self._texture = immvision.GlTexture()
-        if refresh:
+        upload = upload_size((frame.shape[1], frame.shape[0]), size)
+        if needs_refresh(seq, self._last_seq, upload, self._last_upload):
             # Explicit rather than left to immvision's global colour order,
             # because the frames are RGB and a wrong guess here is a silent
             # swap of red and blue in the only place anyone would see it.
             self._texture.update_from_image(
-                self._displayable(frame), is_color_order_bgr=False
+                self._displayable(frame, upload), is_color_order_bgr=False
             )
-            _magnify_without_smoothing(self._texture.texture_id)
+            self._last_seq = seq
+            self._last_upload = upload
         return self._texture.texture_id
 
-    def _displayable(self, frame: np.ndarray) -> np.ndarray:
-        """A writeable copy of the frame, because the uploader will not take one.
+    def _displayable(self, frame: np.ndarray, size: tuple[int, int]) -> np.ndarray:
+        """The frame at `size`, writeable, because the uploader will not take one.
 
         Frames come off the render loop read-only, so that no sink can corrupt
         what the others are handed. The upload converts a numpy array through a
@@ -371,8 +446,12 @@ class PreviewPanel:
 
         Into a buffer it keeps, and only ever called on an upload, so a
         megabyte is copied once per rendered frame rather than once per UI
-        frame drawn from it.
+        frame drawn from it. A magnified frame is a new array each time
+        instead: it is already a copy, and its size follows the panel rather
+        than the model, so there is no shape worth holding on to.
         """
+        if (size[1], size[0]) != frame.shape[:2]:
+            return magnified(frame, size)
         if (
             self._display is None
             or self._display.shape != frame.shape
