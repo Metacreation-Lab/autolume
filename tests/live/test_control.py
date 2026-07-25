@@ -9,6 +9,7 @@ from autolume.live.core.control import ControlLoop
 from autolume.live.core.events import ControlEvent
 from autolume.live.core.expr import compile_expression
 from autolume.live.core.generator import ModelInfo
+from autolume.live.core.noiseloop import NoiseLoop
 from autolume.live.core.params import (
     BINDING_SET,
     VECTOR_RANDOMIZE,
@@ -68,6 +69,21 @@ def make_loop_with_state(clock, state):
     render_store = LatestValueStore(to_render_params(ControlState()))
     source_store = LatestValueStore(SourceTable())
     loop = ControlLoop(control_store, render_store, source_store, clock=clock)
+    return loop, control_store, render_store, source_store
+
+
+def make_loop_with_state_and_model(clock, state, info):
+    control_store = LatestValueStore(state)
+    render_store = LatestValueStore(to_render_params(ControlState()))
+    source_store = LatestValueStore(SourceTable())
+    model_info_store = LatestValueStore(info)
+    loop = ControlLoop(
+        control_store,
+        render_store,
+        source_store,
+        clock=clock,
+        model_info_store=model_info_store,
+    )
     return loop, control_store, render_store, source_store
 
 
@@ -997,3 +1013,121 @@ def test_wrapped_flag_is_exposed_on_a_completed_cycle():
     clock.now = 4.0
     loop.tick()
     assert loop.last_loop_step.wrapped is True
+
+
+# --- noise loop vector (Task 5) ----------------------------------------------
+
+
+def test_noise_loop_vector_is_published_as_the_render_latent_vec():
+    clock = FakeClock()
+    info = ModelInfo(pkl_path="model.pkl", z_dim=4, num_ws=8)
+    state = ControlState(
+        loop_active=True, noise_loop=True, noise_loop_seed=3, noise_radius=2.0
+    )
+    loop, control_store, _, _ = make_loop_with_state_and_model(clock, state, info)
+    result = loop.tick()
+    expected = NoiseLoop(3, 2.0, 4).vector(0.0)
+    assert result.latent_vec == expected
+    assert result.mode == "vec"
+    # The user's own vector, untouched by the noise loop.
+    assert control_store.snapshot().latent_vec == ()
+
+
+def test_noise_loop_never_overwrites_the_users_own_latent_vec():
+    clock = FakeClock()
+    info = ModelInfo(pkl_path="model.pkl", z_dim=4, num_ws=8)
+    users_vector = (1.0, 2.0, 3.0, 4.0)
+    state = ControlState(
+        loop_active=True,
+        noise_loop=True,
+        noise_loop_seed=0,
+        noise_radius=1.0,
+        latent_vec=users_vector,
+    )
+    loop, control_store, render_store, _ = make_loop_with_state_and_model(
+        clock, state, info
+    )
+    loop.tick()
+    assert control_store.snapshot().latent_vec == users_vector
+    assert render_store.snapshot().latent_vec != users_vector
+
+
+def test_noise_loop_rebuilds_only_when_seed_radius_or_z_dim_changes(monkeypatch):
+    builds = []
+
+    class CountingNoiseLoop(NoiseLoop):
+        def __init__(self, seed, radius, dim):
+            builds.append((seed, radius, dim))
+            super().__init__(seed, radius, dim)
+
+    monkeypatch.setattr(control_module, "NoiseLoop", CountingNoiseLoop)
+    clock = FakeClock()
+    info = ModelInfo(pkl_path="model.pkl", z_dim=4, num_ws=8)
+    state = ControlState(
+        loop_active=True, noise_loop=True, noise_loop_seed=1, noise_radius=1.0
+    )
+    loop, _, _, _ = make_loop_with_state_and_model(clock, state, info)
+    for _ in range(5):
+        clock.now += 0.01
+        loop.tick()
+    assert len(builds) == 1
+
+    loop.submit(ControlEvent("/loop/seed", 2, source="ui"))
+    clock.now += 0.01
+    loop.tick()
+    assert len(builds) == 2
+
+    loop.submit(ControlEvent("/loop/radius", 5.0, source="ui"))
+    clock.now += 0.01
+    loop.tick()
+    assert len(builds) == 3
+
+    loop._model_info_store.set(ModelInfo(pkl_path="model.pkl", z_dim=6, num_ws=8))
+    clock.now += 0.01
+    loop.tick()
+    assert len(builds) == 4
+
+
+def test_noise_vector_is_resampled_only_when_alpha_moves(monkeypatch):
+    calls = []
+
+    class CountingNoiseLoop(NoiseLoop):
+        def vector(self, alpha):
+            calls.append(alpha)
+            return super().vector(alpha)
+
+    monkeypatch.setattr(control_module, "NoiseLoop", CountingNoiseLoop)
+    clock = FakeClock()
+    info = ModelInfo(pkl_path="model.pkl", z_dim=4, num_ws=8)
+    state = ControlState(
+        loop_active=True, noise_loop=True, noise_loop_seed=0, noise_radius=1.0
+    )
+    loop, _, _, _ = make_loop_with_state_and_model(clock, state, info)
+    loop.tick()  # dt == 0, alpha stays at 0.0
+    loop.tick()  # dt == 0 again, alpha still 0.0: no resample
+    assert len(calls) == 1
+
+    clock.now += 1.0
+    loop.tick()  # alpha moved: resamples once
+    assert len(calls) == 2
+
+
+def test_noise_loop_without_a_model_does_not_raise_and_keeps_latent_vec():
+    clock = FakeClock()
+    state = ControlState(loop_active=True, noise_loop=True)
+    loop, control_store, render_store, _ = make_loop_with_state(clock, state)
+    result = loop.tick()
+    assert result.mode == "vec"
+    assert result.latent_vec == ()
+    assert control_store.snapshot().latent_vec == ()
+
+
+def test_noise_loop_with_a_non_positive_radius_does_not_raise():
+    clock = FakeClock()
+    info = ModelInfo(pkl_path="model.pkl", z_dim=4, num_ws=8)
+    state = ControlState(
+        loop_active=True, noise_loop=True, noise_loop_seed=0, noise_radius=0.0
+    )
+    loop, _, render_store, _ = make_loop_with_state_and_model(clock, state, info)
+    result = loop.tick()
+    assert result.latent_vec == ()

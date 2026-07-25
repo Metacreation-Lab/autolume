@@ -26,6 +26,7 @@ from autolume.live.core.loop import LoopStep, advance
 from autolume.live.core.mapping import apply_event
 from autolume.live.core.models import ModelFolder
 from autolume.live.core.motion import WalkState, integrate
+from autolume.live.core.noiseloop import NoiseLoop
 from autolume.live.core.params import (
     BY_ADDRESS,
     REGISTRY,
@@ -88,6 +89,15 @@ class ControlLoop:
         self._last_loop_step = LoopStep(
             alpha=0.0, index=0, wrapped=False, started=False
         )
+        # At most one noise loop sampler, rebuilt only when the key it was
+        # built from changes. `_noise_vector_alpha` guards against resampling
+        # 512 dimensions every tick: measured ~5 ms on the dev machine, well
+        # past the tick budget, and unnecessary while alpha is stationary
+        # (the loop paused, or simply between plays).
+        self._noise_loop: NoiseLoop | None = None
+        self._noise_loop_key: tuple[int, float, int] | None = None
+        self._noise_vector_alpha: float | None = None
+        self._noise_vector_cache: tuple[float, ...] | None = None
         self._queue: collections.deque[ControlEvent] = collections.deque(
             maxlen=_QUEUE_LIMIT
         )
@@ -156,6 +166,10 @@ class ControlLoop:
         if sources is not published_sources:
             self._source_store.set(sources)
         render_params = to_render_params(state)
+        if state.loop_active and state.noise_loop:
+            vector = self._noise_latent_vector(state)
+            if vector is not None:
+                render_params = dataclasses.replace(render_params, latent_vec=vector)
         self._render_store.set(render_params)
         return render_params
 
@@ -194,6 +208,30 @@ class ControlLoop:
         if step.wrapped and state.perfect_loop:
             state = apply_value(state, "loop_active", False)
         return state, step
+
+    def _noise_latent_vector(self, state: ControlState) -> tuple[float, ...] | None:
+        """The noise loop's vector for this tick, or None if it cannot be built.
+
+        None means "no model yet" or "a non positive radius"; either way
+        `render_params.latent_vec` is left at `state.latent_vec` rather than
+        raising, since a live show cannot stop for either condition.
+        """
+        info = self._model_info
+        if info is None:
+            return None
+        radius = state.noise_radius
+        if not math.isfinite(radius) or radius <= 0.0:
+            return None
+        key = (state.noise_loop_seed, radius, info.z_dim)
+        if self._noise_loop is None or key != self._noise_loop_key:
+            self._noise_loop = NoiseLoop(state.noise_loop_seed, radius, info.z_dim)
+            self._noise_loop_key = key
+            self._noise_vector_alpha = None
+        alpha = state.loop_alpha
+        if self._noise_vector_cache is None or alpha != self._noise_vector_alpha:
+            self._noise_vector_cache = self._noise_loop.vector(alpha)
+            self._noise_vector_alpha = alpha
+        return self._noise_vector_cache
 
     def start(self) -> None:
         self._running.set()
