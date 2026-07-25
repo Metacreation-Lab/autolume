@@ -36,6 +36,7 @@ from autolume.live.ui.controls import (
     Marker,
     idle_color,
 )
+from autolume.live.ui.panels import preview as preview_module
 from autolume.live.ui.panels.mapping import bindable_specs
 from autolume.live.ui.panels.perform import PerformPanel, button_width
 from autolume.live.ui.panels.preview import (
@@ -514,7 +515,28 @@ class FakeTexture:
         self.uploads.append((image, is_color_order_bgr, image.copy()))
 
 
-Painted = collections.namedtuple("Painted", "ink moved panel quads")
+class FakeEnlarger:
+    """Stands in for the framebuffer blit, which needs a GL context.
+
+    Calling into GL without one does not raise, it takes the process down, so
+    this is a stand-in rather than a guard inside the panel. A guard would be a
+    branch that only ever runs here and never in the app, which is the shape
+    that let a broken magnification ship silently once already.
+
+    It records what it was asked for, which is worth more than a no-op: the
+    only headless evidence that a magnified frame is resampled at all, and at
+    the size the quad will be drawn at.
+    """
+
+    def __init__(self):
+        self.calls = []
+
+    def enlarge(self, source, frame, size):
+        self.calls.append((source, frame, size))
+        return 2
+
+
+Painted = collections.namedtuple("Painted", "ink moved panel quads enlarged")
 
 # Two panels drawn in one frame must not share a child id, or the second one
 # resolves to nothing and its assertions pass on an empty layout.
@@ -532,6 +554,7 @@ def draw_preview(runtime, panel=None, sizes=((400.0, 300.0),)):
     quads = []
     original_overlay = PreviewPanel._overlay
     original_texture = immvision.GlTexture
+    original_enlarger = preview_module.Enlarger
     original_image = imgui.image
     try:
 
@@ -549,6 +572,7 @@ def draw_preview(runtime, panel=None, sizes=((400.0, 300.0),)):
 
         PreviewPanel._overlay = measure
         immvision.GlTexture = FakeTexture
+        preview_module.Enlarger = FakeEnlarger
         imgui.image = image
         panel = panel or PreviewPanel(runtime)
         for size in sizes:
@@ -561,8 +585,15 @@ def draw_preview(runtime, panel=None, sizes=((400.0, 300.0),)):
     finally:
         PreviewPanel._overlay = original_overlay
         immvision.GlTexture = original_texture
+        preview_module.Enlarger = original_enlarger
         imgui.image = original_image
-    return Painted(result[0][0], result[0][1], panel, quads)
+    return Painted(
+        result[0][0],
+        result[0][1],
+        panel,
+        quads,
+        panel._enlarger.calls if panel._enlarger is not None else [],
+    )
 
 
 def uploads_of(panel):
@@ -765,8 +796,10 @@ def test_the_quad_is_drawn_at_the_size_the_mode_asked_for(frame):
 
     fitted = draw_preview(runtime)
     # An 8 by 8 frame in a panel with room to spare, drawn at 8 by 8. Fit does
-    # not magnify, and this is that rule arriving at the screen.
+    # not magnify past native size, and on this unscaled context native size is
+    # the frame's own. So nothing is resampled either.
     assert fitted.quads == [(8.0, 8.0)]
+    assert fitted.enlarged == []
 
     panel = PreviewPanel(runtime)
     panel._mode = DisplayMode.STRETCH
@@ -777,3 +810,10 @@ def test_the_quad_is_drawn_at_the_size_the_mode_asked_for(frame):
     # panel's shape would be the distortion this mode used to do.
     assert (width, height) > (8.0, 8.0)
     assert width == height
+    # And a magnified frame reaches the quad through the resample, at exactly
+    # the size the quad is drawn at. Drawing the 8 by 8 texture over a larger
+    # quad instead is the interpolated result this exists to avoid, and it
+    # would leave this list empty while every size assertion above still held.
+    ((_, source, target),) = stretched.enlarged
+    assert source == (8, 8)
+    assert target == (int(width), int(height))

@@ -43,17 +43,19 @@ what tells the uploader how many pixels the picture actually has to fill. The
 conversion back to points happens at the two calls that need points, and the
 display scale appears nowhere else. See `display_scale`.
 
-**Magnification is done to the frame, not to the quad.** A texture magnified by
-the GPU is interpolated, and there is no per-texture escape from it: imgui's
+**Magnification happens before imgui sees the texture.** Anything imgui draws
+magnified is interpolated, and there is no per-texture escape from it: its
 OpenGL renderer binds a sampler object for every draw it makes, and a sampler
 overrides whatever filtering the texture itself was given, so
 `glTexParameteri(GL_TEXTURE_MAG_FILTER, GL_NEAREST)` on our texture changes
 nothing at all. The pixel grid is part of what a generative model produces, and
 a performer scaling a small model up wants to see it rather than a blurred
-interpolation of it, so a magnified frame is enlarged into the texture before
-it is uploaded and the quad then draws it one for one. See `magnified`.
+interpolation of it, so a magnified frame is resampled into a texture of the
+size it will be drawn at and the quad then draws that one for one. The resample
+is a `GL_NEAREST` framebuffer blit, which is the GPU doing in a tenth of a
+millisecond what the same arithmetic in numpy costs tens of. See `Enlarger`.
 
-Minification is left to the GPU, where the interpolation is the right
+Minification is left to imgui's sampler, where the interpolation is the right
 behaviour: a 1024 frame shrunk into a docked panel would alias and crawl if it
 were sampled every nth pixel, and the blend is what keeps it readable.
 
@@ -112,6 +114,7 @@ from enum import Enum
 
 import numpy as np
 from imgui_bundle import imgui, immvision
+from OpenGL import GL
 
 from autolume.live.ui.controls import ERROR_COLOR
 
@@ -233,53 +236,95 @@ def display_scale() -> float:
     return float(scale) if scale > 0.0 else 1.0
 
 
-def magnified(frame: np.ndarray, size: tuple[int, int]) -> np.ndarray:
-    """`frame` enlarged to `size` by repeating pixels, never blending them.
+def magnifies(frame: tuple[int, int], size: tuple[int, int]) -> bool:
+    """Whether drawing the frame at `size` enlarges it.
 
-    Each output pixel is one input pixel, chosen by where it falls in the
-    frame, so the result is the frame's own pixels drawn bigger and its edges
-    stay where they were. That is the whole point: the alternative is the
-    GPU's interpolation, which is the soft result this exists to avoid.
-
-    The scale does not have to be a whole number and the blocks are allowed to
-    come out uneven, because Stretch fills the panel and a panel is not an
-    exact multiple of a model's resolution except by accident. Uneven and
-    crisp reads as pixels. Even and blurred does not.
-
-    Returns a new array every time. That is what the uploader needs anyway,
-    since it will not take the read-only frames the render loop hands out.
-
-    A whole-number scale gets its own path, and it is worth the branch because
-    it is the ordinary case rather than an optimisation for a rare one: native
-    size on a display that scales by two is exactly two, every frame. It is
-    about two and a half times faster than the general gather, which at 1024
-    doubled is 17 ms against 41. Both produce the same array, and a test says
-    so.
+    Only then does the enlargement have to be done for the GPU rather than by
+    it. Shrinking is handed straight to imgui's sampler, which interpolates,
+    which is what a frame being made smaller wants.
     """
-    width, height = size
-    frame_height, frame_width = frame.shape[:2]
-    if width % frame_width == 0 and height % frame_height == 0:
-        return np.repeat(
-            np.repeat(frame, height // frame_height, axis=0),
-            width // frame_width,
-            axis=1,
+    return size[0] > frame[0] or size[1] > frame[1]
+
+
+class Enlarger:
+    """Nearest-neighbour magnification, done on the GPU by a framebuffer blit.
+
+    `glBlitFramebuffer` with `GL_NEAREST` is a nearest-neighbour resample, at
+    any scale, whole-numbered or not, and it is the one way left to get one
+    once imgui's renderer stopped honouring per-texture filtering. It costs
+    around a tenth of a millisecond for a 1024 frame, against 17 to 41 doing
+    the same arithmetic in numpy, which at 1024 on CUDA would have been more
+    than a whole frame's budget spent enlarging a picture.
+
+    The blit is not the render path. It runs on the UI thread, once per frame
+    the panel actually draws, and it touches the render loop's frames only by
+    reading the texture they were uploaded to.
+
+    Nothing here is created until it is used, because a panel is built before
+    there is a GL context to build it in. There is no fallback if the blit
+    fails: this is not an optional hint, it is how the picture gets its pixels,
+    and the same context draws the rest of the interface, so a failure here is
+    a failure everywhere and should look like one rather than quietly halving
+    the frame rate on a path nobody tests.
+    """
+
+    def __init__(self) -> None:
+        self._read = 0
+        self._draw = 0
+        self._texture = 0
+        self._size = (0, 0)
+
+    def enlarge(
+        self, source: int, frame: tuple[int, int], size: tuple[int, int]
+    ) -> int:
+        """`source` resampled up to `size`, as a texture id to draw from."""
+        if not self._read:
+            self._read = int(GL.glGenFramebuffers(1))
+            self._draw = int(GL.glGenFramebuffers(1))
+        if size != self._size:
+            self._resize(size)
+        read_was = int(GL.glGetIntegerv(GL.GL_READ_FRAMEBUFFER_BINDING))
+        draw_was = int(GL.glGetIntegerv(GL.GL_DRAW_FRAMEBUFFER_BINDING))
+        GL.glBindFramebuffer(GL.GL_READ_FRAMEBUFFER, self._read)
+        GL.glFramebufferTexture2D(
+            GL.GL_READ_FRAMEBUFFER, GL.GL_COLOR_ATTACHMENT0, GL.GL_TEXTURE_2D, source, 0
         )
-    columns = (np.arange(width) * frame_width) // width
-    rows = (np.arange(height) * frame_height) // height
-    return frame[rows[:, None], columns]
+        GL.glBindFramebuffer(GL.GL_DRAW_FRAMEBUFFER, self._draw)
+        GL.glBlitFramebuffer(
+            0, 0, frame[0], frame[1],
+            0, 0, size[0], size[1],
+            GL.GL_COLOR_BUFFER_BIT, GL.GL_NEAREST,
+        )  # fmt: skip
+        GL.glBindFramebuffer(GL.GL_READ_FRAMEBUFFER, read_was)
+        GL.glBindFramebuffer(GL.GL_DRAW_FRAMEBUFFER, draw_was)
+        return self._texture
 
+    def _resize(self, size: tuple[int, int]) -> None:
+        """Point the destination at a texture of exactly `size`.
 
-def upload_size(frame: tuple[int, int], size: tuple[int, int]) -> tuple[int, int]:
-    """The resolution to put on the GPU to draw the frame at `size`.
-
-    Its own, unless it is being magnified, in which case the enlarging is done
-    to the pixels before they are uploaded and the texture is the size of the
-    quad. Shrinking is left at native resolution and handed to the GPU, which
-    interpolates, which is what a frame being made smaller wants.
-    """
-    if size[0] > frame[0] or size[1] > frame[1]:
-        return size
-    return frame
+        Reallocated rather than grown, because the size follows the panel and a
+        texture kept at the largest size ever seen would hold onto the memory
+        of a window that was briefly dragged full screen.
+        """
+        if not self._texture:
+            self._texture = int(GL.glGenTextures(1))
+        was = int(GL.glGetIntegerv(GL.GL_TEXTURE_BINDING_2D))
+        GL.glBindTexture(GL.GL_TEXTURE_2D, self._texture)
+        GL.glTexImage2D(
+            GL.GL_TEXTURE_2D, 0, GL.GL_RGB8, size[0], size[1],
+            0, GL.GL_RGB, GL.GL_UNSIGNED_BYTE, None,
+        )  # fmt: skip
+        GL.glBindTexture(GL.GL_TEXTURE_2D, was)
+        GL.glBindFramebuffer(GL.GL_DRAW_FRAMEBUFFER, self._draw)
+        GL.glFramebufferTexture2D(
+            GL.GL_DRAW_FRAMEBUFFER,
+            GL.GL_COLOR_ATTACHMENT0,
+            GL.GL_TEXTURE_2D,
+            self._texture,
+            0,
+        )
+        GL.glBindFramebuffer(GL.GL_DRAW_FRAMEBUFFER, 0)
+        self._size = size
 
 
 def displayed_size(
@@ -370,19 +415,17 @@ def frame_placement(
 def needs_refresh(
     seq: int, last_seq: int, size: tuple[int, int], last_size: tuple[int, int]
 ) -> bool:
-    """Whether the frame has to be uploaded to the GPU again.
+    """Whether what the quad is drawn from has to be rebuilt.
 
     A new frame from the render loop, which is the whole reason the mailbox
     carries a sequence number rather than the panel comparing arrays. An
-    unchanged frame never re-uploads, however many UI frames are drawn from it.
+    unchanged frame is never uploaded again, however many UI frames are drawn
+    from it.
 
-    And a change in the resolution it is uploaded at, which is the frame's own
-    until the frame is magnified and the size of the quad after that. So in
-    Fit, and in Stretch below native size, dragging a dock split changes the
-    quad and never the texture. Above native size it changes both, because that
-    is where the enlarging lives, and an upload that ignored the size would
-    leave the picture at whatever width the panel happened to be when the frame
-    arrived.
+    And a change in the size it is drawn at, because a magnified frame is
+    resampled to that size before the quad is drawn from it. The upload itself
+    does not depend on the size, only the resample does, so dragging a dock
+    split repeats a blit and never an upload.
     """
     return seq != last_seq or size != last_size
 
@@ -391,10 +434,12 @@ class PreviewPanel:
     def __init__(self, runtime) -> None:
         self._runtime = runtime
         self._last_seq = -1
-        self._last_upload = (0, 0)
+        self._last_size = (0, 0)
         self._mode = DisplayMode.FIT
         self._display: np.ndarray | None = None
         self._texture: immvision.GlTexture | None = None
+        self._enlarger: Enlarger | None = None
+        self._enlarged = 0
 
     def gui(self) -> None:
         seq, frame = self._runtime.preview.latest()
@@ -440,33 +485,42 @@ class PreviewPanel:
         )
 
     def _texture_id(self, seq: int, frame: np.ndarray, size: tuple[int, int]) -> int:
-        """The texture the quad is drawn from, uploaded only when it changes.
+        """The texture the quad is drawn from, rebuilt only when it changes.
 
-        At the frame's own resolution while the frame is being shrunk, so that
-        dragging a dock split changes the quad and never the texture and the
-        GPU does the interpolating that a shrink wants. At the size of the quad
-        once the frame is being magnified, because that is the case the GPU
-        cannot be left to do: see the module docstring.
+        The frame is always uploaded at its own resolution, so an upload costs
+        the same whatever the panel is doing. What follows depends on which way
+        the frame is being scaled: shrinking is handed to imgui's sampler,
+        which interpolates, which is what a shrink wants. Magnifying goes
+        through a blit first, because imgui's sampler would interpolate that
+        too and a magnified frame wants its pixels: see `Enlarger`.
 
         Built on first use rather than in the constructor, because it takes a
         GL context and a panel is built before there is one.
         """
         if self._texture is None:
             self._texture = immvision.GlTexture()
-        upload = upload_size((frame.shape[1], frame.shape[0]), size)
-        if needs_refresh(seq, self._last_seq, upload, self._last_upload):
-            # Explicit rather than left to immvision's global colour order,
-            # because the frames are RGB and a wrong guess here is a silent
-            # swap of red and blue in the only place anyone would see it.
-            self._texture.update_from_image(
-                self._displayable(frame, upload), is_color_order_bgr=False
+            self._enlarger = Enlarger()
+        native = (frame.shape[1], frame.shape[0])
+        if needs_refresh(seq, self._last_seq, size, self._last_size):
+            if seq != self._last_seq:
+                # The colour order is explicit rather than left to immvision's
+                # global setting, because the frames are RGB and a wrong guess
+                # here is a silent swap of red and blue in the only place
+                # anyone would see it.
+                self._texture.update_from_image(
+                    self._displayable(frame), is_color_order_bgr=False
+                )
+            self._enlarged = (
+                self._enlarger.enlarge(self._texture.texture_id, native, size)
+                if magnifies(native, size)
+                else 0
             )
             self._last_seq = seq
-            self._last_upload = upload
-        return self._texture.texture_id
+            self._last_size = size
+        return self._enlarged or self._texture.texture_id
 
-    def _displayable(self, frame: np.ndarray, size: tuple[int, int]) -> np.ndarray:
-        """The frame at `size`, writeable, because the uploader will not take one.
+    def _displayable(self, frame: np.ndarray) -> np.ndarray:
+        """A writeable copy of the frame, because the uploader will not take one.
 
         Frames come off the render loop read-only, so that no sink can corrupt
         what the others are handed. The upload converts a numpy array through a
@@ -476,12 +530,8 @@ class PreviewPanel:
 
         Into a buffer it keeps, and only ever called on an upload, so a
         megabyte is copied once per rendered frame rather than once per UI
-        frame drawn from it. A magnified frame is a new array each time
-        instead: it is already a copy, and its size follows the panel rather
-        than the model, so there is no shape worth holding on to.
+        frame drawn from it.
         """
-        if (size[1], size[0]) != frame.shape[:2]:
-            return magnified(frame, size)
         if (
             self._display is None
             or self._display.shape != frame.shape

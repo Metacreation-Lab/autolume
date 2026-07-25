@@ -42,11 +42,10 @@ from autolume.live.ui.panels.preview import (
     dims_the_frame,
     displayed_size,
     frame_placement,
-    magnified,
+    magnifies,
     model_name,
     needs_refresh,
     preview_status,
-    upload_size,
 )
 
 
@@ -365,56 +364,6 @@ def test_centred_offset_lands_on_a_whole_pixel():
     assert centred_offset((100.0, 100.0), (301.0, 303.0)) == (100.0, 101.0)
 
 
-def test_magnifying_repeats_pixels_rather_than_blending_them():
-    """Every value in the result is a value that was in the frame.
-
-    A blend is exactly what the GPU would have done, so a magnify that
-    introduced one would have been pointless.
-    """
-    frame = np.array([[[0, 0, 0], [255, 255, 255]]], dtype=np.uint8)
-    bigger = magnified(frame, (6, 3))
-    assert bigger.shape == (3, 6, 3)
-    assert set(np.unique(bigger).tolist()) == {0, 255}
-    assert bigger[0, :, 0].tolist() == [0, 0, 0, 255, 255, 255]
-
-
-def test_magnifying_by_an_uneven_scale_keeps_every_pixel():
-    """Stretch fills the panel, and a panel is not a multiple of a model.
-
-    The blocks come out uneven and that is the accepted half of the trade:
-    uneven and crisp reads as pixels, even and blurred does not. What may not
-    happen is a pixel being dropped or the picture being sheared, so the first
-    and last pixel of the frame are still the first and last of the result.
-    """
-    frame = np.arange(5, dtype=np.uint8).reshape(1, 5, 1)
-    bigger = magnified(frame, (7, 1))
-    assert bigger[0, :, 0].tolist() == [0, 0, 1, 2, 2, 3, 4]
-
-
-def test_the_whole_number_shortcut_agrees_with_the_general_case():
-    """The fast path is a shortcut, not a second definition of the result.
-
-    It runs on every frame at native size on a scaled display, so a divergence
-    here would be the ordinary case being wrong and the awkward one right.
-    """
-    frame = np.arange(4 * 5 * 3, dtype=np.uint8).reshape(4, 5, 3)
-    for size in ((10, 8), (15, 12), (5, 4)):
-        general = magnified(frame, (size[0] - 1, size[1]))
-        assert general.shape == (size[1], size[0] - 1, 3)
-        columns = (np.arange(size[0]) * 5) // size[0]
-        rows = (np.arange(size[1]) * 4) // size[1]
-        assert np.array_equal(magnified(frame, size), frame[rows[:, None], columns])
-
-
-def test_magnifying_gives_the_uploader_an_array_it_will_accept():
-    """The frames arrive read-only and immvision rejects those outright."""
-    frame = np.zeros((4, 4, 3), dtype=np.uint8)
-    frame.flags.writeable = False
-    bigger = magnified(frame, (8, 8))
-    assert bigger.flags.writeable
-    assert bigger.flags.c_contiguous
-
-
 def test_native_size_is_one_frame_pixel_per_point_on_every_display():
     """A model is the same physical size whatever the display scale.
 
@@ -433,16 +382,16 @@ def test_native_size_is_one_frame_pixel_per_point_on_every_display():
         assert place.pixels == (int(256 * scale), int(256 * scale))
 
 
-def test_a_frame_at_native_size_is_uploaded_at_the_pixels_it_covers():
+def test_a_frame_at_native_size_is_resampled_before_imgui_draws_it():
     """Which is what keeps it crisp rather than interpolated.
 
     On a 2x display native size covers four device pixels per frame pixel, and
-    the GPU would blend them. Uploading at the covered size sends the enlarging
-    through `magnified`, which repeats pixels instead.
+    imgui's sampler would blend them, so this is a magnification even though
+    the mode is called Fit and the frame is at its native size.
     """
     place = frame_placement((64, 64), (900.0, 900.0), FIT, 2.0)
     assert place.pixels == (128, 128)
-    assert upload_size((64, 64), place.pixels) == (128, 128)
+    assert magnifies((64, 64), place.pixels)
 
 
 def test_stretch_fills_the_panel_in_pixels_it_can_actually_draw():
@@ -484,15 +433,16 @@ def test_a_magnified_frame_is_uploaded_again_when_the_panel_resizes():
     assert needs_refresh(7, 7, (900, 900), (700, 700))
 
 
-def test_only_a_magnified_frame_is_uploaded_at_the_panel_size():
-    """A frame being shrunk stays at its own resolution, whatever the panel does.
+def test_only_a_magnified_frame_is_resampled():
+    """A frame being shrunk goes to imgui's sampler untouched.
 
-    The upload is then independent of the split being dragged, and the GPU is
-    left to interpolate, which is what a shrink wants.
+    That is the case where interpolation is wanted, and the case where a blit
+    would be work done to make the picture worse.
     """
-    assert upload_size((1024, 1024), (600, 600)) == (1024, 1024)
-    assert upload_size((1024, 1024), (1024, 1024)) == (1024, 1024)
-    assert upload_size((256, 256), (900, 900)) == (900, 900)
+    assert not magnifies((1024, 1024), (600, 600))
+    assert not magnifies((1024, 1024), (1024, 1024))
+    assert magnifies((256, 256), (900, 900))
+    assert magnifies((256, 256), (256, 300))
 
 
 def test_model_name_falls_back_to_the_whole_path_when_there_is_no_filename():
