@@ -22,6 +22,12 @@ from autolume.live.core.touch import (
     TOUCH_HOLD_LIMIT,
 )
 
+# What truncation_psi reads as when nothing has written to it. These tests use
+# that parameter as a stand-in for "the write did not land", so the value has to
+# follow the registry: pinning a number here would turn every future change of
+# the default into a wall of unrelated failures.
+UNWRITTEN = ControlState().truncation_psi
+
 _real_apply_event = control_module.apply_event
 
 
@@ -245,7 +251,7 @@ def test_disabled_binding_does_not_fire_until_it_is_enabled():
     bind(loop, "truncation_psi", "/audio/level", "x*2", enabled=False)
     loop.submit(ControlEvent("/audio/level", 0.25))
     loop.tick()
-    assert control_store.snapshot().truncation_psi == 0.7
+    assert control_store.snapshot().truncation_psi == UNWRITTEN
 
     bind(loop, "truncation_psi", "/audio/level", "x*2", enabled=True)
     loop.submit(ControlEvent("/audio/level", 0.25))
@@ -318,7 +324,7 @@ def test_an_unmapped_parameter_ignores_its_own_address():
     loop, control_store, _, _ = make_loop()
     loop.submit(ControlEvent("/trunc/psi", 1.2, source="osc"))
     loop.tick()
-    assert control_store.snapshot().truncation_psi == 0.7
+    assert control_store.snapshot().truncation_psi == UNWRITTEN
 
 
 def test_an_unmapped_parameter_still_answers_the_hand():
@@ -355,7 +361,7 @@ def test_a_row_pointed_elsewhere_closes_the_parameters_own_address():
     bind(loop, "truncation_psi", "/audio/level")
     loop.submit(ControlEvent("/trunc/psi", 1.2, source="osc"))
     loop.tick()
-    assert control_store.snapshot().truncation_psi == 0.7
+    assert control_store.snapshot().truncation_psi == UNWRITTEN
 
 
 def test_a_held_parameter_ignores_remote_writes_to_its_own_address():
@@ -372,12 +378,12 @@ def test_a_held_parameter_ignores_remote_writes_to_its_own_address():
     loop.submit(ControlEvent(TOUCH_BEGIN, "truncation_psi", source="ui"))
     loop.submit(ControlEvent("/trunc/psi", 1.5, source="osc"))
     loop.tick()
-    assert control_store.snapshot().truncation_psi == 0.7
+    assert control_store.snapshot().truncation_psi == UNWRITTEN
 
     loop.submit(ControlEvent(TOUCH_END, "truncation_psi", source="ui"))
     loop.submit(ControlEvent("/trunc/psi", 1.5, source="osc"))
     loop.tick()
-    assert control_store.snapshot().truncation_psi == 0.7
+    assert control_store.snapshot().truncation_psi == UNWRITTEN
 
     clock.now += TOUCH_GRACE
     loop.submit(ControlEvent("/trunc/psi", 1.5, source="osc"))
@@ -405,7 +411,7 @@ def test_a_blocked_remote_write_is_still_offered_as_an_input_source():
     bind(loop, "truncation_psi", "", enabled=False)
     loop.submit(ControlEvent("/trunc/psi", 1.2, source="osc"))
     loop.tick()
-    assert control_store.snapshot().truncation_psi == 0.7
+    assert control_store.snapshot().truncation_psi == UNWRITTEN
     assert source_store.snapshot().recent(clock.now) == ["/trunc/psi"]
 
 
@@ -424,7 +430,7 @@ def test_traffic_at_a_parameter_with_no_row_is_still_recorded_as_a_source():
     loop, control_store, _, source_store = make_loop(clock)
     loop.submit(ControlEvent("/trunc/psi", 1.2, source="osc"))
     loop.tick()
-    assert control_store.snapshot().truncation_psi == 0.7
+    assert control_store.snapshot().truncation_psi == UNWRITTEN
     table = source_store.snapshot()
     assert table.recent(clock.now) == ["/trunc/psi"]
     assert table.active("/trunc/psi", clock.now)
@@ -436,7 +442,7 @@ def test_failing_expression_keeps_the_value_and_records_the_error():
     loop.submit(ControlEvent("/audio/level", 0.0))
     loop.tick()
     state = control_store.snapshot()
-    assert state.truncation_psi == 0.7
+    assert state.truncation_psi == UNWRITTEN
     assert binding_for(state, "truncation_psi").error is not None
 
 
@@ -471,12 +477,12 @@ def test_held_target_ignores_binding_writes_and_resumes_after_the_grace():
     loop.submit(ControlEvent(TOUCH_BEGIN, "truncation_psi", source="ui"))
     loop.submit(ControlEvent("/audio/level", 1.5))
     loop.tick()
-    assert control_store.snapshot().truncation_psi == 0.7
+    assert control_store.snapshot().truncation_psi == UNWRITTEN
 
     loop.submit(ControlEvent(TOUCH_END, "truncation_psi", source="ui"))
     loop.submit(ControlEvent("/audio/level", 1.5))
     loop.tick()
-    assert control_store.snapshot().truncation_psi == 0.7
+    assert control_store.snapshot().truncation_psi == UNWRITTEN
 
     clock.now += TOUCH_GRACE
     loop.submit(ControlEvent("/audio/level", 1.5))
@@ -547,7 +553,7 @@ def test_a_remote_touch_end_cannot_release_a_ui_hold():
     clock.now += TOUCH_GRACE * 2
     loop.submit(ControlEvent("/audio/level", 1.5))
     loop.tick()
-    assert control_store.snapshot().truncation_psi == 0.7
+    assert control_store.snapshot().truncation_psi == UNWRITTEN
 
 
 def test_a_hold_that_is_never_ended_lapses_and_the_binding_resumes():
@@ -558,7 +564,7 @@ def test_a_hold_that_is_never_ended_lapses_and_the_binding_resumes():
     loop.submit(ControlEvent(TOUCH_BEGIN, "truncation_psi", source="ui"))
     loop.submit(ControlEvent("/audio/level", 1.5))
     loop.tick()
-    assert control_store.snapshot().truncation_psi == 0.7
+    assert control_store.snapshot().truncation_psi == UNWRITTEN
 
     clock.now += TOUCH_HOLD_LIMIT
     loop.submit(ControlEvent("/audio/level", 1.5))
@@ -615,7 +621,7 @@ def test_fixing_a_broken_expression_takes_effect_immediately():
     bind(loop, "truncation_psi", "/audio/level", "x*")
     loop.submit(ControlEvent("/audio/level", 0.5))
     loop.tick()
-    assert control_store.snapshot().truncation_psi == 0.7
+    assert control_store.snapshot().truncation_psi == UNWRITTEN
 
     bind(loop, "truncation_psi", "/audio/level", "x*2")
     loop.submit(ControlEvent("/audio/level", 0.5))

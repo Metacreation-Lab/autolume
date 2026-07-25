@@ -24,6 +24,32 @@ def test_registry_defaults_match_control_state():
         assert getattr(state, name) == spec.default
 
 
+def test_the_defaults_a_model_is_first_rendered_with_match_the_old_app():
+    """Parity for the values that decide what the first frame looks like.
+
+    These were checked against a real model rather than against the old app's
+    source: a frame rendered with these defaults is byte-for-byte identical to
+    what the old app draws for the same model. Truncation is the one that
+    caught us. It had been 0.7 here and is 0.8 there, and it does not look like
+    a bug, it looks like the new app rendering the model with duller colours,
+    because that is exactly what pulling a latent closer to the average does.
+    """
+    old_app_defaults = {
+        "latent_x": 0.0,
+        "latent_y": 0.0,
+        "anim_playing": False,
+        "anim_speed_x": 0.25,
+        "truncation_psi": 0.8,
+        "global_noise": 1.0,
+        "noise_enabled": True,
+        "noise_seed": 0,
+        "noise_anim": False,
+    }
+    state = params.ControlState()
+    for name, value in old_app_defaults.items():
+        assert getattr(state, name) == value, name
+
+
 def test_addresses_are_unique_and_slash_prefixed():
     addresses = [spec.address for spec in params.REGISTRY.values()]
     assert len(addresses) == len(set(addresses))
