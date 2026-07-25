@@ -14,7 +14,7 @@ from imgui_bundle import imgui
 from autolume.live.core import presets
 from autolume.live.core.events import ControlEvent
 from autolume.live.errors import describe
-from autolume.live.ui.controls import ERROR_COLOR
+from autolume.live.ui.theme import ERROR_COLOR
 
 logger = logging.getLogger(__name__)
 

@@ -28,11 +28,11 @@ The vocabulary is one rectangle, four colours and two fills.
 One rectangle in every row, whatever drives the parameter, which is what tells
 the performer the column is there to click without making them find it with the
 mouse first. Earlier passes drew an empty container instead, in the frame
-colour, and that could not work in this theme by construction: darcula_darker
-puts `frame_bg` at (0.145, 0.122, 0.122) against a `window_bg` of (0.138,
-0.142, 0.149), so an empty widget is the background. The idle rectangle is the
-theme's disabled text colour instead, which is the one grey a theme guarantees
-reads as inactive and still legible, in a light theme as well as a dark one.
+colour, and that could not work in this theme by construction: `frame_bg` is
+white at five percent over a near black window, so an empty widget is the
+background with a hint on it. The idle rectangle is the theme's disabled text
+colour instead, which is the one grey a theme guarantees reads as inactive and
+still legible, in a light theme as well as a dark one.
 
 With one shape, colour carries who, so the four differ in brightness as well as
 hue rather than in hue alone. Grey is the dimmest, because it is the state that
@@ -85,19 +85,7 @@ from autolume.live.core.params import (
 )
 from autolume.live.core.sources import SourceTable
 from autolume.live.core.touch import TOUCH_BEGIN, TOUCH_END
-
-# Remote input, on. Filled when something is arriving, outlined when it is not.
-BINDING_COLOR = (0.35, 0.75, 1.0, 1.0)
-# Brighter and more saturated than the pale green this used to be. Every marker
-# is the same rectangle now, so motion and the idle grey are told apart by
-# colour alone, and a desaturated green sits at almost exactly a mid grey's
-# brightness, which is the one pair a red green deficiency turns into one
-# colour. Raising its value puts a step between them that hue loss cannot take.
-MOTION_COLOR = (0.45, 0.92, 0.45, 1.0)
-# Every failure the UI shows is this colour, wherever it is shown, so that one
-# definition here is what makes a broken binding, a missing device and a preset
-# that would not save look alike.
-ERROR_COLOR = (1.0, 0.3, 0.3, 1.0)
+from autolume.live.ui.theme import BINDING_COLOR, ERROR_COLOR, MOTION_COLOR
 
 # Wide enough to click at, since the chip in it is the way back from a control
 # a binding has taken over.
@@ -114,7 +102,7 @@ _PLATE_INSET = 0.15
 _OUTLINE_RATIO = 0.07
 # What the idle grey keeps of the theme's disabled text colour. Under 1.0 so
 # the quietest state is also the dimmest, which is what puts a brightness step
-# between it and the green beside it, and still near four to one against the
+# between it and the green beside it, and still over three to one against the
 # panel so it is plainly visible without a hover.
 _IDLE_MARKER_ALPHA = 0.7
 # What an outlined marker keeps of its colour. The fill difference already
@@ -946,9 +934,12 @@ class ControlBinder:
 
         Colour says who drives it and the four differ in brightness as well as
         hue, because with one shape there is nothing else left to differ in.
-        Against darcula_darker the idle grey lands near four to one on the
-        panel, the blue near eight and the green near eleven, so the pair a red
-        green deficiency flattens is also the pair furthest apart in value.
+        Against the near black panel the idle grey lands near three to one, the
+        blue near ten and the green near thirteen, so the pair a red green
+        deficiency flattens is also the pair furthest apart in value. These are
+        not Autolume's teal and red: a surface colour sits behind text, a chip
+        colour has to survive being one of four at a glance, and the brand pair
+        misses the ratios above. `ui/theme.py` records that split.
 
         Fill is the second channel and it says one thing: whether input is
         arriving right now. The outline also drops a little colour, so where a

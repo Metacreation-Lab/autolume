@@ -27,11 +27,9 @@ from imgui_bundle import hello_imgui, imgui, immvision
 from autolume.live.core.params import Binding, ControlState
 from autolume.live.core.sources import SourceTable
 from autolume.live.core.store import LatestValueStore
-from autolume.live.ui import window
+from autolume.live.ui import theme, window
+from autolume.live.ui.theme import BINDING_COLOR, ERROR_COLOR, MOTION_COLOR
 from autolume.live.ui.controls import (
-    BINDING_COLOR,
-    ERROR_COLOR,
-    MOTION_COLOR,
     ControlBinder,
     Marker,
     idle_color,
@@ -76,9 +74,7 @@ def frame():
         io.display_size = imgui.ImVec2(900.0, 700.0)
         io.delta_time = 1.0 / 60.0
         io.backend_flags |= imgui.BackendFlags_.renderer_has_textures
-        hello_imgui.apply_tweaked_theme(
-            hello_imgui.RunnerParams().imgui_window_params.tweaked_theme
-        )
+        theme.apply_theme()
         imgui.new_frame()
         imgui.begin("Controls")
         yield
@@ -364,9 +360,7 @@ def row_edges(width: float, font_scale: float) -> list[float]:
         io.display_size = imgui.ImVec2(1280.0, 800.0)
         io.delta_time = 1.0 / 60.0
         io.backend_flags |= imgui.BackendFlags_.renderer_has_textures
-        hello_imgui.apply_tweaked_theme(
-            hello_imgui.RunnerParams().imgui_window_params.tweaked_theme
-        )
+        theme.apply_theme()
         imgui.get_style().font_scale_main = font_scale
 
         def measure_widget(self, spec, label, draw, enabled):

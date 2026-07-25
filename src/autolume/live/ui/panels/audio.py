@@ -11,7 +11,7 @@ import numpy as np
 from imgui_bundle import imgui
 
 from autolume.audio.features import FEATURE_NAMES
-from autolume.live.ui.controls import ERROR_COLOR
+from autolume.live.ui.theme import ERROR_COLOR
 
 _NO_DEVICES = "No input devices found"
 # Sized in multiples of the font size so the panel holds its proportions on

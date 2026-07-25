@@ -4,6 +4,7 @@ import asyncio
 
 from imgui_bundle import hello_imgui, imgui, immvision
 
+from autolume.live.ui import theme
 from autolume.live.ui.panels import (
     AudioPanel,
     MappingPanel,
@@ -54,7 +55,7 @@ def _viewport_body(label: str, gui) -> None:
     `End` is unconditional because imgui pairs it with `Begin` and not with
     what `Begin` returned.
     """
-    imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(0.0, 0.0))
+    imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(*theme.NO_PADDING))
     opened, _ = imgui.begin(label)
     imgui.pop_style_var()
     if opened:
@@ -89,6 +90,9 @@ def _build_runner_params(runtime) -> hello_imgui.RunnerParams:
     params.renderer_backend_type = hello_imgui.RendererBackendType.open_gl3
     params.ini_folder_type = hello_imgui.IniFolderType.app_user_config_folder
     params.fps_idling.enable_idling = False
+
+    params.callbacks.setup_imgui_style = theme.apply_theme
+    params.callbacks.load_additional_fonts = theme.load_fonts
 
     params.imgui_window_params.default_imgui_window_type = (
         hello_imgui.DefaultImGuiWindowType.provide_full_screen_dock_space

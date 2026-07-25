@@ -41,7 +41,7 @@ from autolume.live.core.params import (
     binding_for,
 )
 from autolume.live.core.sources import canonical_address
-from autolume.live.ui.controls import ERROR_COLOR
+from autolume.live.ui.theme import ERROR_COLOR
 
 # Widths in multiples of the font size, so the rows keep their proportions on
 # every display scale instead of cramping at 200 percent.

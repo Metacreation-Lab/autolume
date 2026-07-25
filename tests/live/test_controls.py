@@ -22,12 +22,10 @@ from autolume.live.core.presets import PRESET_APPLY, to_payload
 from autolume.live.core.sources import LIVE_WINDOW, SourceTable
 from autolume.live.core.store import LatestValueStore
 from autolume.live.core.touch import TOUCH_BEGIN, TOUCH_END
+from autolume.live.ui.theme import BINDING_COLOR, ERROR_COLOR, MOTION_COLOR
 from autolume.live.ui.controls import (
     _HOLD_FRAMES,
     _UNBOUND_TIP,
-    BINDING_COLOR,
-    ERROR_COLOR,
-    MOTION_COLOR,
     Marker,
     Override,
     binding_for,

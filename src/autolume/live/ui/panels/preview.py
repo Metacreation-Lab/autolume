@@ -116,7 +116,8 @@ import numpy as np
 from imgui_bundle import imgui, immvision
 from OpenGL import GL
 
-from autolume.live.ui.controls import ERROR_COLOR
+from autolume.live.ui import theme
+from autolume.live.ui.theme import ERROR_COLOR
 
 _NO_MODEL = "No model loaded. Click Browse in the Controls panel to open one."
 _NO_FRAMES = "Waiting for frames."
@@ -458,7 +459,7 @@ class PreviewPanel:
         # and no scrollbars. The frame is fitted to it, so it should never have
         # anything to scroll, and the flags are what make that a property of
         # the panel rather than of the arithmetic being right every time.
-        imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(0.0, 0.0))
+        imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(*theme.NO_PADDING))
         opened = imgui.begin_child("##viewport", area, 0, _VIEWPORT_FLAGS)
         imgui.pop_style_var()
         if opened:
