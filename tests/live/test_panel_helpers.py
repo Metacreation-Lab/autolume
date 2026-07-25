@@ -7,7 +7,13 @@ lives in module functions rather than inside the gui methods.
 
 import numpy as np
 
-from autolume.live.core.params import ParamKind
+from autolume.live.core.params import (
+    BINDING_CLEAR,
+    BINDING_SET,
+    Binding,
+    ClearBinding,
+    ParamKind,
+)
 from autolume.live.ui.panels.audio import (
     bar_value,
     device_index,
@@ -16,6 +22,7 @@ from autolume.live.ui.panels.audio import (
     spectrum_values,
 )
 from autolume.live.ui.panels.mapping import (
+    MappingPanel,
     bindable_specs,
     canonical_address,
     display_label,
@@ -88,3 +95,69 @@ def test_preset_names_may_not_walk_out_of_the_folder():
     assert not is_valid_name("..")
     assert not is_valid_name("a/b")
     assert not is_valid_name("a\\b")
+
+
+class RecordingRuntime:
+    """Captures what a panel submits, without a control loop behind it."""
+
+    def __init__(self):
+        self.events = []
+
+    def submit(self, event):
+        self.events.append(event)
+
+
+def commit_panel():
+    return MappingPanel(RecordingRuntime())
+
+
+def test_typed_source_becomes_a_binding_with_a_canonical_address():
+    panel = commit_panel()
+    panel._commit("latent_x", None, source="audio/bass")
+    (event,) = panel._runtime.events
+    assert event.address == BINDING_SET
+    assert event.value == Binding("latent_x", "/audio/bass", "x", True)
+    assert event.source == "ui"
+
+
+def test_emptying_the_source_clears_with_an_object_never_a_string():
+    panel = commit_panel()
+    bound = Binding("latent_x", "/audio/bass", "x", True)
+    panel._commit("latent_x", bound, source="")
+    (event,) = panel._runtime.events
+    assert event.address == BINDING_CLEAR
+    # A bare target string would be expressible over OSC, which would let any
+    # peer on the port delete a performer's mapping mid show.
+    assert not isinstance(event.value, str)
+    assert event.value == ClearBinding("latent_x")
+
+
+def test_emptying_an_unbound_source_submits_nothing():
+    panel = commit_panel()
+    panel._commit("latent_x", None, source="   ")
+    assert panel._runtime.events == []
+
+
+def test_editing_only_the_expression_preserves_the_source_and_enabled_flag():
+    panel = commit_panel()
+    bound = Binding("truncation_psi", "/audio/level", "x", False)
+    panel._commit("truncation_psi", bound, expression="x*2")
+    (event,) = panel._runtime.events
+    assert event.value == Binding("truncation_psi", "/audio/level", "x*2", False)
+
+
+def test_a_blank_expression_falls_back_to_identity():
+    panel = commit_panel()
+    bound = Binding("latent_x", "/audio/bass", "x*2", True)
+    panel._commit("latent_x", bound, expression="  ")
+    (event,) = panel._runtime.events
+    assert event.value.expression == "x"
+
+
+def test_committing_forgets_the_drafts_for_that_parameter_only():
+    panel = commit_panel()
+    panel._drafts[("latent_x", "source")] = "typed"
+    panel._drafts[("latent_y", "source")] = "other"
+    panel._commit("latent_x", None, source="/a/b")
+    assert ("latent_x", "source") not in panel._drafts
+    assert panel._drafts[("latent_y", "source")] == "other"

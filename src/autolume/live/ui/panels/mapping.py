@@ -122,9 +122,7 @@ class MappingPanel:
         imgui.indent(column)
         self._expression_field(name, binding)
         if binding is not None and binding.error:
-            imgui.push_style_color(
-                imgui.Col_.text, imgui.ImVec4(*BINDING_ERROR_COLOR)
-            )
+            imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(*BINDING_ERROR_COLOR))
             imgui.text_wrapped(binding.error)
             imgui.pop_style_color()
         imgui.unindent(column)
@@ -136,7 +134,7 @@ class MappingPanel:
         entered, text = imgui.input_text(
             "##source", self._shown(name, "source", current), _ENTER
         )
-        self._keep_draft(name, "source", text, current)
+        self._keep_draft(name, "source", text)
         if entered or imgui.is_item_deactivated_after_edit():
             self._commit(name, binding, source=text)
 
@@ -146,7 +144,7 @@ class MappingPanel:
         entered, text = imgui.input_text(
             "##expression", self._shown(name, "expression", current), _ENTER
         )
-        self._keep_draft(name, "expression", text, current)
+        self._keep_draft(name, "expression", text)
         if entered or imgui.is_item_deactivated_after_edit():
             self._commit(name, binding, expression=text)
 
@@ -228,9 +226,19 @@ class MappingPanel:
     def _shown(self, name: str, field: str, current: str) -> str:
         return self._drafts.get((name, field), current)
 
-    def _keep_draft(self, name: str, field: str, text: str, current: str) -> None:
-        if text != self._shown(name, field, current):
-            self._drafts[(name, field)] = text
+    def _keep_draft(self, name: str, field: str, text: str) -> None:
+        """Hold the typed buffer only while the field is the active item.
+
+        A field that stops being drawn never reports deactivation, so an edit
+        abandoned by switching tabs would otherwise keep its draft forever and
+        hide every later change to the binding. Activity is the one condition
+        that resolves even then.
+        """
+        key = (name, field)
+        if imgui.is_item_active():
+            self._drafts[key] = text
+        else:
+            self._drafts.pop(key, None)
 
     def _forget(self, name: str) -> None:
         self._drafts.pop((name, "source"), None)
