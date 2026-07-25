@@ -20,7 +20,7 @@ import logging
 import pickle
 from pathlib import Path
 
-from autolume.live.core.expr import ExpressionError, compile_expression
+from autolume.live.core.expr import compile_expression
 from autolume.live.core.params import Binding
 
 logger = logging.getLogger(__name__)
@@ -36,7 +36,7 @@ UNSUPPORTED_FILES = {
     "Directions are not available yet.",
     "looper.pkl": "Looping keyframes were not imported. Looping is not available yet.",
     "pickle.pkl": "The model list was not imported. "
-    "Pick your model in the model panel.",
+    "Use the Open model button to load your model.",
     "collap.pkl": "Layer bending was not imported. "
     "Network bending is not available yet.",
     "mix.pkl": "Model mixing was not imported. Model mixing is not available yet.",
@@ -55,16 +55,28 @@ _LATENT_PARAMS = (
     ("update_mode", "anim_playing", lambda value: bool(value != 0)),
 )
 
-_LATENT_UNSUPPORTED = {
-    "project": "The projection setting was not imported. "
-    "Projection is not available yet.",
-    "vec": "The saved latent vector was not imported.",
-    "next": "The queued latent vector was not imported.",
-}
+# What the old app started with, so a preset that still holds it configured
+# nothing and does not deserve a note.
+_PROJECT_DEFAULT = True
+
+_PROJECT_NOTE = (
+    "The projection setting was not imported. Projection is not available yet."
+)
+_VEC_NOTE = "The saved latent vector was not imported."
+_NEXT_NOTE = "The queued latent vector was not imported."
+
+_VECTOR_MODE_NOTE = (
+    "Vector mode is not available yet. This preset was imported in seed mode."
+)
 
 _VECTOR_MENU_NOTE = (
     "The OSC mappings for vector mode were not imported. "
     "Vector mode is not available yet."
+)
+
+_UNREADABLE_NOTE = (
+    "Part of this preset folder could not be read. "
+    "Some of its settings were not imported."
 )
 
 _TRUNC_PARAMS = (
@@ -102,14 +114,38 @@ _TRUNC_MENU_UNSUPPORTED = {
 }
 
 
+def _is_dir(path: Path) -> bool:
+    """`Path.is_dir` that treats an unreachable path as absent.
+
+    `pathlib` only swallows the not found errors. A folder copied off a network
+    share or out of another user's home answers with `EACCES` instead, which
+    would otherwise escape from a probe that runs before any of the guarded
+    reading below.
+    """
+    try:
+        return path.is_dir()
+    except OSError:
+        logger.warning("Could not look at %s", path, exc_info=True)
+        return False
+
+
+def _is_file(path: Path) -> bool:
+    """`Path.is_file` that treats an unreachable path as absent. See `_is_dir`."""
+    try:
+        return path.is_file()
+    except OSError:
+        logger.warning("Could not look at %s", path, exc_info=True)
+        return False
+
+
 def is_legacy_preset(directory: str | Path) -> bool:
     """True if `directory` is a folder saved by the previous Autolume."""
     root = Path(directory)
-    return root.is_dir() and any((root / name).is_file() for name in LEGACY_FILES)
+    return _is_dir(root) and any(_is_file(root / name) for name in LEGACY_FILES)
 
 
 def _read_pickle(path: Path, skipped: list[str]) -> object | None:
-    if not path.is_file():
+    if not _is_file(path):
         skipped.append(f"No {path.name} was found in this preset.")
         return None
     try:
@@ -144,7 +180,6 @@ def _read_params(
     section: object,
     label: str,
     table: tuple,
-    unsupported: dict[str, str],
     params: dict,
     skipped: list[str],
 ) -> None:
@@ -156,14 +191,17 @@ def _read_params(
             continue
         try:
             params[target] = convert(section[legacy_name])
-        except (TypeError, ValueError):
+        # Every value here came out of a pickle written by another program, so
+        # no assumption about its type holds. A tensor in a number's place, for
+        # one, makes the update mode converter raise `RuntimeError`.
+        except Exception:
             logger.warning(
-                "Ignoring legacy value %r for %s", section[legacy_name], legacy_name
+                "Ignoring legacy value %r for %s",
+                section[legacy_name],
+                legacy_name,
+                exc_info=True,
             )
             skipped.append(f"The saved value for {legacy_name} could not be read.")
-    for legacy_name, note in unsupported.items():
-        if legacy_name in section:
-            skipped.append(note)
 
 
 def _address(raw: object) -> str | None:
@@ -176,17 +214,35 @@ def _address(raw: object) -> str | None:
     return address if address.startswith("/") else f"/{address}"
 
 
-def _binding(target: str, address: str, key: str, raw_mapping: object) -> Binding:
+def _binding(
+    target: str, address: str, key: str, raw_mapping: object, skipped: list[str]
+) -> Binding:
     """Build a binding, disabling it if the new evaluator rejects its expression."""
-    expression = raw_mapping.strip() if isinstance(raw_mapping, str) else ""
+    if isinstance(raw_mapping, str):
+        expression = raw_mapping.strip()
+    else:
+        # A field the performer left blank means pass the value through, but a
+        # mapping that pickled as something other than text is a corrupt value
+        # being normalized, which the performer should hear about.
+        if raw_mapping is not None:
+            logger.warning("Legacy mapping for %s is not text: %r", key, raw_mapping)
+            skipped.append(
+                f"The saved OSC mapping for {key} was not readable text. "
+                "It was imported passing the value through unchanged."
+            )
+        expression = ""
     expression = expression or "x"
     try:
         compile_expression(expression)
-    except ExpressionError as exc:
+    # `compile_expression` promises `ExpressionError`, but the source reaching it
+    # came out of a pickle, so a wider failure is caught rather than raised at a
+    # performer who only clicked Import.
+    except Exception as exc:
         logger.warning(
-            "Legacy mapping %r for %s is not valid: %s", expression, key, exc
+            "Legacy mapping %r for %s is not valid", expression, key, exc_info=True
         )
-        return Binding(target, address, expression, enabled=False, error=str(exc))
+        error = str(exc) or type(exc).__name__
+        return Binding(target, address, expression, enabled=False, error=error)
     return Binding(target, address, expression, enabled=True, error=None)
 
 
@@ -221,7 +277,7 @@ def _read_menu(
                 or f"The OSC mapping for {key} is not recognized. It was not imported."
             )
             continue
-        binding = _binding(target, address, key, mappings.get(key))
+        binding = _binding(target, address, key, mappings.get(key), skipped)
         if binding.error is not None:
             skipped.append(
                 f"The OSC mapping for {key} is not valid in this version. "
@@ -242,6 +298,42 @@ def _has_configured_address(section: object) -> bool:
     return any(_address(raw) is not None for raw in addresses.values())
 
 
+def _in_vector_mode(latent: dict) -> bool:
+    """True if the old preset was performing on vectors rather than on seeds."""
+    try:
+        return not latent.get("mode", True)
+    except Exception:
+        logger.warning("Unreadable legacy latent mode", exc_info=True)
+        return False
+
+
+def _report_latent_unsupported(latent: dict, skipped: list[str]) -> None:
+    """Report the latent fields with no home yet, but only when they were used.
+
+    Every real latent structure carries `project`, `vec` and `next`, so a note on
+    mere presence would put three lines about things the performer never touched
+    in front of every single import. `project` counts as used once it differs
+    from what the old app started with, and the two vectors only ever mattered in
+    vector mode, which is the only mode that read them.
+    """
+    project = latent.get("project", _PROJECT_DEFAULT)
+    try:
+        changed = bool(project != _PROJECT_DEFAULT)
+    except Exception:
+        # Something unexpected sits in the field, which is itself worth saying.
+        logger.warning("Unreadable legacy projection setting", exc_info=True)
+        changed = True
+    if changed:
+        skipped.append(_PROJECT_NOTE)
+    if not _in_vector_mode(latent):
+        return
+    skipped.append(_VECTOR_MODE_NOTE)
+    if "vec" in latent:
+        skipped.append(_VEC_NOTE)
+    if "next" in latent:
+        skipped.append(_NEXT_NOTE)
+
+
 def _import_latent(root: Path, params: dict, bindings: list, skipped: list) -> None:
     data = _read_pickle(root / LATENT_FILE, skipped)
     if data is None:
@@ -250,14 +342,9 @@ def _import_latent(root: Path, params: dict, bindings: list, skipped: list) -> N
     if not parts:
         return
     latent = parts[0]
-    _read_params(
-        latent, LATENT_FILE, _LATENT_PARAMS, _LATENT_UNSUPPORTED, params, skipped
-    )
-    # `mode` false means the old preset was performing on vectors, not seeds.
-    if isinstance(latent, dict) and not latent.get("mode", True):
-        skipped.append(
-            "Vector mode is not available yet. This preset was imported in seed mode."
-        )
+    _read_params(latent, LATENT_FILE, _LATENT_PARAMS, params, skipped)
+    if isinstance(latent, dict):
+        _report_latent_unsupported(latent, skipped)
     if len(parts) > 1:
         _read_menu(
             parts[1],
@@ -280,7 +367,7 @@ def _import_trunc(root: Path, params: dict, bindings: list, skipped: list) -> No
     parts = _sections(data, TRUNC_FILE, 2, skipped)
     if not parts:
         return
-    _read_params(parts[0], TRUNC_FILE, _TRUNC_PARAMS, {}, params, skipped)
+    _read_params(parts[0], TRUNC_FILE, _TRUNC_PARAMS, params, skipped)
     if len(parts) > 1:
         _read_menu(
             parts[1],
@@ -302,16 +389,24 @@ def import_legacy_preset(
     gathered is returned and the rest is reported.
     """
     root = Path(directory)
-    if not root.is_dir():
+    if not _is_dir(root):
         return {}, (), [f"{root.name} is not a preset folder. Nothing was imported."]
     params: dict = {}
     bindings: list[Binding] = []
     skipped: list[str] = []
-    _import_latent(root, params, bindings, skipped)
-    _import_trunc(root, params, bindings, skipped)
-    # Reported from the file name alone. These are never unpickled, since
-    # nothing in them can be imported yet.
-    for name, note in UNSUPPORTED_FILES.items():
-        if (root / name).is_file():
-            skipped.append(note)
+    # Everything below reports its own failures, so this catches only what no
+    # handler saw coming. A performer opening an old folder gets what was
+    # gathered plus a note either way, and a probe added later cannot turn into
+    # a crash on the Import button.
+    try:
+        _import_latent(root, params, bindings, skipped)
+        _import_trunc(root, params, bindings, skipped)
+        # Reported from the file name alone. These are never unpickled, since
+        # nothing in them can be imported yet.
+        for name, note in UNSUPPORTED_FILES.items():
+            if _is_file(root / name):
+                skipped.append(note)
+    except Exception:
+        logger.exception("Could not finish reading legacy preset folder %s", root)
+        skipped.append(_UNREADABLE_NOTE)
     return params, tuple(bindings), skipped

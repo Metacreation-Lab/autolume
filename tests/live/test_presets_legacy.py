@@ -1,14 +1,24 @@
 import logging
+import os
 import pickle
+import sys
 
 import pytest
 import torch
 
 import dnnlib
+from autolume.live.core import presets_legacy
 from autolume.live.core.params import REGISTRY, Binding
 from autolume.live.core.presets_legacy import import_legacy_preset, is_legacy_preset
 
 LEGACY_LOGGER = "autolume.live.core.presets_legacy"
+
+# A folder with no permissions is still readable by root, so the test would
+# assert nothing there. Windows ignores the mode bits entirely.
+needs_posix_permissions = pytest.mark.skipif(
+    sys.platform.startswith("win") or (hasattr(os, "geteuid") and os.geteuid() == 0),
+    reason="needs POSIX permission bits and a non root user",
+)
 
 # Key order matches the legacy widgets, so binding order in the assertions below
 # is the order the old app built its OSC menus in.
@@ -174,9 +184,10 @@ def test_full_preset_reports_the_controls_it_could_not_carry_over(tmp_path):
     assert mentions(skipped, "mapping for projection")
     assert mentions(skipped, "mapping for model switching")
     assert mentions(skipped, "mapping for reset")
-    assert mentions(skipped, "projection setting")
-    assert mentions(skipped, "latent vector")
     assert not mentions(skipped, "Vector mode")
+    # The preset never left the defaults for these, so they are not worth a note.
+    assert not mentions(skipped, "projection setting")
+    assert not mentions(skipped, "latent vector")
 
 
 def test_import_accepts_a_str_path(tmp_path):
@@ -370,10 +381,14 @@ def test_invalid_mapping_syntax_is_imported_disabled_with_the_error(tmp_path):
         ),
     )
     _, bindings, skipped = import_legacy_preset(directory)
-    assert bindings == (
-        Binding("global_noise", "/ctl/gn", "x +* 2", False, bindings[0].error),
-    )
-    assert "syntax" in bindings[0].error
+    assert len(bindings) == 1
+    binding = bindings[0]
+    assert binding.target == "global_noise"
+    assert binding.source == "/ctl/gn"
+    assert binding.expression == "x +* 2"
+    assert binding.enabled is False
+    assert binding.error is not None
+    assert "invalid syntax" in binding.error
     assert mentions(skipped, "Global Noise")
 
 
@@ -444,11 +459,166 @@ def test_is_legacy_preset_rejects_an_unrelated_folder(tmp_path):
     assert is_legacy_preset(tmp_path / "old") is True
 
 
-def test_skipped_notes_read_as_plain_sentences(tmp_path):
+@pytest.fixture
+def unreadable_preset(tmp_path):
+    """A real legacy folder the current user is not allowed to look inside."""
+    directory = tmp_path / "old"
+    write_latent(directory)
+    directory.chmod(0o000)
+    try:
+        yield directory
+    finally:
+        directory.chmod(0o700)
+
+
+@needs_posix_permissions
+def test_unreadable_preset_folder_is_not_a_crash(unreadable_preset):
+    params, bindings, skipped = import_legacy_preset(unreadable_preset)
+    assert params == {}
+    assert bindings == ()
+    assert skipped
+
+
+@needs_posix_permissions
+def test_is_legacy_preset_survives_an_unreadable_folder(unreadable_preset):
+    assert is_legacy_preset(unreadable_preset) is False
+
+
+def test_a_failing_probe_still_returns_what_was_gathered(tmp_path, monkeypatch, caplog):
+    directory = tmp_path / "old"
+    write_trunc(directory, params=make_trunc_params(trunc_psi=1.7))
+    real_is_file = presets_legacy._is_file
+
+    def explode(path):
+        if path.name in presets_legacy.UNSUPPORTED_FILES:
+            raise PermissionError(13, "Permission denied", str(path))
+        return real_is_file(path)
+
+    monkeypatch.setattr(presets_legacy, "_is_file", explode)
+    with caplog.at_level(logging.WARNING, logger=LEGACY_LOGGER):
+        params, _, skipped = import_legacy_preset(directory)
+    assert params["truncation_psi"] == 1.7
+    assert mentions(skipped, "could not be read")
+    assert caplog.records
+
+
+def test_a_tensor_where_a_number_was_expected_is_reported(tmp_path, caplog):
+    directory = tmp_path / "old"
+    # bool() on a multi element tensor raises RuntimeError, not ValueError.
+    write_latent(directory, latent=make_latent(x=2.0, update_mode=torch.randn(4)))
+    with caplog.at_level(logging.WARNING, logger=LEGACY_LOGGER):
+        params, _, skipped = import_legacy_preset(directory)
+    assert params["latent_x"] == 2.0
+    assert "anim_playing" not in params
+    assert mentions(skipped, "update_mode")
+    assert caplog.records
+
+
+def test_a_mapping_that_fails_to_compile_at_all_is_reported(tmp_path, monkeypatch):
+    directory = tmp_path / "old"
+
+    def explode(source):
+        raise RuntimeError("compiler fell over")
+
+    monkeypatch.setattr(presets_legacy, "compile_expression", explode)
+    write_trunc(
+        directory,
+        menu=make_menu(TRUNC_KEYS, addresses={"Diversity": "ctl/psi"}),
+    )
+    _, bindings, skipped = import_legacy_preset(directory)
+    assert len(bindings) == 1
+    assert bindings[0].enabled is False
+    assert bindings[0].error
+    assert mentions(skipped, "Diversity")
+
+
+def test_a_mapping_that_is_not_text_is_reported(tmp_path):
+    directory = tmp_path / "old"
+    write_trunc(
+        directory,
+        menu=make_menu(
+            TRUNC_KEYS,
+            addresses={"Diversity": "ctl/psi"},
+            mappings={"Diversity": torch.randn(2)},
+        ),
+    )
+    _, bindings, skipped = import_legacy_preset(directory)
+    assert bindings == (Binding("truncation_psi", "/ctl/psi", "x", True, None),)
+    assert mentions(skipped, "Diversity")
+
+
+def test_a_blank_mapping_is_not_reported(tmp_path):
+    directory = tmp_path / "old"
+    write_trunc(
+        directory,
+        menu=make_menu(
+            TRUNC_KEYS, addresses={"Diversity": "ctl/psi"}, mappings={"Diversity": ""}
+        ),
+    )
+    _, bindings, skipped = import_legacy_preset(directory)
+    assert bindings == (Binding("truncation_psi", "/ctl/psi", "x", True, None),)
+    assert not mentions(skipped, "Diversity")
+
+
+def test_an_untouched_preset_reports_nothing_the_performer_did_not_set(tmp_path):
+    directory = tmp_path / "old"
+    write_latent(directory)
+    write_trunc(directory)
+    _, _, skipped = import_legacy_preset(directory)
+    assert skipped == []
+
+
+def test_projection_is_reported_only_when_it_was_turned_off(tmp_path):
+    on = tmp_path / "on"
+    write_latent(on, latent=make_latent(project=True))
+    off = tmp_path / "off"
+    write_latent(off, latent=make_latent(project=False))
+    assert not mentions(import_legacy_preset(on)[2], "projection setting")
+    assert mentions(import_legacy_preset(off)[2], "projection setting")
+
+
+def test_saved_vectors_are_reported_only_in_vector_mode(tmp_path):
+    seeds = tmp_path / "seeds"
+    write_latent(seeds, latent=make_latent(mode=True))
+    vectors = tmp_path / "vectors"
+    write_latent(vectors, latent=make_latent(mode=False))
+    assert not mentions(import_legacy_preset(seeds)[2], "latent vector")
+    vector_notes = import_legacy_preset(vectors)[2]
+    assert mentions(vector_notes, "saved latent vector")
+    assert mentions(vector_notes, "queued latent vector")
+
+
+def test_the_model_note_names_a_control_that_exists(tmp_path):
+    directory = tmp_path / "old"
+    write_latent(directory)
+    write_pickle(directory, "pickle.pkl", ("whatever",))
+    _, _, skipped = import_legacy_preset(directory)
+    assert mentions(skipped, "Open model")
+    assert not mentions(skipped, "model panel")
+
+
+def test_skipped_notes_read_as_plain_sentences(tmp_path, monkeypatch):
     directory = full_preset(tmp_path / "old")
     write_pickle(directory, "mix.pkl", ("whatever",))
     _, _, skipped = import_legacy_preset(directory)
-    assert skipped
+    # The notes only a damaged or vector mode preset reaches, gathered here so
+    # every note the module can produce is held to the same style.
+    awkward = tmp_path / "awkward"
+    write_latent(
+        awkward,
+        latent=make_latent(mode=False, project=False, speed="fast"),
+        seed_menu=make_menu(
+            SEED_KEYS,
+            addresses={"seed": "ctl/seed", "project": "ctl/project"},
+            mappings={"seed": torch.randn(2)},
+        ),
+        vec_menu=make_menu(VEC_KEYS, addresses={"vector": "ctl/vec"}),
+    )
+    skipped += import_legacy_preset(awkward)[2]
+    monkeypatch.setattr(presets_legacy, "_import_trunc", lambda *args: 1 / 0)
+    skipped += import_legacy_preset(awkward)[2]
+    assert mentions(skipped, "Part of this preset folder")
+    assert len(skipped) > 10
     for note in skipped:
         assert note == note.strip()
         assert note.endswith(".")
