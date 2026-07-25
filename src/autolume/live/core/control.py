@@ -22,6 +22,7 @@ import numpy as np
 from autolume.live.core.events import ControlEvent
 from autolume.live.core.expr import ExpressionError, compile_expression
 from autolume.live.core.generator import ModelInfo
+from autolume.live.core.loop import LoopStep, advance
 from autolume.live.core.mapping import apply_event
 from autolume.live.core.models import ModelFolder
 from autolume.live.core.motion import WalkState, integrate
@@ -81,6 +82,12 @@ class ControlLoop:
         # Seeded once at construction, never persisted: the vector walk's
         # target is runtime-only state, not part of the show (design.md).
         self.walk = WalkState(walk_rng or np.random.RandomState())
+        # The loop step from the most recent tick, including `started` and
+        # `wrapped` resolved against the tick before it. Task 7 reads this to
+        # decide whether the outbound pulse fires.
+        self._last_loop_step = LoopStep(
+            alpha=0.0, index=0, wrapped=False, started=False
+        )
         self._queue: collections.deque[ControlEvent] = collections.deque(
             maxlen=_QUEUE_LIMIT
         )
@@ -103,6 +110,16 @@ class ControlLoop:
         """The loaded model's dimensions, as of the most recent tick."""
         return self._model_info
 
+    @property
+    def last_loop_step(self) -> LoopStep:
+        """The loop's `started`/`wrapped` result from the most recent tick.
+
+        An outbound pulse (Task 7) reads this after `tick()` to decide
+        whether to emit, rather than duplicating the play/wrap edge detection
+        `_integrate_loop` already does.
+        """
+        return self._last_loop_step
+
     def tick(self) -> RenderParams:
         now = self._clock()
         dt = now - self._last_tick if self._last_tick is not None else 0.0
@@ -114,6 +131,9 @@ class ControlLoop:
             self._queue.clear()
 
         state = self._control_store.snapshot()
+        was_loop_active = state.loop_active
+        prior_loop_alpha = state.loop_alpha
+        prior_loop_index = state.loop_index
         published_sources = self._source_store.snapshot()
         sources = published_sources
         for event in events:
@@ -128,6 +148,9 @@ class ControlLoop:
         state = integrate(
             state, dt, self.touch, now, model_info=self._model_info, walk=self.walk
         )
+        state, self._last_loop_step = self._integrate_loop(
+            state, dt, now, was_loop_active, prior_loop_alpha, prior_loop_index
+        )
 
         self._control_store.set(state)
         if sources is not published_sources:
@@ -135,6 +158,42 @@ class ControlLoop:
         render_params = to_render_params(state)
         self._render_store.set(render_params)
         return render_params
+
+    def _integrate_loop(
+        self,
+        state: ControlState,
+        dt: float,
+        now: float,
+        was_active: bool,
+        prior_alpha: float,
+        prior_index: int,
+    ) -> tuple[ControlState, LoopStep]:
+        """Advance the keyframe or noise loop and land the result in `state`.
+
+        `advance` is pure and never sets `started`, since it cannot see the
+        tick before this one; this is the one place that can, by comparing
+        `was_active` (captured before this tick's events ran) to `loop_active`
+        now.
+
+        `prior_alpha`/`prior_index` are the same before-this-tick values, so a
+        manual write to `/loop/alpha` or `/loop/index` earlier this tick is
+        detected as "already changed" and integration leaves it alone,
+        exactly as a manual write outruns a binding within one tick.
+        """
+        step = advance(state, dt)
+        if state.loop_active and not was_active:
+            step = dataclasses.replace(step, started=True)
+        if state.loop_alpha == prior_alpha and not self.touch.is_held(
+            "loop_alpha", now
+        ):
+            state = apply_value(state, "loop_alpha", step.alpha)
+        if state.loop_index == prior_index and not self.touch.is_held(
+            "loop_index", now
+        ):
+            state = apply_value(state, "loop_index", step.index)
+        if step.wrapped and state.perfect_loop:
+            state = apply_value(state, "loop_active", False)
+        return state, step
 
     def start(self) -> None:
         self._running.set()

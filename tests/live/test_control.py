@@ -63,6 +63,14 @@ def make_loop(clock=None, store=LatestValueStore):
     return loop, control_store, render_store, source_store
 
 
+def make_loop_with_state(clock, state):
+    control_store = LatestValueStore(state)
+    render_store = LatestValueStore(to_render_params(ControlState()))
+    source_store = LatestValueStore(SourceTable())
+    loop = ControlLoop(control_store, render_store, source_store, clock=clock)
+    return loop, control_store, render_store, source_store
+
+
 def make_loop_with_model(clock, info):
     control_store = LatestValueStore(ControlState())
     render_store = LatestValueStore(to_render_params(ControlState()))
@@ -863,3 +871,129 @@ def test_the_vector_walk_is_wired_into_the_control_loop():
     loop.tick()
     second = control_store.snapshot().latent_vec
     assert second != first
+
+
+# --- loop integration (Task 4) ----------------------------------------------
+
+
+def test_loop_integration_advances_alpha_in_time_mode():
+    clock = FakeClock()
+    state = ControlState(loop_active=True, loop_uses_time=True, loop_time=4.0)
+    loop, control_store, _, _ = make_loop_with_state(clock, state)
+    loop.tick()  # first tick, dt == 0
+    clock.now = 0.1
+    loop.tick()
+    result = control_store.snapshot()
+    assert abs(result.loop_alpha - 6 * 0.1 / 4.0) < 1e-9
+    assert result.loop_index == 0
+
+
+def test_negative_loop_speed_wraps_the_index_backwards():
+    clock = FakeClock()
+    state = ControlState(
+        loop_active=True, loop_uses_time=False, loop_speed=-1.0, loop_alpha=0.05
+    )
+    loop, control_store, _, _ = make_loop_with_state(clock, state)
+    loop.tick()
+    clock.now = 0.1
+    loop.tick()
+    assert control_store.snapshot().loop_index == 5
+
+
+def test_loop_inactive_integrates_nothing():
+    clock = FakeClock()
+    state = ControlState(loop_active=False, loop_uses_time=False, loop_speed=5.0)
+    loop, control_store, _, _ = make_loop_with_state(clock, state)
+    loop.tick()
+    clock.now = 1.0
+    loop.tick()
+    result = control_store.snapshot()
+    assert result.loop_alpha == 0.0
+    assert result.loop_index == 0
+
+
+def test_a_held_loop_alpha_does_not_advance_and_resumes_after_the_grace():
+    clock = FakeClock()
+    clock.now = 10.0
+    state = ControlState(loop_active=True, loop_uses_time=False, loop_speed=1.0)
+    loop, control_store, _, _ = make_loop_with_state(clock, state)
+    loop.submit(ControlEvent(TOUCH_BEGIN, "loop_alpha", source="ui"))
+    loop.tick()
+    clock.now += 0.5
+    loop.tick()
+    assert control_store.snapshot().loop_alpha == 0.0
+
+    loop.submit(ControlEvent(TOUCH_END, "loop_alpha", source="ui"))
+    loop.tick()
+    clock.now += TOUCH_GRACE + 0.5
+    loop.tick()
+    assert control_store.snapshot().loop_alpha > 0.0
+
+
+def test_manual_loop_alpha_write_wins_over_integration_this_tick():
+    """Same rule as bindings vs UI, applied to the loop's own scrub address."""
+    clock = FakeClock()
+    state = ControlState(loop_active=True, loop_uses_time=False, loop_speed=5.0)
+    loop, control_store, _, _ = make_loop_with_state(clock, state)
+    loop.tick()
+    clock.now = 1.0
+    loop.submit(ControlEvent("/loop/alpha", 0.42, source="ui"))
+    loop.tick()
+    assert control_store.snapshot().loop_alpha == 0.42
+
+
+def test_manual_loop_index_write_wins_over_integration_this_tick():
+    clock = FakeClock()
+    state = ControlState(
+        loop_active=True, loop_uses_time=True, loop_time=4.0, loop_alpha=0.99
+    )
+    loop, control_store, _, _ = make_loop_with_state(clock, state)
+    loop.tick()
+    clock.now = 1.0
+    loop.submit(ControlEvent("/loop/index", 4, source="ui"))
+    loop.tick()
+    assert control_store.snapshot().loop_index == 4
+
+
+def test_perfect_loop_deactivates_on_wrap_and_only_then():
+    clock = FakeClock()
+    state = ControlState(
+        loop_active=True, perfect_loop=True, loop_uses_time=True, loop_time=4.0
+    )
+    loop, control_store, _, _ = make_loop_with_state(clock, state)
+    loop.tick()
+    clock.now = 0.1
+    loop.tick()
+    assert control_store.snapshot().loop_active is True
+
+    clock.now += 10.0
+    loop.tick()
+    assert control_store.snapshot().loop_active is False
+
+
+def test_started_flag_fires_only_on_the_tick_playback_begins():
+    clock = FakeClock()
+    state = ControlState(loop_active=False, loop_uses_time=False, loop_speed=1.0)
+    loop, _, _, _ = make_loop_with_state(clock, state)
+    loop.tick()
+    assert loop.last_loop_step.started is False
+
+    loop.submit(ControlEvent("/loop/anim", True, source="ui"))
+    loop.tick()
+    assert loop.last_loop_step.started is True
+
+    clock.now = 0.1
+    loop.tick()
+    assert loop.last_loop_step.started is False
+
+
+def test_wrapped_flag_is_exposed_on_a_completed_cycle():
+    clock = FakeClock()
+    state = ControlState(loop_active=True, loop_uses_time=True, loop_time=4.0)
+    loop, _, _, _ = make_loop_with_state(clock, state)
+    loop.tick()
+    assert loop.last_loop_step.wrapped is False
+
+    clock.now = 4.0
+    loop.tick()
+    assert loop.last_loop_step.wrapped is True
