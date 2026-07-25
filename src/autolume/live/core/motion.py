@@ -26,6 +26,29 @@ from autolume.live.core.touch import TouchTracker
 # The parameters motion drives, each with the speed that advances it.
 _AXES = (("latent_x", "anim_speed_x"), ("latent_y", "anim_speed_y"))
 
+MOTION_PARAMS = tuple(name for name, _ in _AXES)
+
+
+def drives(
+    state: ControlState,
+    name: str,
+    touch: TouchTracker | None = None,
+    now: float = 0.0,
+) -> bool:
+    """Whether motion is what advances `name` right now.
+
+    The integrator calls this on every axis it considers, so a UI asking the
+    same question gets the same answer. A marker that claimed motion for a
+    parameter the integrator leaves alone would be worse than no marker, and
+    the only way to be sure of that is to share the rule rather than restate
+    it.
+    """
+    if not state.anim_playing or name not in MOTION_PARAMS:
+        return False
+    if any(binding.target == name and binding.enabled for binding in state.bindings):
+        return False
+    return touch is None or not touch.is_held(name, now)
+
 
 def integrate(
     state: ControlState,
@@ -35,11 +58,8 @@ def integrate(
 ) -> ControlState:
     if not state.anim_playing or dt <= 0.0:
         return state
-    bound = {binding.target for binding in state.bindings if binding.enabled}
     for name, speed_name in _AXES:
-        if name in bound:
-            continue
-        if touch is not None and touch.is_held(name, now):
+        if not drives(state, name, touch, now):
             continue
         step = getattr(state, name) + getattr(state, speed_name) * dt
         state = apply_value(state, name, step)

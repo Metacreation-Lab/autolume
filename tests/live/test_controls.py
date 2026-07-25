@@ -4,20 +4,24 @@ The widgets themselves cannot be exercised: imgui-bundle's null backend
 asserts at runtime, so everything below stops at the module boundary.
 """
 
+import dataclasses
 import struct
 
 import pytest
 
-from autolume.live.core.params import REGISTRY, Binding, ParamKind
+from autolume.live.core.params import REGISTRY, Binding, ControlState, ParamKind
 from autolume.live.core.touch import TOUCH_BEGIN, TOUCH_END
 from autolume.live.ui.controls import (
     BINDING_COLOR,
     BINDING_OFF_COLOR,
     ERROR_COLOR,
+    MOTION_COLOR,
+    Marker,
     Override,
     binding_for,
     displayed_value,
     drag_bounds,
+    gutter_for,
     indicator_color,
     next_override,
     require_spec,
@@ -100,6 +104,98 @@ def test_indicator_marks_a_disabled_binding_apart():
 def test_indicator_marks_an_error_even_when_the_binding_is_disabled():
     binding = Binding(target="latent_x", source="/a", enabled=False, error="boom")
     assert indicator_color(binding) == ERROR_COLOR
+
+
+def test_an_undriven_parameter_is_unmarked_and_stays_playable():
+    gutter = gutter_for(ControlState(), "latent_x")
+    assert gutter.marker is Marker.NONE
+    assert gutter.color is None
+    assert not gutter.read_only
+
+
+def test_an_enabled_binding_makes_the_control_read_only():
+    state = ControlState(bindings=(Binding("latent_x", "/audio/level"),))
+    gutter = gutter_for(state, "latent_x")
+    assert gutter.marker is Marker.BINDING
+    assert gutter.color == BINDING_COLOR
+    # The next value from the source erases a drag, so a live widget here would
+    # be a control that visibly does nothing.
+    assert gutter.read_only
+
+
+def test_a_failing_binding_still_holds_the_control_it_claimed():
+    # The integrator skips an enabled binding whether or not it evaluates, so a
+    # playable widget here would fight a parameter nothing else can move.
+    binding = Binding("latent_x", "/audio/level", "nope(", error="bad expression")
+    gutter = gutter_for(ControlState(bindings=(binding,)), "latent_x")
+    assert gutter.marker is Marker.BINDING
+    assert gutter.color == ERROR_COLOR
+    assert gutter.read_only
+
+
+def test_a_binding_switched_off_leaves_the_control_playable():
+    binding = Binding("latent_x", "/audio/level", enabled=False)
+    gutter = gutter_for(ControlState(bindings=(binding,)), "latent_x")
+    assert gutter.marker is Marker.BINDING
+    assert gutter.color == BINDING_OFF_COLOR
+    assert not gutter.read_only
+
+
+def test_an_animated_parameter_is_marked_and_stays_playable():
+    # Motion is relative, so dragging an animated parameter is scrubbing: it
+    # carries on from wherever the hand left it.
+    gutter = gutter_for(ControlState(anim_playing=True), "latent_x")
+    assert gutter.marker is Marker.MOTION
+    assert gutter.color == MOTION_COLOR
+    assert not gutter.read_only
+
+
+def test_animation_marks_only_what_motion_actually_writes():
+    playing = ControlState(anim_playing=True)
+    assert gutter_for(playing, "truncation_psi").marker is Marker.NONE
+    assert gutter_for(playing, "anim_speed_x").marker is Marker.NONE
+
+
+def test_a_binding_beats_motion_on_the_same_parameter():
+    state = ControlState(
+        anim_playing=True, bindings=(Binding("latent_x", "/audio/level"),)
+    )
+    gutter = gutter_for(state, "latent_x")
+    assert gutter.marker is Marker.BINDING
+    assert gutter.read_only
+    assert gutter_for(state, "latent_y").marker is Marker.MOTION
+
+
+def test_motion_takes_the_marker_back_from_a_binding_switched_off():
+    # A binding that is off drives nothing, and motion does, so showing the
+    # parked binding here would name the wrong driver.
+    binding = Binding("latent_x", "/audio/level", enabled=False)
+    state = ControlState(anim_playing=True, bindings=(binding,))
+    assert gutter_for(state, "latent_x").marker is Marker.MOTION
+
+
+def test_every_tooltip_says_something_the_bundled_font_can_draw():
+    # The bundled font has no symbol glyphs, so a non ascii character renders
+    # as a question mark.
+    binding = Binding("latent_x", "/audio/level")
+    states = (
+        ControlState(),
+        ControlState(anim_playing=True),
+        ControlState(bindings=(binding,)),
+        ControlState(bindings=(dataclasses.replace(binding, enabled=False),)),
+        ControlState(bindings=(dataclasses.replace(binding, error="boom"),)),
+    )
+    for state in states:
+        tooltip = gutter_for(state, "latent_x").tooltip
+        assert tooltip.isascii()
+        assert ";" not in tooltip
+        assert " - " not in tooltip
+        assert tooltip.endswith(".")
+
+
+def test_a_bound_tooltip_names_the_source_it_is_bound_to():
+    state = ControlState(bindings=(Binding("latent_x", "/audio/level"),))
+    assert "/audio/level" in gutter_for(state, "latent_x").tooltip
 
 
 def test_displayed_value_is_the_snapshot_when_nothing_is_held():

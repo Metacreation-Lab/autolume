@@ -1,4 +1,4 @@
-from autolume.live.core.motion import integrate
+from autolume.live.core.motion import MOTION_PARAMS, drives, integrate
 from autolume.live.core.params import Binding, ControlState
 from autolume.live.core.touch import TOUCH_GRACE, TouchTracker
 
@@ -92,3 +92,76 @@ def test_a_binding_on_one_axis_does_not_stop_the_other():
 def test_a_non_finite_step_is_refused_like_any_other_write():
     state = ControlState(anim_playing=True, latent_x=1e308, anim_speed_x=1e308)
     assert integrate(state, 1.0).latent_x == 1e308
+
+
+def test_motion_drives_an_axis_only_while_the_animation_plays():
+    assert drives(ControlState(anim_playing=True), "latent_x")
+    assert not drives(ControlState(anim_playing=False), "latent_x")
+
+
+def test_motion_drives_nothing_it_does_not_write():
+    playing = ControlState(anim_playing=True)
+    assert MOTION_PARAMS == ("latent_x", "latent_y")
+    assert not drives(playing, "truncation_psi")
+    assert not drives(playing, "anim_speed_x")
+
+
+def test_an_enabled_binding_takes_the_axis_off_motion_but_a_disabled_one_does_not():
+    bound = ControlState(
+        anim_playing=True, bindings=(Binding("latent_x", "/audio/level"),)
+    )
+    assert not drives(bound, "latent_x")
+    assert drives(bound, "latent_y")
+
+    parked = ControlState(
+        anim_playing=True,
+        bindings=(Binding("latent_x", "/audio/level", enabled=False),),
+    )
+    assert drives(parked, "latent_x")
+
+
+def test_a_held_axis_is_not_motion_driven_until_the_grace_is_over():
+    state = ControlState(anim_playing=True)
+    touch = TouchTracker()
+    touch.begin("latent_x", 10.0)
+    assert not drives(state, "latent_x", touch, 10.0)
+    touch.end("latent_x", 10.0)
+    assert not drives(state, "latent_x", touch, 10.0 + TOUCH_GRACE / 2.0)
+    assert drives(state, "latent_x", touch, 10.0 + TOUCH_GRACE)
+
+
+def test_the_predicate_answers_exactly_what_the_integrator_does():
+    """The marker the UI draws from this must never disagree with the engine.
+
+    Every combination of the conditions either function looks at, checked as
+    one question: did the integrator move this axis, and did the predicate say
+    it would.
+    """
+    touch = TouchTracker()
+    touch.begin("latent_x", 10.0)
+    cases = []
+    for playing in (True, False):
+        for binding in (
+            (),
+            (Binding("latent_x", "/a"),),
+            (Binding("latent_x", "/a", enabled=False),),
+            (Binding("latent_y", "/a"),),
+        ):
+            for tracker in (None, touch):
+                cases.append(
+                    (
+                        ControlState(
+                            anim_playing=playing,
+                            anim_speed_x=2.0,
+                            anim_speed_y=2.0,
+                            bindings=binding,
+                        ),
+                        tracker,
+                    )
+                )
+
+    for state, tracker in cases:
+        out = integrate(state, 0.5, tracker, 10.0)
+        for name in MOTION_PARAMS:
+            moved = getattr(out, name) != getattr(state, name)
+            assert drives(state, name, tracker, 10.0) is moved, (state, tracker, name)
