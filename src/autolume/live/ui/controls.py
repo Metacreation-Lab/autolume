@@ -129,10 +129,18 @@ _FLOAT_TOLERANCE = 1e-6
 # of magnitude and still short enough that a hold the store never answers is
 # gone before the next thing the performer reaches for.
 _HOLD_FRAMES = 30
+# Enter commits a text field, the same way it does in the mapping panel.
+_ENTER = imgui.InputTextFlags_.enter_returns_true
+# The narrowest a text field is ever drawn, in multiples of the font size. It
+# exists only so the width can never reach zero, where imgui reads an item
+# width as a distance from the right edge instead and the field would grow as
+# the panel shrinks. Everything on the row keeps its size while the field gives
+# up its own, so the chip and the button beside it are the last things to go.
+_FIELD_MIN_EMS = 1.0
 
 T = TypeVar("T")
 Color = tuple[float, float, float, float]
-Value = float | int | bool
+Value = float | int | bool | str | None
 
 
 def require_spec(name: str, kind: ParamKind) -> ParamSpec:
@@ -365,12 +373,82 @@ def values_agree(one: Value, other: Value) -> bool:
     very same value the performer asked for. Whole numbers are compared
     exactly, because a seed two thousand away is a different seed however
     large it is, and a relative tolerance would swallow that.
+
+    Text is compared exactly too, and the tolerance is reached only when both
+    sides are numbers. A path one character different is a different model, and
+    a text parameter is also the one that can hold nothing at all, so the
+    numeric branch has to be unreachable from a value that is not a number
+    rather than merely unlikely to be handed one.
     """
-    if isinstance(one, float) or isinstance(other, float):
+    numeric = isinstance(one, (int, float)) and isinstance(other, (int, float))
+    if numeric and (isinstance(one, float) or isinstance(other, float)):
         return math.isclose(
             float(one), float(other), rel_tol=_FLOAT_TOLERANCE, abs_tol=1e-9
         )
     return one == other
+
+
+def text_value(value: object) -> str:
+    """A text parameter as something a field can hold.
+
+    A parameter holding nothing is an empty field rather than the word None,
+    which is what makes the model row read as empty and open rather than as
+    broken. The field's hint is what fills that emptiness in.
+    """
+    return "" if value is None else str(value)
+
+
+def text_submission(text: str, stored: object) -> str | None:
+    """What committing a text field sends, or None when it sends nothing.
+
+    The space around it goes. A model path arrives pasted at least as often as
+    it is typed, and a trailing newline is not part of a filename.
+
+    An empty field sends nothing. There is no value that means "no model": the
+    render loop keeps rendering whatever it already holds, so an empty commit
+    would only put the state out of step with what is on screen. The field goes
+    back to showing the store instead.
+
+    Committing what is already there sends nothing either, so pressing Enter on
+    an untouched field is not a reload, and neither is the escape that puts the
+    original text back before the field reports it.
+    """
+    typed = text.strip()
+    if not typed or typed == text_value(stored):
+        return None
+    return typed
+
+
+def text_hold(
+    text: str, submitted: str | None, *, active: bool, committed: bool
+) -> str | None:
+    """What a text field shows after one frame, or None to show the store.
+
+    While the field is under the hand the hold is the buffer in it, so a remote
+    write landing mid edit cannot pull half typed text out from under the
+    performer. On the frame it commits, the hold becomes what was submitted
+    rather than what was typed: they differ by the space that was stripped, and
+    holding the untrimmed text would mean holding a value the store can never
+    agree with, which then has to lapse instead of releasing.
+
+    A commit that submits nothing lets go at once. The edit was abandoned or it
+    said nothing new, so the field belongs to the store again on that frame
+    rather than showing text nothing will ever come back to confirm.
+    """
+    if committed:
+        return submitted
+    return text if active else None
+
+
+def field_width(available: float, reserve: float, minimum: float) -> float:
+    """How wide a text field is drawn when the row keeps space to its right.
+
+    The field takes everything left over, because the value in it is a path and
+    the panel is narrow. `reserve` is what the row draws after it, so the field
+    gives up its width first and the button beyond it stays on the row down to
+    a panel width where nothing else in the panel works either.
+    """
+    return max(available - reserve, minimum)
 
 
 def displayed_value(overrides: Mapping[str, Override], name: str, snapshot: T) -> T:
@@ -439,6 +517,41 @@ def next_override(
     if frame - override.frame >= _HOLD_FRAMES:
         return None
     return override
+
+
+def next_text_override(
+    override: Override | None,
+    stored: Value,
+    held: str | None,
+    *,
+    committed: bool,
+    active: bool,
+    live: bool,
+    frame: int,
+) -> Override | None:
+    """The local hold after one frame of a text field, or None once it is done.
+
+    `next_override` for everything a text field shares with a slider, which is
+    every ending: the store catching up, a source winning the parameter back
+    once the hand is off it, and the lapse behind both.
+
+    What a slider has no version of is an edit that ends without submitting
+    anything, because a slider cannot be released without having changed
+    something. Nothing will ever arrive for that hold to agree with, so it ends
+    on the frame it commits rather than showing the abandoned text for the half
+    second it would otherwise take to lapse.
+    """
+    if committed and held is None:
+        return None
+    return next_override(
+        override,
+        stored,
+        held if held is not None else text_value(stored),
+        changed=held is not None,
+        active=active,
+        live=live,
+        frame=frame,
+    )
 
 
 def widget_events(
@@ -557,6 +670,40 @@ class ControlBinder:
         spec = require_spec(name, ParamKind.BOOL)
         self._widget(spec, lambda shown: imgui.checkbox(label, bool(shown)), enabled)
 
+    def input_text(
+        self,
+        name: str,
+        label: str,
+        *,
+        hint: str = "",
+        reserve: float = 0.0,
+        enabled: bool = True,
+    ) -> bool:
+        """Draw `name` as a text field, and say whether the hand may use it.
+
+        `reserve` is the width the panel wants for whatever it puts after the
+        field on the same row, so the field can take the rest.
+
+        The returned flag is whether the field is live. A panel that draws a
+        button beside it disables it on the same flag, because an explicit
+        source drives the whole row or none of it: a button that still worked
+        beside a read only field would write a value the source's next message
+        erases, which is the one thing the read only field is there to prevent.
+        """
+        spec = require_spec(name, ParamKind.STR)
+
+        def draw(shown: str) -> tuple[bool, str]:
+            imgui.set_next_item_width(
+                field_width(
+                    imgui.get_content_region_avail().x,
+                    reserve,
+                    imgui.get_font_size() * _FIELD_MIN_EMS,
+                )
+            )
+            return imgui.input_text_with_hint(label, hint, shown, _ENTER)
+
+        return self._text_widget(spec, draw, enabled)
+
     def _widget(
         self,
         spec: ParamSpec,
@@ -605,6 +752,83 @@ class ControlBinder:
             self._runtime.submit(event)
         self._mapping_menu(name)
         imgui.pop_id()
+
+    def _text_widget(
+        self,
+        spec: ParamSpec,
+        draw: Callable[[str], tuple[bool, str]],
+        enabled: bool,
+    ) -> bool:
+        """One frame of a text field, wired like every other control.
+
+        The same contract as `_widget`: the chip first and outside the disabled
+        block, a touch around the edit, the local hold while it is open, and
+        read only when an explicit source drives the parameter. What differs is
+        when a value leaves, because a text field has no gesture that ends. It
+        commits on Enter and on losing focus, which is what the mapping panel's
+        fields already do, so both places in the app that take typed text take
+        it the same way.
+
+        The touch spans the whole edit rather than the commit, so a source
+        writing this parameter cannot pull the text out from under a performer
+        who is halfway through typing a path.
+        """
+        name = spec.name
+        state = self._snapshot()
+        stored = getattr(state, name)
+        gutter = gutter_for(state, name, self._sources, self._clock())
+        live = enabled and not gutter.read_only
+        imgui.push_id(name)
+        self._indicator(name, gutter)
+        shown = text_value(displayed_value(self._local, name, stored))
+        if not live:
+            imgui.begin_disabled()
+        entered, text = draw(shown)
+        if not live:
+            imgui.end_disabled()
+        activated = imgui.is_item_activated()
+        active = imgui.is_item_active()
+        deactivated = imgui.is_item_deactivated()
+        committed = live and (entered or imgui.is_item_deactivated_after_edit())
+        # Read now, because the mapping popup below draws items of its own and
+        # every is_item_ query answers about the last one drawn.
+        hovered = imgui.is_item_hovered(
+            imgui.HoveredFlags_.delay_normal | imgui.HoveredFlags_.allow_when_disabled
+        )
+        submitted = text_submission(text, stored) if committed else None
+        held = text_hold(text, submitted, active=active, committed=committed)
+        events = widget_events(
+            spec,
+            submitted,
+            activated=activated,
+            changed=submitted is not None,
+            deactivated=deactivated,
+        )
+        override = next_text_override(
+            self._local.get(name),
+            stored,
+            held,
+            committed=committed,
+            active=active,
+            live=live,
+            # `_snapshot` has already read the frame count this frame.
+            frame=self._frame,
+        )
+        if override is None:
+            self._local.pop(name, None)
+        else:
+            self._local[name] = override
+        for event in events:
+            self._runtime.submit(event)
+        self._mapping_menu(name)
+        # An inactive field renders from its first character, so a path wider
+        # than the column shows its front and hides the filename, which is the
+        # end a performer reads. The tooltip is where the whole of it is
+        # legible, including on a field a source has taken read only.
+        if hovered and not active and shown:
+            imgui.set_tooltip(shown)
+        imgui.pop_id()
+        return live
 
     def _indicator(self, name: str, gutter: Gutter) -> None:
         """Draw the chip left of the widget: who drives it, and a way to change it.

@@ -33,11 +33,16 @@ from autolume.live.ui.controls import (
     binding_for,
     displayed_value,
     drag_bounds,
+    field_width,
     gutter_for,
     next_override,
+    next_text_override,
     remote_writer,
     require_spec,
     slider_bounds,
+    text_hold,
+    text_submission,
+    text_value,
     values_agree,
     widget_events,
 )
@@ -380,6 +385,90 @@ def test_values_agree_exactly_on_whole_numbers():
     assert not values_agree(True, False)
 
 
+def test_values_agree_compares_text_exactly():
+    # A path one character different is a different model, and the tolerance
+    # the numbers need has nothing to say about that.
+    assert values_agree("/models/wikiart.pkl", "/models/wikiart.pkl")
+    assert not values_agree("/models/wikiart.pkl", "/models/wikiart2.pkl")
+    assert values_agree(None, None)
+    assert not values_agree("", None)
+
+
+def test_values_agree_never_measures_a_missing_value_against_a_number():
+    """The tolerance is reached only when both sides are numbers.
+
+    A text parameter is the one that can hold nothing at all, so the branch
+    that calls `float()` on both sides has to be unreachable from a value that
+    is not a number rather than merely unlikely to be handed one.
+    """
+    assert not values_agree(None, 0.5)
+    assert not values_agree(0.5, None)
+    assert not values_agree("0.5", 0.5)
+
+
+def test_an_unset_text_parameter_shows_as_an_empty_field():
+    # Not the word None, which is what the model row would otherwise open with.
+    assert text_value(None) == ""
+    assert text_value("/models/wikiart.pkl") == "/models/wikiart.pkl"
+
+
+def test_a_commit_sends_the_path_without_the_space_around_it():
+    # A model path arrives pasted at least as often as typed.
+    assert text_submission("  /models/wikiart.pkl \n", None) == "/models/wikiart.pkl"
+
+
+def test_an_empty_commit_sends_nothing():
+    """There is no value that means "no model".
+
+    The render loop keeps rendering whatever it holds, so an empty commit
+    would only put the state out of step with what is on screen.
+    """
+    assert text_submission("", "/models/wikiart.pkl") is None
+    assert text_submission("   ", "/models/wikiart.pkl") is None
+    assert text_submission("", None) is None
+
+
+def test_committing_what_is_already_loaded_sends_nothing():
+    # Enter on an untouched field is not a reload, and neither is the escape
+    # that puts the original text back before the field reports it.
+    assert text_submission("/models/wikiart.pkl", "/models/wikiart.pkl") is None
+    assert text_submission(" /models/wikiart.pkl ", "/models/wikiart.pkl") is None
+    assert text_submission("/models/other.pkl", "/models/wikiart.pkl") is not None
+
+
+def test_the_field_holds_what_is_typed_while_the_hand_is_in_it():
+    # Otherwise a remote write landing mid edit pulls half a path out from
+    # under the performer.
+    assert text_hold("/models/wik", None, active=True, committed=False) == "/models/wik"
+
+
+def test_the_field_lets_go_when_the_hand_leaves_it():
+    assert text_hold("/models/wik", None, active=False, committed=False) is None
+
+
+def test_a_commit_holds_what_it_submitted_rather_than_what_was_typed():
+    # They differ by the space that was stripped, and holding the untrimmed
+    # text would mean holding a value the store can never agree with.
+    assert text_hold(" /a.pkl ", "/a.pkl", active=False, committed=True) == "/a.pkl"
+
+
+def test_a_commit_that_submits_nothing_lets_go_at_once():
+    # Nothing will ever arrive for the hold to agree with, so showing the
+    # abandoned text until it lapses is showing it for no reason.
+    assert text_hold("   ", None, active=False, committed=True) is None
+
+
+def test_the_field_yields_its_width_before_the_button_beside_it():
+    """The path takes what is left, and the row keeps what it reserved.
+
+    A field that grew to fit its content would take the button off the edge of
+    a narrow panel, and the button is the way back from a mistyped path.
+    """
+    assert field_width(400.0, 60.0, 15.0) == 340.0
+    assert field_width(50.0, 60.0, 15.0) == 15.0
+    assert field_width(400.0, 0.0, 15.0) == 400.0
+
+
 def _hold(override, snapshot, value, **flags):
     return next_override(
         override,
@@ -449,6 +538,59 @@ def test_the_hold_lapses_rather_than_wait_for_a_value_that_already_went_by():
     held = Override(False, True, 1)
     assert _hold(held, True, False, frame=_HOLD_FRAMES) == held
     assert _hold(held, True, False, frame=1 + _HOLD_FRAMES) is None
+
+
+def _text_hold(override, stored, held, **flags):
+    return next_text_override(
+        override,
+        stored,
+        held,
+        committed=flags.get("committed", False),
+        active=flags.get("active", False),
+        live=flags.get("live", True),
+        frame=flags.get("frame", 2),
+    )
+
+
+def test_a_commit_opens_a_hold_so_the_field_does_not_flick_back():
+    # The submitted value only reaches the store on the next control tick, and
+    # the field is drawn again before then.
+    assert _text_hold(None, None, "/models/wikiart.pkl", committed=True) == Override(
+        "/models/wikiart.pkl", None, 2
+    )
+
+
+def test_an_abandoned_edit_stops_being_shown_on_the_frame_it_is_abandoned():
+    """Nothing will ever arrive for that hold to agree with.
+
+    An empty commit, or one that says what the store already says, submits
+    nothing, so waiting on the store would mean showing text that is going
+    nowhere until the hold lapses half a second later.
+    """
+    held = Override("typed and given up on", None, 1)
+    assert _text_hold(held, None, None, committed=True) is None
+    # And the same hold with no commit under it is still waiting for the store.
+    assert _text_hold(held, None, None) == held
+
+
+def test_a_text_hold_releases_once_the_store_holds_the_path():
+    # The round trip the hold exists to hide, on the parameter that starts out
+    # holding nothing at all.
+    held = Override("/models/wikiart.pkl", None, 1)
+    assert _hold(held, None, "/models/wikiart.pkl") == held
+    assert _hold(held, "/models/wikiart.pkl", "/models/wikiart.pkl") is None
+
+
+def test_a_text_hold_ends_when_a_remote_write_changes_the_model_underneath():
+    """A row won the parameter back, so the field has to say which model is up.
+
+    While the field is still under the hand that same disagreement is the round
+    trip the hold hides, so it is ignored until the hand lets go. The touch
+    that brackets the edit is what keeps a source out of it for that long.
+    """
+    held = Override("/models/wikiart.pkl", None, 1)
+    assert _hold(held, "/models/other.pkl", "/models/wikiart.pkl", active=True) == held
+    assert _hold(held, "/models/other.pkl", "/models/wikiart.pkl") is None
 
 
 def test_an_untouched_widget_emits_nothing():

@@ -184,6 +184,16 @@ class ModelHost:
         with self._lock:
             return self._error
 
+    def pending(self) -> str | None:
+        """The model being loaded right now, or None if none is.
+
+        Both facts from one read, because the UI wants to name what is loading
+        and two reads could straddle a load finishing and report a state this
+        host was never in.
+        """
+        with self._lock:
+            return self._pending
+
     def loading(self) -> bool:
         with self._lock:
             return self._pending is not None

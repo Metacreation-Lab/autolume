@@ -34,6 +34,7 @@ from autolume.live.ui.panels.mapping import (
     reference_note,
 )
 from autolume.live.ui.panels.presets import PresetsPanel, is_valid_name
+from autolume.live.ui.panels.preview import model_name, preview_status
 
 
 def test_device_labels_never_empty_so_the_combo_stays_drawn():
@@ -110,6 +111,82 @@ def test_only_a_text_parameter_row_carries_a_note():
     assert "does not apply" in note
     assert reference_note(REGISTRY["latent_x"]) is None
     assert reference_note(REGISTRY["anim_playing"]) is None
+
+
+WIKIART = "/home/vj/models/wikiart-1024.pkl"
+
+
+def test_the_preview_names_the_model_it_is_loading():
+    """A load takes seconds, and a still frame with no word on it is a hang.
+
+    By filename, not by path: a status line that grew with the path would push
+    the frame under it around every time a model in a deeper folder loaded.
+    """
+    status = preview_status(WIKIART, None, False, False)
+    assert status.text == "Loading wikiart-1024.pkl."
+    assert not status.error
+
+
+def test_a_load_that_failed_is_reported_over_the_frames_still_arriving():
+    """The state the preview used to lie about, and the one that matters most.
+
+    A load failing partway through a set leaves the previous model rendering
+    happily. Without this the performer sees a preview that simply ignored
+    them, and the old wording said "Waiting for frames", which is the worst of
+    the three because it implies something is still coming.
+    """
+    status = preview_status(None, "No such file", False, True)
+    assert status.text == "No such file"
+    assert status.error
+    assert preview_status(None, "No such file", False, False).error
+
+
+def test_the_model_being_loaded_is_named_ahead_of_the_last_one_that_failed():
+    # The error belongs to the model before this one by then, and it would be
+    # read as this one failing before it has had a chance to.
+    status = preview_status(WIKIART, "No such file", False, False)
+    assert status.text == "Loading wikiart-1024.pkl."
+    assert not status.error
+
+
+def test_a_preview_with_frames_in_it_says_nothing():
+    # The line is still drawn, so nothing on the panel moves when it goes
+    # quiet, but a performance is not the place to read a running commentary.
+    status = preview_status(None, None, True, True)
+    assert status.text == ""
+    assert not status.error
+
+
+def test_an_empty_preview_with_no_model_invites_one():
+    status = preview_status(None, None, False, False)
+    assert "No model loaded" in status.text
+    assert "Browse" in status.text
+    assert not status.error
+
+
+def test_an_empty_preview_with_a_model_loaded_is_waiting_rather_than_empty():
+    # The one state the old wording was right about, and now the only one it
+    # is used for.
+    assert preview_status(None, None, True, False).text == "Waiting for frames."
+
+
+def test_every_preview_status_says_something_the_bundled_font_can_draw():
+    texts = [
+        preview_status(WIKIART, None, False, False).text,
+        preview_status(None, None, False, False).text,
+        preview_status(None, None, True, False).text,
+    ]
+    for text in texts:
+        assert text.isascii()
+        assert ";" not in text
+        assert " - " not in text
+        assert text.endswith(".")
+
+
+def test_model_name_falls_back_to_the_whole_path_when_there_is_no_filename():
+    assert model_name(WIKIART) == "wikiart-1024.pkl"
+    assert model_name("wikiart.pkl") == "wikiart.pkl"
+    assert model_name("/home/vj/models/") == "/home/vj/models/"
 
 
 def test_display_label_is_derived_from_the_registry_name():

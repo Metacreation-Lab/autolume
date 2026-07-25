@@ -22,7 +22,7 @@ import itertools
 import pytest
 from imgui_bundle import hello_imgui, imgui
 
-from autolume.live.core.params import Binding, ControlState, ParamKind
+from autolume.live.core.params import Binding, ControlState
 from autolume.live.core.sources import SourceTable
 from autolume.live.core.store import LatestValueStore
 from autolume.live.ui.controls import (
@@ -34,6 +34,8 @@ from autolume.live.ui.controls import (
     idle_color,
 )
 from autolume.live.ui.panels.mapping import bindable_specs
+from autolume.live.ui.panels.perform import PerformPanel, button_width
+from autolume.live.ui.panels.preview import PreviewPanel
 
 NOW = 100.0
 IDLE = ControlState()
@@ -115,15 +117,14 @@ def painted(state, sources, name):
 
 
 def widget_specs():
-    """The bindable parameters that are drawn as widgets with a gutter.
+    """The bindable parameters, every one of which is drawn with a gutter.
 
-    Every parameter carries a mapping row now, the model path included, but
-    the model path is a file the performer opens rather than a slider, so it
-    has no widget here and no gutter to reserve. Filtered by kind rather than
-    by name, so a text parameter added later drops out of here on its own
-    instead of failing this file.
+    The model path used to be left out, because it was a button and a label
+    drawn by hand rather than a control. It is a text field through the binder
+    now, so the row it draws is the same row as every other one and the
+    assertions below cover it.
     """
-    return [spec for spec in bindable_specs() if spec.kind is not ParamKind.STR]
+    return bindable_specs()
 
 
 def draw_every_bindable(state=IDLE, sources=SILENT):
@@ -139,6 +140,7 @@ def draw_every_bindable(state=IDLE, sources=SILENT):
         "float": binder.drag_float,
         "int": binder.drag_int,
         "bool": binder.checkbox,
+        "str": binder.input_text,
     }
     rows = []
     original = ControlBinder._indicator
@@ -255,3 +257,106 @@ def test_a_driven_parameter_is_marked_apart_from_an_idle_one(frame):
     assert rows["truncation_psi"].marker is Marker.BINDING
     assert rows["truncation_psi"].filled
     assert rows["latent_x"].marker is Marker.NONE
+
+
+class FakeModelHost:
+    def __init__(self, pending=None, error=None, current=None):
+        self._pending = pending
+        self._error = error
+        self._current = current
+
+    def pending(self):
+        return self._pending
+
+    def error(self):
+        return self._error
+
+    def current(self):
+        return self._current
+
+
+class FakePreview:
+    def latest(self):
+        return -1, None
+
+
+class FakeRenderLoop:
+    def fps(self):
+        return 60.0
+
+
+class FakeOsc:
+    port = 1338
+
+
+class PanelRuntime(FakeRuntime):
+    """A runtime with the parts the two panels read, and nothing behind them."""
+
+    def __init__(self, state=IDLE, sources=SILENT, host=None):
+        super().__init__(state, sources)
+        self.model_host = host or FakeModelHost()
+        self.preview = FakePreview()
+        self.render_loop = FakeRenderLoop()
+        self.osc = FakeOsc()
+
+
+def model_field(state, **kwargs):
+    """Draw the model field for one frame and report whether it is live."""
+    binder = ControlBinder(
+        FakeRuntime(state, SILENT), mapping_popup=lambda name: None, clock=lambda: NOW
+    )
+    return binder.input_text("pkl_path", "##model", **kwargs)
+
+
+def test_a_source_driving_the_model_takes_the_field_and_the_button_with_it(frame):
+    """The ownership rule, on the row where it now has two things to say.
+
+    The returned flag is what the panel disables Browse on, so a field drawn
+    read only beside a button that still opened a dialog would be the one
+    inconsistency this rule exists to prevent: the next message from the source
+    erases whatever the dialog picked.
+    """
+    driven = ControlState(bindings=(Binding("pkl_path", "/td/model"),))
+    assert not model_field(driven)
+    assert model_field(IDLE)
+    # A row that is on with no source of its own is a row the hand keeps, the
+    # same as every other parameter.
+    assert model_field(ControlState(bindings=(Binding("pkl_path", ""),)))
+    assert not model_field(IDLE, enabled=False)
+
+
+def test_a_button_is_as_wide_as_the_row_reserves_for_it(frame):
+    # The row hands the field everything except this, so a measurement that
+    # disagreed with the button would put Browse over the panel edge.
+    reserved = button_width("Browse")
+    imgui.button("Browse")
+    assert imgui.get_item_rect_size().x == pytest.approx(reserved)
+
+
+def test_the_perform_panel_draws_at_the_width_a_docked_column_gives_it(frame):
+    """A smoke test, and the only one there can be for the row's layout.
+
+    The model row measures a button and hands the rest of the width to a field,
+    so it is arithmetic on numbers that exist only inside a frame. What this
+    can say is that the whole panel draws at a realistic column width and that
+    the row leaves the cursor where the next row expects it, which is what a
+    width the field mishandled would break first.
+    """
+    imgui.begin_child("##column", imgui.ImVec2(320.0, 600.0))
+    panel = PerformPanel(PanelRuntime(), mapping_popup=lambda name: None)
+    panel.gui()
+    imgui.end_child()
+
+
+def test_the_preview_draws_its_status_line_in_every_state(frame):
+    """Each state pushes a colour it then has to pop.
+
+    An unbalanced style stack is not a wrong pixel, it is imgui asserting at
+    the end of the frame, so drawing all three inside one is the check.
+    """
+    for host in (
+        FakeModelHost(),
+        FakeModelHost(pending="/models/wikiart.pkl"),
+        FakeModelHost(error="No such file"),
+    ):
+        PreviewPanel(PanelRuntime(host=host)).gui()
