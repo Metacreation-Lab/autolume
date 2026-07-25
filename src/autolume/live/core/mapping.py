@@ -15,6 +15,7 @@ from autolume.live.core.params import (
     ControlState,
     apply_value,
 )
+from autolume.live.core.presets import PRESET_APPLY, from_payload
 
 logger = logging.getLogger(__name__)
 
@@ -63,11 +64,33 @@ def _clear_binding(state: ControlState, value: object) -> ControlState:
     return dataclasses.replace(state, bindings=remaining)
 
 
+def _apply_preset(state: ControlState, value: object) -> ControlState:
+    """Apply a whole preset payload as one state replacement.
+
+    Every value goes through `apply_value`, so a hand edited file cannot push a
+    parameter out of range, and the caller only ever sees the finished state.
+    """
+    if not isinstance(value, dict):
+        logger.warning("Ignoring non preset value %r on %s", value, PRESET_APPLY)
+        return state
+    try:
+        values, bindings = from_payload(value)
+    except ValueError as exc:
+        logger.warning("Ignoring malformed preset payload: %s", exc)
+        return state
+    applied = state
+    for name, param_value in values.items():
+        applied = apply_value(applied, name, param_value)
+    return dataclasses.replace(applied, bindings=bindings)
+
+
 def apply_event(state: ControlState, event: ControlEvent) -> ControlState:
     if event.address == BINDING_SET:
         return _set_binding(state, event.value)
     if event.address == BINDING_CLEAR:
         return _clear_binding(state, event.value)
+    if event.address == PRESET_APPLY:
+        return _apply_preset(state, event.value)
     spec = BY_ADDRESS.get(event.address)
     if spec is None:
         logger.debug("Ignoring event for unknown address %s", event.address)

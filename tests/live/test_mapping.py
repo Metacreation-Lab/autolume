@@ -11,6 +11,7 @@ from autolume.live.core.params import (
     ClearBinding,
     ControlState,
 )
+from autolume.live.core.presets import FORMAT, PRESET_APPLY, VERSION
 
 MAPPING_LOGGER = "autolume.live.core.mapping"
 
@@ -179,3 +180,59 @@ def test_binding_clear_with_non_str_target_ignored(caplog, target):
     assert any(
         "malformed clear binding" in m for m in warnings_from(caplog, MAPPING_LOGGER)
     )
+
+
+def preset_payload(params=None, bindings=None):
+    return {
+        "format": FORMAT,
+        "version": VERSION,
+        "params": params if params is not None else {},
+        "bindings": bindings if bindings is not None else [],
+    }
+
+
+def apply_preset(state, payload):
+    return apply_event(state, ControlEvent(PRESET_APPLY, payload))
+
+
+def test_preset_apply_sets_params_and_bindings_in_one_event():
+    payload = preset_payload(
+        {"truncation_psi": 1.4, "fps_cap": 30},
+        [{"target": "latent_x", "source": "/audio/level", "expression": "x*2"}],
+    )
+    state = apply_preset(ControlState(), payload)
+    assert (state.truncation_psi, state.fps_cap) == (1.4, 30)
+    assert state.bindings == (Binding("latent_x", "/audio/level", "x*2"),)
+
+
+def test_preset_apply_replaces_the_whole_binding_set():
+    before = set_binding(ControlState(), Binding("latent_x", "/audio/level"))
+    after = apply_preset(before, preset_payload({"latent_y": 2.0}))
+    assert after.bindings == ()
+    assert after.latent_y == 2.0
+
+
+def test_preset_apply_clamps_out_of_range_values():
+    state = apply_preset(ControlState(), preset_payload({"truncation_psi": 99.0}))
+    assert state.truncation_psi == 2.0
+
+
+@pytest.mark.parametrize(
+    "value", [1.0, "look", None, ["look"], Binding("latent_x", "/x")]
+)
+def test_preset_apply_with_non_dict_value_ignored(caplog, value):
+    before = ControlState(truncation_psi=1.1)
+    with caplog.at_level(logging.WARNING):
+        after = apply_preset(before, value)
+    assert after == before
+    assert any("non preset value" in m for m in warnings_from(caplog, MAPPING_LOGGER))
+
+
+def test_preset_apply_with_wrong_format_ignored(caplog):
+    before = ControlState(truncation_psi=1.1)
+    payload = preset_payload({"truncation_psi": 0.2})
+    payload["format"] = "some-other-app"
+    with caplog.at_level(logging.WARNING):
+        after = apply_preset(before, payload)
+    assert after == before
+    assert any("malformed preset" in m for m in warnings_from(caplog, MAPPING_LOGGER))
