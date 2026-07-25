@@ -19,6 +19,15 @@ _CACHE_SIZE = 128
 # mapping expression is a one-liner, so this is far above any real use.
 _MAX_SOURCE_LENGTH = 512
 
+# Integer exponentiation is arbitrary precision, so `9**9**9` runs for minutes
+# and can exhaust memory before there is any result left to reject. Both bounds
+# are checked before the operation runs, since afterwards is too late. The bit
+# bound is what stops nesting (`((2**64)**64)**64`) from compounding past the
+# exponent bound; 1024 bits is already outside the float range, so no result
+# that could survive the float conversion is lost.
+_MAX_POW_EXPONENT = 64
+_MAX_POW_BITS = 1024
+
 
 class ExpressionError(ValueError):
     """A mapping expression is not valid or failed to produce a usable value."""
@@ -49,6 +58,19 @@ _FUNCTIONS: dict[str, Callable[..., float]] = {
     "clamp": clamp,
 }
 
+def _guarded_pow(left: float, right: float) -> float:
+    if isinstance(left, int) and isinstance(right, int):
+        if right > _MAX_POW_EXPONENT:
+            raise ExpressionError(
+                f"exponent is too large: {right}, the limit is {_MAX_POW_EXPONENT}"
+            )
+        if left.bit_length() * max(right, 0) > _MAX_POW_BITS:
+            raise ExpressionError(
+                f"power result is too large, the limit is {_MAX_POW_BITS} bits"
+            )
+    return left**right
+
+
 _BINARY_OPS: dict[type[ast.operator], Callable[[float, float], float]] = {
     ast.Add: operator.add,
     ast.Sub: operator.sub,
@@ -56,7 +78,7 @@ _BINARY_OPS: dict[type[ast.operator], Callable[[float, float], float]] = {
     ast.Div: operator.truediv,
     ast.FloorDiv: operator.floordiv,
     ast.Mod: operator.mod,
-    ast.Pow: operator.pow,
+    ast.Pow: _guarded_pow,
 }
 
 _UNARY_OPS: dict[type[ast.unaryop], Callable[[float], object]] = {
@@ -209,6 +231,8 @@ def compile_expression(source: str) -> Callable[[float], float]:
     def run(x: float) -> float:
         try:
             result = float(body(float(x)))
+        except ExpressionError:
+            raise
         except (ArithmeticError, ValueError, TypeError) as exc:
             raise ExpressionError(f"evaluation failed: {exc}") from exc
         if not math.isfinite(result):

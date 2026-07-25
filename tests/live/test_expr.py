@@ -1,4 +1,5 @@
 import math
+import time
 
 import pytest
 
@@ -92,17 +93,51 @@ def test_compile_error_names_the_offending_construct():
         compile_expression("x.__class__")
     with pytest.raises(ExpressionError, match="open"):
         compile_expression("open('f')")
-    with pytest.raises(ExpressionError, match="y"):
+    with pytest.raises(ExpressionError, match="unknown name: y"):
         compile_expression("y")
 
 
 @pytest.mark.parametrize(
-    "source", ["1/0", "log(0-1)", "x*1e400", "1 % 0", "(0-1)**0.5"]
+    "source", ["1/0", "log(0-1)", "x*1e400", "1 % 0", "(0-1)**0.5", "1e308**2"]
 )
 def test_rejected_at_runtime(source):
     fn = compile_expression(source)
     with pytest.raises(ExpressionError):
         fn(1.0)
+
+
+_PROMPT_SECONDS = 1.0
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "9**9**9",
+        "2**2**26",
+        "(((2**64)**64)**64)**64",
+        "1**10**20",
+    ],
+)
+def test_oversized_integer_power_is_rejected_promptly(source):
+    start = time.perf_counter()
+    with pytest.raises(ExpressionError, match="too large"):
+        evaluate(source, 1.0)
+    assert time.perf_counter() - start < _PROMPT_SECONDS
+
+
+@pytest.mark.parametrize(
+    "source, x, expected",
+    [
+        ("x**2", 3.0, 9.0),
+        ("x**0.5", 9.0, 3.0),
+        ("2**10", 1.0, 1024.0),
+        ("2**-2", 1.0, 0.25),
+        ("x**64", 1.5, 1.5**64),
+        ("(1+x)**2", 1.0, 4.0),
+    ],
+)
+def test_bounded_powers_still_evaluate(source, x, expected):
+    assert evaluate(source, x) == pytest.approx(expected)
 
 
 def test_runtime_errors_do_not_leak_native_exception_types():
