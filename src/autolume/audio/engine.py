@@ -2,20 +2,22 @@
 
 import logging
 
-from audio.capture import (AudioStream, AudioStreamError, list_input_devices,
-                           refresh_devices)
-from audio.features import (FEATURE_NAMES, ONSET_SENSITIVITY_DEFAULT,
-                            FeatureExtractor)
-from audio.publisher import FeaturePublisher
+from autolume.audio.capture import (AudioStream, AudioStreamError,
+                                    list_input_devices, refresh_devices)
+from autolume.audio.features import (FEATURE_NAMES, ONSET_SENSITIVITY_DEFAULT,
+                                     FeatureExtractor)
 
 logger = logging.getLogger(__name__)
 
 
 class AudioEngine:
-    """Owns device selection, the capture stream, feature extraction and publishing."""
+    """Owns device selection, the capture stream, feature extraction and publishing.
 
-    def __init__(self, dispatcher):
-        self.publisher = FeaturePublisher(dispatcher)
+    `publish` is called with the feature mapping after every successful update.
+    """
+
+    def __init__(self, publish):
+        self._publish = publish
         self.devices = list_input_devices()
         self.device_pos = 0  # position in self.devices, not a device index
         self.stream = None
@@ -100,4 +102,4 @@ class AudioEngine:
                 logger.exception("Audio feature computation failed")
                 self._compute_warned = True
             return
-        self.publisher.publish(self.features)
+        self._publish(self.features)

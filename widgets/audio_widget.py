@@ -2,9 +2,9 @@ import imgui
 import numpy as np
 
 from assets import ACTIVE_RED
-from audio.engine import AudioEngine
-from audio.features import FEATURE_NAMES
-from audio.publisher import OSC_PREFIX
+from autolume.audio.engine import AudioEngine
+from autolume.audio.features import FEATURE_NAMES
+from autolume.audio.publisher import OSC_PREFIX, FeaturePublisher
 from utils.gui_utils import imgui_utils
 
 
@@ -13,7 +13,7 @@ class AudioWidget:
 
     def __init__(self, viz):
         self.viz = viz
-        self.engine = AudioEngine(viz.osc_dispatcher)
+        self.engine = AudioEngine(FeaturePublisher(viz.osc_dispatcher).publish)
         self._scale_max = 0.0
         self._onset_glow = 0.0
 

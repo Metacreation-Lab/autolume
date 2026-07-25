@@ -1,6 +1,6 @@
 import numpy as np
 
-from audio.features import FeatureExtractor, FEATURE_NAMES
+from autolume.audio.features import FeatureExtractor, FEATURE_NAMES
 
 SR = 44100
 N_FFT = 2048

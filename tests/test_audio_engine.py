@@ -1,10 +1,9 @@
 import numpy as np
 import pytest
-from pythonosc.osc_message import OscMessage
 
-import audio.engine as engine_mod
-from audio.engine import AudioEngine
-from audio.features import FEATURE_NAMES
+import autolume.audio.engine as engine_mod
+from autolume.audio.engine import AudioEngine
+from autolume.audio.features import FEATURE_NAMES
 
 
 class FakeStream:
@@ -27,15 +26,14 @@ class FakeStream:
         self._active = False
 
 
-class FakeDispatcher:
-    """Records the OSC messages the publisher loops back."""
+class Recorder:
+    """Records the feature maps the engine publishes."""
 
     def __init__(self):
-        self.messages = []
+        self.published = []
 
-    def call_handlers_for_packet(self, dgram, addr):
-        msg = OscMessage(dgram)
-        self.messages.append((msg.address, msg.params[0]))
+    def __call__(self, features):
+        self.published.append(dict(features))
 
 
 @pytest.fixture
@@ -45,14 +43,14 @@ def patched(monkeypatch):
 
 
 def test_engine_starts_disabled(patched):
-    eng = AudioEngine(FakeDispatcher())
+    eng = AudioEngine(Recorder())
     assert not eng.enabled
     assert eng.devices == [(3, "Fake Device")]
     assert eng.sample_rate == 0
 
 
 def test_enable_opens_stream(patched):
-    eng = AudioEngine(FakeDispatcher())
+    eng = AudioEngine(Recorder())
     eng.enable()
     assert eng.enabled
     assert eng.sample_rate == 44100
@@ -60,24 +58,25 @@ def test_enable_opens_stream(patched):
 
 
 def test_update_publishes_all_features(patched):
-    disp = FakeDispatcher()
-    eng = AudioEngine(disp)
+    recorder = Recorder()
+    eng = AudioEngine(recorder)
     eng.enable()
     eng.update()
-    published = {addr for addr, _ in disp.messages}
-    assert published == {f"/audio/{name}" for name in FEATURE_NAMES}
-    assert all(isinstance(value, float) for _, value in disp.messages)
+    assert len(recorder.published) == 1
+    features = recorder.published[0]
+    assert set(features) == set(FEATURE_NAMES)
+    assert all(isinstance(value, float) for value in features.values())
 
 
 def test_update_while_disabled_publishes_nothing(patched):
-    disp = FakeDispatcher()
-    eng = AudioEngine(disp)
+    recorder = Recorder()
+    eng = AudioEngine(recorder)
     eng.update()
-    assert disp.messages == []
+    assert recorder.published == []
 
 
 def test_inactive_stream_self_disables(patched):
-    eng = AudioEngine(FakeDispatcher())
+    eng = AudioEngine(Recorder())
     eng.enable()
     eng.stream.close()  # active -> False
     eng.update()
@@ -86,7 +85,7 @@ def test_inactive_stream_self_disables(patched):
 
 
 def test_disable_clears_features(patched):
-    eng = AudioEngine(FakeDispatcher())
+    eng = AudioEngine(Recorder())
     eng.enable()
     eng.update()
     eng.disable()
@@ -98,7 +97,7 @@ def test_refresh_preserves_selected_device(monkeypatch):
     devices = [(1, "Mic A"), (2, "Mic B")]
     monkeypatch.setattr(engine_mod, "refresh_devices", lambda: None)
     monkeypatch.setattr(engine_mod, "list_input_devices", lambda: list(devices))
-    eng = AudioEngine(FakeDispatcher())
+    eng = AudioEngine(Recorder())
     eng.select_device(1)  # Mic B
     devices[:] = [(5, "Mic B"), (9, "Mic A")]  # re-enumeration reshuffles indices
     eng.refresh()
@@ -106,7 +105,7 @@ def test_refresh_preserves_selected_device(monkeypatch):
 
 
 def test_onset_sensitivity_forwards_and_clamps(patched):
-    eng = AudioEngine(FakeDispatcher())
+    eng = AudioEngine(Recorder())
     eng.set_onset_sensitivity(0.8)
     eng.enable()
     assert eng.extractor.onset_sensitivity == 0.8
