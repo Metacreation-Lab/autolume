@@ -451,6 +451,38 @@ def field_width(available: float, reserve: float, minimum: float) -> float:
     return max(available - reserve, minimum)
 
 
+def fitted_width(
+    default: float, available: float, reserve: float, minimum: float
+) -> float:
+    """How wide a widget is drawn so that its whole row fits the panel.
+
+    Its natural width wherever the row already fits, which is every ordinary
+    case, and only what is left where it does not. Nothing about the panel
+    changes until the alternative is a row running off the edge of it.
+
+    imgui's own default is a fixed sixteen times the font size, and a widget's
+    label is drawn to the right of that rather than inside it, so a row costs
+    the widget plus the label however narrow the panel is. That is a width that
+    grows with the font size while the panel does not, and past the edge it
+    grows the window's content instead. Nothing shows the overflow directly:
+    what shows is every separator in the panel, which spans the content region
+    and so stops well short of rows that have run past it.
+    """
+    return max(min(default, available - reserve), minimum)
+
+
+def label_reserve(label: str) -> float:
+    """The width a widget's label takes to the right of it, its spacing too.
+
+    Zero for a hidden label, since imgui adds no spacing for a label it does
+    not draw.
+    """
+    width = imgui.calc_text_size(label, None, True).x
+    if width <= 0.0:
+        return 0.0
+    return width + imgui.get_style().item_inner_spacing.x
+
+
 def displayed_value(overrides: Mapping[str, Override], name: str, snapshot: T) -> T:
     """The value to draw: the local one while the performer holds the widget.
 
@@ -625,6 +657,7 @@ class ControlBinder:
         minimum, maximum = slider_bounds(spec)
         self._widget(
             spec,
+            label,
             lambda shown: imgui.slider_float(label, float(shown), minimum, maximum),
             enabled,
         )
@@ -636,6 +669,7 @@ class ControlBinder:
         minimum, maximum = drag_bounds(spec)
         self._widget(
             spec,
+            label,
             lambda shown: imgui.drag_float(
                 label, float(shown), speed, minimum, maximum
             ),
@@ -647,6 +681,7 @@ class ControlBinder:
         minimum, maximum = slider_bounds(spec)
         self._widget(
             spec,
+            label,
             lambda shown: imgui.slider_int(
                 label, int(shown), int(minimum), int(maximum)
             ),
@@ -660,6 +695,7 @@ class ControlBinder:
         minimum, maximum = drag_bounds(spec)
         self._widget(
             spec,
+            label,
             lambda shown: imgui.drag_int(
                 label, int(shown), speed, int(minimum), int(maximum)
             ),
@@ -668,7 +704,9 @@ class ControlBinder:
 
     def checkbox(self, name: str, label: str, *, enabled: bool = True) -> None:
         spec = require_spec(name, ParamKind.BOOL)
-        self._widget(spec, lambda shown: imgui.checkbox(label, bool(shown)), enabled)
+        self._widget(
+            spec, label, lambda shown: imgui.checkbox(label, bool(shown)), enabled
+        )
 
     def input_text(
         self,
@@ -707,6 +745,7 @@ class ControlBinder:
     def _widget(
         self,
         spec: ParamSpec,
+        label: str,
         draw: Callable[[Value], tuple[bool, Value]],
         enabled: bool,
     ) -> None:
@@ -722,6 +761,7 @@ class ControlBinder:
         self._indicator(name, gutter)
         if not live:
             imgui.begin_disabled()
+        self._fit(label)
         changed, value = draw(displayed_value(self._local, name, stored))
         if not live:
             imgui.end_disabled()
@@ -829,6 +869,28 @@ class ControlBinder:
             imgui.set_tooltip(shown)
         imgui.pop_id()
         return live
+
+    def _fit(self, label: str) -> None:
+        """Keep the row inside the panel, whatever its label and the font size.
+
+        imgui's default width is a fixed sixteen times the font size and the
+        label sits outside it, so a row costs more than the panel has as soon
+        as the font is scaled up or the column is dragged narrow, and what runs
+        past the edge grows the window's content instead. Nothing draws the
+        overflow: what shows is the separators, which span the content region
+        and so stop short of every row that has run past it.
+
+        Only ever narrower, never wider, so a panel that already fits looks
+        exactly as it did.
+        """
+        imgui.set_next_item_width(
+            fitted_width(
+                imgui.calc_item_width(),
+                imgui.get_content_region_avail().x,
+                label_reserve(label),
+                imgui.get_font_size() * _FIELD_MIN_EMS,
+            )
+        )
 
     def _indicator(self, name: str, gutter: Gutter) -> None:
         """Draw the chip left of the widget: who drives it, and a way to change it.

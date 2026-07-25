@@ -333,19 +333,104 @@ def test_a_button_is_as_wide_as_the_row_reserves_for_it(frame):
     assert imgui.get_item_rect_size().x == pytest.approx(reserved)
 
 
-def test_the_perform_panel_draws_at_the_width_a_docked_column_gives_it(frame):
-    """A smoke test, and the only one there can be for the row's layout.
+LONG_PATH = "/Users/vj/Documents/autolume/models/wikiart-1024.pkl"
 
-    The model row measures a button and hands the rest of the width to a field,
-    so it is arithmetic on numbers that exist only inside a frame. What this
-    can say is that the whole panel draws at a realistic column width and that
-    the row leaves the cursor where the next row expects it, which is what a
-    width the field mishandled would break first.
+
+def row_edges(width: float, font_scale: float) -> list[float]:
+    """Every row's right edge in the perform panel, against the content edge.
+
+    Zero is flush with the edge of the content region, which is where the
+    separators end and as far as anything may go. Positive is a row that has
+    run off the panel and grown the window's content behind it.
+
+    A window of its own rather than the shared frame, because width and font
+    size are the two things that make a row overflow and neither can be changed
+    inside a frame that has already begun.
     """
-    imgui.begin_child("##column", imgui.ImVec2(320.0, 600.0))
-    panel = PerformPanel(PanelRuntime(), mapping_popup=lambda name: None)
-    panel.gui()
-    imgui.end_child()
+    context = imgui.create_context()
+    edges: list[float] = []
+    right = [0.0]
+    original_widget = ControlBinder._widget
+    original_row = PerformPanel._model_row
+    try:
+        io = imgui.get_io()
+        io.set_ini_filename(None)
+        io.display_size = imgui.ImVec2(1280.0, 800.0)
+        io.delta_time = 1.0 / 60.0
+        io.backend_flags |= imgui.BackendFlags_.renderer_has_textures
+        hello_imgui.apply_tweaked_theme(
+            hello_imgui.RunnerParams().imgui_window_params.tweaked_theme
+        )
+        imgui.get_style().font_scale_main = font_scale
+
+        def measure_widget(self, spec, label, draw, enabled):
+            original_widget(self, spec, label, draw, enabled)
+            edges.append(imgui.get_item_rect_max().x - right[0])
+
+        def measure_row(self):
+            # After the whole row, so the last item measured is Browse and not
+            # the field, which is the half that could be pushed off the edge.
+            original_row(self)
+            edges.append(imgui.get_item_rect_max().x - right[0])
+
+        ControlBinder._widget = measure_widget
+        PerformPanel._model_row = measure_row
+        panel = PerformPanel(
+            PanelRuntime(ControlState(pkl_path=LONG_PATH)),
+            mapping_popup=lambda name: None,
+        )
+        # Three frames, because a scrollbar is decided from the frame before
+        # it and the row has to fit the panel it is actually drawn in.
+        for _ in range(3):
+            imgui.new_frame()
+            imgui.set_next_window_pos(imgui.ImVec2(0.0, 0.0))
+            # Short on purpose: the panel scrolls in the dock it ships in, and
+            # a vertical scrollbar is what takes the width the rows measure.
+            imgui.set_next_window_size(imgui.ImVec2(width, 300.0))
+            imgui.begin("Controls")
+            edges.clear()
+            right[0] = (
+                imgui.get_cursor_screen_pos().x + imgui.get_content_region_avail().x
+            )
+            panel.gui()
+            imgui.end()
+            imgui.render()
+    finally:
+        ControlBinder._widget = original_widget
+        PerformPanel._model_row = original_row
+        imgui.destroy_context(context)
+    return edges
+
+
+@pytest.mark.parametrize("font_scale", (1.0, 1.5, 2.0))
+@pytest.mark.parametrize("width", (448.0, 360.0, 280.0))
+def test_no_row_runs_past_the_panel_it_is_drawn_in(width, font_scale):
+    """The panel's content may never be wider than the panel.
+
+    imgui's default item width is a fraction of the window and the label is
+    drawn outside it, so a row costs more than it declares and grows with the
+    font while the panel does not. What overflows is not itself visible: what
+    shows is every separator in the panel, which spans the content region and
+    so stops short of the rows that have run past it.
+
+    448 is the docked width at the shipped window size, and the font scale is
+    the UI font size preference, which is why the worst case is a fair test
+    rather than a contrived one.
+    """
+    edges = row_edges(width, font_scale)
+    assert len(edges) == len(bindable_specs())
+    assert max(edges) <= 0.0
+
+
+def test_the_model_row_uses_the_width_it_is_given_and_no_more():
+    """The field takes what is left, so the row is flush with the edge.
+
+    Being under is a field that gave up width it could have used for a path.
+    Being over is the row growing the panel's content. The row measures the
+    button beside it, so it can be exactly right rather than close.
+    """
+    for width in (448.0, 360.0, 280.0):
+        assert row_edges(width, 1.0)[0] == pytest.approx(0.0, abs=1.0)
 
 
 def test_the_preview_draws_its_status_line_in_every_state(frame):
