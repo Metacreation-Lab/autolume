@@ -2,8 +2,11 @@ import time
 
 import numpy as np
 
+from autolume.live.core import presets
 from autolume.live.core.events import ControlEvent
 from autolume.live.core.generator import ModelHost
+from autolume.live.core.params import BINDING_SET, Binding
+from autolume.live.core.presets import PRESET_APPLY
 from autolume.live.runtime import build_runtime
 
 
@@ -14,6 +17,47 @@ class FakeModel:
     def render_frame(self, params, frame_index):
         value = int(abs(params.latent_x) * 10) % 256
         return np.full((8, 8, 3), value, dtype=np.uint8)
+
+
+class FakeAudioEngine:
+    """Stands in for AudioEngine, guards included.
+
+    `select_device` ignores a change while enabled exactly as the real engine
+    does, so a test that switches devices cannot pass here while doing nothing
+    in production.
+    """
+
+    def __init__(self):
+        self.enabled = False
+        self.devices = ((0, "fake mic"), (1, "fake line in"))
+        self.device_pos = 0
+        self.features = {"level": 0.0}
+        self.spectrum = np.zeros(4, dtype=np.float32)
+        self.error = None
+        self.onset_sensitivity = 0.65
+        self.sample_rate = 48000
+        self.disabled_count = 0
+
+    def enable(self):
+        self.enabled = True
+
+    def disable(self):
+        self.enabled = False
+        self.disabled_count += 1
+
+    def select_device(self, pos):
+        if not self.enabled:
+            self.device_pos = pos
+
+    def set_onset_sensitivity(self, value):
+        self.onset_sensitivity = value
+
+    def refresh(self):
+        pass
+
+    def update(self):
+        if self.enabled:
+            self.features = {"level": 0.75}
 
 
 def wait_for(predicate, timeout=3.0):
@@ -54,3 +98,117 @@ def test_stop_is_clean_and_idempotent():
     runtime.start()
     runtime.stop()
     runtime.stop()
+
+
+def make_runtime(**kwargs):
+    kwargs.setdefault("model_host", ModelHost(loader=FakeModel))
+    kwargs.setdefault("start_osc", False)
+    kwargs.setdefault("start_audio", False)
+    return build_runtime(**kwargs)
+
+
+def test_source_store_fills_as_events_arrive():
+    runtime = make_runtime()
+    runtime.start()
+    try:
+        assert runtime.source_store.snapshot().entries == {}
+
+        runtime.submit(ControlEvent("/knob/one", 0.5))
+
+        assert wait_for(
+            lambda: runtime.source_store.snapshot().get("/knob/one") is not None
+        )
+        assert runtime.source_store.snapshot().get("/knob/one").value == 0.5
+        assert "/knob/one" in runtime.source_store.snapshot().recent(time.monotonic())
+    finally:
+        runtime.stop()
+
+
+def test_binding_submitted_through_the_runtime_drives_its_target():
+    runtime = make_runtime()
+    runtime.start()
+    try:
+        runtime.submit(
+            ControlEvent(
+                BINDING_SET,
+                Binding("truncation_psi", "/knob/one", "x * 2"),
+                source="ui",
+            )
+        )
+        assert wait_for(lambda: runtime.control_store.snapshot().bindings != ())
+
+        runtime.submit(ControlEvent("/knob/one", 0.25))
+
+        assert wait_for(
+            lambda: runtime.control_store.snapshot().truncation_psi == 0.5
+        )
+        assert runtime.render_store.snapshot().truncation_psi == 0.5
+    finally:
+        runtime.stop()
+
+
+def test_audio_runs_with_the_runtime_and_reaches_the_source_table():
+    engine = FakeAudioEngine()
+    runtime = make_runtime(start_audio=True, audio_engine=engine)
+    runtime.start()
+    try:
+        runtime.audio.enable()
+
+        assert wait_for(lambda: runtime.audio.status().enabled)
+        assert wait_for(
+            lambda: runtime.source_store.snapshot().get("/audio/level") is not None
+        )
+        assert runtime.source_store.snapshot().get("/audio/level").value == 0.75
+    finally:
+        runtime.stop()
+    assert engine.enabled is False
+    assert engine.disabled_count >= 1
+
+
+def test_preset_saved_from_a_running_runtime_is_restored_by_apply(tmp_path):
+    runtime = make_runtime()
+    runtime.start()
+    try:
+        runtime.submit(ControlEvent("/trunc/psi", 1.25))
+        runtime.submit(
+            ControlEvent(
+                BINDING_SET,
+                Binding("global_noise", "/knob/two", "x / 2"),
+                source="ui",
+            )
+        )
+        assert wait_for(
+            lambda: runtime.control_store.snapshot().truncation_psi == 1.25
+            and runtime.control_store.snapshot().bindings != ()
+        )
+
+        path = tmp_path / "look.json"
+        presets.save(runtime.control_store.snapshot(), path)
+        assert presets.list_presets(tmp_path) == ["look"]
+
+        runtime.submit(ControlEvent("/trunc/psi", 0.0))
+        assert wait_for(lambda: runtime.control_store.snapshot().truncation_psi == 0.0)
+
+        runtime.submit(
+            ControlEvent(PRESET_APPLY, presets.load(path), source="ui")
+        )
+
+        assert wait_for(lambda: runtime.control_store.snapshot().truncation_psi == 1.25)
+        state = runtime.control_store.snapshot()
+        assert [b.target for b in state.bindings] == ["global_noise"]
+        assert state.bindings[0].expression == "x / 2"
+    finally:
+        runtime.stop()
+
+
+def test_stop_is_clean_and_idempotent_with_audio_running():
+    engine = FakeAudioEngine()
+    runtime = make_runtime(start_audio=True, audio_engine=engine)
+    runtime.start()
+    runtime.start()
+    runtime.audio.enable()
+    assert wait_for(lambda: runtime.audio.status().enabled)
+    runtime.stop()
+    runtime.stop()
+    assert engine.enabled is False
+    assert engine.disabled_count == 1
