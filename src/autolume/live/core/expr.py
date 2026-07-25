@@ -29,6 +29,9 @@ _MAX_POW_EXPONENT = 64
 _MAX_POW_BITS = 1024
 
 
+_SYNTAX_PREFIX = "invalid syntax"
+
+
 class ExpressionError(ValueError):
     """A mapping expression is not valid or failed to produce a usable value."""
 
@@ -97,6 +100,27 @@ _COMPARE_OPS: dict[type[ast.cmpop], Callable[[object, object], bool]] = {
 }
 
 _Node = Callable[[float], object]
+
+
+def _syntax_message(exc: SyntaxError, source: str) -> str:
+    """Say where the syntax error is, and keep the parser's hint when it has one.
+
+    `offset` is one based and is 0 when the parser ran out of input, so an
+    offset outside the source is dropped rather than pointed at. Python's own
+    `msg` is already "invalid syntax" for the plain cases and starts with those
+    same words for the helpful ones, so the prefix is taken off what is left
+    and the message never says it twice.
+    """
+    detail = (exc.msg or "").strip()
+    if detail.lower().startswith(_SYNTAX_PREFIX):
+        detail = detail[len(_SYNTAX_PREFIX) :].lstrip(". ")
+    offset = exc.offset
+    where = ""
+    if isinstance(offset, int) and 1 <= offset <= len(source):
+        where = f" at character {offset}"
+    if detail:
+        return f"{_SYNTAX_PREFIX}{where}. {detail}"
+    return f"{_SYNTAX_PREFIX}{where}"
 
 
 def _reject(node: ast.AST) -> ExpressionError:
@@ -222,7 +246,7 @@ def compile_expression(source: str) -> Callable[[float], float]:
     try:
         tree = ast.parse(source, mode="eval")
     except SyntaxError as exc:
-        raise ExpressionError(f"invalid syntax: {exc.msg}") from exc
+        raise ExpressionError(_syntax_message(exc, source)) from exc
     except ValueError as exc:
         raise ExpressionError(f"invalid expression: {exc}") from exc
 

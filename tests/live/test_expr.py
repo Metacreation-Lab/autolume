@@ -97,6 +97,43 @@ def test_compile_error_names_the_offending_construct():
         compile_expression("y")
 
 
+def test_syntax_error_points_at_the_offending_character():
+    with pytest.raises(ExpressionError) as info:
+        compile_expression("(x-0.5)*10!")
+    assert str(info.value) == "invalid syntax at character 11"
+
+
+def test_syntax_error_keeps_the_parser_hint_and_says_invalid_syntax_once():
+    with pytest.raises(ExpressionError) as info:
+        compile_expression("min(x 1)")
+    message = str(info.value)
+    assert message.startswith("invalid syntax at character 5. ")
+    assert message.lower().count("invalid syntax") == 1
+    assert "comma" in message
+
+
+def test_syntax_error_keeps_the_parser_hint_when_it_is_not_a_repeat():
+    with pytest.raises(ExpressionError) as info:
+        compile_expression("(x")
+    assert str(info.value) == "invalid syntax at character 1. '(' was never closed"
+
+
+@pytest.mark.parametrize("source", ["x +", "x**", ""])
+def test_syntax_error_without_a_usable_offset_omits_the_position(source):
+    with pytest.raises(ExpressionError) as info:
+        compile_expression(source)
+    assert str(info.value) == "invalid syntax"
+
+
+@pytest.mark.parametrize(
+    "source", ["(x-0.5)*10!", "min(x 1)", "(x", "x)", "x; y", "x +", "1 2", "  "]
+)
+def test_syntax_errors_never_repeat_themselves(source):
+    with pytest.raises(ExpressionError) as info:
+        compile_expression(source)
+    assert str(info.value).lower().count("invalid syntax") == 1
+
+
 @pytest.mark.parametrize(
     "source", ["1/0", "log(0-1)", "x*1e400", "1 % 0", "(0-1)**0.5", "1e308**2"]
 )
