@@ -77,7 +77,6 @@ array at all. See `_displayable`.
 
 import logging
 import os
-import warnings
 from dataclasses import dataclass
 from enum import Enum
 
@@ -243,24 +242,23 @@ def _magnify_without_smoothing(texture_id: int) -> None:
     GL context is assumed but not guaranteed, so a failure here is logged once
     and the preview keeps drawing the smooth way.
 
-    The context is checked rather than the call being attempted and caught:
-    calling into GL without one does not raise, it takes the process down, and
-    the suite draws real frames against a fake texture with no window behind
-    it.
+    Guarded rather than attempted and caught, because calling into GL with no
+    context does not raise, it takes the process down, and the suite draws real
+    frames against a fake texture with no window behind it.
+
+    The guard asks imgui whether a renderer backend is attached, which is the
+    same library that owns the texture being adjusted. An earlier version asked
+    the `glfw` package for a current context and silently never fired: that
+    package is its own copy of glfw, not the one imgui-bundle bundles, so it
+    answers about a library this app never initialises and reports no context
+    even with a window on screen.
     """
     global _SMOOTHING_WARNED
     try:
-        import glfw
         from OpenGL import GL
 
-        with warnings.catch_warnings():
-            # Asking before glfw is initialised is the answer we want, not a
-            # mistake: it means no window, so no context. glfw warns about it
-            # anyway, and a suite that draws frames without a window would
-            # carry that warning on every uploaded frame.
-            warnings.simplefilter("ignore")
-            if not glfw.get_current_context():
-                return
+        if not imgui.get_io().backend_renderer_name:
+            return
         previous = GL.glGetIntegerv(GL.GL_TEXTURE_BINDING_2D)
         GL.glBindTexture(GL.GL_TEXTURE_2D, texture_id)
         GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_NEAREST)
