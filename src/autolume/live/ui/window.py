@@ -56,6 +56,10 @@ def _build_runner_params(runtime) -> hello_imgui.RunnerParams:
     params.imgui_window_params.default_imgui_window_type = (
         hello_imgui.DefaultImGuiWindowType.provide_full_screen_dock_space
     )
+    # A saved layout wins over the code default, and the condition to apply a
+    # layout is first use ever. Naming this layout makes it fire again for
+    # installs that already have an ini from the two pane arrangement.
+    params.docking_params.layout_name = "Patch"
     params.docking_params.docking_splits = [
         _split(_MAIN_SPACE, _CONTROLS_SPACE, imgui.Dir.left, 0.35),
         _split(_CONTROLS_SPACE, _PATCH_SPACE, imgui.Dir.down, 0.5),

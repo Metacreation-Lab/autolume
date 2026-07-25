@@ -71,7 +71,7 @@ def wait_for(predicate, timeout=3.0):
 
 def test_end_to_end_headless_flow():
     host = ModelHost(loader=FakeModel)
-    runtime = build_runtime(model_host=host, start_osc=False)
+    runtime = build_runtime(model_host=host, start_osc=False, start_audio=False)
     runtime.start()
     try:
         runtime.submit(ControlEvent("/model/path", "/tmp/fake.pkl"))
@@ -94,7 +94,9 @@ def test_end_to_end_headless_flow():
 
 
 def test_stop_is_clean_and_idempotent():
-    runtime = build_runtime(model_host=ModelHost(loader=FakeModel), start_osc=False)
+    runtime = build_runtime(
+        model_host=ModelHost(loader=FakeModel), start_osc=False, start_audio=False
+    )
     runtime.start()
     runtime.stop()
     runtime.stop()
