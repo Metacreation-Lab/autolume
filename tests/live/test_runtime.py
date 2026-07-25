@@ -11,8 +11,8 @@ class FakeModel:
     def __init__(self, path):
         self.pkl_path = path
 
-    def render_frame(self, latent_x, latent_y, truncation_psi):
-        value = int(abs(latent_x) * 10) % 256
+    def render_frame(self, params, frame_index):
+        value = int(abs(params.latent_x) * 10) % 256
         return np.full((8, 8, 3), value, dtype=np.uint8)
 
 

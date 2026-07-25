@@ -1,7 +1,19 @@
 import threading
 import time
 
-from autolume.live.core.generator import ModelHost, corner_seeds
+import pytest
+
+from autolume.live.core.generator import (
+    ModelHost,
+    corner_seeds,
+    effective_noise_seed,
+    noise_mode,
+)
+from autolume.live.core.params import ControlState, to_render_params
+
+
+def render_params(**changes):
+    return to_render_params(ControlState(**changes))
 
 
 def test_corner_seeds_integer_position_is_single_seed():
@@ -90,39 +102,138 @@ class _FakeMapping:
         return torch.zeros([z.shape[0], self._num_ws, self.w_avg.shape[0]])
 
 
-def _fake_generator(synthesis):
-    import torch
+class _FakeG:
+    z_dim = 4
 
-    class FakeG:
-        z_dim = 4
-        mapping = _FakeMapping(torch.zeros([8]), num_ws=2)
+    def __init__(self, synthesis, modules=()):
+        import torch
 
-    FakeG.synthesis = staticmethod(synthesis)
-    return FakeG()
+        self.mapping = _FakeMapping(torch.zeros([8]), num_ws=2)
+        self.synthesis = synthesis
+        self._modules = list(modules)
+        self.module_walks = 0
+
+    def modules(self):
+        self.module_walks += 1
+        return list(self._modules)
 
 
-def test_render_frame_with_tensor_synthesis_output():
+class _NoisyModule:
+    def __init__(self):
+        self.global_noise = 1.0
+
+
+class _PlainModule:
+    pass
+
+
+def _fake_model(synthesis, modules=()):
     import torch
 
     from autolume.live.core.generator import LoadedModel
 
-    def synthesis(ws, noise_mode):
-        return torch.zeros([1, 3, 8, 8])
+    return LoadedModel(
+        "/tmp/fake.pkl", _FakeG(synthesis, modules), torch.device("cpu")
+    )
 
-    model = LoadedModel("/tmp/fake.pkl", _fake_generator(synthesis), torch.device("cpu"))
-    frame = model.render_frame(0.0, 0.0, 0.7)
+
+def _zeros_synthesis(ws, noise_mode):
+    import torch
+
+    return torch.zeros([1, 3, 8, 8])
+
+
+def test_render_frame_with_tensor_synthesis_output():
+    model = _fake_model(_zeros_synthesis)
+    frame = model.render_frame(render_params(), 0)
     assert frame.shape == (8, 8, 3)
     assert frame.dtype.name == "uint8"
 
 
 def test_render_frame_with_tuple_synthesis_output():
-    import torch
-
-    from autolume.live.core.generator import LoadedModel
-
     def synthesis(ws, noise_mode):
+        import torch
+
         return torch.zeros([1, 3, 8, 8]), []
 
-    model = LoadedModel("/tmp/fake.pkl", _fake_generator(synthesis), torch.device("cpu"))
-    frame = model.render_frame(0.0, 0.0, 0.7)
+    model = _fake_model(synthesis)
+    frame = model.render_frame(render_params(), 0)
     assert frame.shape == (8, 8, 3)
+
+
+@pytest.mark.parametrize(
+    "changes,expected",
+    [
+        ({"noise_enabled": False}, "none"),
+        ({"noise_enabled": False, "noise_seed": 9, "noise_anim": True}, "none"),
+        ({"noise_seed": 0, "noise_anim": False}, "const"),
+        ({"noise_seed": 9, "noise_anim": False}, "random"),
+        ({"noise_seed": 0, "noise_anim": True}, "random"),
+    ],
+)
+def test_noise_mode_truth_table(changes, expected):
+    assert noise_mode(render_params(**changes)) == expected
+
+
+def test_effective_noise_seed_static_ignores_frame_index():
+    params = render_params(noise_seed=42, noise_anim=False)
+    assert effective_noise_seed(params, 0) == 42
+    assert effective_noise_seed(params, 137) == 42
+
+
+def test_effective_noise_seed_animated_advances_with_frame_index():
+    params = render_params(noise_seed=42, noise_anim=True)
+    assert effective_noise_seed(params, 0) == 42
+    assert effective_noise_seed(params, 3) == 45
+
+
+def test_effective_noise_seed_stays_within_32_bits():
+    params = render_params(noise_seed=2**31 - 1, noise_anim=True)
+    seed = effective_noise_seed(params, 2**34)
+    assert 0 <= seed < 2**32
+
+
+def test_render_frame_passes_noise_mode_to_synthesis():
+    seen = []
+
+    def synthesis(ws, noise_mode):
+        import torch
+
+        seen.append(noise_mode)
+        return torch.zeros([1, 3, 8, 8])
+
+    model = _fake_model(synthesis)
+    model.render_frame(render_params(noise_seed=5), 0)
+    model.render_frame(render_params(noise_enabled=False), 1)
+    assert seen == ["random", "none"]
+
+
+def test_render_frame_seeds_torch_with_effective_seed(monkeypatch):
+    import torch
+
+    seeds = []
+    monkeypatch.setattr(torch, "manual_seed", seeds.append)
+    model = _fake_model(_zeros_synthesis)
+    model.render_frame(render_params(noise_seed=11, noise_anim=True), 4)
+    assert seeds == [15]
+
+
+def test_global_noise_applied_only_to_modules_that_declare_it():
+    noisy = _NoisyModule()
+    plain = _PlainModule()
+    model = _fake_model(_zeros_synthesis, modules=[noisy, plain])
+    model.render_frame(render_params(global_noise=0.25), 0)
+    assert noisy.global_noise == 0.25
+    assert not hasattr(plain, "global_noise")
+
+
+def test_global_noise_walk_is_skipped_when_value_is_unchanged():
+    noisy = _NoisyModule()
+    model = _fake_model(_zeros_synthesis, modules=[noisy])
+    model.render_frame(render_params(global_noise=0.25), 0)
+    assert model.G.module_walks == 1
+    model.render_frame(render_params(global_noise=0.25), 1)
+    assert model.G.module_walks == 1
+    model.render_frame(render_params(global_noise=0.75), 2)
+    assert model.G.module_walks == 2
+    assert noisy.global_noise == 0.75

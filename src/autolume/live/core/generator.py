@@ -14,6 +14,8 @@ from typing import Callable
 
 import numpy as np
 
+from autolume.live.core.params import RenderParams
+
 logger = logging.getLogger(__name__)
 
 _SEED_MASK = (1 << 32) - 1
@@ -36,6 +38,27 @@ def corner_seeds(
     return corners
 
 
+def noise_mode(params: RenderParams) -> str:
+    """Map the noise parameters onto the synthesis `noise_mode` argument.
+
+    Seed 0 means the model's own constant noise buffer, so composition stays
+    put while any other seed redraws the texture. Animation forces "random"
+    because the constant buffer cannot animate.
+    """
+    if not params.noise_enabled:
+        return "none"
+    if params.noise_anim or params.noise_seed != 0:
+        return "random"
+    return "const"
+
+
+def effective_noise_seed(params: RenderParams, frame_index: int) -> int:
+    seed = params.noise_seed
+    if params.noise_anim:
+        seed += frame_index
+    return seed & _SEED_MASK
+
+
 def pick_device():
     import torch
 
@@ -54,6 +77,7 @@ class LoadedModel:
         self._w_avg = G.mapping.w_avg
         self._z_dim = int(G.z_dim)
         self._c_dim = int(G.mapping.c_dim)
+        self._applied_global_noise: float | None = None
 
     def _blended_w(self, latent_x, latent_y, truncation_psi):
         import torch
@@ -77,12 +101,30 @@ class LoadedModel:
         ).sum(dim=0)
         return blended + self._w_avg
 
-    def render_frame(self, latent_x, latent_y, truncation_psi) -> np.ndarray:
+    def _apply_global_noise(self, value: float) -> None:
+        """Push the global noise scale onto the layers that support it.
+
+        Runs every frame, so it walks the network only when the value moved.
+        Autolume's custom architecture defines `global_noise` on its noise
+        layers, stock StyleGAN networks do not, and we never invent it.
+        """
+        if value == self._applied_global_noise:
+            return
+        for module in self.G.modules():
+            if hasattr(module, "global_noise"):
+                module.global_noise = value
+        self._applied_global_noise = value
+
+    def render_frame(self, params: RenderParams, frame_index: int) -> np.ndarray:
         import torch
 
         with torch.no_grad():
-            ws = self._blended_w(latent_x, latent_y, truncation_psi)
-            output = self.G.synthesis(ws.unsqueeze(0), noise_mode="const")
+            self._apply_global_noise(params.global_noise)
+            ws = self._blended_w(
+                params.latent_x, params.latent_y, params.truncation_psi
+            )
+            torch.manual_seed(effective_noise_seed(params, frame_index))
+            output = self.G.synthesis(ws.unsqueeze(0), noise_mode=noise_mode(params))
             # Autolume's custom stylegan2 synthesis returns (img, rgb_list);
             # standard stylegan synthesis returns the img tensor directly.
             if isinstance(output, tuple):

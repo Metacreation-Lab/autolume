@@ -46,6 +46,19 @@ def test_numeric_defaults_within_bounds():
             assert spec.default <= spec.maximum
 
 
+def test_noise_specs_declare_expected_addresses_and_kinds():
+    expected = {
+        "global_noise": ("/noise/global", params.ParamKind.FLOAT, 1.0, 0.0, 2.0),
+        "noise_enabled": ("/noise/enabled", params.ParamKind.BOOL, True, None, None),
+        "noise_seed": ("/noise/seed", params.ParamKind.INT, 0, 0, 2**31 - 1),
+        "noise_anim": ("/noise/anim", params.ParamKind.BOOL, False, None, None),
+    }
+    for name, (address, kind, default, minimum, maximum) in expected.items():
+        spec = params.REGISTRY[name]
+        assert (spec.address, spec.kind, spec.default) == (address, kind, default)
+        assert (spec.minimum, spec.maximum) == (minimum, maximum)
+
+
 def test_to_render_params_projects_state():
     state = params.ControlState(latent_x=2.5, truncation_psi=1.1, fps_cap=30)
     rp = params.to_render_params(state)
@@ -53,6 +66,24 @@ def test_to_render_params_projects_state():
     assert rp.truncation_psi == 1.1
     assert rp.fps_cap == 30
     assert rp.pkl_path is None
+
+
+def test_to_render_params_projects_noise_state():
+    state = params.ControlState(
+        global_noise=0.25, noise_enabled=False, noise_seed=17, noise_anim=True
+    )
+    rp = params.to_render_params(state)
+    assert rp.global_noise == 0.25
+    assert rp.noise_enabled is False
+    assert rp.noise_seed == 17
+    assert rp.noise_anim is True
+
+
+def test_apply_value_clamps_noise_params():
+    state = params.apply_value(params.ControlState(), "global_noise", 9.0)
+    assert state.global_noise == 2.0
+    state = params.apply_value(state, "noise_seed", -4)
+    assert state.noise_seed == 0
 
 
 def test_apply_value_sets_float():

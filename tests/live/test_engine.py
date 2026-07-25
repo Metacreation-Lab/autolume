@@ -14,8 +14,8 @@ class FakeModel:
     def __init__(self):
         self.calls = []
 
-    def render_frame(self, latent_x, latent_y, truncation_psi):
-        self.calls.append((latent_x, latent_y, truncation_psi))
+    def render_frame(self, params, frame_index):
+        self.calls.append((params, frame_index))
         return np.full((4, 4, 3), len(self.calls) % 256, dtype=np.uint8)
 
 
@@ -55,7 +55,18 @@ def test_render_uses_current_params():
     store = make_store(latent_x=3.5, truncation_psi=1.2, fps_cap=0)
     loop = RenderLoop(store, FakeHost(model), [])
     loop.render_one()
-    assert model.calls[-1] == (3.5, 0.0, 1.2)
+    params, _ = model.calls[-1]
+    assert params is store.snapshot()
+    assert (params.latent_x, params.latent_y, params.truncation_psi) == (3.5, 0.0, 1.2)
+
+
+def test_render_passes_increasing_frame_index():
+    model = FakeModel()
+    loop = RenderLoop(make_store(fps_cap=0), FakeHost(model), [])
+    loop.render_one()
+    loop.render_one()
+    loop.render_one()
+    assert [frame_index for _, frame_index in model.calls] == [0, 1, 2]
 
 
 def test_sink_error_does_not_kill_loop():
@@ -76,7 +87,7 @@ def test_render_error_does_not_kill_loop():
         def __init__(self):
             self.calls = 0
 
-        def render_frame(self, latent_x, latent_y, truncation_psi):
+        def render_frame(self, params, frame_index):
             self.calls += 1
             if self.calls == 1:
                 raise RuntimeError("synthesis exploded")

@@ -43,9 +43,7 @@ class RenderLoop:
             self._next_deadline = None
             return False
         try:
-            frame = model.render_frame(
-                params.latent_x, params.latent_y, params.truncation_psi
-            )
+            frame = model.render_frame(params, self._seq)
         except Exception:
             logger.exception("Frame render failed")
             self._next_deadline = None

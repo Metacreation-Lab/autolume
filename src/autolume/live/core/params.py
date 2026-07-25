@@ -38,6 +38,10 @@ _SPECS = (
     ParamSpec("anim_speed_x", ParamKind.FLOAT, 0.25, "/anim/speed/x", -10.0, 10.0),
     ParamSpec("anim_speed_y", ParamKind.FLOAT, 0.0, "/anim/speed/y", -10.0, 10.0),
     ParamSpec("truncation_psi", ParamKind.FLOAT, 0.7, "/trunc/psi", -1.0, 2.0),
+    ParamSpec("global_noise", ParamKind.FLOAT, 1.0, "/noise/global", 0.0, 2.0),
+    ParamSpec("noise_enabled", ParamKind.BOOL, True, "/noise/enabled"),
+    ParamSpec("noise_seed", ParamKind.INT, 0, "/noise/seed", 0, 2**31 - 1),
+    ParamSpec("noise_anim", ParamKind.BOOL, False, "/noise/anim"),
     ParamSpec("fps_cap", ParamKind.INT, 60, "/render/fps", 0, 240),
 )
 
@@ -85,6 +89,10 @@ class ControlState:
     anim_speed_x: float = 0.25
     anim_speed_y: float = 0.0
     truncation_psi: float = 0.7
+    global_noise: float = 1.0
+    noise_enabled: bool = True
+    noise_seed: int = 0
+    noise_anim: bool = False
     fps_cap: int = 60
     bindings: tuple[Binding, ...] = ()
 
@@ -95,6 +103,10 @@ class RenderParams:
     latent_x: float
     latent_y: float
     truncation_psi: float
+    global_noise: float
+    noise_enabled: bool
+    noise_seed: int
+    noise_anim: bool
     fps_cap: int
 
 
@@ -104,6 +116,10 @@ def to_render_params(state: ControlState) -> RenderParams:
         latent_x=state.latent_x,
         latent_y=state.latent_y,
         truncation_psi=state.truncation_psi,
+        global_noise=state.global_noise,
+        noise_enabled=state.noise_enabled,
+        noise_seed=state.noise_seed,
+        noise_anim=state.noise_anim,
         fps_cap=state.fps_cap,
     )
 
