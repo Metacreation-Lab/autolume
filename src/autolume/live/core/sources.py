@@ -19,7 +19,15 @@ class SourceValue:
     timestamp: float
 
 
-def _canonical(address: str) -> str:
+def canonical_address(address: str) -> str:
+    """The one spelling of an address, shared by everything that compares them.
+
+    The table, the control loop and the picker all normalize through here, so a
+    binding on a picked address cannot silently miss the events that filled it.
+    """
+    address = address.strip()
+    if not address:
+        return ""
     return address if address.startswith("/") else "/" + address
 
 
@@ -42,7 +50,7 @@ class SourceTable:
         if number is None:
             return self
 
-        key = _canonical(address)
+        key = canonical_address(address)
         entries = dict(self.entries)
         # An open OSC port is an unbounded input, so a new address on a full
         # table displaces the least recently seen one.
@@ -61,4 +69,4 @@ class SourceTable:
         )
 
     def get(self, address: str) -> SourceValue | None:
-        return self.entries.get(_canonical(address))
+        return self.entries.get(canonical_address(address))

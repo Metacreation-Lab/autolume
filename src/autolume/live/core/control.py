@@ -27,7 +27,7 @@ from autolume.live.core.params import (
     apply_value,
     to_render_params,
 )
-from autolume.live.core.sources import SourceTable, as_float
+from autolume.live.core.sources import SourceTable, as_float, canonical_address
 from autolume.live.core.store import LatestValueStore
 from autolume.live.core.touch import TOUCH_BEGIN, TOUCH_END, TouchTracker
 
@@ -130,16 +130,22 @@ class ControlLoop:
     def _apply(
         self, state: ControlState, sources: SourceTable, event: ControlEvent, now: float
     ) -> tuple[ControlState, SourceTable]:
-        if event.address in _TOUCH_ADDRESSES:
+        # Canonicalized once, here, so the table, the parameter lookup and the
+        # bindings all match on the same spelling. An address canonical on one
+        # side of a comparison only is a mapping that silently never fires.
+        address = canonical_address(event.address)
+        if address != event.address:
+            event = dataclasses.replace(event, address=address)
+        if address in _TOUCH_ADDRESSES:
             self._track_touch(event, now)
             return state, sources
         number = as_float(event.value)
         if number is None:
             return apply_event(state, event), sources
         stamp = now if event.timestamp is None else event.timestamp
-        sources = sources.observe(event.address, number, stamp)
+        sources = sources.observe(address, number, stamp)
         state = apply_event(state, event)
-        return self._drive_bindings(state, event.address, number, now), sources
+        return self._drive_bindings(state, address, number, now), sources
 
     def _report_guard(self, key: tuple[str, str], message: str, *args: object) -> None:
         """Log a last resort guard hit, throttled to protect the tick budget.

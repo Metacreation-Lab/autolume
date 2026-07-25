@@ -25,6 +25,7 @@ from autolume.live.core.params import (
     ParamKind,
     ParamSpec,
 )
+from autolume.live.core.sources import canonical_address
 from autolume.live.ui.controls import ERROR_COLOR, binding_for
 
 # Widths in multiples of the font size, so the rows keep their proportions on
@@ -54,14 +55,6 @@ def bindable_specs() -> list[ParamSpec]:
 def display_label(name: str) -> str:
     """A readable name for a registry parameter, derived rather than restated."""
     return name.replace("_", " ").capitalize()
-
-
-def canonical_address(text: str) -> str:
-    """Normalize a typed address the way the source table stores one."""
-    address = text.strip()
-    if not address:
-        return ""
-    return address if address.startswith("/") else "/" + address
 
 
 class MappingPanel:

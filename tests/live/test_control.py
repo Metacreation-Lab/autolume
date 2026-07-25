@@ -147,6 +147,28 @@ def test_unbound_address_only_updates_the_source_table():
     assert control_store.snapshot() == ControlState()
 
 
+def test_a_slash_less_address_reaches_the_binding_it_is_listed_as():
+    """The picker offers what the table stored, so a binding on it must fire.
+
+    An inbound address without a leading slash is listed as `/audio/level`,
+    picked as `/audio/level`, and stored as `/audio/level`. If the loop drives
+    bindings with the raw text the mapping is dead with nothing to show for it.
+    """
+    loop, control_store, _, source_store = make_loop()
+    bind(loop, "truncation_psi", "/audio/level")
+    loop.submit(ControlEvent("audio/level", 1.5, source="osc"))
+    loop.tick()
+    assert source_store.snapshot().get("/audio/level").value == 1.5
+    assert control_store.snapshot().truncation_psi == 1.5
+
+
+def test_a_slash_less_address_still_reaches_its_own_parameter():
+    loop, control_store, _, _ = make_loop()
+    loop.submit(ControlEvent("trunc/psi", 1.2, source="osc"))
+    loop.tick()
+    assert control_store.snapshot().truncation_psi == 1.2
+
+
 def test_source_table_is_published_only_when_it_changed():
     loop, _, _, source_store = make_loop()
     loop.tick()
