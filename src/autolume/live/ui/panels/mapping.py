@@ -25,7 +25,7 @@ from autolume.live.core.params import (
     ParamKind,
     ParamSpec,
 )
-from autolume.live.ui.controls import BINDING_ERROR_COLOR, binding_for
+from autolume.live.ui.controls import ERROR_COLOR, binding_for
 
 # Widths in multiples of the font size, so the rows keep their proportions on
 # every display scale instead of cramping at 200 percent.
@@ -122,7 +122,7 @@ class MappingPanel:
         imgui.indent(column)
         self._expression_field(name, binding)
         if binding is not None and binding.error:
-            imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(*BINDING_ERROR_COLOR))
+            imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(*ERROR_COLOR))
             imgui.text_wrapped(binding.error)
             imgui.pop_style_color()
         imgui.unindent(column)

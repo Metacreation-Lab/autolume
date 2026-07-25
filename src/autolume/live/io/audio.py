@@ -19,6 +19,7 @@ import numpy as np
 from autolume.audio.features import FEATURE_NAMES, ONSET_SENSITIVITY_DEFAULT
 from autolume.live.core.events import ControlEvent
 from autolume.live.core.store import LatestValueStore
+from autolume.live.errors import describe
 
 logger = logging.getLogger(__name__)
 
@@ -153,7 +154,7 @@ class AudioInput:
             # list, with the failure attached.
             logger.exception("Audio tick failed")
             self._store.set(
-                dataclasses.replace(self._store.snapshot(), error=_describe(exc))
+                dataclasses.replace(self._store.snapshot(), error=describe(exc))
             )
 
     def start(self) -> None:
@@ -266,7 +267,3 @@ class AudioInput:
             onset_sensitivity=float(engine.onset_sensitivity),
             sample_rate=int(engine.sample_rate),
         )
-
-
-def _describe(exc: Exception) -> str:
-    return str(exc) or type(exc).__name__

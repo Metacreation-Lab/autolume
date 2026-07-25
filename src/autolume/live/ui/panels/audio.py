@@ -11,8 +11,8 @@ import numpy as np
 from imgui_bundle import imgui
 
 from autolume.audio.features import FEATURE_NAMES
+from autolume.live.ui.controls import ERROR_COLOR
 
-_ERROR_COLOR = (1.0, 0.3, 0.3, 1.0)
 _NO_DEVICES = "No input devices found"
 # Sized in multiples of the font size so the panel holds its proportions on
 # every display scale.
@@ -51,9 +51,13 @@ def bar_value(value: object) -> float:
 
 
 def spectrum_values(spectrum: np.ndarray | None) -> np.ndarray:
-    """The spectrum as something `plot_histogram` accepts, idle bars if absent."""
+    """The spectrum as something `plot_histogram` accepts, idle bars if absent.
+
+    The idle bars are copied rather than handed out, so the caller owns what it
+    is given whichever branch produced it.
+    """
     if spectrum is None or spectrum.size == 0:
-        return _IDLE_SPECTRUM
+        return _IDLE_SPECTRUM.copy()
     return np.ascontiguousarray(spectrum, dtype=np.float32)
 
 
@@ -163,6 +167,6 @@ class AudioPanel:
         if not status.error:
             return
         imgui.separator()
-        imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(*_ERROR_COLOR))
+        imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(*ERROR_COLOR))
         imgui.text_wrapped(status.error)
         imgui.pop_style_color()

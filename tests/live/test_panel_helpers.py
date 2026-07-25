@@ -5,15 +5,20 @@ What can be pinned down is the logic the drawing reads from, which is why it
 lives in module functions rather than inside the gui methods.
 """
 
+import itertools
+
 import numpy as np
 
+from autolume.live.core import presets
 from autolume.live.core.params import (
     BINDING_CLEAR,
     BINDING_SET,
     Binding,
     ClearBinding,
+    ControlState,
     ParamKind,
 )
+from autolume.live.errors import describe
 from autolume.live.ui.panels.audio import (
     bar_value,
     device_index,
@@ -27,7 +32,7 @@ from autolume.live.ui.panels.mapping import (
     canonical_address,
     display_label,
 )
-from autolume.live.ui.panels.presets import is_valid_name
+from autolume.live.ui.panels.presets import PresetsPanel, is_valid_name
 
 
 def test_device_labels_never_empty_so_the_combo_stays_drawn():
@@ -51,6 +56,12 @@ def test_spectrum_values_fall_back_to_idle_bars():
     values = spectrum_values(np.array([1.0, 2.0], dtype=np.float64))
     assert values.dtype == np.float32
     assert list(values) == [1.0, 2.0]
+
+
+def test_idle_bars_are_not_shared_between_frames():
+    idle = spectrum_values(None)
+    idle[0] = 5.0
+    assert spectrum_values(None)[0] == 0.0
 
 
 def test_spectrum_ceiling_keeps_silence_flat():
@@ -97,11 +108,17 @@ def test_preset_names_may_not_walk_out_of_the_folder():
     assert not is_valid_name("a\\b")
 
 
+class RecordingStore:
+    def snapshot(self):
+        return ControlState()
+
+
 class RecordingRuntime:
     """Captures what a panel submits, without a control loop behind it."""
 
     def __init__(self):
         self.events = []
+        self.control_store = RecordingStore()
 
     def submit(self, event):
         self.events.append(event)
@@ -161,3 +178,82 @@ def test_committing_forgets_the_drafts_for_that_parameter_only():
     panel._commit("latent_x", None, source="/a/b")
     assert ("latent_x", "source") not in panel._drafts
     assert panel._drafts[("latent_y", "source")] == "other"
+
+
+def test_a_failure_carrying_no_message_is_still_described():
+    # Shared with the audio transport, which reports its errors the same way.
+    assert describe(OSError("folder is gone")) == "folder is gone"
+    assert describe(KeyError()) == "KeyError"
+
+
+def presets_at(directory):
+    """A presets panel on a clock that is always past the rescan interval."""
+    ticks = itertools.count(0.0, 10.0)
+    return PresetsPanel(RecordingRuntime(), directory, clock=lambda: next(ticks))
+
+
+def test_a_listing_failure_stops_being_reported_once_listing_works(
+    tmp_path, monkeypatch
+):
+    panel = presets_at(tmp_path)
+
+    def boom(directory):
+        raise OSError("folder is gone")
+
+    monkeypatch.setattr(presets, "list_presets", boom)
+    assert panel._names() == []
+    assert "presets folder" in (panel.report_error() or "")
+
+    monkeypatch.undo()
+    assert panel._names() == []
+    assert panel.report_error() is None
+
+
+def test_a_save_failure_stays_reported_through_a_later_rescan(tmp_path, monkeypatch):
+    panel = presets_at(tmp_path)
+
+    def boom(state, path):
+        raise OSError("disk is full")
+
+    monkeypatch.setattr(presets, "save", boom)
+    panel._save("evening")
+    assert "Could not save evening" in (panel.report_error() or "")
+
+    monkeypatch.undo()
+    panel._names()
+    # The rescan says nothing about the failed save, so it may not clear it.
+    assert "Could not save evening" in (panel.report_error() or "")
+
+
+def test_a_saved_preset_is_reported_after_a_transient_listing_failure(
+    tmp_path, monkeypatch
+):
+    panel = presets_at(tmp_path)
+
+    def boom(directory):
+        raise OSError("folder is busy")
+
+    monkeypatch.setattr(presets, "list_presets", boom)
+    panel._names()
+    monkeypatch.undo()
+
+    panel._save("evening")
+    panel._names()
+
+    # An error takes precedence over the message, so a stale one hides "Saved".
+    assert panel.report_error() is None
+    assert panel._message == "Saved evening."
+
+
+def test_a_legacy_setting_this_version_has_no_home_for_is_reported(monkeypatch):
+    panel = presets_at(None)
+    monkeypatch.setattr(
+        "autolume.live.ui.panels.presets.import_legacy_preset",
+        lambda folder: ({"truncation_psi": 0.7, "moon_phase": 2.0}, (), []),
+    )
+
+    panel._import("/old/evening set")
+
+    addresses = [event.address for event in panel._runtime.events]
+    assert addresses == ["/trunc/psi"]
+    assert any("moon_phase" in note for note in panel._notes)

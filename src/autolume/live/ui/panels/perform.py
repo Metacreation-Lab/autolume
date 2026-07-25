@@ -5,7 +5,7 @@ from typing import Callable
 from imgui_bundle import imgui, portable_file_dialogs as pfd
 
 from autolume.live.core.events import ControlEvent
-from autolume.live.ui.controls import ControlBinder
+from autolume.live.ui.controls import ERROR_COLOR, ControlBinder
 
 
 class PerformPanel:
@@ -47,7 +47,7 @@ class PerformPanel:
             imgui.text_disabled("No model loaded")
         error = self._runtime.model_host.error()
         if error:
-            imgui.text_colored(imgui.ImVec4(1.0, 0.3, 0.3, 1.0), error)
+            imgui.text_colored(imgui.ImVec4(*ERROR_COLOR), error)
 
     def _latent_rows(self) -> None:
         imgui.separator_text("Latent")

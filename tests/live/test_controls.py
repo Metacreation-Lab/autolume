@@ -12,8 +12,8 @@ from autolume.live.core.params import REGISTRY, Binding, ParamKind
 from autolume.live.core.touch import TOUCH_BEGIN, TOUCH_END
 from autolume.live.ui.controls import (
     BINDING_COLOR,
-    BINDING_ERROR_COLOR,
     BINDING_OFF_COLOR,
+    ERROR_COLOR,
     Override,
     binding_for,
     displayed_value,
@@ -99,7 +99,7 @@ def test_indicator_marks_a_disabled_binding_apart():
 
 def test_indicator_marks_an_error_even_when_the_binding_is_disabled():
     binding = Binding(target="latent_x", source="/a", enabled=False, error="boom")
-    assert indicator_color(binding) == BINDING_ERROR_COLOR
+    assert indicator_color(binding) == ERROR_COLOR
 
 
 def test_displayed_value_is_the_snapshot_when_nothing_is_held():

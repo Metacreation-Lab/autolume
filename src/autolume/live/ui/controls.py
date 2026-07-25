@@ -26,8 +26,11 @@ from autolume.live.core.params import (
 from autolume.live.core.touch import TOUCH_BEGIN, TOUCH_END
 
 BINDING_COLOR = (0.35, 0.75, 1.0, 1.0)
-BINDING_ERROR_COLOR = (1.0, 0.3, 0.3, 1.0)
 BINDING_OFF_COLOR = (0.5, 0.5, 0.5, 1.0)
+# Every failure the UI shows is this colour, wherever it is shown, so that one
+# definition here is what makes a broken binding, a missing device and a preset
+# that would not save look alike.
+ERROR_COLOR = (1.0, 0.3, 0.3, 1.0)
 
 _GUTTER_RATIO = 0.4
 _MARKER_RATIO = 0.3
@@ -81,7 +84,7 @@ def indicator_color(binding: Binding | None) -> Color | None:
     if binding is None:
         return None
     if binding.error is not None:
-        return BINDING_ERROR_COLOR
+        return ERROR_COLOR
     if not binding.enabled:
         return BINDING_OFF_COLOR
     return BINDING_COLOR

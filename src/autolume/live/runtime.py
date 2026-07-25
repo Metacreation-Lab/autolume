@@ -49,13 +49,22 @@ class Runtime:
     def start(self) -> None:
         if self._started:
             return
-        self.control_loop.start()
-        self.render_loop.start()
-        if self._start_audio:
-            self.audio.start()
-        if self._start_osc:
-            self.osc.start()
+        # Flagged as started before anything is, so that a subsystem failing to
+        # come up can be unwound by the same stop() a normal shutdown uses. The
+        # OSC transport raises when no port in its range binds, and leaving the
+        # audio thread behind for that would hold the input device open with no
+        # way left to release it.
         self._started = True
+        try:
+            self.control_loop.start()
+            self.render_loop.start()
+            if self._start_audio:
+                self.audio.start()
+            if self._start_osc:
+                self.osc.start()
+        except Exception:
+            self.stop()
+            raise
 
     def stop(self) -> None:
         if not self._started:

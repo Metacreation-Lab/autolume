@@ -1,6 +1,7 @@
 import time
 
 import numpy as np
+import pytest
 
 from autolume.live.core import presets
 from autolume.live.core.events import ControlEvent
@@ -201,6 +202,39 @@ def test_preset_saved_from_a_running_runtime_is_restored_by_apply(tmp_path):
         assert state.bindings[0].expression == "x / 2"
     finally:
         runtime.stop()
+
+
+class FailingOsc:
+    """An OSC transport that cannot bind, the way a taken port range behaves."""
+
+    port = None
+
+    def __init__(self):
+        self.stopped = 0
+
+    def start(self):
+        raise OSError("No OSC port available in 1338-1357")
+
+    def stop(self):
+        self.stopped += 1
+
+
+def test_a_failed_osc_start_does_not_leave_the_audio_thread_running():
+    engine = FakeAudioEngine()
+    runtime = make_runtime(start_audio=True, audio_engine=engine, start_osc=True)
+    runtime.osc = FailingOsc()
+
+    with pytest.raises(OSError):
+        runtime.start()
+
+    # The engine is only disabled once the audio thread has been joined, so a
+    # disabled engine is what proves the thread went with it and released the
+    # device.
+    assert engine.disabled_count == 1
+    assert runtime.audio._thread is None
+    # The failed start left nothing running, so stopping again is still a no-op.
+    runtime.stop()
+    assert engine.disabled_count == 1
 
 
 def test_stop_is_clean_and_idempotent_with_audio_running():

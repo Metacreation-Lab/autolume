@@ -13,6 +13,7 @@ Each imported value and binding is sent on its own instead.
 
 import logging
 from pathlib import Path
+from typing import Callable
 
 from imgui_bundle import imgui, portable_file_dialogs as pfd
 
@@ -20,10 +21,11 @@ from autolume.live.core import presets
 from autolume.live.core.events import ControlEvent
 from autolume.live.core.params import BINDING_SET, REGISTRY
 from autolume.live.core.presets_legacy import import_legacy_preset
+from autolume.live.errors import describe
+from autolume.live.ui.controls import ERROR_COLOR
 
 logger = logging.getLogger(__name__)
 
-_ERROR_COLOR = (1.0, 0.3, 0.3, 1.0)
 # Sized in multiples of the font size so the panel holds its proportions on
 # every display scale.
 _NAME_EMS = 13.0
@@ -47,12 +49,22 @@ def is_valid_name(name: str) -> bool:
 
 
 class PresetsPanel:
-    def __init__(self, runtime, directory: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        runtime,
+        directory: str | Path | None = None,
+        clock: Callable[[], float] = imgui.get_time,
+    ) -> None:
         self._runtime = runtime
         self._directory = Path(directory) if directory is not None else None
+        self._clock = clock
         self._name = ""
         self._message: str | None = None
         self._error: str | None = None
+        # Kept apart from `_error`, which belongs to whatever the user last
+        # asked for. Listing happens on a timer nobody asked for, so it clears
+        # itself and may not speak over a save that failed.
+        self._list_error: str | None = None
         self._notes: list[str] = []
         self._imported = False
         self._folder_dialog: pfd.select_folder | None = None
@@ -89,7 +101,7 @@ class PresetsPanel:
             presets.save(self._runtime.control_store.snapshot(), path)
         except Exception as exc:
             logger.exception("Could not save preset %s", name)
-            self._error = f"Could not save {name}. {_describe(exc)}"
+            self._error = f"Could not save {name}. {describe(exc)}"
             return
         self._names_cache = None
         self._message = f"Saved {name}."
@@ -118,7 +130,7 @@ class PresetsPanel:
         glob a directory sixty times a second. Saving invalidates it directly so
         a new preset shows up at once.
         """
-        now = imgui.get_time()
+        now = self._clock()
         if self._names_cache is not None and now - self._names_read < _LIST_INTERVAL:
             return self._names_cache
         self._names_read = now
@@ -127,7 +139,12 @@ class PresetsPanel:
         except Exception as exc:
             logger.exception("Could not list presets")
             self._names_cache = []
-            self._error = f"Could not read the presets folder. {_describe(exc)}"
+            self._list_error = f"Could not read the presets folder. {describe(exc)}"
+        else:
+            # A folder that reads now is not a folder that failed to read, and
+            # leaving the old failure up would keep the panel red for the rest
+            # of the show and hide every message behind it.
+            self._list_error = None
         return self._names_cache
 
     def _load(self, name: str) -> None:
@@ -136,7 +153,7 @@ class PresetsPanel:
             payload = presets.load(self.directory() / f"{name}.json")
         except Exception as exc:
             logger.exception("Could not load preset %s", name)
-            self._error = f"Could not load {name}. {_describe(exc)}"
+            self._error = f"Could not load {name}. {describe(exc)}"
             return
         self._submit(presets.PRESET_APPLY, payload)
         self._message = f"Loaded {name}."
@@ -155,16 +172,24 @@ class PresetsPanel:
     def _import(self, folder: str) -> None:
         self._reset_report()
         values, bindings, skipped = import_legacy_preset(folder)
+        notes = list(skipped)
+        applied = 0
         for name, value in values.items():
             spec = REGISTRY.get(name)
             if spec is None:
+                # No legacy target misses the registry today. It is still noted
+                # rather than dropped, because this list is the only account the
+                # performer gets of what did not come across, and a setting that
+                # vanished from it would be one they go looking for later.
+                notes.append(f"This version has no {name} setting to import into.")
                 continue
             self._submit(spec.address, value)
+            applied += 1
         # Sent one at a time rather than through a preset payload, so the error
         # the importer put on a rejected legacy expression survives.
         for binding in bindings:
             self._submit(BINDING_SET, binding)
-        self._notes = list(skipped)
+        self._notes = notes
         self._imported = True
         if not values and not bindings:
             # Reported plainly. The importer cannot tell an unreadable folder
@@ -173,14 +198,23 @@ class PresetsPanel:
             self._message = _NOTHING_IMPORTED
             return
         self._message = (
-            f"Imported {len(values)} settings and {len(bindings)} mappings "
+            f"Imported {applied} settings and {len(bindings)} mappings "
             f"from {Path(folder).name}."
         )
 
+    def report_error(self) -> str | None:
+        """The failure the panel shows, the last action's before the listing's.
+
+        An error the performer's own click produced says more than a background
+        rescan finding the folder missing, and only one of them can be shown.
+        """
+        return self._error or self._list_error
+
     def _report(self) -> None:
-        if self._error:
-            imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(*_ERROR_COLOR))
-            imgui.text_wrapped(self._error)
+        error = self.report_error()
+        if error:
+            imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(*ERROR_COLOR))
+            imgui.text_wrapped(error)
             imgui.pop_style_color()
         elif self._message:
             imgui.text_wrapped(self._message)
@@ -204,7 +238,3 @@ class PresetsPanel:
         self._error = None
         self._notes = []
         self._imported = False
-
-
-def _describe(exc: Exception) -> str:
-    return str(exc) or type(exc).__name__
