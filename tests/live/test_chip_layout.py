@@ -22,7 +22,7 @@ import itertools
 import pytest
 from imgui_bundle import hello_imgui, imgui
 
-from autolume.live.core.params import Binding, ControlState
+from autolume.live.core.params import Binding, ControlState, ParamKind
 from autolume.live.core.sources import SourceTable
 from autolume.live.core.store import LatestValueStore
 from autolume.live.ui.controls import (
@@ -114,11 +114,23 @@ def painted(state, sources, name):
     return counts[name]
 
 
+def widget_specs():
+    """The bindable parameters that are drawn as widgets with a gutter.
+
+    Every parameter carries a mapping row now, the model path included, but
+    the model path is a file the performer opens rather than a slider, so it
+    has no widget here and no gutter to reserve. Filtered by kind rather than
+    by name, so a text parameter added later drops out of here on its own
+    instead of failing this file.
+    """
+    return [spec for spec in bindable_specs() if spec.kind is not ParamKind.STR]
+
+
 def draw_every_bindable(state=IDLE, sources=SILENT):
     """Draw one widget per bindable parameter, and report each one's gutter.
 
-    Driven off `bindable_specs` rather than off a copy of the perform panel, so
-    a parameter added later is covered here the day it is added.
+    Driven off the registry rather than off a copy of the perform panel, so a
+    parameter added later is covered here the day it is added.
     """
     binder = ControlBinder(
         FakeRuntime(state, sources), mapping_popup=lambda name: None, clock=lambda: NOW
@@ -138,7 +150,7 @@ def draw_every_bindable(state=IDLE, sources=SILENT):
             rows.append((name, imgui.get_cursor_screen_pos().x - start, gutter))
 
         ControlBinder._indicator = record
-        for index, spec in enumerate(bindable_specs()):
+        for index, spec in enumerate(widget_specs()):
             # A separator every few rows, because the reported split fell either
             # side of one and a layout fault could plausibly have lived there.
             if index % 4 == 0:
@@ -151,7 +163,7 @@ def draw_every_bindable(state=IDLE, sources=SILENT):
 
 def test_every_bindable_parameter_reserves_the_same_gutter(frame):
     rows = draw_every_bindable()
-    assert len(rows) == len(bindable_specs())
+    assert len(rows) == len(widget_specs())
     assert len({round(width, 3) for _, width, _ in rows}) == 1
     assert all(width > 0.0 for _, width, _ in rows)
 

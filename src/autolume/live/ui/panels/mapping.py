@@ -14,6 +14,11 @@ to what may write this parameter from outside. It never governs the hand.
 An empty source means the parameter's own address, so a row that says only On
 opens the address the registry gives the parameter without anyone typing it.
 
+Every parameter has a row, including the model path. A value means something
+different there, a position in the models folder or a name, so that row says
+what it means underneath itself rather than leaving the performer to find out
+by sending something.
+
 Every edit leaves as a control event. Nothing here writes state directly, and
 a clear travels as a `ClearBinding` object rather than a target string, so no
 OSC peer can express one.
@@ -53,15 +58,39 @@ _HINT = (
     "Pick lists the addresses arriving right now, which is how you find out "
     "what your controller is sending."
 )
+_REFERENCE_NOTE = (
+    "A number picks a model by its position in your models folder, counting "
+    "from 0, and the expression above scales it. Text picks a model by name "
+    "or by part of a name, and the expression does not apply to it."
+)
 
 
 def bindable_specs() -> list[ParamSpec]:
     """The parameters a source can drive, in registry order.
 
-    Text parameters are left out: an expression yields a number, so a model
-    path has nothing a binding could give it.
+    Every one of them. A text parameter used to be left out, on the grounds
+    that an expression yields a number and a model path has nothing to do with
+    one, which made switching models the single thing a controller could not
+    do. What it needed was not an exception to the rule but a row like any
+    other: what a value means on it differs, and that is the row's business to
+    explain, not the registry's to withhold.
     """
-    return [spec for spec in REGISTRY.values() if spec.kind is not ParamKind.STR]
+    return list(REGISTRY.values())
+
+
+def reference_note(spec: ParamSpec) -> str | None:
+    """The line under `spec`'s row explaining what a value means on it, or None.
+
+    Only a text parameter needs one, and it needs one because its row is the
+    only place where the expression field applies to some values and not
+    others. A number is an index into the models folder and the expression
+    scales it, which is what makes a fader a model selector. Text names a model
+    and no expression touches it, since an expression yields a number.
+
+    Leaving that unsaid would make the field the misleading kind: editable,
+    and silently doing nothing to half of what arrives.
+    """
+    return _REFERENCE_NOTE if spec.kind is ParamKind.STR else None
 
 
 def display_label(name: str) -> str:
@@ -105,8 +134,7 @@ class MappingPanel:
 
     def popup(self, name: str) -> None:
         """The editor for one parameter, drawn inside an already open popup."""
-        spec = REGISTRY.get(name)
-        if spec is None or spec.kind is ParamKind.STR:
+        if REGISTRY.get(name) is None:
             imgui.text_disabled("This control cannot be mapped.")
             return
         self._row(name, self._runtime.control_store.snapshot())
@@ -126,6 +154,9 @@ class MappingPanel:
         self._clear_button(name, binding)
         imgui.indent(column)
         self._expression_field(name, binding)
+        note = reference_note(REGISTRY[name])
+        if note is not None:
+            self._note(note)
         if binding is not None and binding.error:
             imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(*ERROR_COLOR))
             imgui.text_wrapped(binding.error)
@@ -158,6 +189,20 @@ class MappingPanel:
         self._keep_draft(name, "expression", text)
         if entered or imgui.is_item_deactivated_after_edit():
             self._commit(name, binding, expression=text)
+
+    def _note(self, text: str) -> None:
+        """Draw a greyed line under a row, in the colour the rest of the UI
+        already means "present but not something you act on" with.
+
+        Written on the row rather than hidden in a tooltip: the thing it
+        explains is a field the performer is about to type into, and a tooltip
+        is read after the mistake rather than before it.
+        """
+        imgui.push_style_color(
+            imgui.Col_.text, imgui.get_style_color_vec4(imgui.Col_.text_disabled)
+        )
+        imgui.text_wrapped(text)
+        imgui.pop_style_color()
 
     def _picker(self, name: str, binding: Binding | None) -> None:
         if imgui.button("Pick"):

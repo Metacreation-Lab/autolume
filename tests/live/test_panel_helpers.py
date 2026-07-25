@@ -13,10 +13,10 @@ from autolume.live.core import presets
 from autolume.live.core.params import (
     BINDING_CLEAR,
     BINDING_SET,
+    REGISTRY,
     Binding,
     ClearBinding,
     ControlState,
-    ParamKind,
 )
 from autolume.live.errors import describe
 from autolume.live.ui.panels.audio import (
@@ -31,6 +31,7 @@ from autolume.live.ui.panels.mapping import (
     bindable_specs,
     canonical_address,
     display_label,
+    reference_note,
 )
 from autolume.live.ui.panels.presets import PresetsPanel, is_valid_name
 
@@ -81,11 +82,34 @@ def test_bar_value_shows_a_broken_feature_as_silence():
     assert bar_value(None) == 0.0
 
 
-def test_bindable_specs_leave_out_text_parameters():
+def test_every_parameter_gets_a_row_including_the_model_path():
+    """The model path is bindable, so it has a row like everything else.
+
+    Under the opt in model a parameter is reachable from a controller only
+    through its row, so leaving the text parameter out of this list was the
+    whole of why a controller could not switch models. Pinned by name as well
+    as by count, because that one parameter is the point.
+    """
     names = [spec.name for spec in bindable_specs()]
-    assert "pkl_path" not in names
+    assert "pkl_path" in names
     assert "latent_x" in names
-    assert all(spec.kind is not ParamKind.STR for spec in bindable_specs())
+    assert names == [spec.name for spec in REGISTRY.values()]
+
+
+def test_only_a_text_parameter_row_carries_a_note():
+    """The expression field stays live on the model row, so the row explains it.
+
+    A number is an index and the expression scales it, text is a name and no
+    expression applies. Both halves have to be on the row or the field is the
+    misleading kind: editable, and quietly doing nothing to half of what
+    arrives. Every other row means one thing and needs no line under it.
+    """
+    note = reference_note(REGISTRY["pkl_path"])
+    assert note is not None
+    assert "position" in note and "expression above" in note
+    assert "does not apply" in note
+    assert reference_note(REGISTRY["latent_x"]) is None
+    assert reference_note(REGISTRY["anim_playing"]) is None
 
 
 def test_display_label_is_derived_from_the_registry_name():

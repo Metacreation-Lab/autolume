@@ -19,11 +19,14 @@ from typing import Callable
 from autolume.live.core.events import ControlEvent
 from autolume.live.core.expr import ExpressionError, compile_expression
 from autolume.live.core.mapping import apply_event
+from autolume.live.core.models import ModelFolder
 from autolume.live.core.motion import integrate
 from autolume.live.core.params import (
     BY_ADDRESS,
     REGISTRY,
+    Binding,
     ControlState,
+    ParamKind,
     RenderParams,
     apply_value,
     listens_on,
@@ -49,12 +52,17 @@ class ControlLoop:
         source_store: LatestValueStore[SourceTable],
         tick_hz: float = 125.0,
         clock: Callable[[], float] = time.monotonic,
+        models: ModelFolder | None = None,
     ) -> None:
         self._control_store = control_store
         self._render_store = render_store
         self._source_store = source_store
         self._period = 1.0 / tick_hz
         self._clock = clock
+        # What a row on a text parameter resolves against. Held rather than
+        # looked up per message: it caches its listing, which is what keeps a
+        # swept fader from reading the folder once per value.
+        self._models = models or ModelFolder()
         self.touch = TouchTracker()
         self._queue: collections.deque[ControlEvent] = collections.deque(
             maxlen=_QUEUE_LIMIT
@@ -159,9 +167,11 @@ class ControlLoop:
             sources = sources.observe(address, number, stamp)
         if self._accepts_direct(address, remote):
             state = apply_event(state, event)
-        if number is None:
-            return state, sources
-        return self._drive_bindings(state, address, number, now, remote), sources
+        # The raw value travels alongside the number it may not be. A text
+        # value carries no number and used to stop here, which left a text
+        # parameter with no remote path at all once the gate closed.
+        state = self._drive_bindings(state, address, event.value, number, now, remote)
+        return state, sources
 
     def _accepts_direct(self, address: str, remote: bool) -> bool:
         """Whether an event may write the parameter its own address names.
@@ -227,7 +237,8 @@ class ControlLoop:
         self,
         state: ControlState,
         address: str,
-        value: float,
+        value: object,
+        number: float | None,
         now: float,
         remote: bool,
     ) -> ControlState:
@@ -240,6 +251,9 @@ class ControlLoop:
         for remote input: its expression is there to shape what arrives from
         outside, and running it over the value the performer just set by hand
         would turn their own control against them.
+
+        `number` is `value` as a float where it is one, and None where it is
+        not. Both are passed because a text parameter is driven by either.
         """
         for binding in state.bindings:
             if not binding.enabled:
@@ -250,14 +264,64 @@ class ControlLoop:
                 continue
             if self.touch.is_held(binding.target, now):
                 continue
+            spec = REGISTRY.get(binding.target)
+            if spec is not None and spec.kind is ParamKind.STR:
+                state = self._drive_reference(state, binding, value, number)
+                continue
+            if number is None:
+                continue
             try:
-                result = self._compile(binding.expression)(value)
+                result = self._compile(binding.expression)(number)
             except ExpressionError as exc:
                 state = self._record_error(state, binding.target, str(exc))
                 continue
             state = apply_value(state, binding.target, result)
             state = self._record_error(state, binding.target, None)
         return state
+
+    def _drive_reference(
+        self,
+        state: ControlState,
+        binding: Binding,
+        value: object,
+        number: float | None,
+    ) -> ControlState:
+        """Resolve a model reference onto a text parameter, or leave it alone.
+
+        A number is an index into the models folder and the row's expression
+        applies to it, which is the whole of why this is worth having: nearly
+        every controller a performer owns sends numbers, and `x*4` over a fader
+        is what turns one of them into a selector across five models.
+
+        A text value names a model and no expression applies, because an
+        expression yields a number and there is nothing it could do to a name.
+        The mapping row says so beside the field rather than leaving a live
+        looking field that quietly does nothing.
+
+        A reference that resolves to nothing is logged where it is resolved and
+        ignored here. It is not recorded as a binding error: an index off the
+        end is what the top of a wrongly scaled fader sends on the way past, so
+        marking the row failing would flash a red row through every sweep.
+
+        Loading is not started here and cannot be: this writes the path into
+        the state, and the runtime notices the change on its own tick and hands
+        it to the model host, which loads on its own thread. The control thread
+        never waits on a file.
+        """
+        if isinstance(value, str):
+            resolved = self._models.named(value)
+        elif number is not None:
+            try:
+                index = self._compile(binding.expression)(number)
+            except ExpressionError as exc:
+                return self._record_error(state, binding.target, str(exc))
+            resolved = self._models.at_index(index)
+        else:
+            return state
+        if resolved is None:
+            return state
+        state = apply_value(state, binding.target, resolved)
+        return self._record_error(state, binding.target, None)
 
     def _compile(self, source: str) -> Callable[[float], float]:
         """Compile a mapping expression, memoizing failures as well as hits.
