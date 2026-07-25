@@ -51,6 +51,28 @@ _SPECS = (
     # Not persisted: the frame limit is a property of the machine, not of the
     # look. A preset saved on a laptop capped at 30 must not cap stage hardware.
     ParamSpec("fps_cap", ParamKind.INT, 60, "/render/fps", 0, 240, preset=False),
+    # Latent navigation mode. Off is seed mode; vector_mode drifts a raw latent
+    # vector instead of walking the seed grid.
+    ParamSpec("vector_mode", ParamKind.BOOL, False, "/latent/vector"),
+    ParamSpec("latent_project", ParamKind.BOOL, True, "/latent/project"),
+    # Keyframe and noise loop playback. loop_active overrides latent
+    # navigation entirely while it is set.
+    ParamSpec("loop_active", ParamKind.BOOL, False, "/loop/anim"),
+    ParamSpec("loop_uses_time", ParamKind.BOOL, True, "/loop/timemode"),
+    ParamSpec("loop_time", ParamKind.FLOAT, 4.0, "/loop/time", 0.1, 600.0),
+    ParamSpec("loop_speed", ParamKind.FLOAT, 0.0, "/loop/speed", -5.0, 5.0),
+    ParamSpec("loop_alpha", ParamKind.FLOAT, 0.0, "/loop/alpha", 0.0, 1.0),
+    ParamSpec("loop_index", ParamKind.INT, 0, "/loop/index", 0, 2**31 - 1),
+    ParamSpec("keyframe_count", ParamKind.INT, 6, "/loop/keyframes", 1, 256),
+    ParamSpec("perfect_loop", ParamKind.BOOL, False, "/loop/perfect"),
+    ParamSpec("noise_loop", ParamKind.BOOL, False, "/loop/noise"),
+    ParamSpec("noise_radius", ParamKind.FLOAT, 1.0, "/loop/radius", 0.01, 100.0),
+    ParamSpec("noise_loop_seed", ParamKind.INT, 0, "/loop/seed", 0, 2**31 - 1),
+    # Loop pulse: one OSC message per loop-start or loop-complete event, sent
+    # to a user configured address, separate from the control input port.
+    ParamSpec("pulse_address", ParamKind.STR, "", "/loop/pulse/address"),
+    ParamSpec("pulse_ip", ParamKind.STR, "127.0.0.1", "/loop/pulse/ip"),
+    ParamSpec("pulse_port", ParamKind.INT, 5005, "/loop/pulse/port", 1, 65535),
 )
 
 REGISTRY: dict[str, ParamSpec] = {spec.name: spec for spec in _SPECS}
@@ -60,6 +82,13 @@ BY_ADDRESS: dict[str, ParamSpec] = {spec.address: spec for spec in _SPECS}
 # so they are reserved and never registry parameters.
 BINDING_SET = "/binding/set"
 BINDING_CLEAR = "/binding/clear"
+VECTOR_SET = "/vector/set"
+# The seed is applied in the control loop, not here: materializing a vector
+# needs the loaded model's z_dim, which the registry and mapping layer do not
+# know. This address is reserved so mapping still recognizes it.
+VECTOR_RANDOMIZE = "/vector/randomize"
+KEYFRAME_SET = "/keyframe/set"
+KEYFRAME_REMOVE = "/keyframe/remove"
 
 
 @dataclass(frozen=True)
@@ -122,6 +151,59 @@ def listens_on(binding: Binding) -> str:
 
 
 @dataclass(frozen=True)
+class Keyframe:
+    """One stop in a keyframe loop.
+
+    `kind` is `"seed"` (blend from `seed_x`/`seed_y` like the latent grid) or
+    `"vec"` (use `vec` directly). `project` mirrors `latent_project`: applied
+    per keyframe rather than once for the whole loop, so a loop can mix
+    projected and raw stops. Validation is not this dataclass's job: it
+    happens where a `Keyframe` is applied to state, not where one is built.
+    """
+
+    kind: str
+    seed_x: float = 0.0
+    seed_y: float = 0.0
+    vec: tuple[float, ...] = ()
+    project: bool = True
+
+
+def default_keyframe(index: int) -> Keyframe:
+    """The keyframe a resized or freshly opened loop fills a slot with."""
+    return Keyframe("seed", float(index), 0.0)
+
+
+# Six seed keyframes at (i, 0), matching the old app's default seeds list.
+_DEFAULT_KEYFRAMES: tuple[Keyframe, ...] = tuple(default_keyframe(i) for i in range(6))
+
+
+@dataclass(frozen=True)
+class SetVector:
+    """Replace the performer's latent vector wholesale.
+
+    A dedicated value object, matching `Binding`/`ClearBinding`, though a raw
+    sequence of numbers is also accepted on `/vector/set` for OSC parity.
+    """
+
+    values: tuple[float, ...]
+
+
+@dataclass(frozen=True)
+class SetKeyframe:
+    """Replace or append the keyframe at `index` in the loop."""
+
+    index: int
+    keyframe: Keyframe
+
+
+@dataclass(frozen=True)
+class RemoveKeyframe:
+    """Remove the keyframe at `index` from the loop."""
+
+    index: int
+
+
+@dataclass(frozen=True)
 class ControlState:
     """The whole control surface, as one value.
 
@@ -144,6 +226,28 @@ class ControlState:
     noise_seed: int = 0
     noise_anim: bool = False
     fps_cap: int = 60
+    vector_mode: bool = False
+    latent_project: bool = True
+    loop_active: bool = False
+    loop_uses_time: bool = True
+    loop_time: float = 4.0
+    loop_speed: float = 0.0
+    loop_alpha: float = 0.0
+    loop_index: int = 0
+    keyframe_count: int = 6
+    perfect_loop: bool = False
+    noise_loop: bool = False
+    noise_radius: float = 1.0
+    noise_loop_seed: int = 0
+    pulse_address: str = ""
+    pulse_ip: str = "127.0.0.1"
+    pulse_port: int = 5005
+    # Structured state, not a registry parameter: empty means unset, and the
+    # generator derives a deterministic fallback from it (see design.md).
+    latent_vec: tuple[float, ...] = ()
+    # Structured state, not a registry parameter: the loop's stops. Six seed
+    # keyframes by default, matching the old app.
+    keyframes: tuple[Keyframe, ...] = _DEFAULT_KEYFRAMES
     bindings: tuple[Binding, ...] = ()
 
 
@@ -158,9 +262,32 @@ class RenderParams:
     noise_seed: int
     noise_anim: bool
     fps_cap: int
+    latent_vec: tuple[float, ...]
+    latent_project: bool
+    keyframes: tuple[Keyframe, ...]
+    loop_alpha: float
+    loop_index: int
+    # "seed", "vec" or "loop": what the generator evaluates this frame, see
+    # `_derive_mode`.
+    mode: str
+
+
+def _derive_mode(state: ControlState) -> str:
+    """The generator mode for one frame, per the design's mode table.
+
+    Loop playback overrides latent navigation entirely: while `loop_active`,
+    a noise loop still evaluates as "vec" (a vector fed straight to the
+    mapping network), everything else that loops does so via keyframes.
+    Outside a loop, `vector_mode` picks between the seed grid and a raw
+    vector.
+    """
+    if state.loop_active:
+        return "vec" if state.noise_loop else "loop"
+    return "vec" if state.vector_mode else "seed"
 
 
 def to_render_params(state: ControlState) -> RenderParams:
+    keyframe_count = len(state.keyframes)
     return RenderParams(
         pkl_path=state.pkl_path,
         latent_x=state.latent_x,
@@ -171,6 +298,14 @@ def to_render_params(state: ControlState) -> RenderParams:
         noise_seed=state.noise_seed,
         noise_anim=state.noise_anim,
         fps_cap=state.fps_cap,
+        latent_vec=state.latent_vec,
+        latent_project=state.latent_project,
+        keyframes=state.keyframes,
+        loop_alpha=state.loop_alpha,
+        # Clamped here, not in the spec: the bound is the keyframe count,
+        # which is dynamic.
+        loop_index=min(state.loop_index, max(keyframe_count - 1, 0)),
+        mode=_derive_mode(state),
     )
 
 

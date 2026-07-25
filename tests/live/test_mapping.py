@@ -7,9 +7,18 @@ from autolume.live.core.mapping import apply_event
 from autolume.live.core.params import (
     BINDING_CLEAR,
     BINDING_SET,
+    KEYFRAME_REMOVE,
+    KEYFRAME_SET,
+    VECTOR_RANDOMIZE,
+    VECTOR_SET,
     Binding,
     ClearBinding,
     ControlState,
+    Keyframe,
+    RemoveKeyframe,
+    SetKeyframe,
+    SetVector,
+    default_keyframe,
 )
 from autolume.live.core.presets import FORMAT, PRESET_APPLY, VERSION
 
@@ -252,3 +261,217 @@ def test_preset_apply_with_wrong_format_ignored(caplog):
         after = apply_preset(before, payload)
     assert after == before
     assert any("malformed preset" in m for m in warnings_from(caplog, MAPPING_LOGGER))
+
+
+# --- /vector/set --------------------------------------------------------
+
+
+def test_vector_set_from_set_vector_object():
+    state = apply_event(ControlState(), ControlEvent(VECTOR_SET, SetVector((1.0, 2.0))))
+    assert state.latent_vec == (1.0, 2.0)
+
+
+def test_vector_set_from_raw_list_osc_parity():
+    state = apply_event(ControlState(), ControlEvent(VECTOR_SET, [1.0, 2.0, 3.0]))
+    assert state.latent_vec == (1.0, 2.0, 3.0)
+
+
+def test_vector_set_coerces_ints_to_floats():
+    state = apply_event(ControlState(), ControlEvent(VECTOR_SET, [1, 2, 3]))
+    assert state.latent_vec == (1.0, 2.0, 3.0)
+    assert all(isinstance(v, float) for v in state.latent_vec)
+
+
+def test_vector_set_empty_clears_the_vector():
+    before = apply_event(ControlState(), ControlEvent(VECTOR_SET, [1.0, 2.0]))
+    after = apply_event(before, ControlEvent(VECTOR_SET, []))
+    assert after.latent_vec == ()
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_vector_set_rejects_non_finite_entry_wholesale(caplog, bad):
+    before = ControlState(latent_vec=(9.0,))
+    with caplog.at_level(logging.WARNING):
+        after = apply_event(before, ControlEvent(VECTOR_SET, [1.0, bad, 2.0]))
+    assert after == before
+    assert any(
+        "non finite" in m or "non numeric" in m
+        for m in warnings_from(caplog, MAPPING_LOGGER)
+    )
+
+
+def test_vector_set_rejects_non_numeric_entry(caplog):
+    before = ControlState(latent_vec=(9.0,))
+    with caplog.at_level(logging.WARNING):
+        after = apply_event(before, ControlEvent(VECTOR_SET, [1.0, "nope"]))
+    assert after == before
+    assert warnings_from(caplog, MAPPING_LOGGER)
+
+
+def test_vector_set_with_non_sequence_value_ignored(caplog):
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = apply_event(before, ControlEvent(VECTOR_SET, "nope"))
+    assert after == before
+    assert any("non vector value" in m for m in warnings_from(caplog, MAPPING_LOGGER))
+
+
+# --- /vector/randomize ----------------------------------------------------
+
+
+def test_vector_randomize_is_recognized_and_left_to_the_control_loop(caplog):
+    before = ControlState()
+    with caplog.at_level(logging.DEBUG):
+        after = apply_event(before, ControlEvent(VECTOR_RANDOMIZE, 42))
+    assert after == before
+    assert not any(
+        "unknown address" in m for m in warnings_from(caplog, MAPPING_LOGGER)
+    )
+    assert not [
+        r for r in caplog.records if r.name == MAPPING_LOGGER and "unknown" in r.getMessage()
+    ]
+
+
+# --- /keyframe/set --------------------------------------------------------
+
+
+def set_keyframe(state, index, keyframe):
+    return apply_event(state, ControlEvent(KEYFRAME_SET, SetKeyframe(index, keyframe)))
+
+
+def test_keyframe_set_replaces_at_index():
+    state = set_keyframe(ControlState(), 0, Keyframe("seed", 9.0, 9.0))
+    assert state.keyframes[0] == Keyframe("seed", 9.0, 9.0)
+    assert len(state.keyframes) == 6
+    assert state.keyframe_count == 6
+
+
+def test_keyframe_set_at_len_appends():
+    before = ControlState()
+    keyframe = Keyframe("vec", vec=(1.0, 2.0))
+    state = set_keyframe(before, len(before.keyframes), keyframe)
+    assert len(state.keyframes) == 7
+    assert state.keyframes[-1] == keyframe
+    assert state.keyframe_count == 7
+
+
+def test_keyframe_set_out_of_range_ignored(caplog):
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = set_keyframe(before, 99, Keyframe("seed", 0.0, 0.0))
+    assert after == before
+    assert any("out of range" in m for m in warnings_from(caplog, MAPPING_LOGGER))
+
+
+def test_keyframe_set_rejects_non_finite_vec(caplog):
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = set_keyframe(before, 0, Keyframe("vec", vec=(1.0, float("nan"))))
+    assert after == before
+    assert warnings_from(caplog, MAPPING_LOGGER)
+
+
+def test_keyframe_set_with_non_set_keyframe_value_ignored(caplog):
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = apply_event(before, ControlEvent(KEYFRAME_SET, (0, "seed", 1.0, 0.0)))
+    assert after == before
+    assert any("non keyframe value" in m for m in warnings_from(caplog, MAPPING_LOGGER))
+
+
+def test_keyframe_set_with_osc_shaped_dict_ignored(caplog):
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = apply_event(
+            before, ControlEvent(KEYFRAME_SET, {"index": 0, "kind": "seed"})
+        )
+    assert after == before
+    assert any("non keyframe value" in m for m in warnings_from(caplog, MAPPING_LOGGER))
+
+
+def test_keyframe_set_with_non_keyframe_payload_ignored(caplog):
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = apply_event(before, ControlEvent(KEYFRAME_SET, SetKeyframe(0, "seed")))
+    assert after == before
+    assert any("malformed keyframe" in m for m in warnings_from(caplog, MAPPING_LOGGER))
+
+
+# --- /keyframe/remove ------------------------------------------------------
+
+
+def remove_keyframe(state, index):
+    return apply_event(state, ControlEvent(KEYFRAME_REMOVE, RemoveKeyframe(index)))
+
+
+def test_keyframe_remove_removes_at_index():
+    before = ControlState()
+    state = remove_keyframe(before, 1)
+    assert len(state.keyframes) == 5
+    assert state.keyframe_count == 5
+    assert state.keyframes == before.keyframes[:1] + before.keyframes[2:]
+
+
+def test_keyframe_remove_out_of_range_ignored(caplog):
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = remove_keyframe(before, 99)
+    assert after == before
+    assert any("out of range" in m for m in warnings_from(caplog, MAPPING_LOGGER))
+
+
+def test_keyframe_remove_last_keyframe_guard(caplog):
+    one = ControlState(keyframes=(default_keyframe(0),), keyframe_count=1)
+    with caplog.at_level(logging.WARNING):
+        after = remove_keyframe(one, 0)
+    assert after == one
+    assert any(
+        "at least one keyframe" in m for m in warnings_from(caplog, MAPPING_LOGGER)
+    )
+
+
+def test_keyframe_remove_with_non_remove_keyframe_value_ignored(caplog):
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = apply_event(before, ControlEvent(KEYFRAME_REMOVE, 1))
+    assert after == before
+    assert any("non keyframe value" in m for m in warnings_from(caplog, MAPPING_LOGGER))
+
+
+# --- keyframe_count resize --------------------------------------------------
+
+
+def test_keyframe_count_grows_preserving_prefix_with_seed_fill():
+    before = ControlState()
+    state = apply_event(before, ControlEvent("/loop/keyframes", 9))
+    assert state.keyframe_count == 9
+    assert len(state.keyframes) == 9
+    assert state.keyframes[:6] == before.keyframes
+    assert state.keyframes[6] == default_keyframe(6)
+    assert state.keyframes[8] == default_keyframe(8)
+
+
+def test_keyframe_count_shrinks_preserving_prefix():
+    before = ControlState()
+    state = apply_event(before, ControlEvent("/loop/keyframes", 3))
+    assert state.keyframe_count == 3
+    assert state.keyframes == before.keyframes[:3]
+
+
+def test_keyframe_count_clamped_to_registry_bounds():
+    state = apply_event(ControlState(), ControlEvent("/loop/keyframes", 999))
+    assert state.keyframe_count == 256
+    assert len(state.keyframes) == 256
+
+
+def test_keyframe_count_unchanged_is_a_noop_on_keyframes():
+    before = ControlState()
+    state = apply_event(before, ControlEvent("/loop/keyframes", 6))
+    assert state.keyframes == before.keyframes
+
+
+def test_keyframe_count_uncoercible_value_ignored(caplog):
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = apply_event(before, ControlEvent("/loop/keyframes", "nope"))
+    assert after == before

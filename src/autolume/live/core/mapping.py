@@ -2,6 +2,7 @@
 
 import dataclasses
 import logging
+import math
 
 from autolume.live.core.events import ControlEvent
 from autolume.live.core.expr import ExpressionError, compile_expression
@@ -9,11 +10,20 @@ from autolume.live.core.params import (
     BINDING_CLEAR,
     BINDING_SET,
     BY_ADDRESS,
+    KEYFRAME_REMOVE,
+    KEYFRAME_SET,
     REGISTRY,
+    VECTOR_RANDOMIZE,
+    VECTOR_SET,
     Binding,
     ClearBinding,
     ControlState,
+    Keyframe,
+    RemoveKeyframe,
+    SetKeyframe,
+    SetVector,
     apply_value,
+    default_keyframe,
 )
 from autolume.live.core.presets import PRESET_APPLY, from_payload
 
@@ -84,6 +94,127 @@ def _apply_preset(state: ControlState, value: object) -> ControlState:
     return dataclasses.replace(applied, bindings=bindings)
 
 
+def _coerce_vector(raw: object) -> tuple[float, ...] | None:
+    """Coerce a sequence to a tuple of finite floats, or None if it cannot be.
+
+    Rejects the whole sequence on any non-finite or non-numeric entry rather
+    than dropping the bad entries, so a malformed vector never lands half set.
+    """
+    try:
+        values = [float(item) for item in raw]
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not all(math.isfinite(v) for v in values):
+        return None
+    return tuple(values)
+
+
+def _set_vector(state: ControlState, value: object) -> ControlState:
+    if isinstance(value, SetVector):
+        raw = value.values
+    elif isinstance(value, (list, tuple)):
+        raw = value
+    else:
+        logger.warning("Ignoring non vector value %r on %s", value, VECTOR_SET)
+        return state
+    coerced = _coerce_vector(raw)
+    if coerced is None:
+        logger.warning(
+            "Ignoring vector with a non finite or non numeric entry on %s", VECTOR_SET
+        )
+        return state
+    return dataclasses.replace(state, latent_vec=coerced)
+
+
+def _set_keyframe(state: ControlState, value: object) -> ControlState:
+    if not isinstance(value, SetKeyframe):
+        logger.warning("Ignoring non keyframe value %r on %s", value, KEYFRAME_SET)
+        return state
+    if not isinstance(value.index, int) or isinstance(value.index, bool):
+        logger.warning(
+            "Ignoring malformed keyframe index %r on %s", value.index, KEYFRAME_SET
+        )
+        return state
+    if not isinstance(value.keyframe, Keyframe):
+        logger.warning(
+            "Ignoring malformed keyframe %r on %s", value.keyframe, KEYFRAME_SET
+        )
+        return state
+    keyframe = value.keyframe
+    if keyframe.kind == "vec" and _coerce_vector(keyframe.vec) is None:
+        logger.warning(
+            "Ignoring vec keyframe with a non finite or non numeric entry on %s",
+            KEYFRAME_SET,
+        )
+        return state
+    keyframes = list(state.keyframes)
+    index = value.index
+    if index == len(keyframes):
+        keyframes.append(keyframe)
+    elif 0 <= index < len(keyframes):
+        keyframes[index] = keyframe
+    else:
+        logger.warning(
+            "Ignoring keyframe set at out of range index %d on %s", index, KEYFRAME_SET
+        )
+        return state
+    return dataclasses.replace(
+        state, keyframes=tuple(keyframes), keyframe_count=len(keyframes)
+    )
+
+
+def _remove_keyframe(state: ControlState, value: object) -> ControlState:
+    if not isinstance(value, RemoveKeyframe):
+        logger.warning("Ignoring non keyframe value %r on %s", value, KEYFRAME_REMOVE)
+        return state
+    if not isinstance(value.index, int) or isinstance(value.index, bool):
+        logger.warning(
+            "Ignoring malformed keyframe index %r on %s", value.index, KEYFRAME_REMOVE
+        )
+        return state
+    keyframes = state.keyframes
+    if len(keyframes) <= 1:
+        logger.warning(
+            "Ignoring keyframe remove on %s, a loop needs at least one keyframe",
+            KEYFRAME_REMOVE,
+        )
+        return state
+    if not (0 <= value.index < len(keyframes)):
+        logger.warning(
+            "Ignoring keyframe remove at out of range index %d on %s",
+            value.index,
+            KEYFRAME_REMOVE,
+        )
+        return state
+    remaining = keyframes[: value.index] + keyframes[value.index + 1 :]
+    return dataclasses.replace(
+        state, keyframes=remaining, keyframe_count=len(remaining)
+    )
+
+
+def _resize_keyframes(state: ControlState, value: object, address: str) -> ControlState:
+    """Apply a `keyframe_count` write, resizing `keyframes` to match.
+
+    Goes through `apply_value` for the coercion and clamping every other
+    parameter gets, then grows or shrinks the tuple to the clamped count,
+    preserving the prefix and filling new slots with seed keyframes.
+    """
+    resized = apply_value(state, "keyframe_count", value, address)
+    # apply_value returns the same object, unchanged, when the value could
+    # not be coerced. Nothing to resize in that case.
+    if resized is state:
+        return state
+    count = resized.keyframe_count
+    current = list(state.keyframes)
+    if count > len(current):
+        current.extend(default_keyframe(i) for i in range(len(current), count))
+    elif count < len(current):
+        current = current[:count]
+    else:
+        return resized
+    return dataclasses.replace(resized, keyframes=tuple(current))
+
+
 def apply_event(state: ControlState, event: ControlEvent) -> ControlState:
     if event.address == BINDING_SET:
         return _set_binding(state, event.value)
@@ -91,8 +222,22 @@ def apply_event(state: ControlState, event: ControlEvent) -> ControlState:
         return _clear_binding(state, event.value)
     if event.address == PRESET_APPLY:
         return _apply_preset(state, event.value)
+    if event.address == VECTOR_SET:
+        return _set_vector(state, event.value)
+    if event.address == VECTOR_RANDOMIZE:
+        # Recognized only. Materializing the vector needs the model's z_dim,
+        # which mapping does not have, so the control loop applies this event
+        # itself once it can (see design.md). Recognizing it here just keeps
+        # it out of the unknown-address path below.
+        return state
+    if event.address == KEYFRAME_SET:
+        return _set_keyframe(state, event.value)
+    if event.address == KEYFRAME_REMOVE:
+        return _remove_keyframe(state, event.value)
     spec = BY_ADDRESS.get(event.address)
     if spec is None:
         logger.debug("Ignoring event for unknown address %s", event.address)
         return state
+    if spec.name == "keyframe_count":
+        return _resize_keyframes(state, event.value, event.address)
     return apply_value(state, spec.name, event.value, event.address)
