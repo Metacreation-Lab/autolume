@@ -226,19 +226,57 @@ def test_fit_scales_by_whichever_axis_runs_out_first():
     assert displayed_size((1024, 512), (600.0, 600.0), FIT) == (600, 300)
 
 
-def test_fit_scales_a_small_frame_up_to_the_panel():
-    """The preview is how a performer judges what they are making.
+def test_fit_never_magnifies_a_frame_smaller_than_the_panel():
+    """Native size, and a model that renders small is meant to look small.
 
-    A 256 model shown at 256 in the middle of a large panel is a smaller
-    picture for no reason the performer chose, and a Fit that only ever shrank
-    would differ from Stretch in two ways at once on a small model.
+    Magnifying is not fitting, so a Fit that enlarged would be misnamed, and
+    the size a model renders at is worth being able to see for what it is.
+    This is the old app's "Raw" behaviour under a name that describes it.
     """
-    assert displayed_size((256, 256), (900.0, 900.0), FIT) == (900, 900)
+    assert displayed_size((256, 256), (900.0, 900.0), FIT) == (256, 256)
+    assert displayed_size((256, 128), (900.0, 900.0), FIT) == (256, 128)
 
 
-def test_stretch_takes_the_panel_whatever_shape_it_is():
-    assert displayed_size(SQUARE, (1200.0, 600.0), STRETCH) == (1200, 600)
-    assert displayed_size((1024, 512), (300.0, 900.0), STRETCH) == (300, 900)
+def test_fit_leaves_a_frame_that_fits_exactly_alone():
+    # The boundary between native and shrunk, from both sides.
+    assert displayed_size((600, 600), (600.0, 600.0), FIT) == (600, 600)
+    assert displayed_size((601, 601), (600.0, 600.0), FIT) == (600, 600)
+    assert displayed_size((599, 599), (600.0, 600.0), FIT) == (599, 599)
+
+
+def test_magnifying_is_the_only_thing_the_two_modes_disagree_about():
+    # A square panel, so the shape cannot confuse the one real difference.
+    assert displayed_size((256, 256), (900.0, 900.0), STRETCH) == (900, 900)
+    assert displayed_size((256, 256), (900.0, 900.0), FIT) == (256, 256)
+
+
+def test_the_modes_agree_exactly_on_a_frame_too_big_for_the_panel():
+    # Above native size Fit's cap never binds, so there is nothing left to
+    # tell them apart. A Stretch that cropped or distorted would fail here.
+    for area in ((1200.0, 600.0), (599.5, 601.5), (300.0, 900.0)):
+        assert displayed_size((1024, 1024), area, FIT) == displayed_size(
+            (1024, 1024), area, STRETCH
+        )
+
+
+def test_a_frame_smaller_than_the_panel_is_still_centred_in_it():
+    # Both modes letterbox, so both leave room, and both split it evenly.
+    small = displayed_size((256, 256), (900.0, 700.0), FIT)
+    assert centred_offset(small, (900.0, 700.0)) == (322.0, 222.0)
+    grown = displayed_size((256, 256), (900.0, 700.0), STRETCH)
+    assert grown == (700, 700)
+    assert centred_offset(grown, (900.0, 700.0)) == (100.0, 0.0)
+
+
+def test_stretch_keeps_the_aspect_ratio_whatever_shape_the_panel_is():
+    """The bars land on the axis with room left, never on the tight one.
+
+    A wide panel and a square frame leaves the width over. A tall panel and a
+    wide frame leaves the height over. A mode that filled the panel would
+    return the panel's own size in both cases and distort the picture.
+    """
+    assert displayed_size(SQUARE, (1200.0, 600.0), STRETCH) == (600, 600)
+    assert displayed_size((1024, 512), (300.0, 900.0), STRETCH) == (300, 150)
 
 
 def test_neither_mode_ever_exceeds_the_panel_it_is_drawn_in():
@@ -307,20 +345,13 @@ def test_centred_offset_never_starts_something_off_the_left_edge():
     assert centred_offset((900.0, 20.0), (300.0, 300.0)) == (0.0, 140.0)
 
 
-def test_an_unchanged_frame_at_an_unchanged_size_is_never_uploaded_again():
+def test_an_unchanged_frame_is_never_uploaded_again():
     # The whole reason the mailbox carries a sequence number.
-    assert not needs_refresh(7, 7, (600, 600), (600, 600))
+    assert not needs_refresh(7, 7)
 
 
 def test_a_new_frame_is_uploaded():
-    assert needs_refresh(8, 7, (600, 600), (600, 600))
-
-
-def test_a_change_of_displayed_size_is_uploaded_too():
-    # immvision draws through a texture built at the size it was asked for, so
-    # the size is part of what is cached. A dock drag or a mode switch, never
-    # anything that happens during a performance.
-    assert needs_refresh(7, 7, (601, 600), (600, 600))
+    assert needs_refresh(8, 7)
 
 
 def test_model_name_falls_back_to_the_whole_path_when_there_is_no_filename():

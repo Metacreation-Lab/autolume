@@ -25,6 +25,43 @@ def _dockable(label: str, space: str, gui) -> hello_imgui.DockableWindow:
     return window
 
 
+def _viewport_dockable(label: str, space: str, gui) -> hello_imgui.DockableWindow:
+    """A dockable window that is a viewport rather than a form.
+
+    Every other panel is a form. Its content is rows of controls and it wants
+    the window padding the theme gives it, because text against a window edge
+    is cramped. A viewport's content is an image, it is meant to reach the
+    edges, and the same padding reads as a mount around the picture.
+
+    Padding is read once, by `Begin`, so there is nowhere inside the panel to
+    drop it from. That is the whole reason this window opens itself:
+    `call_begin_end` hands the `Begin` to us so the style can be pushed in
+    front of it. Docking is unaffected, because a window is docked by name
+    through the dock builder rather than by whoever calls `Begin`.
+
+    The preview is the only viewport today. The fullscreen output in the parity
+    plan is the same surface with even less chrome, so it goes through here as
+    well rather than repeating the reasoning.
+    """
+    window = _dockable(label, space, lambda: _viewport_body(label, gui))
+    window.call_begin_end = False
+    return window
+
+
+def _viewport_body(label: str, gui) -> None:
+    """Open `label` with no padding, draw `gui` in it, and always close it.
+
+    `End` is unconditional because imgui pairs it with `Begin` and not with
+    what `Begin` returned.
+    """
+    imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(0.0, 0.0))
+    opened, _ = imgui.begin(label)
+    imgui.pop_style_var()
+    if opened:
+        gui()
+    imgui.end()
+
+
 def _split(initial: str, new: str, direction, ratio: float):
     split = hello_imgui.DockingSplit()
     split.initial_dock = initial
@@ -69,7 +106,7 @@ def _build_runner_params(runtime) -> hello_imgui.RunnerParams:
         _dockable("Audio", _PATCH_SPACE, audio.gui),
         _dockable("Mapping", _PATCH_SPACE, mapping.gui),
         _dockable("Presets", _PATCH_SPACE, presets.gui),
-        _dockable("Preview", _MAIN_SPACE, preview.gui),
+        _viewport_dockable("Preview", _MAIN_SPACE, preview.gui),
     ]
     return params
 

@@ -17,6 +17,7 @@ theme the app runs under. Which driver wins and what a tooltip says are
 `test_controls.py`, which needs no context at all.
 """
 
+import collections
 import itertools
 
 import numpy as np
@@ -26,6 +27,7 @@ from imgui_bundle import hello_imgui, imgui, immvision
 from autolume.live.core.params import Binding, ControlState
 from autolume.live.core.sources import SourceTable
 from autolume.live.core.store import LatestValueStore
+from autolume.live.ui import window
 from autolume.live.ui.controls import (
     BINDING_COLOR,
     ERROR_COLOR,
@@ -36,7 +38,11 @@ from autolume.live.ui.controls import (
 )
 from autolume.live.ui.panels.mapping import bindable_specs
 from autolume.live.ui.panels.perform import PerformPanel, button_width
-from autolume.live.ui.panels.preview import _DIM_ALPHA, PreviewPanel
+from autolume.live.ui.panels.preview import (
+    _DIM_ALPHA,
+    DisplayMode,
+    PreviewPanel,
+)
 
 NOW = 100.0
 IDLE = ControlState()
@@ -227,9 +233,7 @@ def test_the_idle_grey_and_the_motion_green_differ_in_brightness(frame):
 def test_no_two_marker_colours_are_the_same_brightness(frame):
     palette = (idle_color(), MOTION_COLOR, BINDING_COLOR, ERROR_COLOR)
     values = sorted(luminance(color) for color in palette)
-    assert all(
-        contrast(low, high) > 1.2 for low, high in itertools.pairwise(values)
-    )
+    assert all(contrast(low, high) > 1.2 for low, high in itertools.pairwise(values))
 
 
 def test_an_idle_row_actually_paints_something(frame):
@@ -483,28 +487,57 @@ def rendered(value=0, shape=(8, 8, 3)):
 
 class FramePreview:
     """A mailbox with a frame in it, so the preview has something to be quiet
-    about. What it holds never reaches immvision, which needs a GL context."""
+    about. What it holds never reaches the GPU, which is not here."""
 
     def latest(self):
         return 7, rendered()
 
 
-def overlay_paint(runtime):
-    """What the status overlay costs: vertices drawn, and layout taken.
+class FakeTexture:
+    """Stands in for immvision.GlTexture, which needs a GL context.
 
-    Measured around the overlay itself, inside the child it paints into, which
-    is the only place either question can be asked. Zero vertices really is
-    nothing drawn, and a cursor that has not moved really is nothing placed.
+    Everything around it runs for real, including the copy the panel makes and
+    the quad imgui places, so what is faked is exactly the upload and nothing
+    else. It refuses a read-only array the way the real binding does: it
+    converts through a mutable cv::Mat, and a stand-in that accepted one would
+    let the panel pass here and fail on the first frame in the app.
+    """
 
-    Everything else runs for real. Only immvision is stood in for, because it
-    uploads a texture and there is no GL context here, and what it was handed
-    is recorded so the frame can be asked about afterwards.
+    texture_id = 1
+
+    def __init__(self):
+        self.uploads = []
+
+    def update_from_image(self, image, is_color_order_bgr=False):
+        if not image.flags.writeable:
+            raise TypeError("update_from_image(): incompatible function arguments")
+        self.uploads.append((image, is_color_order_bgr, image.copy()))
+
+
+Painted = collections.namedtuple("Painted", "ink moved panel quads")
+
+# Two panels drawn in one frame must not share a child id, or the second one
+# resolves to nothing and its assertions pass on an empty layout.
+_panel_ids = itertools.count()
+
+
+def draw_preview(runtime, panel=None, sizes=((400.0, 300.0),)):
+    """Draw a preview panel once per size, and report what it cost.
+
+    The overlay's ink and whether it took any layout, from the first pass, the
+    panel itself so the uploads it made can be asked about, and the size of
+    every quad the frame was drawn as.
     """
     result = []
-    shown = []
+    quads = []
     original_overlay = PreviewPanel._overlay
-    original_display = immvision.image_display
+    original_texture = immvision.GlTexture
+    original_image = imgui.image
     try:
+
+        def image(tex_ref, image_size, *args, **kwargs):
+            quads.append((image_size.x, image_size.y))
+            original_image(tex_ref, image_size, *args, **kwargs)
 
         def measure(self, status, origin, area, has_frame):
             draw_list = imgui.get_window_draw_list()
@@ -514,49 +547,43 @@ def overlay_paint(runtime):
             moved = imgui.get_cursor_pos() != cursor
             result.append((draw_list.vtx_buffer.size() - before, moved))
 
-        def display(label, image, size=None, refresh_image=False, **kwargs):
-            # The real binding converts through a mutable cv::Mat and refuses a
-            # read-only array with exactly this error. Frames arrive read-only
-            # from the render loop now, so a stand-in that accepted one would
-            # let the panel pass here and fail on the first frame in the app.
-            if not image.flags.writeable:
-                raise TypeError("image_display(): incompatible function arguments")
-            shown.append((image, size, refresh_image))
-            # immvision places an item of the size it was asked for, and the
-            # cursor having been moved to centre it is only legal because
-            # something is then submitted there.
-            imgui.dummy(imgui.ImVec2(float(size[0]), float(size[1])))
-            return (0.0, 0.0)
-
         PreviewPanel._overlay = measure
-        immvision.image_display = display
-        # A panel with room in it. The window this fixture opens is auto sized
-        # and has next to none, which is the zero area case rather than this
-        # one.
-        imgui.begin_child("##panel", imgui.ImVec2(400.0, 300.0))
-        PreviewPanel(runtime).gui()
-        imgui.end_child()
+        immvision.GlTexture = FakeTexture
+        imgui.image = image
+        panel = panel or PreviewPanel(runtime)
+        for size in sizes:
+            # A panel with room in it. The window this fixture opens is auto
+            # sized and has next to none, which is the zero area case rather
+            # than this one.
+            imgui.begin_child(f"##panel{next(_panel_ids)}", imgui.ImVec2(*size))
+            panel.gui()
+            imgui.end_child()
     finally:
         PreviewPanel._overlay = original_overlay
-        immvision.image_display = original_display
-    return result[0] + (shown,)
+        immvision.GlTexture = original_texture
+        imgui.image = original_image
+    return Painted(result[0][0], result[0][1], panel, quads)
+
+
+def uploads_of(panel):
+    return panel._texture.uploads if panel._texture is not None else []
 
 
 def test_a_preview_with_nothing_to_say_paints_nothing_at_all(frame):
-    """No plate, no glyph, no ink, over a frame that is doing fine.
+    """No dim, no glyph, no ink, over a frame that is doing fine.
 
     The status sits on the image now, so "nothing to say" has to mean nothing
     drawn rather than an empty line the way it did when it had a row of its
-    own. A plate over a running preview would be a permanent grey smudge in
-    the middle of the picture.
+    own. A dim over a running preview would be a permanent grey wash over the
+    middle of the picture.
     """
     running = PanelRuntime(host=FakeModelHost(current=object()))
     running.preview = FramePreview()
-    ink, moved, shown = overlay_paint(running)
-    assert (ink, moved) == (0, False)
-    # And the frame itself did go out, so this is a quiet preview rather than
-    # an empty one.
-    assert len(shown) == 1
+    painted = draw_preview(running)
+    assert (painted.ink, painted.moved) == (0, False)
+    # And the frame itself did go up, so this is a quiet preview rather than an
+    # empty one.
+    assert len(uploads_of(painted.panel)) == 1
 
 
 def test_the_status_is_painted_over_the_frame_rather_than_placed_above_it(frame):
@@ -564,9 +591,9 @@ def test_the_status_is_painted_over_the_frame_rather_than_placed_above_it(frame)
     # image instead of pushing it down the way the old line did.
     failing = PanelRuntime(host=FakeModelHost(error="Could not load the model"))
     failing.preview = FramePreview()
-    ink, moved, _ = overlay_paint(failing)
-    assert ink > 0
-    assert not moved
+    painted = draw_preview(failing)
+    assert painted.ink > 0
+    assert not painted.moved
 
 
 def test_only_a_preview_with_a_frame_in_it_is_dimmed(frame):
@@ -580,7 +607,7 @@ def test_only_a_preview_with_a_frame_in_it_is_dimmed(frame):
     empty = PanelRuntime(host=host)
     over_frame = PanelRuntime(host=host)
     over_frame.preview = FramePreview()
-    assert overlay_paint(over_frame)[0] > overlay_paint(empty)[0]
+    assert draw_preview(over_frame).ink > draw_preview(empty).ink
 
 
 def test_the_dim_never_reaches_the_frame_the_sinks_are_handed(frame):
@@ -601,13 +628,13 @@ def test_the_dim_never_reaches_the_frame_the_sinks_are_handed(frame):
 
     runtime = PanelRuntime(host=FakeModelHost(error="Could not load the model"))
     runtime.preview = OneFrame()
-    ink, _, shown = overlay_paint(runtime)
-    assert ink > 0
+    painted = draw_preview(runtime)
+    assert painted.ink > 0
     # Dimmed on screen, and byte for byte the frame that arrived on its way to
-    # the drawing. The panel copies for immvision's sake and for nothing else,
-    # so the copy carries the picture and not the dim, and the frame the other
-    # sinks hold is the one it came in as.
-    (image, _size, _refresh), = shown
+    # the GPU. The panel copies because the uploader will not take a read-only
+    # array and for no other reason, so the copy carries the picture and not
+    # the dim, and the frame the other sinks hold is the one it came in as.
+    ((image, _bgr, _pixels),) = uploads_of(painted.panel)
     assert np.array_equal(image, original)
     assert np.array_equal(original, untouched)
     assert not np.shares_memory(image, original)
@@ -617,7 +644,7 @@ def test_the_preview_draws_a_frame_it_is_not_allowed_to_write_to(frame):
     """End to end on the array the render loop actually hands out.
 
     Read-only is what keeps one sink from corrupting every other, and it is
-    also the one thing immvision will not accept: its binding converts through
+    also the one thing the uploader will not accept, since it converts through
     a mutable cv::Mat. So the panel copies, and this is what says the copy is
     there and that the picture survived it.
     """
@@ -625,71 +652,128 @@ def test_the_preview_draws_a_frame_it_is_not_allowed_to_write_to(frame):
     runtime.preview = type(
         "OneFrame", (), {"latest": lambda self: (3, rendered(140))}
     )()
-    _ink, _moved, shown = overlay_paint(runtime)
-    (image, _size, refresh), = shown
+    ((image, bgr, _pixels),) = uploads_of(draw_preview(runtime).panel)
     assert image.flags.writeable
-    assert refresh is True
     assert np.array_equal(image, rendered(140))
+    # The frames are RGB. Leaving this to immvision's global colour order would
+    # be a silent swap of red and blue in the only place anyone would see it.
+    assert bgr is False
 
 
-def test_a_still_preview_copies_the_frame_once_rather_than_every_gui_pass(frame):
-    """immvision ignores the pixels when it is not refreshing its texture.
+def test_a_still_preview_uploads_once_rather_than_every_gui_pass(frame):
+    """The whole reason the mailbox carries a sequence number.
 
-    A megabyte image recopied on every UI pass would be paying for uploads that
-    are not happening, several times per rendered frame, on the UI thread. The
-    buffer is the panel's and it is refilled when the texture is.
+    A megabyte image copied and uploaded on every UI pass would be paying for a
+    frame that has not changed, several times per rendered frame, on the UI
+    thread.
     """
     runtime = PanelRuntime(host=FakeModelHost(current=object()))
     runtime.preview = FramePreview()
+    panel = draw_preview(runtime, sizes=((400.0, 300.0),) * 3).panel
+    assert len(uploads_of(panel)) == 1
+    assert np.array_equal(uploads_of(panel)[0][2], rendered())
+
+
+def test_resizing_the_panel_does_not_upload_the_frame_again(frame):
+    """The texture holds the frame, the quad carries the size.
+
+    An earlier pass uploaded on a size change too, because immvision built its
+    texture at the size it was asked for. Drawing the quad here is what made
+    that unnecessary, and a dock split being dragged is a stream of new sizes.
+    """
+    runtime = PanelRuntime(host=FakeModelHost(current=object()))
+    runtime.preview = FramePreview()
+    panel = draw_preview(
+        runtime, sizes=((400.0, 300.0), (250.0, 300.0), (250.0, 180.0))
+    ).panel
+    assert len(uploads_of(panel)) == 1
+
+
+def test_immvision_would_letterbox_and_left_align_what_it_is_given(frame):
+    """Why the frame is drawn as a quad instead of by `image_display`.
+
+    `image_display` fits what it is handed into the size it is asked for with
+    the aspect ratio kept, and pins the result to the top left of that box. A
+    square frame asked to fill a wide box therefore comes back scaled by the
+    short axis and starting at the left, which is Fit's shape in Stretch's
+    place and the alignment of neither. Asserted on the matrix immvision
+    exposes, so that if it ever centres and stretches, the reason for owning
+    the draw is known to have gone.
+    """
+    matrix = immvision.make_zoom_pan_matrix_full_view((1024, 1024), (800, 400))
+    horizontal, vertical = matrix[0][0], matrix[1][1]
+    assert horizontal == vertical == 400 / 1024
+    assert (matrix[0][2], matrix[1][2]) == (0.0, 0.0)
+
+
+def test_a_viewport_window_gives_its_panel_the_whole_window(frame):
+    """The preview is a viewport, not a form, and wants no padding.
+
+    Padding is read once, by `Begin`, so there is nowhere inside the panel to
+    drop it from. This is what says the window opens itself in order to push
+    the style in front of that call, and that the push actually lands.
+    """
+    measured = {}
+
+    def record(key):
+        def gui():
+            measured[key] = (
+                imgui.get_cursor_screen_pos().x - imgui.get_window_pos().x,
+                imgui.get_content_region_avail().x - imgui.get_window_size().x,
+            )
+
+        return gui
+
+    window._viewport_body("Viewport", record("viewport"))
+    # A form window, opened the way hello_imgui opens every other panel.
+    imgui.begin("Form")
+    record("form")()
+    imgui.end()
+
+    assert measured["viewport"] == (0.0, 0.0)
+    assert measured["form"][0] > 0.0
+    assert measured["form"][1] < 0.0
+
+
+def test_only_the_preview_opens_itself_and_every_form_keeps_its_padding():
+    """The viewport treatment is one window's, and the forms are untouched.
+
+    `call_begin_end` is what hands the `Begin` to us, so a viewport that lost
+    it would quietly get its padding back, and a form that gained it would draw
+    nothing at all.
+    """
+    params = window._build_runner_params(PanelRuntime())
+    opens_itself = {
+        dockable.label: dockable.call_begin_end
+        for dockable in params.docking_params.dockable_windows
+    }
+    assert opens_itself["Preview"] is False
+    assert set(opens_itself) == {"Controls", "Audio", "Mapping", "Presets", "Preview"}
+    forms = {label for label, own in opens_itself.items() if own}
+    assert forms == {"Controls", "Audio", "Mapping", "Presets"}
+
+
+def test_the_quad_is_drawn_at_the_size_the_mode_asked_for(frame):
+    """End to end, from the geometry to the item imgui actually places.
+
+    The quad carries all the scaling now, so its size is the only place the
+    modes differ once a frame is on screen, and a quad drawn at the frame's own
+    size would be a preview that ignored both of them.
+    """
+    runtime = PanelRuntime(host=FakeModelHost(current=object()))
+    runtime.preview = FramePreview()
+
+    fitted = draw_preview(runtime)
+    # An 8 by 8 frame in a panel with room to spare, drawn at 8 by 8. Fit does
+    # not magnify, and this is that rule arriving at the screen.
+    assert fitted.quads == [(8.0, 8.0)]
+
     panel = PreviewPanel(runtime)
-    shown = []
-    original_display = immvision.image_display
-    try:
-
-        def display(label, image, size=None, refresh_image=False, **kwargs):
-            shown.append((image, refresh_image, image.copy()))
-            imgui.dummy(imgui.ImVec2(float(size[0]), float(size[1])))
-            return (0.0, 0.0)
-
-        immvision.image_display = display
-        for index in range(3):
-            imgui.begin_child(f"##panel{index}", imgui.ImVec2(400.0, 300.0))
-            panel.gui()
-            imgui.end_child()
-    finally:
-        immvision.image_display = original_display
-    assert [refresh for _image, refresh, _pixels in shown] == [True, False, False]
-    # One buffer throughout, and it still holds the frame on the passes that
-    # did not refill it, so a preview sitting on a still frame keeps drawing it.
-    assert shown[0][0] is shown[1][0] is shown[2][0]
-    assert all(np.array_equal(pixels, rendered()) for _i, _r, pixels in shown)
-
-
-def test_the_preview_never_makes_its_panel_scroll(frame):
-    """The status takes no layout, at any panel size, however long it is.
-
-    It is painted at a position rather than placed, which is what lets it sit
-    on the image without having pushed it down first. A message wider than the
-    panel is the case that would show it up, so that is the one drawn here.
-    """
-    failure = FakeModelHost(error="Could not load the model. " * 6)
-    for index, size in enumerate(((900.0, 300.0), (200.0, 600.0), (60.0, 60.0))):
-        imgui.begin_child(f"##host{index}", imgui.ImVec2(*size))
-        PreviewPanel(PanelRuntime(host=failure)).gui()
-        assert imgui.get_scroll_max_x() == 0.0
-        assert imgui.get_scroll_max_y() == 0.0
-        imgui.end_child()
-
-
-def test_the_preview_draws_its_status_line_in_every_state(frame):
-    """Each state pushes a colour it then has to pop.
-
-    An unbalanced style stack is not a wrong pixel, it is imgui asserting at
-    the end of the frame, so drawing all three inside one is the check.
-    """
-    for host in (
-        FakeModelHost(),
-        FakeModelHost(pending="/models/wikiart.pkl"),
-        FakeModelHost(error="No such file"),
-    ):
-        PreviewPanel(PanelRuntime(host=host)).gui()
+    panel._mode = DisplayMode.STRETCH
+    stretched = draw_preview(runtime, panel=panel)
+    ((width, height),) = stretched.quads
+    # Stretch is the mode that magnifies, and that is the whole of what it
+    # does differently. A square frame stays square: a quad that took the
+    # panel's shape would be the distortion this mode used to do.
+    assert (width, height) > (8.0, 8.0)
+    assert width == height
