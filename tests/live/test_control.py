@@ -147,6 +147,25 @@ def test_unbound_address_only_updates_the_source_table():
     assert control_store.snapshot() == ControlState()
 
 
+def test_touching_a_control_does_not_offer_it_as_an_input_source():
+    """The picker is a list of inputs, not an echo of the app's own output.
+
+    Every parameter has a transport address, so recording UI events would fill
+    the picker with the very addresses the app writes, and binding a parameter
+    to itself would be two clicks away.
+    """
+    clock = FakeClock()
+    clock.now = 5.0
+    loop, _, _, source_store = make_loop(clock)
+    loop.submit(ControlEvent("/trunc/psi", 1.2, source="ui"))
+    loop.tick()
+    assert source_store.snapshot().recent(clock.now) == []
+
+    loop.submit(ControlEvent("/trunc/psi", 1.2, source="osc"))
+    loop.tick()
+    assert source_store.snapshot().recent(clock.now) == ["/trunc/psi"]
+
+
 def test_a_slash_less_address_reaches_the_binding_it_is_listed_as():
     """The picker offers what the table stored, so a binding on it must fire.
 

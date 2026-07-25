@@ -142,8 +142,13 @@ class ControlLoop:
         number = as_float(event.value)
         if number is None:
             return apply_event(state, event), sources
-        stamp = now if event.timestamp is None else event.timestamp
-        sources = sources.observe(address, number, stamp)
+        # The source table is the picker's list of available inputs, so what
+        # this app writes out has no business in it. Recording UI events would
+        # fill it with the parameters' own transport addresses and put binding
+        # a parameter to itself two clicks away.
+        if event.source != "ui":
+            stamp = now if event.timestamp is None else event.timestamp
+            sources = sources.observe(address, number, stamp)
         state = apply_event(state, event)
         return self._drive_bindings(state, address, number, now), sources
 
