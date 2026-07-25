@@ -10,6 +10,7 @@ from autolume.live.core.generator import ModelHost
 from autolume.live.core.engine import RenderLoop
 from autolume.live.core.params import ControlState, to_render_params
 from autolume.live.core.sinks import PreviewMailbox
+from autolume.live.core.sources import SourceTable
 from autolume.live.core.store import LatestValueStore
 from autolume.live.io.osc import OscInput
 
@@ -18,10 +19,11 @@ class Runtime:
     def __init__(self, model_host: ModelHost, osc_port: int, start_osc: bool) -> None:
         self.control_store = LatestValueStore(ControlState())
         self.render_store = LatestValueStore(to_render_params(ControlState()))
+        self.source_store = LatestValueStore(SourceTable())
         self.model_host = model_host
         self.preview = PreviewMailbox()
         self.control_loop = _ModelWatchingControlLoop(
-            self.control_store, self.render_store, model_host
+            self.control_store, self.render_store, self.source_store, model_host
         )
         self.render_loop = RenderLoop(
             self.render_store, self.model_host, [self.preview]
@@ -57,8 +59,10 @@ class _ModelWatchingControlLoop(ControlLoop):
     the control tick where every state change already flows.
     """
 
-    def __init__(self, control_store, render_store, model_host, **kwargs) -> None:
-        super().__init__(control_store, render_store, **kwargs)
+    def __init__(
+        self, control_store, render_store, source_store, model_host, **kwargs
+    ) -> None:
+        super().__init__(control_store, render_store, source_store, **kwargs)
         self._model_host = model_host
         self._last_pkl_path: str | None = None
 

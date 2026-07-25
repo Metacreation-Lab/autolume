@@ -23,7 +23,8 @@ def _canonical(address: str) -> str:
     return address if address.startswith("/") else "/" + address
 
 
-def _as_float(value: object) -> float | None:
+def as_float(value: object) -> float | None:
+    """Return `value` as a float, or None if it does not carry a number."""
     if isinstance(value, (str, bytes, bytearray)):
         return None
     try:
@@ -37,7 +38,7 @@ class SourceTable:
     entries: Mapping[str, SourceValue] = field(default_factory=dict)
 
     def observe(self, address: str, value: object, timestamp: float) -> "SourceTable":
-        number = _as_float(value)
+        number = as_float(value)
         if number is None:
             return self
 
