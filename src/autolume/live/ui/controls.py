@@ -51,6 +51,11 @@ _PLATE_INSET = 0.15
 # A widget hands its value back through a C float, so it cannot express a
 # difference finer than this. Anything closer is the same value.
 _FLOAT_TOLERANCE = 1e-6
+# How long a local hold may wait for the store, in frames. The round trip it
+# hides is one frame plus one control tick, so this is generous by two orders
+# of magnitude and still short enough that a hold the store never answers is
+# gone before the next thing the performer reaches for.
+_HOLD_FRAMES = 30
 
 T = TypeVar("T")
 Color = tuple[float, float, float, float]
@@ -175,11 +180,13 @@ class Override:
 
     `stored` is what the store held at the moment the value was set, which is
     how a store that moves on to something else can be told from a store that
-    has simply not applied the value yet.
+    has simply not applied the value yet. `frame` is when it was set, which is
+    what bounds how long it may wait.
     """
 
     value: Value
     stored: Value
+    frame: int
 
 
 def values_agree(one: Value, other: Value) -> bool:
@@ -220,6 +227,8 @@ def next_override(
     *,
     changed: bool,
     active: bool,
+    live: bool,
+    frame: int,
 ) -> Override | None:
     """The local hold after one frame of a widget, or None once it is done.
 
@@ -228,24 +237,39 @@ def next_override(
     draws the previous state for a frame, which a checkbox shows as a visible
     flick back. It ends when the store agrees instead.
 
+    A control the hand cannot act on has no hold at all. A read only or
+    disabled widget can never report a change, so it can neither open one nor
+    ever be the thing that clears one, and a hold left on it would draw a value
+    the performer has no way left to correct.
+
     A store that moves to a third value once the widget is released is a
     binding that won the parameter back. The hold ends there too, because
     showing what drives the parameter beats a number frozen at what the hand
     last asked for. While the widget is still held that same disagreement is
     the round trip the hold exists to hide, so it is ignored.
 
-    Between them the two endings also bound the lifetime of a hold left behind
-    by a widget that stopped being drawn mid drag, a panel closed or a section
-    collapsed. Nothing reads it while it is not drawn, and the first frame the
-    widget comes back settles it either way.
+    And a hold lapses. Every other ending waits on a passing state of the
+    store, and the UI only looks at the store once a frame: a value written and
+    overwritten within one control tick, or while the window is not drawing, is
+    a value no frame ever sees. A bool has no third value to fall back on when
+    that happens, so a hold that only waited would wait for the rest of the
+    session. This is the same ceiling `TouchTracker` puts on a touch, for the
+    same reason: state cleared only by an event that may never arrive needs a
+    condition that resolves on its own.
     """
+    if not live:
+        return None
     if changed:
-        return Override(value, snapshot)
+        return Override(value, snapshot, frame)
     if override is None:
         return None
     if values_agree(override.value, snapshot):
         return None
-    if not active and not values_agree(override.stored, snapshot):
+    if active:
+        return override
+    if not values_agree(override.stored, snapshot):
+        return None
+    if frame - override.frame >= _HOLD_FRAMES:
         return None
     return override
 
@@ -394,6 +418,9 @@ class ControlBinder:
             value,
             changed=changed,
             active=imgui.is_item_active(),
+            live=live,
+            # `_snapshot` has already read the frame count this frame.
+            frame=self._frame,
         )
         if override is None:
             self._local.pop(name, None)

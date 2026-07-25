@@ -9,9 +9,21 @@ import struct
 
 import pytest
 
-from autolume.live.core.params import REGISTRY, Binding, ControlState, ParamKind
+from autolume.live.core.control import ControlLoop
+from autolume.live.core.events import ControlEvent
+from autolume.live.core.params import (
+    REGISTRY,
+    Binding,
+    ControlState,
+    ParamKind,
+    to_render_params,
+)
+from autolume.live.core.presets import PRESET_APPLY, to_payload
+from autolume.live.core.sources import SourceTable
+from autolume.live.core.store import LatestValueStore
 from autolume.live.core.touch import TOUCH_BEGIN, TOUCH_END
 from autolume.live.ui.controls import (
+    _HOLD_FRAMES,
     BINDING_COLOR,
     BINDING_OFF_COLOR,
     ERROR_COLOR,
@@ -203,12 +215,12 @@ def test_displayed_value_is_the_snapshot_when_nothing_is_held():
 
 
 def test_displayed_value_is_the_local_one_while_the_widget_is_held():
-    held = {"latent_x": Override(0.9, 0.5)}
+    held = {"latent_x": Override(0.9, 0.5, 1)}
     assert displayed_value(held, "latent_x", 0.5) == 0.9
 
 
 def test_displayed_value_of_one_parameter_does_not_leak_to_another():
-    held = {"latent_x": Override(0.9, 0.5)}
+    held = {"latent_x": Override(0.9, 0.5, 1)}
     assert displayed_value(held, "latent_y", 0.5) == 0.5
 
 
@@ -228,44 +240,75 @@ def test_values_agree_exactly_on_whole_numbers():
     assert not values_agree(True, False)
 
 
+def _hold(override, snapshot, value, **flags):
+    return next_override(
+        override,
+        snapshot,
+        value,
+        changed=flags.get("changed", False),
+        active=flags.get("active", False),
+        live=flags.get("live", True),
+        frame=flags.get("frame", 1),
+    )
+
+
 def test_a_change_holds_the_value_against_the_stored_one():
-    assert next_override(None, 0.5, 0.9, changed=True, active=True) == Override(
-        0.9, 0.5
+    assert _hold(None, 0.5, 0.9, changed=True, active=True, frame=7) == Override(
+        0.9, 0.5, 7
     )
 
 
 def test_a_change_that_releases_in_the_same_frame_still_holds():
     # Every checkbox click. The value only reaches the store on the next
     # control tick, so dropping the hold here draws the old state for a frame.
-    assert next_override(None, False, True, changed=True, active=False) == Override(
-        True, False
-    )
+    assert _hold(None, False, True, changed=True) == Override(True, False, 1)
 
 
 def test_the_hold_is_dropped_once_the_store_agrees():
-    held = Override(0.9, 0.5)
-    assert next_override(held, 0.9, 0.9, changed=False, active=True) is None
+    held = Override(0.9, 0.5, 1)
+    assert _hold(held, 0.9, 0.9, active=True) is None
 
 
 def test_the_hold_outlasts_a_binding_writing_underneath_a_held_widget():
-    held = Override(0.9, 0.5)
-    assert next_override(held, 0.2, 0.9, changed=False, active=True) == held
+    held = Override(0.9, 0.5, 1)
+    assert _hold(held, 0.2, 0.9, active=True, frame=1 + _HOLD_FRAMES * 10) == held
 
 
 def test_the_hold_outlasts_a_release_while_the_value_is_still_in_flight():
-    held = Override(True, False)
-    assert next_override(held, False, True, changed=False, active=False) == held
+    held = Override(True, False, 1)
+    assert _hold(held, False, True) == held
 
 
 def test_the_hold_is_dropped_when_the_store_moves_on_after_release():
     # Nothing else clears it: the widget may never be drawn again, and a
     # binding driving this parameter would otherwise show a frozen number.
-    held = Override(0.9, 0.5)
-    assert next_override(held, 0.2, 0.9, changed=False, active=False) is None
+    held = Override(0.9, 0.5, 1)
+    assert _hold(held, 0.2, 0.9) is None
 
 
 def test_nothing_held_stays_nothing():
-    assert next_override(None, 0.5, 0.5, changed=False, active=False) is None
+    assert _hold(None, 0.5, 0.5) is None
+
+
+def test_a_control_the_hand_cannot_act_on_holds_nothing():
+    # A binding taking the parameter over is the way this happens: the widget
+    # goes read only between one frame and the next, and from then on it can
+    # neither report a change nor ever clear what it was holding.
+    held = Override(False, True, 1)
+    assert _hold(held, True, False, live=False, frame=2) is None
+
+
+def test_a_control_the_hand_cannot_act_on_cannot_open_a_hold():
+    assert _hold(None, True, False, changed=True, live=False) is None
+
+
+def test_the_hold_lapses_rather_than_wait_for_a_value_that_already_went_by():
+    # A bool the store wrote and overwrote inside one control tick: no frame
+    # ever sees the value the hold waits for, and there is no third value it
+    # could move on to either.
+    held = Override(False, True, 1)
+    assert _hold(held, True, False, frame=_HOLD_FRAMES) == held
+    assert _hold(held, True, False, frame=1 + _HOLD_FRAMES) is None
 
 
 def test_an_untouched_widget_emits_nothing():
@@ -309,3 +352,118 @@ def test_touch_events_are_sourced_from_the_ui():
     # The control loop honors touch only from the ui, so this is load bearing.
     events = _events(activated=True, changed=True, deactivated=True)
     assert {event.source for event in events} == {"ui"}
+
+
+class _Clock:
+    def __init__(self):
+        self.now = 0.0
+
+    def __call__(self):
+        return self.now
+
+
+class _Session:
+    """A binder driving a real control loop, one frame at a time.
+
+    imgui-bundle's null backend asserts, so the widget loop is restated here
+    rather than driven: the gutter decides whether the control is live, a
+    widget inside `begin_disabled` reports neither a change nor any activity,
+    and the events and the hold both come off the same `changed` flag. Only the
+    imgui calls are missing, and what runs underneath is the real control
+    thread, so a value takes the same round trip it takes in the app.
+    """
+
+    def __init__(self, state: ControlState) -> None:
+        self.clock = _Clock()
+        self.store = LatestValueStore(state)
+        self.loop = ControlLoop(
+            self.store,
+            LatestValueStore(to_render_params(state)),
+            LatestValueStore(SourceTable()),
+            clock=self.clock,
+        )
+        self.local: dict[str, Override] = {}
+        self.frame = 0
+
+    def tick(self, count: int = 1) -> None:
+        for _ in range(count):
+            self.clock.now += 0.008
+            self.loop.tick()
+
+    def submit(self, address: str, value: object, source: str = "ui") -> None:
+        self.loop.submit(ControlEvent(address, value, source=source))
+
+    def draw(self, name: str, *, clicked: bool = False, enabled: bool = True):
+        """Draw one widget for one frame and return what it shows."""
+        self.frame += 1
+        state = self.store.snapshot()
+        gutter = gutter_for(state, name)
+        live = enabled and not gutter.read_only
+        stored = getattr(state, name)
+        shown = displayed_value(self.local, name, stored)
+        # imgui swallows a click inside a disabled block entirely.
+        changed = clicked and live
+        value = (not shown) if changed else shown
+        override = next_override(
+            self.local.get(name),
+            stored,
+            value,
+            changed=changed,
+            active=False,
+            live=live,
+            frame=self.frame,
+        )
+        if override is None:
+            self.local.pop(name, None)
+        else:
+            self.local[name] = override
+        for event in widget_events(
+            REGISTRY[name],
+            value,
+            activated=changed,
+            changed=changed,
+            deactivated=changed,
+        ):
+            self.loop.submit(event)
+        return shown, gutter
+
+
+def test_a_binding_taking_a_parameter_over_cannot_freeze_the_control_that_lost_it():
+    """The reported bug: Animate drawn unchecked while the animation runs.
+
+    The performer clicks Animate off while the control thread is between ticks,
+    then recalls a preset that turns animation back on and binds the parameter.
+    Both drain in the same tick, so no frame ever sees the store hold the value
+    the hold is waiting for, and the checkbox is now read only and can never
+    report a change again. Waiting on a value the store has already moved past
+    is what makes the hold outlive its purpose, and a bool has no third value to
+    fall back on, so nothing else can end it either.
+    """
+    session = _Session(ControlState(anim_playing=True, anim_speed_x=-0.03))
+    shown, gutter = session.draw("anim_playing", clicked=True)
+    assert shown is True and not gutter.read_only
+
+    payload = to_payload(
+        ControlState(
+            anim_playing=True,
+            anim_speed_x=-0.03,
+            bindings=(Binding("anim_playing", "/audio/level"),),
+        )
+    )
+    session.submit(PRESET_APPLY, payload)
+    session.tick()
+    assert session.store.snapshot().anim_playing is True
+
+    # Every frame after that the performer clicks the box and nothing moves.
+    for _ in range(200):
+        session.submit("/audio/level", 0.31, source="audio")
+        session.tick(2)
+        shown, gutter = session.draw("anim_playing", clicked=True)
+
+    state = session.store.snapshot()
+    # The animation is running and the gutter says so, so the box beside it
+    # cannot be drawn unchecked. That disagreement is the whole bug.
+    assert gutter_for(state, "latent_x").marker is Marker.MOTION
+    assert state.latent_x != 0.0
+    assert shown is True
+    assert not session.local
