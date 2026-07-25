@@ -43,7 +43,9 @@ _SPECS = (
     ParamSpec("noise_enabled", ParamKind.BOOL, True, "/noise/enabled"),
     ParamSpec("noise_seed", ParamKind.INT, 0, "/noise/seed", 0, 2**31 - 1),
     ParamSpec("noise_anim", ParamKind.BOOL, False, "/noise/anim"),
-    ParamSpec("fps_cap", ParamKind.INT, 60, "/render/fps", 0, 240),
+    # Not persisted: the frame limit is a property of the machine, not of the
+    # look. A preset saved on a laptop capped at 30 must not cap stage hardware.
+    ParamSpec("fps_cap", ParamKind.INT, 60, "/render/fps", 0, 240, preset=False),
 )
 
 REGISTRY: dict[str, ParamSpec] = {spec.name: spec for spec in _SPECS}

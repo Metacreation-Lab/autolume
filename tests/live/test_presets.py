@@ -27,7 +27,6 @@ SAMPLE = ControlState(
     noise_enabled=False,
     noise_seed=99,
     noise_anim=True,
-    fps_cap=30,
     bindings=(
         Binding("truncation_psi", "/audio/bass", "0.4+x"),
         Binding("latent_x", "/ctl/1", "x*2", enabled=False),
@@ -93,6 +92,20 @@ def test_saved_file_is_json_with_the_expected_envelope(tmp_path):
             "enabled": False,
         },
     ]
+
+
+def test_the_frame_limit_is_a_property_of_the_machine_not_of_the_look(tmp_path):
+    """A look saved on a laptop capped at 30 must not cap the stage machine.
+
+    The model path is the opposite case and stays persisted: it is what the
+    look looks like, while the frame limit is what the hardware can do.
+    """
+    path = tmp_path / "look.json"
+    presets.save(dataclasses.replace(SAMPLE, fps_cap=30), path)
+    payload = presets.load(path)
+    assert "fps_cap" not in payload["params"]
+    assert "pkl_path" in payload["params"]
+    assert apply_payload(ControlState(fps_cap=144), payload).fps_cap == 144
 
 
 def test_params_written_follow_the_registry_preset_flag(monkeypatch):
@@ -202,10 +215,10 @@ def test_corrupt_file_raises(tmp_path):
 def test_out_of_range_value_is_clamped_on_apply():
     payload = presets.to_payload(SAMPLE)
     payload["params"]["truncation_psi"] = 9.0
-    payload["params"]["fps_cap"] = -20
+    payload["params"]["noise_seed"] = -20
     state = apply_payload(ControlState(), payload)
     assert state.truncation_psi == 2.0
-    assert state.fps_cap == 0
+    assert state.noise_seed == 0
 
 
 def test_uncoercible_value_leaves_the_current_value():
@@ -352,7 +365,7 @@ def test_preset_dir_lives_under_the_data_root_and_is_created(tmp_path, monkeypat
 def test_save_creates_missing_parent_directories(tmp_path):
     path = tmp_path / "deep" / "nested" / "look.json"
     presets.save(SAMPLE, path)
-    assert presets.load(path)["params"]["fps_cap"] == 30
+    assert presets.load(path)["params"]["truncation_psi"] == 1.25
 
 
 def test_save_accepts_a_str_path(tmp_path):

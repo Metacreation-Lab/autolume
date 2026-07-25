@@ -213,11 +213,11 @@ def apply_preset(state, payload):
 
 def test_preset_apply_sets_params_and_bindings_in_one_event():
     payload = preset_payload(
-        {"truncation_psi": 1.4, "fps_cap": 30},
+        {"truncation_psi": 1.4, "global_noise": 0.3},
         [{"target": "latent_x", "source": "/audio/level", "expression": "x*2"}],
     )
     state = apply_preset(ControlState(), payload)
-    assert (state.truncation_psi, state.fps_cap) == (1.4, 30)
+    assert (state.truncation_psi, state.global_noise) == (1.4, 0.3)
     assert state.bindings == (Binding("latent_x", "/audio/level", "x*2"),)
 
 
