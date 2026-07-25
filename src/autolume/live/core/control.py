@@ -12,6 +12,7 @@ because one event was malformed or one mapping had a typo.
 import collections
 import dataclasses
 import logging
+import math
 import threading
 import time
 from typing import Callable
@@ -258,7 +259,7 @@ class ControlLoop:
         if info is None:
             logger.info("Ignoring %s, no model is loaded yet", VECTOR_RANDOMIZE)
             return state
-        if seed_number is None:
+        if seed_number is None or not math.isfinite(seed_number):
             logger.warning("Ignoring non numeric seed on %s", VECTOR_RANDOMIZE)
             return state
         seed = int(round(seed_number)) & _SEED_MASK

@@ -797,6 +797,33 @@ def test_vector_randomize_with_a_non_numeric_seed_is_ignored():
     assert control_store.snapshot().latent_vec == ()
 
 
+def test_vector_randomize_with_a_non_finite_seed_is_ignored_cleanly(caplog):
+    """A non finite seed must take the log-and-ignore path, not the guard.
+
+    `int(round(seed_number))` raises on `nan` (ValueError) and `inf`
+    (OverflowError). Without an explicit `math.isfinite` check, the event
+    still leaves the vector unchanged, but only because the last resort guard
+    in `tick()` catches the exception and drops it, logging an ERROR with a
+    full traceback instead of this function's own clean warning. Asserting
+    only "vector unchanged" would pass on that buggy path too, so this checks
+    the log record as well: a guard hit is unmistakably an ERROR from
+    `_report_guard`, while the intended path is a WARNING from
+    `_randomize_vector`.
+    """
+    clock = FakeClock()
+    info = ModelInfo(pkl_path="model.pkl", z_dim=2, num_ws=8)
+    loop, control_store, _, _ = make_loop_with_model(clock, info)
+    with caplog.at_level(logging.WARNING, logger=control_module.__name__):
+        loop.submit(ControlEvent(VECTOR_RANDOMIZE, float("nan"), source="ui"))
+        loop.submit(ControlEvent(VECTOR_RANDOMIZE, float("inf"), source="ui"))
+        loop.tick()
+    assert control_store.snapshot().latent_vec == ()
+    logged = [r for r in caplog.records if r.name == control_module.__name__]
+    assert len(logged) == 2
+    assert all(record.levelno == logging.WARNING for record in logged)
+    assert all(record.exc_info is None for record in logged)
+
+
 def test_vector_randomize_updates_when_the_model_changes_between_ticks():
     """`model_info` is refreshed once per tick, not read at construction."""
     clock = FakeClock()
