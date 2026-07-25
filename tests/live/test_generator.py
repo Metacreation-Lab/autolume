@@ -1,3 +1,4 @@
+import logging
 import threading
 import time
 
@@ -9,8 +10,9 @@ from autolume.live.core.generator import (
     corner_seeds,
     effective_noise_seed,
     noise_mode,
+    slerp,
 )
-from autolume.live.core.params import ControlState, to_render_params
+from autolume.live.core.params import ControlState, Keyframe, to_render_params
 
 
 def render_params(**changes):
@@ -302,3 +304,251 @@ def test_global_noise_walk_is_skipped_when_value_is_unchanged():
     model.render_frame(render_params(global_noise=0.75), 2)
     assert model.G.module_walks == 2
     assert noisy.global_noise == 0.75
+
+
+# --- vec and loop modes -----------------------------------------------------
+#
+# These fixtures use z_dim == w_dim (unlike the fixtures above, which keep
+# them different to prove shape routing does not care), so the vec/W tests
+# below can exercise realistic single-vector-broadcast behavior.
+
+
+class _RecordingMapping:
+    def __init__(self, w_dim, num_ws):
+        import torch
+
+        self.w_avg = torch.zeros([w_dim])
+        self.c_dim = 0
+        self._num_ws = num_ws
+        self.calls = []
+
+    def __call__(self, z, c, truncation_psi):
+        self.calls.append((z.clone(), truncation_psi))
+        return z.unsqueeze(1).repeat(1, self._num_ws, 1) * truncation_psi
+
+
+class _VecG:
+    def __init__(self, z_dim, num_ws, synthesis):
+        self.z_dim = z_dim
+        self.num_ws = num_ws
+        self.mapping = _RecordingMapping(z_dim, num_ws)
+        self.synthesis = synthesis
+
+    def modules(self):
+        return []
+
+
+def _recording_synthesis(sink):
+    def synthesis(ws, noise_mode):
+        import torch
+
+        sink.append(ws.clone())
+        return torch.zeros([1, 3, 4, 4])
+
+    return synthesis
+
+
+def _vec_model(z_dim=4, num_ws=3, synthesis=None):
+    import torch
+
+    from autolume.live.core.generator import LoadedModel
+
+    return LoadedModel(
+        "/tmp/vec.pkl", _VecG(z_dim, num_ws, synthesis or _zeros_synthesis), torch.device("cpu")
+    )
+
+
+def test_vec_projected_passes_truncation_into_mapping():
+    model = _vec_model(z_dim=4, num_ws=3)
+    params = render_params(
+        vector_mode=True,
+        latent_project=True,
+        latent_vec=(1.0, 2.0, 3.0, 4.0),
+        truncation_psi=0.5,
+    )
+    model.render_frame(params, 0)
+    assert len(model.G.mapping.calls) == 1
+    z, psi = model.G.mapping.calls[0]
+    assert psi == 0.5
+    assert z.tolist() == [[1.0, 2.0, 3.0, 4.0]]
+
+
+def test_vec_unprojected_exact_length_passes_rows_through():
+    sink = []
+    model = _vec_model(z_dim=4, num_ws=3, synthesis=_recording_synthesis(sink))
+    rows = (1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3)
+    params = render_params(
+        vector_mode=True, latent_project=False, latent_vec=rows
+    )
+    model.render_frame(params, 0)
+    assert sink[-1][0].tolist() == [
+        [1, 1, 1, 1],
+        [2, 2, 2, 2],
+        [3, 3, 3, 3],
+    ]
+
+
+def test_vec_unprojected_too_many_rows_truncates_to_num_ws():
+    sink = []
+    model = _vec_model(z_dim=4, num_ws=3, synthesis=_recording_synthesis(sink))
+    rows = (1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4)
+    params = render_params(
+        vector_mode=True, latent_project=False, latent_vec=rows
+    )
+    model.render_frame(params, 0)
+    assert sink[-1][0].tolist() == [
+        [1, 1, 1, 1],
+        [2, 2, 2, 2],
+        [3, 3, 3, 3],
+    ]
+
+
+def test_vec_unprojected_too_few_rows_repeats_last_row():
+    sink = []
+    model = _vec_model(z_dim=4, num_ws=3, synthesis=_recording_synthesis(sink))
+    rows = (1, 1, 1, 1, 2, 2, 2, 2)
+    params = render_params(
+        vector_mode=True, latent_project=False, latent_vec=rows
+    )
+    model.render_frame(params, 0)
+    assert sink[-1][0].tolist() == [
+        [1, 1, 1, 1],
+        [2, 2, 2, 2],
+        [2, 2, 2, 2],
+    ]
+
+
+def test_empty_vector_fallback_is_deterministic_and_logged_once(caplog):
+    import numpy as np
+    import torch
+
+    model = _vec_model(z_dim=4, num_ws=2)
+    params = render_params(vector_mode=True, latent_project=True, latent_vec=())
+    with caplog.at_level(logging.WARNING):
+        model.render_frame(params, 0)
+        model.render_frame(params, 1)
+    calls = model.G.mapping.calls
+    assert len(calls) == 2
+    expected = np.random.RandomState(0).randn(4).astype(np.float32)
+    assert torch.allclose(calls[0][0][0], torch.from_numpy(expected))
+    assert torch.allclose(calls[1][0][0], torch.from_numpy(expected))
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+
+
+def test_loop_endpoint_cache_reuses_mapping_per_endpoint():
+    model = _vec_model(z_dim=4, num_ws=3)
+    kf0 = Keyframe("vec", vec=(1.0, 2.0, 3.0, 4.0), project=True)
+    kf1 = Keyframe("vec", vec=(5.0, 6.0, 7.0, 8.0), project=True)
+    params = render_params(
+        loop_active=True,
+        keyframes=(kf0, kf1),
+        loop_index=1,
+        loop_alpha=0.5,
+        truncation_psi=0.6,
+    )
+    model.render_frame(params, 0)
+    model.render_frame(params, 1)
+    assert len(model.G.mapping.calls) == 2
+
+
+def test_loop_alpha_zero_matches_previous_keyframe():
+    import torch
+
+    sink = []
+    model = _vec_model(z_dim=4, num_ws=3, synthesis=_recording_synthesis(sink))
+    kf0 = Keyframe("seed", seed_x=0.0, seed_y=0.0)
+    kf1 = Keyframe("seed", seed_x=1.0, seed_y=0.0)
+    loop_params = render_params(
+        loop_active=True,
+        keyframes=(kf0, kf1),
+        loop_index=1,
+        loop_alpha=0.0,
+        truncation_psi=0.7,
+    )
+    model.render_frame(loop_params, 0)
+    loop_ws = sink[-1]
+
+    seed_params = render_params(latent_x=0.0, latent_y=0.0, truncation_psi=0.7)
+    model.render_frame(seed_params, 0)
+    seed_ws = sink[-1]
+
+    assert torch.allclose(loop_ws, seed_ws, atol=1e-5)
+
+
+def test_loop_alpha_one_matches_current_keyframe():
+    import torch
+
+    sink = []
+    model = _vec_model(z_dim=4, num_ws=3, synthesis=_recording_synthesis(sink))
+    kf0 = Keyframe("seed", seed_x=0.0, seed_y=0.0)
+    kf1 = Keyframe("seed", seed_x=1.0, seed_y=0.0)
+    loop_params = render_params(
+        loop_active=True,
+        keyframes=(kf0, kf1),
+        loop_index=1,
+        loop_alpha=1.0,
+        truncation_psi=0.7,
+    )
+    model.render_frame(loop_params, 0)
+    loop_ws = sink[-1]
+
+    seed_params = render_params(latent_x=1.0, latent_y=0.0, truncation_psi=0.7)
+    model.render_frame(seed_params, 0)
+    seed_ws = sink[-1]
+
+    assert torch.allclose(loop_ws, seed_ws, atol=1e-5)
+
+
+def test_loop_index_zero_wraps_to_last_keyframe():
+    import torch
+
+    sink = []
+    model = _vec_model(z_dim=4, num_ws=3, synthesis=_recording_synthesis(sink))
+    kf0 = Keyframe("seed", seed_x=0.0, seed_y=0.0)
+    kf1 = Keyframe("seed", seed_x=1.0, seed_y=0.0)
+    kf2 = Keyframe("seed", seed_x=2.0, seed_y=0.0)
+    loop_params = render_params(
+        loop_active=True,
+        keyframes=(kf0, kf1, kf2),
+        loop_index=0,
+        loop_alpha=0.0,
+        truncation_psi=0.7,
+    )
+    model.render_frame(loop_params, 0)
+    loop_ws = sink[-1]
+
+    seed_params = render_params(latent_x=2.0, latent_y=0.0, truncation_psi=0.7)
+    model.render_frame(seed_params, 0)
+    seed_ws = sink[-1]
+
+    assert torch.allclose(loop_ws, seed_ws, atol=1e-5)
+
+
+def test_slerp_of_orthogonal_unit_vectors_has_unit_norm():
+    import torch
+
+    w0 = torch.tensor([1.0, 0.0])
+    w1 = torch.tensor([0.0, 1.0])
+    result = slerp(0.5, w0, w1)
+    assert abs(float(result.norm()) - 1.0) < 1e-5
+
+
+def test_slerp_falls_back_to_lerp_when_near_colinear():
+    import torch
+
+    w0 = torch.tensor([1.0, 0.0])
+    w1 = torch.tensor([1.0, 1e-5])
+    alpha = 0.3
+    result = slerp(alpha, w0, w1)
+    expected = w0 + alpha * (w1 - w0)
+    assert torch.allclose(result, expected, atol=1e-6)
+
+
+def test_slerp_alpha_bounds_reproduce_endpoints():
+    import torch
+
+    w0 = torch.tensor([1.0, 0.0, 0.0])
+    w1 = torch.tensor([0.0, 1.0, 0.0])
+    assert torch.allclose(slerp(0.0, w0, w1), w0, atol=1e-6)
+    assert torch.allclose(slerp(1.0, w0, w1), w1, atol=1e-6)

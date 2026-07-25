@@ -15,13 +15,34 @@ from typing import Callable
 
 import numpy as np
 
-from autolume.live.core.params import RenderParams
+from autolume.live.core.params import Keyframe, RenderParams
 from autolume.live.core.store import LatestValueStore
 
 logger = logging.getLogger(__name__)
 
 _SEED_MASK = (1 << 32) - 1
 _BILINEAR_CORNERS = ((0, 0), (1, 0), (0, 1), (1, 1))
+_SLERP_COLINEAR_THRESHOLD = 0.9995
+_KEYFRAME_CACHE_SIZE = 4
+
+
+def slerp(alpha: float, w0, w1):
+    """Spherical interpolation between two W tensors.
+
+    Falls back to lerp when the vectors are close enough to colinear that the
+    angle between them is not numerically well defined.
+    """
+    import torch
+
+    dot = (w0 * w1).sum() / (w0.norm() * w1.norm() + 1e-12)
+    dot = dot.clamp(-1.0, 1.0)
+    if dot.abs() > _SLERP_COLINEAR_THRESHOLD:
+        return w0 + alpha * (w1 - w0)
+    theta = torch.acos(dot)
+    sin_theta = torch.sin(theta)
+    return (
+        torch.sin((1.0 - alpha) * theta) * w0 + torch.sin(alpha * theta) * w1
+    ) / sin_theta
 
 
 def corner_seeds(
@@ -112,6 +133,8 @@ class LoadedModel:
         self.num_ws = int(G.num_ws)
         self._c_dim = int(G.mapping.c_dim)
         self._applied_global_noise: float | None = None
+        self._vec_fallback_logged = False
+        self._keyframe_w_cache: dict = {}
 
     def _blended_w(self, latent_x, latent_y, truncation_psi):
         import torch
@@ -135,6 +158,90 @@ class LoadedModel:
         ).sum(dim=0)
         return blended + self._w_avg
 
+    def _log_vec_fallback(self) -> None:
+        if self._vec_fallback_logged:
+            return
+        logger.warning(
+            "Latent vector missing or wrong length for %s, using a deterministic fallback",
+            self.pkl_path,
+        )
+        self._vec_fallback_logged = True
+
+    def _z_for_vec(self, vec: tuple[float, ...]) -> np.ndarray:
+        if len(vec) == self.z_dim:
+            return np.asarray(vec, dtype=np.float32)
+        self._log_vec_fallback()
+        return np.random.RandomState(0).randn(self.z_dim).astype(np.float32)
+
+    def _w_rows_for_vec(self, vec: tuple[float, ...], w_dim: int) -> np.ndarray:
+        if len(vec) == 0 or len(vec) % w_dim != 0:
+            self._log_vec_fallback()
+            return np.random.RandomState(0).randn(1, w_dim).astype(np.float32)
+        return np.asarray(vec, dtype=np.float32).reshape(-1, w_dim)
+
+    def _vec_to_w(self, vec: tuple[float, ...], project: bool, truncation_psi: float):
+        """A raw latent vector to a full `[num_ws, w_dim]` W tensor.
+
+        `project=True` runs the mapping network (truncation applied there).
+        `project=False` treats `vec` as W rows directly: too many rows
+        truncate to `num_ws`, too few repeat the last row to fill it out.
+        Old-app parity, and shared by both the standalone vector mode and
+        `"vec"` keyframes.
+        """
+        import torch
+
+        w_dim = self._w_avg.shape[-1]
+        if project:
+            z = self._z_for_vec(vec)
+            z_batch = torch.from_numpy(z[None, :]).to(self.device)
+            c_batch = torch.zeros(
+                [1, self._c_dim], dtype=torch.float32, device=self.device
+            )
+            mapped = self.G.mapping(z=z_batch, c=c_batch, truncation_psi=truncation_psi)
+            return mapped[0]
+        rows = torch.from_numpy(self._w_rows_for_vec(vec, w_dim)).to(self.device)
+        if rows.shape[0] >= self.num_ws:
+            return rows[: self.num_ws]
+        pad = rows[-1:].repeat(self.num_ws - rows.shape[0], 1)
+        return torch.cat([rows, pad], dim=0)
+
+    def _keyframe_to_w(self, keyframe: Keyframe, truncation_psi: float):
+        if keyframe.kind == "vec":
+            return self._vec_to_w(keyframe.vec, keyframe.project, truncation_psi)
+        return self._blended_w(keyframe.seed_x, keyframe.seed_y, truncation_psi)
+
+    def _cached_keyframe_w(self, keyframe: Keyframe, truncation_psi: float):
+        """`_keyframe_to_w`, memoized so a static loop does not re-run the
+        mapping network for both endpoints on every frame.
+
+        Keyed by keyframe value plus truncation, sized 2 to 4 entries (a loop
+        only ever needs its two active endpoints); a fresh `LoadedModel` per
+        model switch invalidates it for free.
+        """
+        key = (keyframe, truncation_psi)
+        cached = self._keyframe_w_cache.get(key)
+        if cached is not None:
+            return cached
+        w = self._keyframe_to_w(keyframe, truncation_psi)
+        self._keyframe_w_cache[key] = w
+        if len(self._keyframe_w_cache) > _KEYFRAME_CACHE_SIZE:
+            self._keyframe_w_cache.pop(next(iter(self._keyframe_w_cache)))
+        return w
+
+    def _loop_w(self, params: RenderParams):
+        """Slerp between the previous and current keyframe.
+
+        Negative indexing gives the closed-loop wrap for free: index 0
+        interpolates in from the last keyframe, old-app parity.
+        """
+        keyframes = params.keyframes
+        if not keyframes:
+            return self._blended_w(0.0, 0.0, params.truncation_psi)
+        index = params.loop_index
+        w0 = self._cached_keyframe_w(keyframes[index - 1], params.truncation_psi)
+        w1 = self._cached_keyframe_w(keyframes[index], params.truncation_psi)
+        return slerp(params.loop_alpha, w0, w1)
+
     def _apply_global_noise(self, value: float) -> None:
         """Push the global noise scale onto the layers that support it.
 
@@ -154,9 +261,16 @@ class LoadedModel:
 
         with torch.no_grad():
             self._apply_global_noise(params.global_noise)
-            ws = self._blended_w(
-                params.latent_x, params.latent_y, params.truncation_psi
-            )
+            if params.mode == "vec":
+                ws = self._vec_to_w(
+                    params.latent_vec, params.latent_project, params.truncation_psi
+                )
+            elif params.mode == "loop":
+                ws = self._loop_w(params)
+            else:
+                ws = self._blended_w(
+                    params.latent_x, params.latent_y, params.truncation_psi
+                )
             mode = noise_mode(params)
             # Only "random" draws from torch's global generator, and seeding it
             # is a process wide side effect, so the other modes leave it alone.
