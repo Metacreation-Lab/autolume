@@ -66,6 +66,18 @@ def test_a_disabled_binding_leaves_the_axis_to_motion():
     assert integrate(state, 0.5).latent_x == 1.0
 
 
+def test_a_row_with_no_source_leaves_the_axis_to_motion():
+    # It writes when a message happens to arrive on the parameter's own
+    # address, exactly like the unmapped default, so it takes nothing away.
+    state = ControlState(
+        anim_playing=True,
+        anim_speed_x=2.0,
+        bindings=(Binding("latent_x", "", "x*2"),),
+    )
+    assert integrate(state, 0.5).latent_x == 1.0
+    assert drives(state, "latent_x")
+
+
 def test_clearing_a_binding_hands_the_axis_back_to_motion():
     bound = ControlState(
         anim_playing=True,

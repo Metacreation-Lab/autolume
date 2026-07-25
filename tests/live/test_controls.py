@@ -19,7 +19,7 @@ from autolume.live.core.params import (
     to_render_params,
 )
 from autolume.live.core.presets import PRESET_APPLY, to_payload
-from autolume.live.core.sources import SourceTable
+from autolume.live.core.sources import LIVE_WINDOW, SourceTable
 from autolume.live.core.store import LatestValueStore
 from autolume.live.core.touch import TOUCH_BEGIN, TOUCH_END
 from autolume.live.ui.controls import (
@@ -28,6 +28,7 @@ from autolume.live.ui.controls import (
     BINDING_OFF_COLOR,
     ERROR_COLOR,
     MOTION_COLOR,
+    REMOTE_COLOR,
     Marker,
     Override,
     binding_for,
@@ -186,19 +187,121 @@ def test_motion_takes_the_marker_back_from_a_binding_switched_off():
     assert gutter_for(state, "latent_x").marker is Marker.MOTION
 
 
+NOW = 100.0
+
+
+def sending(address, when=NOW):
+    """A source table holding one address, seen at `when`."""
+    return SourceTable().observe(address, 0.5, when)
+
+
+def test_a_parameter_something_remote_is_writing_says_so():
+    gutter = gutter_for(ControlState(), "latent_x", sending("/latent/x"), NOW)
+    assert gutter.marker is Marker.REMOTE
+    assert gutter.color == REMOTE_COLOR
+    assert "/latent/x" in gutter.tooltip
+
+
+def test_a_parameter_something_remote_is_writing_stays_playable():
+    # The whole point of showing it: a misbehaving controller is exactly when
+    # the performer has to be able to grab the parameter back. This is also the
+    # default state of every parameter, so read only here locks the whole panel.
+    gutter = gutter_for(ControlState(), "latent_x", sending("/latent/x"), NOW)
+    assert not gutter.read_only
+
+
+def test_the_remote_marker_goes_out_once_the_sender_stops():
+    stale = sending("/latent/x", NOW - LIVE_WINDOW - 0.1)
+    assert gutter_for(ControlState(), "latent_x", stale, NOW).marker is Marker.NONE
+    fresh = sending("/latent/x", NOW - LIVE_WINDOW)
+    assert gutter_for(ControlState(), "latent_x", fresh, NOW).marker is Marker.REMOTE
+
+
+def test_traffic_on_one_address_marks_only_the_parameter_it_names():
+    table = sending("/latent/x")
+    assert gutter_for(ControlState(), "latent_y", table, NOW).marker is Marker.NONE
+
+
+def test_a_caller_with_no_source_table_shows_no_remote_marker():
+    assert gutter_for(ControlState(), "latent_x").marker is Marker.NONE
+
+
+def test_a_row_switched_off_shows_that_rather_than_the_traffic_it_is_blocking():
+    # Nothing remote is writing the parameter, so claiming otherwise would be
+    # the same lie in the other direction. The grey marker is the answer.
+    state = ControlState(bindings=(Binding("latent_x", "", enabled=False),))
+    gutter = gutter_for(state, "latent_x", sending("/latent/x"), NOW)
+    assert gutter.marker is Marker.BINDING
+    assert gutter.color == BINDING_OFF_COLOR
+    assert not gutter.read_only
+
+
+def test_a_row_bound_elsewhere_beats_traffic_on_the_parameters_own_address():
+    # The row closed that address, so the binding is what drives the parameter.
+    state = ControlState(bindings=(Binding("latent_x", "/audio/level"),))
+    gutter = gutter_for(state, "latent_x", sending("/latent/x"), NOW)
+    assert gutter.marker is Marker.BINDING
+    assert gutter.read_only
+
+
+def test_a_remote_writer_is_named_ahead_of_the_animation():
+    # Animation is already legible in the Animate box, and it is the remote
+    # writer that explains a control that seems to have a mind of its own.
+    state = ControlState(anim_playing=True)
+    table = sending("/latent/x")
+    assert gutter_for(state, "latent_x", table, NOW).marker is Marker.REMOTE
+    assert gutter_for(state, "latent_y", table, NOW).marker is Marker.MOTION
+
+
+def test_a_row_with_no_source_and_a_broken_expression_shows_the_failure():
+    # Nothing is reaching the parameter, so the marker names the reason.
+    binding = Binding("latent_x", "", "nope(", error="bad expression")
+    state = ControlState(bindings=(binding,))
+    gutter = gutter_for(state, "latent_x", sending("/latent/x"), NOW)
+    assert gutter.marker is Marker.BINDING
+    assert gutter.color == ERROR_COLOR
+    assert not gutter.read_only
+
+
+def test_a_row_with_no_source_never_takes_the_control_away_from_the_hand():
+    # It writes only when a message happens to arrive, exactly like the
+    # unmapped default, so it has no claim on the widget between messages.
+    state = ControlState(bindings=(Binding("latent_x", "", "x*2"),))
+    assert not gutter_for(state, "latent_x").read_only
+
+
+def test_a_row_with_no_source_leaves_the_axis_to_the_animation():
+    state = ControlState(anim_playing=True, bindings=(Binding("latent_x", "", "x*2"),))
+    assert gutter_for(state, "latent_x").marker is Marker.MOTION
+
+
+def test_a_row_with_no_source_names_the_address_it_governs():
+    on = Binding("latent_x", "")
+    off = dataclasses.replace(on, enabled=False)
+    assert "/latent/x" in gutter_for(ControlState(bindings=(on,)), "latent_x").tooltip
+    assert "/latent/x" in gutter_for(ControlState(bindings=(off,)), "latent_x").tooltip
+
+
 def test_every_tooltip_says_something_the_bundled_font_can_draw():
     # The bundled font has no symbol glyphs, so a non ascii character renders
     # as a question mark.
     binding = Binding("latent_x", "/audio/level")
+    sourceless = Binding("latent_x", "")
     states = (
         ControlState(),
         ControlState(anim_playing=True),
         ControlState(bindings=(binding,)),
         ControlState(bindings=(dataclasses.replace(binding, enabled=False),)),
         ControlState(bindings=(dataclasses.replace(binding, error="boom"),)),
+        ControlState(bindings=(sourceless,)),
+        ControlState(bindings=(dataclasses.replace(sourceless, enabled=False),)),
     )
-    for state in states:
-        tooltip = gutter_for(state, "latent_x").tooltip
+    gutters = [gutter_for(state, "latent_x") for state in states]
+    # And the one state that needs live traffic to be reachable at all.
+    gutters.append(gutter_for(ControlState(), "latent_x", sending("/latent/x"), NOW))
+    assert {gutter.marker for gutter in gutters} == set(Marker)
+    for gutter in gutters:
+        tooltip = gutter.tooltip
         assert tooltip.isascii()
         assert ";" not in tooltip
         assert " - " not in tooltip

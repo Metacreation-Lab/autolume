@@ -11,6 +11,15 @@ from typing import Mapping
 
 MAX_SOURCES = 128
 DEFAULT_WINDOW = 60.0
+# How recently an address must have been seen to count as writing right now.
+# `DEFAULT_WINDOW` answers a different question, "what has this show seen", and
+# a picker may safely keep offering an address a minute after the last message.
+# A marker claiming a parameter is being driven has to go dark once the sender
+# stops, or it is a lie the performer will read while deciding what to touch.
+# Two seconds is long enough to stay lit through a controller that only sends
+# on change at human speed, a button or a fader let go, and short enough that
+# it clears about as fast as the performer can look away and back.
+LIVE_WINDOW = 2.0
 
 
 @dataclass(frozen=True)
@@ -70,3 +79,13 @@ class SourceTable:
 
     def get(self, address: str) -> SourceValue | None:
         return self.entries.get(canonical_address(address))
+
+    def active(self, address: str, now: float, window: float = LIVE_WINDOW) -> bool:
+        """Whether `address` carried a message recently enough to count as live.
+
+        The table only ever records what arrived from outside the UI, so this
+        answers "is something remote writing this right now" and never echoes
+        the app's own output back at the performer.
+        """
+        entry = self.entries.get(canonical_address(address))
+        return entry is not None and now - entry.timestamp <= window

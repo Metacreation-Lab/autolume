@@ -252,6 +252,134 @@ def test_disabled_binding_does_not_fire_until_it_is_enabled():
     assert control_store.snapshot().truncation_psi == 0.5
 
 
+def test_a_row_switched_off_stops_input_on_the_parameters_own_address():
+    """The reported bug, in the terms it was hit in.
+
+    TouchDesigner streaming /anim/playing, the Animate box refusing to stay
+    off, and a mapping row that showed no source and read as switched off. The
+    row governed a binding while the parameter's own address stayed open beside
+    it, so the performer's every click lost the next race to the stream.
+    """
+    loop, control_store, _, _ = make_loop()
+    loop.submit(ControlEvent("/anim/playing", 1.0, source="osc"))
+    loop.tick()
+    assert control_store.snapshot().anim_playing is True
+
+    bind(loop, "anim_playing", "", enabled=False)
+    loop.submit(ControlEvent("/anim/playing", 0.0, source="ui"))
+    loop.tick()
+    assert control_store.snapshot().anim_playing is False
+
+    loop.submit(ControlEvent("/anim/playing", 1.0, source="osc"))
+    loop.tick()
+    assert control_store.snapshot().anim_playing is False
+
+
+def test_a_row_switched_off_still_answers_the_hand():
+    # The switch stops the network, never the mouse. A performer who cannot
+    # move a control they have just taken off the network has lost it entirely.
+    loop, control_store, _, _ = make_loop()
+    bind(loop, "truncation_psi", "", enabled=False)
+    loop.submit(ControlEvent("/trunc/psi", 1.2, source="ui"))
+    loop.tick()
+    assert control_store.snapshot().truncation_psi == 1.2
+
+
+def test_a_row_switched_on_lets_input_through_the_parameters_own_address():
+    loop, control_store, _, _ = make_loop()
+    bind(loop, "truncation_psi", "", enabled=True)
+    loop.submit(ControlEvent("/trunc/psi", 1.2, source="osc"))
+    loop.tick()
+    assert control_store.snapshot().truncation_psi == 1.2
+
+
+def test_an_unmapped_parameter_still_answers_its_own_address():
+    # The default, and the behavior worth keeping: nothing configured and
+    # sending the address in the docs just works.
+    loop, control_store, _, _ = make_loop()
+    loop.submit(ControlEvent("/trunc/psi", 1.2, source="osc"))
+    loop.tick()
+    assert control_store.snapshot().truncation_psi == 1.2
+
+
+def test_a_row_with_no_source_runs_its_expression_on_remote_input():
+    loop, control_store, _, _ = make_loop()
+    bind(loop, "truncation_psi", "", "x*2")
+    loop.submit(ControlEvent("/trunc/psi", 0.25, source="osc"))
+    loop.tick()
+    assert control_store.snapshot().truncation_psi == 0.5
+
+
+def test_a_row_with_no_source_leaves_what_the_hand_sets_alone():
+    # The expression shapes what arrives from outside. Running it over the
+    # value the performer just set would turn their own control against them.
+    loop, control_store, _, _ = make_loop()
+    bind(loop, "truncation_psi", "", "x*2")
+    loop.submit(ControlEvent("/trunc/psi", 0.25, source="ui"))
+    loop.tick()
+    assert control_store.snapshot().truncation_psi == 0.25
+
+
+def test_a_row_pointed_elsewhere_closes_the_parameters_own_address():
+    # One driver per parameter: the row names the one address that reaches it,
+    # and a bound control is read only to the hand for the same reason.
+    loop, control_store, _, _ = make_loop()
+    bind(loop, "truncation_psi", "/audio/level")
+    loop.submit(ControlEvent("/trunc/psi", 1.2, source="osc"))
+    loop.tick()
+    assert control_store.snapshot().truncation_psi == 0.7
+
+
+def test_a_held_parameter_ignores_remote_writes_to_its_own_address():
+    """Touch grace, on the one writer that can now reach a live control.
+
+    A bound control is drawn read only, so the hand and a binding never share
+    one. A remote writer on the parameter's own address does share it, by
+    design, and without this the drag would fight the stream frame by frame.
+    """
+    clock = FakeClock()
+    clock.now = 10.0
+    loop, control_store, _, _ = make_loop(clock)
+    loop.submit(ControlEvent(TOUCH_BEGIN, "truncation_psi", source="ui"))
+    loop.submit(ControlEvent("/trunc/psi", 1.5, source="osc"))
+    loop.tick()
+    assert control_store.snapshot().truncation_psi == 0.7
+
+    loop.submit(ControlEvent(TOUCH_END, "truncation_psi", source="ui"))
+    loop.submit(ControlEvent("/trunc/psi", 1.5, source="osc"))
+    loop.tick()
+    assert control_store.snapshot().truncation_psi == 0.7
+
+    clock.now += TOUCH_GRACE
+    loop.submit(ControlEvent("/trunc/psi", 1.5, source="osc"))
+    loop.tick()
+    assert control_store.snapshot().truncation_psi == 1.5
+
+
+def test_a_held_parameter_still_takes_the_value_the_hand_is_dragging():
+    clock = FakeClock()
+    clock.now = 10.0
+    loop, control_store, _, _ = make_loop(clock)
+    loop.submit(ControlEvent(TOUCH_BEGIN, "truncation_psi", source="ui"))
+    loop.submit(ControlEvent("/trunc/psi", 1.5, source="osc"))
+    loop.submit(ControlEvent("/trunc/psi", 0.3, source="ui"))
+    loop.tick()
+    assert control_store.snapshot().truncation_psi == 0.3
+
+
+def test_a_blocked_remote_write_is_still_offered_as_an_input_source():
+    # The picker lists what arrived, not what was accepted, or an address a row
+    # has switched off could never be picked as another parameter's source.
+    clock = FakeClock()
+    clock.now = 5.0
+    loop, control_store, _, source_store = make_loop(clock)
+    bind(loop, "truncation_psi", "", enabled=False)
+    loop.submit(ControlEvent("/trunc/psi", 1.2, source="osc"))
+    loop.tick()
+    assert control_store.snapshot().truncation_psi == 0.7
+    assert source_store.snapshot().recent(clock.now) == ["/trunc/psi"]
+
+
 def test_failing_expression_keeps_the_value_and_records_the_error():
     loop, control_store, _, _ = make_loop()
     bind(loop, "truncation_psi", "/audio/level", "1/x")
@@ -307,12 +435,13 @@ def test_held_target_ignores_binding_writes_and_resumes_after_the_grace():
 
 
 def test_held_target_still_accepts_direct_events_on_its_own_address():
+    # From the ui, which is the only writer the hold does not stand against.
     clock = FakeClock()
     clock.now = 10.0
     loop, control_store, _, _ = make_loop(clock)
     bind(loop, "truncation_psi", "/audio/level")
     loop.submit(ControlEvent(TOUCH_BEGIN, "truncation_psi", source="ui"))
-    loop.submit(ControlEvent("/trunc/psi", 1.2))
+    loop.submit(ControlEvent("/trunc/psi", 1.2, source="ui"))
     loop.submit(ControlEvent("/audio/level", 1.5))
     loop.tick()
     assert control_store.snapshot().truncation_psi == 1.2
@@ -323,7 +452,7 @@ def test_an_unheld_target_lets_the_binding_overwrite_an_earlier_ui_event():
     clock.now = 10.0
     loop, control_store, _, _ = make_loop(clock)
     bind(loop, "truncation_psi", "/audio/level")
-    loop.submit(ControlEvent("/trunc/psi", 1.2))
+    loop.submit(ControlEvent("/trunc/psi", 1.2, source="ui"))
     loop.submit(ControlEvent("/audio/level", 1.5))
     loop.tick()
     assert control_store.snapshot().truncation_psi == 1.5

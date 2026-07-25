@@ -94,6 +94,18 @@ def test_saved_file_is_json_with_the_expected_envelope(tmp_path):
     ]
 
 
+def test_a_parameter_taken_off_the_network_stays_off_it_through_a_reload(tmp_path):
+    """A row with no source and no switch is how remote input is turned off.
+
+    It has to survive the round trip, or a performer who took a runaway
+    parameter off the network gets it back the moment they recall the look.
+    """
+    path = tmp_path / "look.json"
+    off = ControlState(bindings=(Binding("anim_playing", "", "x", enabled=False),))
+    presets.save(off, path)
+    assert apply_payload(ControlState(), presets.load(path)).bindings == off.bindings
+
+
 def test_the_frame_limit_is_a_property_of_the_machine_not_of_the_look(tmp_path):
     """A look saved on a laptop capped at 30 must not cap the stage machine.
 

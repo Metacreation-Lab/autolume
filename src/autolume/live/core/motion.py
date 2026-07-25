@@ -45,7 +45,14 @@ def drives(
     """
     if not state.anim_playing or name not in MOTION_PARAMS:
         return False
-    if any(binding.target == name and binding.enabled for binding in state.bindings):
+    # Only a row with a source of its own takes the parameter away from motion.
+    # A row left sourceless is the parameter's own address, which writes when a
+    # message happens to arrive rather than continuously, so it no more owns the
+    # parameter than an unmapped one does.
+    if any(
+        binding.target == name and binding.enabled and binding.source
+        for binding in state.bindings
+    ):
         return False
     return touch is None or not touch.is_held(name, now)
 

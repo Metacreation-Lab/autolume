@@ -5,6 +5,12 @@ glance instead of hunting through right click menus. The same row is what
 `ControlBinder` shows in its right click popup, so both entry points edit a
 mapping the same way and neither can drift from the other.
 
+The row governs every remote writer of its parameter, which is the whole point
+of there being one row per parameter rather than one per configured mapping.
+An empty source means the parameter's own address, so an untouched row is not
+an inert row, and the switch beside it is the one honest answer to what may
+write this parameter from outside. It never governs the hand.
+
 Every edit leaves as a control event. Nothing here writes state directly, and
 a clear travels as a `ClearBinding` object rather than a target string, so no
 OSC peer can express one.
@@ -24,9 +30,10 @@ from autolume.live.core.params import (
     ClearBinding,
     ParamKind,
     ParamSpec,
+    binding_for,
 )
 from autolume.live.core.sources import canonical_address
-from autolume.live.ui.controls import ERROR_COLOR, binding_for
+from autolume.live.ui.controls import ERROR_COLOR
 
 # Widths in multiples of the font size, so the rows keep their proportions on
 # every display scale instead of cramping at 200 percent.
@@ -38,8 +45,10 @@ _ENTER = imgui.InputTextFlags_.enter_returns_true
 _NO_SOURCES = "No input detected"
 _HINT = (
     "Every parameter can be mapped here. "
-    "Pick lists the addresses arriving right now. "
-    "Send OSC or turn audio on to fill it."
+    "A row with no source follows the parameter's own address, shown in grey. "
+    "On is what lets remote input in, so a row switched off can only be moved "
+    "by hand. "
+    "Pick lists the addresses arriving right now."
 )
 
 
@@ -124,8 +133,14 @@ class MappingPanel:
     def _source_field(self, name: str, binding: Binding | None) -> None:
         current = binding.source if binding is not None else ""
         imgui.set_next_item_width(imgui.get_font_size() * _SOURCE_EMS)
-        entered, text = imgui.input_text(
-            "##source", self._shown(name, "source", current), _ENTER
+        # The empty field is not "nothing", it is the parameter's own address,
+        # so the field says which one rather than leaving the performer to work
+        # out what an empty row means.
+        entered, text = imgui.input_text_with_hint(
+            "##source",
+            REGISTRY[name].address,
+            self._shown(name, "source", current),
+            _ENTER,
         )
         self._keep_draft(name, "source", text)
         if entered or imgui.is_item_deactivated_after_edit():
@@ -164,14 +179,16 @@ class MappingPanel:
         imgui.end_popup()
 
     def _enable_box(self, name: str, binding: Binding | None) -> None:
-        if binding is None:
-            imgui.begin_disabled()
+        """The row's switch, which governs every remote writer of the parameter.
+
+        Always live, and on by default: a parameter with no row still answers
+        its own address, so a switch that could not be reached until a source
+        was typed would be a switch that does not govern what it appears to.
+        """
         changed, enabled = imgui.checkbox(
-            "On", binding.enabled if binding is not None else False
+            "On", binding.enabled if binding is not None else True
         )
-        if binding is None:
-            imgui.end_disabled()
-        elif changed:
+        if changed:
             self._commit(name, binding, enabled=enabled)
 
     def _clear_button(self, name: str, binding: Binding | None) -> None:
@@ -192,7 +209,15 @@ class MappingPanel:
         expression: str | None = None,
         enabled: bool | None = None,
     ) -> None:
-        """Send the edited binding, or clear it once its source is emptied."""
+        """Send the edited row, or clear it when it says nothing anymore.
+
+        A row with no source, switched on, passing the value through is exactly
+        what a parameter with no row does, so it is cleared rather than stored.
+        That keeps the default state out of presets and makes switching a row
+        off and on again land back where it started. Any other row is kept,
+        including one with nothing but its switch turned off, which is how
+        "no remote input on this parameter" is recorded and persisted.
+        """
         if source is None:
             source = self._shown(name, "source", binding.source if binding else "")
         if expression is None:
@@ -202,15 +227,14 @@ class MappingPanel:
         if enabled is None:
             enabled = binding.enabled if binding is not None else True
         address = canonical_address(source)
-        if not address:
+        expression = expression.strip() or "x"
+        enabled = bool(enabled)
+        if not address and enabled and expression == "x":
             if binding is not None:
                 self._submit(BINDING_CLEAR, ClearBinding(name))
                 self._forget(name)
             return
-        self._submit(
-            BINDING_SET,
-            Binding(name, address, expression.strip() or "x", bool(enabled)),
-        )
+        self._submit(BINDING_SET, Binding(name, address, expression, enabled))
         self._forget(name)
 
     def _submit(self, address: str, value: object) -> None:

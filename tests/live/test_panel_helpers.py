@@ -155,6 +155,51 @@ def test_emptying_an_unbound_source_submits_nothing():
     assert panel._runtime.events == []
 
 
+def test_switching_an_unmapped_row_off_records_it_as_a_sourceless_binding():
+    """Off has to be written down somewhere, and this is the somewhere.
+
+    Absence of a row means the default, which is remote input on through the
+    parameter's own address, so switching one off cannot be expressed by
+    leaving the state alone. As an ordinary binding it persists in a preset for
+    free rather than needing a parallel set of disabled names.
+    """
+    panel = commit_panel()
+    panel._commit("latent_x", None, enabled=False)
+    (event,) = panel._runtime.events
+    assert event.address == BINDING_SET
+    assert event.value == Binding("latent_x", "", "x", False)
+
+
+def test_switching_a_sourceless_row_back_on_returns_it_to_the_default():
+    # And leaves nothing behind in the preset, so off and on again lands where
+    # it started rather than storing a row that says what absence already says.
+    panel = commit_panel()
+    off = Binding("latent_x", "", "x", False)
+    panel._commit("latent_x", off, enabled=True)
+    (event,) = panel._runtime.events
+    assert event.address == BINDING_CLEAR
+    assert event.value == ClearBinding("latent_x")
+
+
+def test_emptying_the_source_of_a_row_that_is_off_keeps_the_row():
+    # Clearing it would switch remote input back on behind the performer.
+    panel = commit_panel()
+    bound = Binding("latent_x", "/audio/bass", "x", False)
+    panel._commit("latent_x", bound, source="")
+    (event,) = panel._runtime.events
+    assert event.address == BINDING_SET
+    assert event.value == Binding("latent_x", "", "x", False)
+
+
+def test_a_sourceless_row_with_an_expression_is_kept():
+    # It transforms what arrives on the parameter's own address, which is not
+    # what an absent row does.
+    panel = commit_panel()
+    panel._commit("latent_x", None, expression="x*2")
+    (event,) = panel._runtime.events
+    assert event.value == Binding("latent_x", "", "x*2", True)
+
+
 def test_editing_only_the_expression_preserves_the_source_and_enabled_flag():
     panel = commit_panel()
     bound = Binding("truncation_psi", "/audio/level", "x", False)

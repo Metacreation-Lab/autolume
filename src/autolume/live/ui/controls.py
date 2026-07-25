@@ -8,16 +8,19 @@ hand it another one's value. The
 performer's hand wins over a binding while a widget is held. A parameter that
 something else drives says so.
 
-Every parameter has exactly one driver, and the chip in the gutter left of the
-widget names it. A binding writes an absolute value, so it takes the control
-away from the hand and the widget is drawn read only. Motion is relative and
-carries on from wherever the value is, so an animated control stays live and
-dragging it is scrubbing. The chip is clickable in all three states and opens
-the mapping editor, which is what a read only control has instead of its own
-right click menu.
+The chip in the gutter left of the widget names what is driving the parameter.
+A binding writes an absolute value, so it takes the control away from the hand
+and the widget is drawn read only. Motion is relative and carries on from
+wherever the value is, so an animated control stays live and dragging it is
+scrubbing. Input arriving on the parameter's own address stays live too, since
+that is the default state of every parameter and the moment a controller
+misbehaves is the moment the performer must be able to take it back. The chip
+is clickable in every state and opens the mapping editor, which is what a read
+only control has instead of its own right click menu.
 """
 
 import math
+import time
 from dataclasses import dataclass
 from enum import Enum
 from typing import Callable, Mapping, TypeVar
@@ -32,12 +35,16 @@ from autolume.live.core.params import (
     ControlState,
     ParamKind,
     ParamSpec,
+    binding_for,
+    listens_on,
 )
+from autolume.live.core.sources import SourceTable
 from autolume.live.core.touch import TOUCH_BEGIN, TOUCH_END
 
 BINDING_COLOR = (0.35, 0.75, 1.0, 1.0)
 BINDING_OFF_COLOR = (0.5, 0.5, 0.5, 1.0)
 MOTION_COLOR = (0.55, 0.8, 0.55, 0.9)
+REMOTE_COLOR = (0.95, 0.7, 0.25, 1.0)
 # Every failure the UI shows is this colour, wherever it is shown, so that one
 # definition here is what makes a broken binding, a missing device and a preset
 # that would not save look alike.
@@ -48,6 +55,10 @@ ERROR_COLOR = (1.0, 0.3, 0.3, 1.0)
 _GUTTER_RATIO = 0.7
 _MARKER_RATIO = 0.3
 _PLATE_INSET = 0.15
+# How much of the frame colour the empty slot keeps. Enough to find the column
+# without looking for it, and well under any marker, so a dozen empty gutters
+# stay quiet next to the one parameter something is driving.
+_SLOT_ALPHA = 0.7
 # A widget hands its value back through a C float, so it cannot express a
 # difference finer than this. Anything closer is the same value.
 _FLOAT_TOLERANCE = 1e-6
@@ -91,13 +102,6 @@ def drag_bounds(spec: ParamSpec) -> tuple[float, float]:
     return spec.minimum, spec.maximum
 
 
-def binding_for(bindings: tuple[Binding, ...], name: str) -> Binding | None:
-    for binding in bindings:
-        if binding.target == name:
-            return binding
-    return None
-
-
 def indicator_color(binding: Binding | None) -> Color | None:
     """The colour of the binding marker, or None when nothing drives this."""
     if binding is None:
@@ -115,6 +119,7 @@ class Marker(Enum):
     NONE = "none"
     MOTION = "motion"
     BINDING = "binding"
+    REMOTE = "remote"
 
 
 @dataclass(frozen=True)
@@ -136,12 +141,52 @@ _MOTION_TIP = (
 def _binding_tip(binding: Binding) -> str:
     if binding.error is not None:
         return "This binding is failing. Click to fix it."
+    if binding.source:
+        if not binding.enabled:
+            return f"Bound to {binding.source}. The binding is off. Click to edit it."
+        return f"Bound to {binding.source}. Click to edit it."
+    address = listens_on(binding)
     if not binding.enabled:
-        return f"Bound to {binding.source}. The binding is off. Click to edit it."
-    return f"Bound to {binding.source}. Click to edit it."
+        return f"Remote input on {address} is off. Click to turn it back on."
+    return f"Remote input on {address} goes through this mapping. Click to edit it."
 
 
-def gutter_for(state: ControlState, name: str) -> Gutter:
+def _remote_tip(address: str) -> str:
+    return f"{address} is being sent right now. Switch it off in the mapping row."
+
+
+def remote_writer(
+    state: ControlState,
+    name: str,
+    sources: SourceTable | None,
+    now: float,
+) -> str | None:
+    """The address something remote is writing `name` on, or None.
+
+    Only the parameter's own canonical address, and only when the mapping row
+    lets it through and has no expression failure to report. A row with a
+    source of its own is a binding, which the gutter already names, and a row
+    switched off means nothing arriving is reaching the parameter at all.
+    """
+    if sources is None:
+        return None
+    binding = binding_for(state.bindings, name)
+    if binding is not None and (
+        binding.source or not binding.enabled or binding.error is not None
+    ):
+        return None
+    spec = REGISTRY.get(name)
+    if spec is None or not sources.active(spec.address, now):
+        return None
+    return spec.address
+
+
+def gutter_for(
+    state: ControlState,
+    name: str,
+    sources: SourceTable | None = None,
+    now: float = 0.0,
+) -> Gutter:
     """Who drives `name`, in the terms the control is drawn in.
 
     A binding writes an absolute value, so the next message from its source
@@ -149,11 +194,24 @@ def gutter_for(state: ControlState, name: str) -> Gutter:
     only rather than futile. Motion is relative and advances from wherever the
     value is, so dragging an animated parameter is scrubbing and stays live.
 
-    Precedence is the control loop's own: an enabled binding beats motion, and
-    a binding switched off drives nothing, so motion takes the marker back and
-    the parked binding is only shown once nothing is driving the parameter.
-    Whether motion has the parameter is `motion.drives`' answer rather than
-    ours, so this cannot disagree with the integrator.
+    A remote writer on the parameter's own address stays playable too, and that
+    is deliberate rather than an oversight: it is the default state of every
+    parameter, so read only there would lock the whole panel, and a misbehaving
+    controller is exactly the moment the performer has to be able to grab the
+    parameter back. The control loop's touch grace is what makes that grab
+    stick.
+
+    Precedence is the control loop's own, with the remote marker slotted where
+    it answers a question nothing else on screen does. An enabled binding with a
+    source beats everything and is read only. A remote writer comes next: it is
+    transient, invisible anywhere else in the app, and the reason a control
+    seems to have a mind of its own, while motion is already legible in the
+    Animate box. Motion follows, from `motion.drives` rather than a restatement
+    of it, so this cannot disagree with the integrator. A row that drives
+    nothing right now, switched off or parked without a source, is shown last.
+
+    `sources` may be omitted by a caller that has no source table, and then no
+    remote marker is ever shown.
 
     No touch tracker is passed, which is the one skip of the integrator's this
     does not follow: a hand on the widget pauses motion for the drag and its
@@ -161,10 +219,13 @@ def gutter_for(state: ControlState, name: str) -> Gutter:
     blinking off for the length of every drag would be noise.
     """
     binding = binding_for(state.bindings, name)
-    if binding is not None and binding.enabled:
+    if binding is not None and binding.enabled and binding.source:
         return Gutter(
             Marker.BINDING, indicator_color(binding), True, _binding_tip(binding)
         )
+    address = remote_writer(state, name, sources, now)
+    if address is not None:
+        return Gutter(Marker.REMOTE, REMOTE_COLOR, False, _remote_tip(address))
     if motion.drives(state, name):
         return Gutter(Marker.MOTION, MOTION_COLOR, False, _MOTION_TIP)
     if binding is not None:
@@ -308,13 +369,21 @@ class ControlBinder:
     """
 
     def __init__(
-        self, runtime, mapping_popup: Callable[[str], None] | None = None
+        self,
+        runtime,
+        mapping_popup: Callable[[str], None] | None = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._runtime = runtime
         self._mapping_popup = mapping_popup
+        # The same clock the control loop stamps source values with, or the
+        # remote marker would compare two unrelated timelines and either never
+        # light or never go out.
+        self._clock = clock
         self._local: dict[str, Override] = {}
         self._frame = -1
         self._state: ControlState | None = None
+        self._sources = SourceTable()
 
     def state(self) -> ControlState:
         """The control state this frame, for a panel that needs more than values.
@@ -391,7 +460,7 @@ class ControlBinder:
         name = spec.name
         state = self._snapshot()
         stored = getattr(state, name)
-        gutter = gutter_for(state, name)
+        gutter = gutter_for(state, name, self._sources, self._clock())
         # A control a binding drives is drawn read only. The next value from
         # the source erases a drag, so the hand cannot hold it anyway, and a
         # widget that visibly does nothing is worse than one that says so.
@@ -461,7 +530,7 @@ class ControlBinder:
         else:
             imgui.dummy(imgui.ImVec2(width, height))
             hovered = explain = False
-        self._chip_shape(origin, width, height, gutter, hovered)
+        self._chip_shape(origin, width, height, gutter, hovered, clickable)
         if explain:
             imgui.set_tooltip(gutter.tooltip)
         if clickable and imgui.begin_popup("chip"):
@@ -470,22 +539,56 @@ class ControlBinder:
         imgui.same_line()
 
     def _chip_shape(
-        self, origin, width: int, height: float, gutter: Gutter, hovered: bool
+        self,
+        origin,
+        width: int,
+        height: float,
+        gutter: Gutter,
+        hovered: bool,
+        clickable: bool = True,
     ) -> None:
-        """Paint the chip: a hover plate under the marker for the current driver.
+        """Paint the chip: an empty slot, a hover plate, then the driver's marker.
 
-        The plate is what tells a performer the chip can be clicked, including
-        on the parameters nothing drives, where there is no marker to hover.
+        The container is the affordance and the contents are the state. The
+        slot is drawn on every row whether or not anything drives the
+        parameter, because the chip is the only way into the mapping editor
+        from a control a binding has taken read only, and before this the
+        column advertised itself with a plate that only appeared once the
+        cursor was already on it. It is an outline in the frame colour, so it
+        reads as an empty version of the widgets beside it and follows whatever
+        theme they do, and it is faint enough that a panel of undriven
+        parameters stays quiet while any marker plainly outranks it.
+
+        Each driver has its own shape as well as its own colour, a square for a
+        binding, a dot for motion and an arrowhead for input arriving from
+        outside, so the three stay apart for a performer who cannot tell them
+        apart by colour and on a projector that eats saturation.
+
+        Nothing here changes the layout: the gutter is reserved by the item in
+        `_indicator` and every shape is painted inside what it already took.
         """
         draw_list = imgui.get_window_draw_list()
         middle = imgui.ImVec2(origin.x + width * 0.5, origin.y + height * 0.5)
-        if hovered:
-            inset = height * _PLATE_INSET
+        inset = height * _PLATE_INSET
+        top_left = imgui.ImVec2(origin.x, origin.y + inset)
+        bottom_right = imgui.ImVec2(origin.x + width, origin.y + height - inset)
+        rounding = imgui.get_style().frame_rounding
+        if clickable and not hovered:
+            slot = imgui.get_style_color_vec4(imgui.Col_.frame_bg)
+            draw_list.add_rect(
+                top_left,
+                bottom_right,
+                imgui.get_color_u32(
+                    imgui.ImVec4(slot.x, slot.y, slot.z, slot.w * _SLOT_ALPHA)
+                ),
+                rounding,
+            )
+        elif hovered:
             draw_list.add_rect_filled(
-                imgui.ImVec2(origin.x, origin.y + inset),
-                imgui.ImVec2(origin.x + width, origin.y + height - inset),
+                top_left,
+                bottom_right,
                 imgui.get_color_u32(imgui.Col_.button_hovered),
-                imgui.get_style().frame_rounding,
+                rounding,
             )
         if gutter.color is None:
             return
@@ -493,6 +596,13 @@ class ControlBinder:
         side = round(height * _MARKER_RATIO)
         if gutter.marker is Marker.MOTION:
             draw_list.add_circle_filled(middle, side * 0.5, color)
+        elif gutter.marker is Marker.REMOTE:
+            draw_list.add_triangle_filled(
+                imgui.ImVec2(middle.x - side * 0.5, middle.y - side * 0.6),
+                imgui.ImVec2(middle.x + side * 0.6, middle.y),
+                imgui.ImVec2(middle.x - side * 0.5, middle.y + side * 0.6),
+                color,
+            )
         else:
             draw_list.add_rect_filled(
                 imgui.ImVec2(middle.x - side * 0.5, middle.y - side * 0.5),
@@ -512,10 +622,14 @@ class ControlBinder:
 
         Read here rather than passed in so a widget cannot be drawn from one
         snapshot and marked from another, and so a panel cannot forget to hand
-        it over and silently lose every binding marker.
+        it over and silently lose every binding marker. The source table is
+        read on the same frame boundary, for the same reason: the marker saying
+        a parameter is being written from outside has to be as old as the value
+        it is drawn beside.
         """
         frame = imgui.get_frame_count()
         if self._state is None or frame != self._frame:
             self._frame = frame
             self._state = self._runtime.control_store.snapshot()
+            self._sources = self._runtime.source_store.snapshot()
         return self._state

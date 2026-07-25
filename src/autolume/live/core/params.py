@@ -59,7 +59,15 @@ BINDING_CLEAR = "/binding/clear"
 
 @dataclass(frozen=True)
 class Binding:
-    """A source address driving one registry parameter through an expression.
+    """One parameter's mapping row: what may write it, and through what.
+
+    `source` is the one address that reaches the parameter, and an empty source
+    means the parameter's own canonical address, so a parameter nobody has
+    mapped still answers the address the registry gives it. `enabled` is the
+    row's switch and governs every remote writer, which is why a row exists at
+    all for a parameter with no source: switching remote input off is a state
+    that has to be recorded somewhere, and recorded here it persists in a
+    preset like any other mapping instead of needing a parallel set of names.
 
     `error` holds the last compile or evaluation failure so the mapping panel
     can show it. It is runtime state and is never persisted.
@@ -81,6 +89,27 @@ class ClearBinding:
     """
 
     target: str
+
+
+def binding_for(bindings: tuple[Binding, ...], name: str) -> Binding | None:
+    """The row governing `name`, or None when nothing has been recorded for it."""
+    for binding in bindings:
+        if binding.target == name:
+            return binding
+    return None
+
+
+def listens_on(binding: Binding) -> str:
+    """The one address a row lets through to its parameter.
+
+    An empty source is not a broken row, it is the default one: the parameter's
+    own canonical address. That is what keeps a bare `/anim/playing` working
+    with nothing configured, while leaving the row's switch in charge of it.
+    """
+    if binding.source:
+        return binding.source
+    spec = REGISTRY.get(binding.target)
+    return spec.address if spec is not None else ""
 
 
 @dataclass(frozen=True)

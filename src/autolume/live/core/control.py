@@ -21,10 +21,13 @@ from autolume.live.core.expr import ExpressionError, compile_expression
 from autolume.live.core.mapping import apply_event
 from autolume.live.core.motion import integrate
 from autolume.live.core.params import (
+    BY_ADDRESS,
     REGISTRY,
     ControlState,
     RenderParams,
     apply_value,
+    binding_for,
+    listens_on,
     to_render_params,
 )
 from autolume.live.core.sources import SourceTable, as_float, canonical_address
@@ -140,17 +143,54 @@ class ControlLoop:
             self._track_touch(event, now)
             return state, sources
         number = as_float(event.value)
-        if number is None:
-            return apply_event(state, event), sources
+        remote = event.source != "ui"
         # The source table is the picker's list of available inputs, so what
         # this app writes out has no business in it. Recording UI events would
         # fill it with the parameters' own transport addresses and put binding
-        # a parameter to itself two clicks away.
-        if event.source != "ui":
+        # a parameter to itself two clicks away. Recorded before the gate below,
+        # because an address the picker should offer is an address that arrived,
+        # whether or not the parameter it names accepted it.
+        if number is not None and remote:
             stamp = now if event.timestamp is None else event.timestamp
             sources = sources.observe(address, number, stamp)
-        state = apply_event(state, event)
-        return self._drive_bindings(state, address, number, now), sources
+        if self._accepts_direct(state, address, remote, now):
+            state = apply_event(state, event)
+        if number is None:
+            return state, sources
+        return self._drive_bindings(state, address, number, now, remote), sources
+
+    def _accepts_direct(
+        self, state: ControlState, address: str, remote: bool, now: float
+    ) -> bool:
+        """Whether an event may write the parameter its own address names.
+
+        The performer's hand is never gated: a UI event passes here whatever
+        the mapping says, because the switch in a mapping row stops the
+        network, not the mouse.
+
+        A remote write has to pass two checks. The mapping row governs all
+        remote input to its parameter, so once a row exists the row decides and
+        the direct path stands down: `_drive_bindings` applies the row, whether
+        its source is an address the performer picked or, left empty, the
+        parameter's own. And a parameter the performer is holding is theirs for
+        the length of the hold plus its grace, exactly as it is against a
+        binding. This is the only case where a hand and an automated writer can
+        both reach an interactive control, since a bound control is drawn read
+        only, so without it grabbing a slider a stream is writing produces the
+        jitter the touch grace exists to prevent.
+
+        Everything that is not a parameter address passes: the structured
+        addresses carry their own validation, and an unknown one is dropped
+        downstream where it is logged.
+        """
+        if not remote:
+            return True
+        spec = BY_ADDRESS.get(address)
+        if spec is None:
+            return True
+        if binding_for(state.bindings, spec.name) is not None:
+            return False
+        return not self.touch.is_held(spec.name, now)
 
     def _report_guard(self, key: tuple[str, str], message: str, *args: object) -> None:
         """Log a last resort guard hit, throttled to protect the tick budget.
@@ -192,10 +232,26 @@ class ControlLoop:
             self.touch.end(name, now)
 
     def _drive_bindings(
-        self, state: ControlState, address: str, value: float, now: float
+        self,
+        state: ControlState,
+        address: str,
+        value: float,
+        now: float,
+        remote: bool,
     ) -> ControlState:
+        """Run every enabled row listening on `address`.
+
+        A row with no source listens on its parameter's own address, and only
+        for remote input: its expression is there to shape what arrives from
+        outside, and running it over the value the performer just set by hand
+        would turn their own control against them.
+        """
         for binding in state.bindings:
-            if not binding.enabled or binding.source != address:
+            if not binding.enabled:
+                continue
+            if not binding.source and not remote:
+                continue
+            if listens_on(binding) != address:
                 continue
             if self.touch.is_held(binding.target, now):
                 continue
