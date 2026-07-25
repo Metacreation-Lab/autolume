@@ -217,12 +217,12 @@ def test_held_target_ignores_binding_writes_and_resumes_after_the_grace():
     clock.now = 10.0
     loop, control_store, _, _ = make_loop(clock)
     bind(loop, "truncation_psi", "/audio/level")
-    loop.submit(ControlEvent(TOUCH_BEGIN, "truncation_psi"))
+    loop.submit(ControlEvent(TOUCH_BEGIN, "truncation_psi", source="ui"))
     loop.submit(ControlEvent("/audio/level", 1.5))
     loop.tick()
     assert control_store.snapshot().truncation_psi == 0.7
 
-    loop.submit(ControlEvent(TOUCH_END, "truncation_psi"))
+    loop.submit(ControlEvent(TOUCH_END, "truncation_psi", source="ui"))
     loop.submit(ControlEvent("/audio/level", 1.5))
     loop.tick()
     assert control_store.snapshot().truncation_psi == 0.7
@@ -238,7 +238,7 @@ def test_held_target_still_accepts_direct_events_on_its_own_address():
     clock.now = 10.0
     loop, control_store, _, _ = make_loop(clock)
     bind(loop, "truncation_psi", "/audio/level")
-    loop.submit(ControlEvent(TOUCH_BEGIN, "truncation_psi"))
+    loop.submit(ControlEvent(TOUCH_BEGIN, "truncation_psi", source="ui"))
     loop.submit(ControlEvent("/trunc/psi", 1.2))
     loop.submit(ControlEvent("/audio/level", 1.5))
     loop.tick()
@@ -251,6 +251,23 @@ def test_an_unheld_target_lets_the_binding_overwrite_an_earlier_ui_event():
     loop, control_store, _, _ = make_loop(clock)
     bind(loop, "truncation_psi", "/audio/level")
     loop.submit(ControlEvent("/trunc/psi", 1.2))
+    loop.submit(ControlEvent("/audio/level", 1.5))
+    loop.tick()
+    assert control_store.snapshot().truncation_psi == 1.5
+
+
+def test_a_touch_event_that_does_not_declare_a_source_is_ignored():
+    """Privilege has to be asked for, never inherited from a default.
+
+    The touch gate is the one thing standing between an open OSC port and a
+    parameter wedged for the rest of the show, so the next producer someone
+    adds must not pass it by forgetting a keyword.
+    """
+    clock = FakeClock()
+    clock.now = 10.0
+    loop, control_store, _, _ = make_loop(clock)
+    bind(loop, "truncation_psi", "/audio/level")
+    loop.submit(ControlEvent(TOUCH_BEGIN, "truncation_psi"))
     loop.submit(ControlEvent("/audio/level", 1.5))
     loop.tick()
     assert control_store.snapshot().truncation_psi == 1.5
@@ -272,7 +289,7 @@ def test_a_remote_touch_end_cannot_release_a_ui_hold():
     clock.now = 10.0
     loop, control_store, _, _ = make_loop(clock)
     bind(loop, "truncation_psi", "/audio/level")
-    loop.submit(ControlEvent(TOUCH_BEGIN, "truncation_psi"))
+    loop.submit(ControlEvent(TOUCH_BEGIN, "truncation_psi", source="ui"))
     loop.submit(ControlEvent(TOUCH_END, "truncation_psi", source="osc"))
     loop.tick()
     clock.now += TOUCH_GRACE * 2
@@ -286,7 +303,7 @@ def test_a_hold_that_is_never_ended_lapses_and_the_binding_resumes():
     clock.now = 10.0
     loop, control_store, _, _ = make_loop(clock)
     bind(loop, "truncation_psi", "/audio/level")
-    loop.submit(ControlEvent(TOUCH_BEGIN, "truncation_psi"))
+    loop.submit(ControlEvent(TOUCH_BEGIN, "truncation_psi", source="ui"))
     loop.submit(ControlEvent("/audio/level", 1.5))
     loop.tick()
     assert control_store.snapshot().truncation_psi == 0.7
@@ -302,8 +319,8 @@ def test_malformed_touch_event_is_ignored():
     clock.now = 10.0
     loop, control_store, _, _ = make_loop(clock)
     bind(loop, "truncation_psi", "/audio/level")
-    loop.submit(ControlEvent(TOUCH_BEGIN, 3.0))
-    loop.submit(ControlEvent(TOUCH_BEGIN, "not_a_parameter"))
+    loop.submit(ControlEvent(TOUCH_BEGIN, 3.0, source="ui"))
+    loop.submit(ControlEvent(TOUCH_BEGIN, "not_a_parameter", source="ui"))
     loop.submit(ControlEvent("/audio/level", 1.5))
     loop.tick()
     assert control_store.snapshot().truncation_psi == 1.5
