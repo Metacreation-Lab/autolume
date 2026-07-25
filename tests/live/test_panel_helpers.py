@@ -34,7 +34,17 @@ from autolume.live.ui.panels.mapping import (
     reference_note,
 )
 from autolume.live.ui.panels.presets import PresetsPanel, is_valid_name
-from autolume.live.ui.panels.preview import model_name, preview_status
+from autolume.live.ui.panels.preview import (
+    DisplayMode,
+    PreviewPanel,
+    PreviewStatus,
+    centred_offset,
+    dims_the_frame,
+    displayed_size,
+    model_name,
+    needs_refresh,
+    preview_status,
+)
 
 
 def test_device_labels_never_empty_so_the_combo_stays_drawn():
@@ -181,6 +191,136 @@ def test_every_preview_status_says_something_the_bundled_font_can_draw():
         assert ";" not in text
         assert " - " not in text
         assert text.endswith(".")
+
+
+def test_the_display_modes_are_named_for_what_they_actually_do():
+    """The old app called these "Raw" and "Fit" and had both backwards.
+
+    Its "Raw" kept the aspect ratio, which is what everyone means by fit, and
+    its "Fit" filled the area while distorting, which is stretching. Carrying
+    those names over would have carried the confusion with them.
+    """
+    assert [mode.value for mode in DisplayMode] == ["Fit", "Stretch"]
+    assert "Raw" not in {mode.value for mode in DisplayMode}
+
+
+def test_the_preview_opens_fitted_and_keeps_the_mode_to_itself():
+    # Panel state, not a registry parameter: it describes this window and not
+    # the performance, so nothing carries it into a preset or out over OSC.
+    panel = PreviewPanel(RecordingRuntime())
+    assert panel._mode is DisplayMode.FIT
+    assert "display_mode" not in REGISTRY
+    assert not any("mode" in name for name in REGISTRY)
+
+
+SQUARE = (1024, 1024)
+FIT = DisplayMode.FIT
+STRETCH = DisplayMode.STRETCH
+
+
+def test_fit_scales_by_whichever_axis_runs_out_first():
+    # A square frame in a wide panel is bounded by the height, and the width
+    # left over is letterboxing.
+    assert displayed_size(SQUARE, (1200.0, 600.0), FIT) == (600, 600)
+    assert displayed_size(SQUARE, (600.0, 1200.0), FIT) == (600, 600)
+    assert displayed_size((1024, 512), (600.0, 600.0), FIT) == (600, 300)
+
+
+def test_fit_scales_a_small_frame_up_to_the_panel():
+    """The preview is how a performer judges what they are making.
+
+    A 256 model shown at 256 in the middle of a large panel is a smaller
+    picture for no reason the performer chose, and a Fit that only ever shrank
+    would differ from Stretch in two ways at once on a small model.
+    """
+    assert displayed_size((256, 256), (900.0, 900.0), FIT) == (900, 900)
+
+
+def test_stretch_takes_the_panel_whatever_shape_it_is():
+    assert displayed_size(SQUARE, (1200.0, 600.0), STRETCH) == (1200, 600)
+    assert displayed_size((1024, 512), (300.0, 900.0), STRETCH) == (300, 900)
+
+
+def test_neither_mode_ever_exceeds_the_panel_it_is_drawn_in():
+    """What keeps the preview from scrolling, at every shape of panel.
+
+    Including the fraction that rounding leaves: the size is drawn in whole
+    pixels, so rounding up a fitted frame by one would be a panel that scrolls
+    by one, on a whole class of window sizes rather than on a memorable one.
+    """
+    frames = ((1024, 1024), (1024, 512), (3, 1000), (1, 1))
+    areas = ((1200.0, 600.0), (599.5, 601.5), (37.0, 900.0), (1.0, 1.0))
+    for frame in frames:
+        for area in areas:
+            for mode in DisplayMode:
+                width, height = displayed_size(frame, area, mode)
+                left, top = centred_offset((width, height), area)
+                assert width <= area[0] and height <= area[1]
+                assert left + width <= area[0] and top + height <= area[1]
+
+
+def test_a_panel_or_a_frame_with_no_area_leaves_nothing_to_draw():
+    """Both are reachable and neither may divide by anything.
+
+    A dock split dragged shut has no width, and there is no frame at all until
+    the first one arrives.
+    """
+    for mode in DisplayMode:
+        assert displayed_size(SQUARE, (0.0, 600.0), mode) == (0, 0)
+        assert displayed_size(SQUARE, (600.0, 0.0), mode) == (0, 0)
+        assert displayed_size(SQUARE, (-5.0, -5.0), mode) == (0, 0)
+        assert displayed_size((0, 0), (600.0, 600.0), mode) == (0, 0)
+        assert displayed_size((1024, 0), (600.0, 600.0), mode) == (0, 0)
+
+
+def test_only_a_viewport_with_a_frame_in_it_is_dimmed():
+    """With nothing rendered there is nothing to dim.
+
+    The words already stand out on an empty panel, so a dim there would be a
+    grey rectangle explaining itself.
+    """
+    loading = PreviewStatus("Loading wikiart-1024.pkl.")
+    assert dims_the_frame(loading, True)
+    assert not dims_the_frame(loading, False)
+
+
+def test_a_preview_that_is_running_is_never_dimmed():
+    # A dim over a preview that is fine is the panel claiming to be busy when
+    # it is not, and it would sit there for the whole of a set.
+    assert not dims_the_frame(PreviewStatus(""), True)
+
+
+def test_a_failed_load_dims_the_frame_it_could_not_replace():
+    # The model that is still rendering is the one the performer is looking at
+    # while they read why the next one did not arrive.
+    assert dims_the_frame(PreviewStatus("No such file", True), True)
+
+
+def test_centred_offset_puts_the_spare_room_on_both_sides():
+    assert centred_offset((600.0, 600.0), (1200.0, 600.0)) == (300.0, 0.0)
+    assert centred_offset((0.0, 0.0), (0.0, 0.0)) == (0.0, 0.0)
+
+
+def test_centred_offset_never_starts_something_off_the_left_edge():
+    # A status line longer than a narrow panel. Losing the end of it beats
+    # losing the beginning as well.
+    assert centred_offset((900.0, 20.0), (300.0, 300.0)) == (0.0, 140.0)
+
+
+def test_an_unchanged_frame_at_an_unchanged_size_is_never_uploaded_again():
+    # The whole reason the mailbox carries a sequence number.
+    assert not needs_refresh(7, 7, (600, 600), (600, 600))
+
+
+def test_a_new_frame_is_uploaded():
+    assert needs_refresh(8, 7, (600, 600), (600, 600))
+
+
+def test_a_change_of_displayed_size_is_uploaded_too():
+    # immvision draws through a texture built at the size it was asked for, so
+    # the size is part of what is cached. A dock drag or a mode switch, never
+    # anything that happens during a performance.
+    assert needs_refresh(7, 7, (601, 600), (600, 600))
 
 
 def test_model_name_falls_back_to_the_whole_path_when_there_is_no_filename():

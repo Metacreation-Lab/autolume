@@ -19,8 +19,9 @@ theme the app runs under. Which driver wins and what a tooltip says are
 
 import itertools
 
+import numpy as np
 import pytest
-from imgui_bundle import hello_imgui, imgui
+from imgui_bundle import hello_imgui, imgui, immvision
 
 from autolume.live.core.params import Binding, ControlState
 from autolume.live.core.sources import SourceTable
@@ -35,7 +36,7 @@ from autolume.live.ui.controls import (
 )
 from autolume.live.ui.panels.mapping import bindable_specs
 from autolume.live.ui.panels.perform import PerformPanel, button_width
-from autolume.live.ui.panels.preview import PreviewPanel
+from autolume.live.ui.panels.preview import _DIM_ALPHA, PreviewPanel
 
 NOW = 100.0
 IDLE = ControlState()
@@ -431,6 +432,181 @@ def test_the_model_row_uses_the_width_it_is_given_and_no_more():
     """
     for width in (448.0, 360.0, 280.0):
         assert row_edges(width, 1.0)[0] == pytest.approx(0.0, abs=1.0)
+
+
+def dimmed_white(alpha):
+    """The brightest frame a model can produce, under a dim of `alpha`."""
+    return (1.0 - alpha, 1.0 - alpha, 1.0 - alpha)
+
+
+def test_the_dim_carries_the_status_over_the_brightest_frame(frame):
+    """The words land on arbitrary imagery, so no text colour is safe alone.
+
+    The dim has to be set for the worst case the model can produce, which is
+    white, and not for whichever painting happens to be loaded. The red is what
+    binds rather than the white: it is a mid luminance colour, so it has the
+    least room of anything drawn here, and it carries the message that most
+    needs reading.
+    """
+    dimmed = luminance(dimmed_white(_DIM_ALPHA))
+    text = imgui.get_style_color_vec4(imgui.Col_.text)
+    assert contrast(luminance((text.x, text.y, text.z)), dimmed) > 7.0
+    assert contrast(luminance(ERROR_COLOR), dimmed) > 4.0
+
+
+def test_a_lighter_dim_would_not_carry_the_failure_colour(frame):
+    # The check above only means something if it could fail. At three fifths
+    # the red is under two to one, which is a red no one can read.
+    assert contrast(luminance(ERROR_COLOR), luminance(dimmed_white(0.6))) < 2.0
+
+
+def test_the_dim_leaves_the_frame_underneath_visible(frame):
+    """The reason the previous model is not unloaded is that it keeps showing.
+
+    A dim that took the picture to black would give the same legibility and
+    throw away what it was protecting, which is the performer watching what is
+    still rendering while the next model loads.
+    """
+    assert _DIM_ALPHA <= 0.85
+
+
+class FramePreview:
+    """A mailbox with a frame in it, so the preview has something to be quiet
+    about. What it holds never reaches immvision, which needs a GL context."""
+
+    def latest(self):
+        return 7, np.zeros((8, 8, 3), dtype=np.uint8)
+
+
+def overlay_paint(runtime):
+    """What the status overlay costs: vertices drawn, and layout taken.
+
+    Measured around the overlay itself, inside the child it paints into, which
+    is the only place either question can be asked. Zero vertices really is
+    nothing drawn, and a cursor that has not moved really is nothing placed.
+
+    Everything else runs for real. Only immvision is stood in for, because it
+    uploads a texture and there is no GL context here, and what it was handed
+    is recorded so the frame can be asked about afterwards.
+    """
+    result = []
+    shown = []
+    original_overlay = PreviewPanel._overlay
+    original_display = immvision.image_display
+    try:
+
+        def measure(self, status, origin, area, has_frame):
+            draw_list = imgui.get_window_draw_list()
+            before = draw_list.vtx_buffer.size()
+            cursor = imgui.get_cursor_pos()
+            original_overlay(self, status, origin, area, has_frame)
+            moved = imgui.get_cursor_pos() != cursor
+            result.append((draw_list.vtx_buffer.size() - before, moved))
+
+        def display(label, image, size=None, refresh_image=False, **kwargs):
+            shown.append((image, size, refresh_image))
+            # immvision places an item of the size it was asked for, and the
+            # cursor having been moved to centre it is only legal because
+            # something is then submitted there.
+            imgui.dummy(imgui.ImVec2(float(size[0]), float(size[1])))
+            return (0.0, 0.0)
+
+        PreviewPanel._overlay = measure
+        immvision.image_display = display
+        # A panel with room in it. The window this fixture opens is auto sized
+        # and has next to none, which is the zero area case rather than this
+        # one.
+        imgui.begin_child("##panel", imgui.ImVec2(400.0, 300.0))
+        PreviewPanel(runtime).gui()
+        imgui.end_child()
+    finally:
+        PreviewPanel._overlay = original_overlay
+        immvision.image_display = original_display
+    return result[0] + (shown,)
+
+
+def test_a_preview_with_nothing_to_say_paints_nothing_at_all(frame):
+    """No plate, no glyph, no ink, over a frame that is doing fine.
+
+    The status sits on the image now, so "nothing to say" has to mean nothing
+    drawn rather than an empty line the way it did when it had a row of its
+    own. A plate over a running preview would be a permanent grey smudge in
+    the middle of the picture.
+    """
+    running = PanelRuntime(host=FakeModelHost(current=object()))
+    running.preview = FramePreview()
+    ink, moved, shown = overlay_paint(running)
+    assert (ink, moved) == (0, False)
+    # And the frame itself did go out, so this is a quiet preview rather than
+    # an empty one.
+    assert len(shown) == 1
+
+
+def test_the_status_is_painted_over_the_frame_rather_than_placed_above_it(frame):
+    # It takes no layout in either state, which is what lets it sit on the
+    # image instead of pushing it down the way the old line did.
+    failing = PanelRuntime(host=FakeModelHost(error="Could not load the model"))
+    failing.preview = FramePreview()
+    ink, moved, _ = overlay_paint(failing)
+    assert ink > 0
+    assert not moved
+
+
+def test_only_a_preview_with_a_frame_in_it_is_dimmed(frame):
+    """With nothing rendered there is nothing to dim.
+
+    The words already stand out on an empty panel, so a dim there would be a
+    grey rectangle explaining itself. Measured as ink rather than asserted,
+    because the rectangle is the only difference between the two states.
+    """
+    host = FakeModelHost(error="Could not load the model")
+    empty = PanelRuntime(host=host)
+    over_frame = PanelRuntime(host=host)
+    over_frame.preview = FramePreview()
+    assert overlay_paint(over_frame)[0] > overlay_paint(empty)[0]
+
+
+def test_the_dim_never_reaches_the_frame_the_sinks_are_handed(frame):
+    """The dim is presentation and belongs to this panel only.
+
+    The render loop fans the same frames out to every sink, and the parity plan
+    adds NDI, a recorder and a fullscreen output, so a dim that reached the
+    frame would dim the show and the recording on every model switch. It is a
+    rectangle on a draw list, and this is what says the array is not part of
+    it.
+    """
+    original = np.full((8, 8, 3), 210, dtype=np.uint8)
+    untouched = original.copy()
+
+    class OneFrame:
+        def latest(self):
+            return 7, original
+
+    runtime = PanelRuntime(host=FakeModelHost(error="Could not load the model"))
+    runtime.preview = OneFrame()
+    ink, _, shown = overlay_paint(runtime)
+    assert ink > 0
+    # Dimmed on screen, and the very same array, byte for byte, on its way to
+    # the drawing. Nothing copied it and nothing wrote to it.
+    (image, _size, _refresh), = shown
+    assert image is original
+    assert np.array_equal(original, untouched)
+
+
+def test_the_preview_never_makes_its_panel_scroll(frame):
+    """The status takes no layout, at any panel size, however long it is.
+
+    It is painted at a position rather than placed, which is what lets it sit
+    on the image without having pushed it down first. A message wider than the
+    panel is the case that would show it up, so that is the one drawn here.
+    """
+    failure = FakeModelHost(error="Could not load the model. " * 6)
+    for index, size in enumerate(((900.0, 300.0), (200.0, 600.0), (60.0, 60.0))):
+        imgui.begin_child(f"##host{index}", imgui.ImVec2(*size))
+        PreviewPanel(PanelRuntime(host=failure)).gui()
+        assert imgui.get_scroll_max_x() == 0.0
+        assert imgui.get_scroll_max_y() == 0.0
+        imgui.end_child()
 
 
 def test_the_preview_draws_its_status_line_in_every_state(frame):
