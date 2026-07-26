@@ -3,7 +3,7 @@ import logging
 import pytest
 import torch
 
-from autolume.live.core.superres import MAX_SHORT_SIDE, SuperRes
+from autolume.live.core.superres import _LOG_ONCE_CAP, MAX_SHORT_SIDE, SuperRes
 from utils import resource_paths
 
 
@@ -71,6 +71,57 @@ class FlakyForwardModel(torch.nn.Module):
             raise RuntimeError("transient boom")
         _, c, h, w = x.shape
         return torch.zeros(1, c, h * 4, w * 4)
+
+
+class VaryingByteCountOOMModel(torch.nn.Module):
+    """Raises the same cause every call, but with different embedded numbers.
+
+    Mirrors real CUDA OOM messages, which embed the live byte count they
+    tried to allocate and so never repeat verbatim.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        self.calls = 0
+
+    def load_state_dict(self, state_dict, *args, **kwargs):
+        return None
+
+    def forward(self, x):
+        self.calls += 1
+        raise RuntimeError(f"CUDA out of memory. Tried to allocate {384 + self.calls} MiB")
+
+
+class TwoDistinctCausesModel(torch.nn.Module):
+    """First call fails one way, every call after fails a genuinely different way."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        self.calls = 0
+
+    def load_state_dict(self, state_dict, *args, **kwargs):
+        return None
+
+    def forward(self, x):
+        self.calls += 1
+        if self.calls == 1:
+            raise RuntimeError("CUDA out of memory. Tried to allocate 384 MiB")
+        raise TypeError("unrelated interface failure")
+
+
+class UniqueCauseEachCallModel(torch.nn.Module):
+    """Raises a genuinely distinct (non-numeric) cause every call, to drive the cap."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        self.calls = 0
+
+    def load_state_dict(self, state_dict, *args, **kwargs):
+        return None
+
+    def forward(self, x):
+        self.calls += 1
+        raise RuntimeError(f"cause-{chr(ord('a') + self.calls)}")
 
 
 @pytest.fixture
@@ -243,6 +294,50 @@ def test_forward_failure_recovers_on_next_success(install_model):
     second = sr.apply(image, "cpu")
     assert second.shape == (3, 32, 32)
     assert sr.last_error is None
+
+
+def test_forward_failure_dedup_collapses_varying_byte_counts(install_model, caplog):
+    """The exact shape that bit: same cause, different embedded numbers each call."""
+    install_model(VaryingByteCountOOMModel)
+    sr = SuperRes()
+    image = torch.zeros(3, 8, 8)
+
+    with caplog.at_level(logging.WARNING):
+        for _ in range(3):
+            output = sr.apply(image, "cpu")
+            assert output is image
+
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+
+
+def test_forward_failure_dedup_keeps_distinct_causes_separate(install_model, caplog):
+    install_model(TwoDistinctCausesModel)
+    sr = SuperRes()
+    image = torch.zeros(3, 8, 8)
+
+    with caplog.at_level(logging.WARNING):
+        sr.apply(image, "cpu")
+        sr.apply(image, "cpu")
+
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 2
+
+
+def test_forward_failure_log_cap_stops_growing_and_warns_once(install_model, caplog):
+    install_model(UniqueCauseEachCallModel)
+    sr = SuperRes()
+    image = torch.zeros(3, 8, 8)
+
+    with caplog.at_level(logging.WARNING):
+        for _ in range(_LOG_ONCE_CAP + 5):
+            output = sr.apply(image, "cpu")
+            assert output is image
+
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    # One warning per distinct cause up to the cap, plus exactly one
+    # "cap reached" warning, then silence for the remaining distinct causes.
+    assert len(warnings) == _LOG_ONCE_CAP + 1
 
 
 _REAL_WEIGHTS = resource_paths.resource_path("sr_models", "Fast.pt")

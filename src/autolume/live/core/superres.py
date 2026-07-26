@@ -11,12 +11,33 @@ level, so importing this module never pulls torch into the control plane.
 
 import contextlib
 import logging
+import re
 
 from utils import resource_paths
 
 logger = logging.getLogger(__name__)
 
 MAX_SHORT_SIDE = 1024
+
+# Past this many distinct failure causes, the model has bigger problems than
+# a missing log line, and the set stops growing (mirrors generator.py's
+# _LOG_ONCE_CAP so a session that goes quiet says why instead of just
+# falling silent).
+_LOG_ONCE_CAP = 64
+_DIGIT_RUN = re.compile(r"\d+")
+
+
+def _failure_key(exc: Exception) -> str:
+    """Collapse a recurring failure to one key regardless of embedded numbers.
+
+    A CUDA OOM message embeds the live byte counts it tried to allocate,
+    which differ call to call, so a literal string match never dedups the
+    case it exists for. Digit runs are normalised out of the message; the
+    exception type name stays part of the key so an unrelated failure (a
+    TypeError from a bad call, say) still logs on its own.
+    """
+    normalized = _DIGIT_RUN.sub("N", str(exc))
+    return f"{type(exc).__name__}:{normalized}"
 
 
 class SuperRes:
@@ -30,6 +51,7 @@ class SuperRes:
         self._guard_logged = False
         self.last_error: str | None = None
         self._logged_errors: set[str] = set()
+        self._log_cap_warned = False
 
     @property
     def disabled(self) -> bool:
@@ -74,7 +96,7 @@ class SuperRes:
             try:
                 self._model = self._model.to(device)
             except Exception as exc:
-                self._record_forward_failure(f"Super-res failed to move to {device}: {exc}")
+                self._record_forward_failure(f"Super-res failed to move to {device}: {exc}", exc)
                 return image
             self._device = device
         try:
@@ -82,21 +104,34 @@ class SuperRes:
                 batch = image.unsqueeze(0).to(device)
                 output = self._model(batch).float()
         except Exception as exc:
-            self._record_forward_failure(f"Super-res forward pass failed: {exc}")
+            self._record_forward_failure(f"Super-res forward pass failed: {exc}", exc)
             return image
         self.last_error = None
         return output[0]
 
-    def _record_forward_failure(self, message: str) -> None:
+    def _record_forward_failure(self, message: str, exc: Exception) -> None:
         """Note a transient (input- or memory-dependent) failure, logged once per cause.
 
         Unlike `_load`'s permanent sentinel, this never sets `disabled`: the
         very next frame, at a smaller size or with memory freed up, may work.
+        `last_error` itself is set unconditionally (it is the current status,
+        not a log), only the warning line is deduplicated by cause.
         """
         self.last_error = message
-        if message not in self._logged_errors:
-            self._logged_errors.add(message)
-            logger.warning(message)
+        key = _failure_key(exc)
+        if key in self._logged_errors:
+            return
+        if len(self._logged_errors) >= _LOG_ONCE_CAP:
+            if not self._log_cap_warned:
+                self._log_cap_warned = True
+                logger.warning(
+                    "Reached %d distinct super-res failure causes, further "
+                    "distinct causes will not be logged",
+                    _LOG_ONCE_CAP,
+                )
+            return
+        self._logged_errors.add(key)
+        logger.warning(message)
 
     def _load(self):
         weight_path = resource_paths.resource_path("sr_models", "Fast.pt")
