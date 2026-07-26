@@ -752,6 +752,44 @@ def test_model_host_publishes_empty_layer_catalog_when_enumeration_fails():
     host.stop()
 
 
+def test_model_host_publishes_empty_layer_catalog_when_wrapper_enumeration_raises(
+    caplog,
+):
+    """`_model_info`'s own guard, not `LoadedModel.enumerate_layers`'s.
+
+    A future wrapper generator (a mixed-model network, say) need not be a
+    `LoadedModel`: it only has to duck-type `z_dim`/`num_ws`/`enumerate_layers`.
+    If its `enumerate_layers` raises, `_model_info` must still publish an
+    empty catalog rather than failing the whole load.
+    """
+
+    class _WrapperModel:
+        def __init__(self, path):
+            self.pkl_path = path
+            self.z_dim = 4
+            self.num_ws = 2
+
+        def enumerate_layers(self):
+            raise RuntimeError("wrapper enumeration exploded")
+
+    host = ModelHost(loader=_WrapperModel)
+    with caplog.at_level(logging.WARNING):
+        host.request_load("/tmp/wrapper.pkl")
+        deadline = time.monotonic() + 2.0
+        while host.info_store.snapshot() is None and time.monotonic() < deadline:
+            time.sleep(0.005)
+
+    info = host.info_store.snapshot()
+    assert info is not None
+    assert info.layers == ()
+    assert host.current() is not None
+    assert host.error() is None
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert warnings[0].exc_info is not None
+    host.stop()
+
+
 def test_model_host_publishes_layer_catalog_on_successful_load():
     import torch
 
