@@ -14,11 +14,25 @@ from autolume.live.core.generator import (
     derive_float_image,
     direction_delta,
     effective_noise_seed,
+    manipulation_dict,
     noise_mode,
     slerp,
     to_uint8_frame,
 )
-from autolume.live.core.params import ControlState, Keyframe, to_render_params
+from autolume.live.core.params import (
+    ControlState,
+    Keyframe,
+    Transform,
+    to_render_params,
+)
+
+
+# The bending tests below make the generator import the operator library,
+# and merely importing kornia trips a torch FutureWarning from its lightglue
+# submodule. Matched by message so it cannot mask anything else.
+pytestmark = pytest.mark.filterwarnings(
+    r"ignore:.*torch\.cuda\.amp\.custom_fwd.*:FutureWarning"
+)
 
 
 def render_params(**changes):
@@ -1083,3 +1097,326 @@ def test_per_layer_ratio_reaches_its_layer_and_the_rest_stay_square():
 
     assert conv1.writes == [("ratio", (2.0, 3.0))]
     assert torgb.writes == [("ratio", (1.0, 1.0))]
+
+
+# --- bending hooks, transforms and layer capture --------------------------
+#
+# The fixture chains two layers with different gains so a transform applied
+# at the wrong point in the network reads back a different number, and uses
+# 0.25 rather than 0.5 as its base so that inversion is not its own inverse.
+
+
+def _bendable_synthesis(channels=3, height=1, width=2, tuple_output=False):
+    import torch
+    import torch.nn as nn
+
+    class _Hooked(nn.Module):
+        def __init__(self, gain):
+            super().__init__()
+            self.gain = gain
+            self.hook_registrations = 0
+
+        def register_forward_hook(self, hook, **kwargs):
+            self.hook_registrations += 1
+            return super().register_forward_hook(hook, **kwargs)
+
+        def forward(self, x):
+            return x * self.gain
+
+    class _Synthesis(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv1 = _Hooked(1.0)
+            self.torgb = _Hooked(0.5)
+
+        def forward(self, ws, noise_mode="const"):
+            base = torch.full([1, channels, height, width], 0.25)
+            image = self.torgb(self.conv1(base))
+            return (image, []) if tuple_output else image
+
+    return _Synthesis()
+
+
+def _bendable_model(**changes):
+    return _fake_model(_bendable_synthesis(**changes))
+
+
+def _pixel(frame):
+    return frame[0, 0].tolist()
+
+
+# conv1 sees 0.25, torgb turns it into 0.125, which quantizes to 143.
+_UNBENT = [143, 143, 143]
+_ALL_CHANNELS = (0, 1, 2)
+
+
+def test_no_hooks_are_registered_without_transforms_or_a_capture_layer():
+    model = _bendable_model()
+    assert _pixel(model.render_frame(render_params(), 0)) == _UNBENT
+    for module in model.G.synthesis.modules():
+        assert len(module._forward_hooks) == 0
+    assert model.G.synthesis.conv1.hook_registrations == 0
+
+
+def test_one_hook_is_registered_per_bent_layer_and_reused_across_frames():
+    model = _bendable_model()
+    params = render_params(
+        transforms=(Transform("ablate", "conv1", (1.0,), _ALL_CHANNELS),)
+    )
+    for index in range(4):
+        assert _pixel(model.render_frame(params, index)) == [128, 128, 128]
+    assert model.G.synthesis.conv1.hook_registrations == 1
+    assert model.G.synthesis.torgb.hook_registrations == 0
+
+
+def test_changing_only_transform_parameters_leaves_the_hooks_in_place():
+    model = _bendable_model()
+    for index, factor in enumerate((2.0, 3.0, 4.0)):
+        model.render_frame(
+            render_params(
+                transforms=(
+                    Transform("scalar-multiply", "conv1", (factor,), _ALL_CHANNELS),
+                )
+            ),
+            index,
+        )
+    assert model.G.synthesis.conv1.hook_registrations == 1
+
+
+def test_adding_a_layer_to_the_chain_rebuilds_the_hook_set():
+    model = _bendable_model()
+    first = Transform("ablate", "conv1", (1.0,), _ALL_CHANNELS)
+    second = Transform("ablate", "torgb", (1.0,), _ALL_CHANNELS)
+    model.render_frame(render_params(transforms=(first,)), 0)
+    model.render_frame(render_params(transforms=(first, second)), 1)
+    synthesis = model.G.synthesis
+    assert synthesis.torgb.hook_registrations == 1
+    # Re-registered, not doubled up: one live hook per module either way.
+    assert len(synthesis.conv1._forward_hooks) == 1
+    assert len(synthesis.torgb._forward_hooks) == 1
+
+
+def test_clearing_the_chain_removes_every_hook():
+    model = _bendable_model()
+    transform = Transform("ablate", "conv1", (1.0,), _ALL_CHANNELS)
+    model.render_frame(render_params(transforms=(transform,)), 0)
+    assert _pixel(model.render_frame(render_params(), 1)) == _UNBENT
+    for module in model.G.synthesis.modules():
+        assert len(module._forward_hooks) == 0
+
+
+def test_a_capture_layer_alone_registers_its_hook():
+    model = _bendable_model()
+    model.render_frame(render_params(capture_layer="conv1"), 0)
+    assert model.G.synthesis.conv1.hook_registrations == 1
+    assert model.G.synthesis.torgb.hook_registrations == 0
+
+
+@pytest.mark.parametrize(
+    "layer,expected",
+    [("conv1", [175, 175, 175]), ("torgb", [239, 239, 239])],
+)
+def test_a_transform_applies_at_the_layer_it_names(layer, expected):
+    model = _bendable_model()
+    params = render_params(
+        transforms=(Transform("invert", layer, (1.0,), _ALL_CHANNELS),)
+    )
+    assert _pixel(model.render_frame(params, 0)) == expected
+
+
+@pytest.mark.parametrize(
+    "chain,expected",
+    [
+        (("scalar-multiply", "invert"), [159, 159, 159]),
+        (("invert", "scalar-multiply"), [223, 223, 223]),
+    ],
+)
+def test_transforms_apply_in_chain_order(chain, expected):
+    model = _bendable_model()
+    params = {"scalar-multiply": (2.0,), "invert": (1.0,)}
+    transforms = tuple(
+        Transform(op, "conv1", params[op], _ALL_CHANNELS) for op in chain
+    )
+    assert _pixel(model.render_frame(render_params(transforms=transforms), 0)) == expected
+
+
+def test_a_transform_only_touches_the_channels_it_selected():
+    model = _bendable_model()
+    params = render_params(
+        transforms=(Transform("scalar-multiply", "conv1", (3.0,), (0,)),)
+    )
+    assert _pixel(model.render_frame(params, 0)) == [175, 143, 143]
+
+
+def test_a_transform_on_the_output_layer_edits_the_final_image():
+    model = _bendable_model()
+    params = render_params(
+        transforms=(Transform("ablate", "output", (1.0,), _ALL_CHANNELS),)
+    )
+    assert _pixel(model.render_frame(params, 0)) == [128, 128, 128]
+
+
+def test_a_transform_survives_a_tuple_synthesis_output():
+    model = _bendable_model(tuple_output=True)
+    params = render_params(
+        transforms=(Transform("invert", "output", (1.0,), _ALL_CHANNELS),)
+    )
+    assert _pixel(model.render_frame(params, 0)) == [239, 239, 239]
+
+
+def test_an_erode_kernel_size_reaches_the_operator_as_an_int(caplog):
+    # torch.ones((1.0, 1.0)) raises, so a float kernel would be logged and
+    # skipped instead of applied. Kernel 1 erosion is the identity, which
+    # makes "nothing was logged" the whole assertion.
+    assert manipulation_dict(Transform("erode", "conv1", (5.0,), (0,)))["params"] == [5]
+    model = _bendable_model()
+    params = render_params(
+        transforms=(Transform("erode", "conv1", (1.0,), _ALL_CHANNELS),)
+    )
+    with caplog.at_level(logging.WARNING):
+        assert _pixel(model.render_frame(params, 0)) == _UNBENT
+    assert [r for r in caplog.records if r.levelno == logging.WARNING] == []
+
+
+def test_a_failing_transform_is_skipped_and_logged_once(caplog):
+    model = _bendable_model()
+    # Channel 99 does not exist, so the operator raises on the way in.
+    params = render_params(
+        transforms=(Transform("ablate", "conv1", (1.0,), (99,)),)
+    )
+    with caplog.at_level(logging.WARNING):
+        for index in range(3):
+            assert _pixel(model.render_frame(params, index)) == _UNBENT
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+
+
+def test_a_failing_transform_does_not_stop_the_rest_of_the_chain(caplog):
+    model = _bendable_model()
+    params = render_params(
+        transforms=(
+            Transform("ablate", "conv1", (1.0,), (99,)),
+            Transform("invert", "conv1", (1.0,), _ALL_CHANNELS),
+        )
+    )
+    with caplog.at_level(logging.WARNING):
+        assert _pixel(model.render_frame(params, 0)) == [175, 175, 175]
+    assert len([r for r in caplog.records if r.levelno == logging.WARNING]) == 1
+
+
+def test_two_different_failures_are_logged_separately(caplog):
+    model = _bendable_model()
+    params = render_params(
+        transforms=(
+            Transform("ablate", "conv1", (1.0,), (99,)),
+            Transform("invert", "conv1", (1.0,), (99,)),
+        )
+    )
+    with caplog.at_level(logging.WARNING):
+        model.render_frame(params, 0)
+        model.render_frame(params, 1)
+    assert len([r for r in caplog.records if r.levelno == logging.WARNING]) == 2
+
+
+def test_a_layer_name_this_model_does_not_have_is_logged_once_and_skipped(caplog):
+    model = _bendable_model()
+    params = render_params(
+        transforms=(Transform("ablate", "b8.conv0", (1.0,), _ALL_CHANNELS),)
+    )
+    with caplog.at_level(logging.WARNING):
+        for index in range(3):
+            assert _pixel(model.render_frame(params, index)) == _UNBENT
+    assert len([r for r in caplog.records if r.levelno == logging.WARNING]) == 1
+    for module in model.G.synthesis.modules():
+        assert len(module._forward_hooks) == 0
+
+
+def test_a_capture_layer_derives_the_image_from_that_layer():
+    model = _bendable_model()
+    assert _pixel(model.render_frame(render_params(capture_layer="conv1"), 0)) == [
+        159,
+        159,
+        159,
+    ]
+
+
+def test_a_captured_layer_carries_its_own_transform():
+    model = _bendable_model()
+    params = render_params(
+        capture_layer="conv1",
+        transforms=(Transform("invert", "conv1", (1.0,), _ALL_CHANNELS),),
+    )
+    assert _pixel(model.render_frame(params, 0)) == [223, 223, 223]
+
+
+def test_a_capture_layer_this_model_does_not_have_falls_back_to_the_final_image(caplog):
+    model = _bendable_model()
+    params = render_params(capture_layer="b8.torgb")
+    with caplog.at_level(logging.WARNING):
+        for index in range(3):
+            assert _pixel(model.render_frame(params, index)) == _UNBENT
+    assert len([r for r in caplog.records if r.levelno == logging.WARNING]) == 1
+
+
+def test_capturing_a_group_layer_averages_the_group_dimension():
+    import torch
+    import torch.nn as nn
+
+    class _GroupBlock(nn.Module):
+        def forward(self, ws):
+            # (N, C, G, H, W) with two groups, 0.0 and 0.5, so the group mean
+            # is 0.25 and quantizes to 159.
+            groups = torch.tensor([0.0, 0.5]).reshape(1, 1, 2, 1, 1)
+            return groups.repeat(1, 3, 1, 1, 2)
+
+    class _Synthesis(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.group_conv = _GroupBlock()
+
+        def forward(self, ws, noise_mode="const"):
+            self.group_conv(ws)
+            return torch.zeros([1, 3, 1, 2])
+
+    model = _fake_model(_Synthesis())
+    frame = model.render_frame(render_params(capture_layer="group_conv"), 0)
+    assert frame.shape == (1, 2, 3)
+    assert _pixel(frame) == [159, 159, 159]
+
+
+def test_the_frame_slot_does_not_outlive_the_frame():
+    model = _bendable_model()
+    params = render_params(
+        transforms=(Transform("ablate", "conv1", (1.0,), _ALL_CHANNELS),)
+    )
+    assert _pixel(model.render_frame(params, 0)) == [128, 128, 128]
+    # The hooks stay registered, so a synthesis call from anywhere else would
+    # be bent too if the per frame slot were left behind.
+    loose = model.G.synthesis(None)
+    assert float(loose.reshape(-1)[0]) == 0.125
+
+
+def test_the_frame_slot_is_cleared_even_when_synthesis_raises():
+    import torch
+    import torch.nn as nn
+
+    class _Flaky(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv1 = nn.Identity()
+            self.calls = 0
+
+        def forward(self, ws, noise_mode="const"):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("synthesis exploded")
+            return self.conv1(torch.full([1, 3, 1, 2], 0.25))
+
+    model = _fake_model(_Flaky())
+    params = render_params(
+        transforms=(Transform("ablate", "conv1", (1.0,), _ALL_CHANNELS),)
+    )
+    with pytest.raises(RuntimeError):
+        model.render_frame(params, 0)
+    loose = model.G.synthesis(None)
+    assert float(loose.reshape(-1)[0]) == 0.25

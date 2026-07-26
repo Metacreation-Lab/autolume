@@ -15,7 +15,7 @@ from typing import Callable
 
 import numpy as np
 
-from autolume.live.core.params import Keyframe, RenderParams
+from autolume.live.core.params import Keyframe, RenderParams, Transform
 from autolume.live.core.store import LatestValueStore
 
 logger = logging.getLogger(__name__)
@@ -84,6 +84,39 @@ def effective_noise_seed(params: RenderParams, frame_index: int) -> int:
     if params.noise_anim:
         seed += frame_index
     return seed & _SEED_MASK
+
+
+def hook_layer_names(params: RenderParams) -> tuple[str, ...]:
+    """Every layer this frame reads or edits, in first seen order.
+
+    This tuple is the hook registration key: while it holds, the registered
+    hooks are reused frame after frame, however much the transforms
+    themselves are being turned.
+    """
+    names: list[str] = []
+    for transform in params.transforms:
+        if transform.layer not in names:
+            names.append(transform.layer)
+    if params.capture_layer and params.capture_layer not in names:
+        names.append(params.capture_layer)
+    return tuple(names)
+
+
+def manipulation_dict(transform: Transform) -> dict:
+    """A `Transform` in the shape `ManipulationLayer.forward` reads.
+
+    `erode` and `dilate` size a `torch.ones` kernel with their parameter, so
+    the stored float has to become an int on the way in or the kernel cannot
+    be built at all.
+    """
+    params = [float(value) for value in transform.params]
+    if transform.op in ("erode", "dilate") and params:
+        params[0] = int(params[0])
+    return {
+        "transformID": transform.op,
+        "params": params,
+        "indices": list(transform.indices),
+    }
 
 
 def adjust_weights(params: RenderParams) -> tuple[float, ...]:
@@ -255,6 +288,14 @@ class LoadedModel:
         self._vec_fallback_logged = False
         self._keyframe_w_cache: dict = {}
         self._logged_once: set = set()
+        self._hook_key: tuple[str, ...] | None = None
+        self._hook_handles: list = []
+        self._manipulation = None
+        # What the hooks act on for the frame being rendered right now, and
+        # where the capture hook leaves what it grabbed. Empty between frames.
+        self._frame_transforms: tuple[Transform, ...] = ()
+        self._frame_capture = ""
+        self._captured = None
 
     def _blended_w(self, latent_x, latent_y, truncation_psi):
         import torch
@@ -419,6 +460,102 @@ class LoadedModel:
             dict(params.layer_ratios),
         )
 
+    def _ensure_manipulation(self) -> None:
+        """The operator library, loaded the first time a transform needs it.
+
+        Imported here rather than at module scope so a session that never
+        bends anything never pays for kornia.
+        """
+        if self._manipulation is not None:
+            return
+        try:
+            from autolume.bending.transform_layers import ManipulationLayer
+
+            self._manipulation = ManipulationLayer()
+        except Exception:
+            self._log_once(
+                ("manipulation",),
+                "Could not load the bending operators, transforms stay inactive",
+                exc_info=True,
+            )
+
+    def _sync_hooks(self, params: RenderParams) -> None:
+        """Hold one forward hook on every layer this frame reads or edits.
+
+        Registration follows the layer name key and nothing else, so turning
+        a transform's parameters, or the whole chain's values, costs no hook
+        traffic at all. An empty key means the network carries no hooks.
+        """
+        key = hook_layer_names(params)
+        if key == self._hook_key:
+            return
+        for handle in self._hook_handles:
+            handle.remove()
+        self._hook_handles = []
+        self._hook_key = key
+        if params.transforms:
+            self._ensure_manipulation()
+        modules = self._synthesis_modules()
+        for name in key:
+            module = modules.get(name)
+            if module is None:
+                self._log_once(
+                    ("layer", name),
+                    "Layer %s is not part of %s, skipping it",
+                    name,
+                    self.pkl_path,
+                )
+                continue
+            register = getattr(module, "register_forward_hook", None)
+            if callable(register):
+                self._hook_handles.append(register(self._make_hook(name)))
+
+    def _make_hook(self, name: str):
+        def _hook(_module, _inputs, output):
+            tensor = output[0] if isinstance(output, tuple) else output
+            if getattr(tensor, "ndim", 0) not in (4, 5):
+                return None
+            bent, applied = self._apply_transforms(name, tensor)
+            if name == self._frame_capture:
+                # A 5D activation is a G-CNN group layout (N, C, G, H, W) and
+                # the image comes from the group mean, which is also the shape
+                # the layer catalog reports.
+                self._captured = bent.mean(2) if bent.ndim == 5 else bent
+            if not applied:
+                return None
+            if isinstance(output, tuple):
+                return (bent,) + tuple(output[1:])
+            return bent
+
+        return _hook
+
+    def _apply_transforms(self, name: str, tensor):
+        """Every transform aimed at `name`, in chain order.
+
+        Called from a forward hook, so it cannot raise: a transform that
+        fails is logged once for that cause and dropped, and the frame
+        renders with whatever the rest of the chain produced.
+        """
+        manipulation = self._manipulation
+        if manipulation is None:
+            return tensor, False
+        applied = False
+        for transform in self._frame_transforms:
+            if transform.layer != name:
+                continue
+            try:
+                tensor = manipulation(tensor, manipulation_dict(transform))
+                applied = True
+            except Exception as exc:
+                self._log_once(
+                    ("transform", transform.op, name, str(exc)),
+                    "Bending %s on %s failed, skipping it: %s",
+                    transform.op,
+                    name,
+                    exc,
+                )
+        return tensor, applied
+
     def _direction(self, params: RenderParams):
         import torch
 
@@ -503,6 +640,7 @@ class LoadedModel:
 
         with torch.no_grad():
             self._apply_module_state(params)
+            self._sync_hooks(params)
             if params.mode == "vec":
                 ws = self._vec_to_w(
                     params.latent_vec, params.latent_project, params.truncation_psi
@@ -521,12 +659,22 @@ class LoadedModel:
             # is a process wide side effect, so the other modes leave it alone.
             if mode == "random":
                 torch.manual_seed(effective_noise_seed(params, frame_index))
-            output = self.G.synthesis(ws.unsqueeze(0), noise_mode=mode)
+            self._frame_transforms = params.transforms
+            self._frame_capture = params.capture_layer
+            self._captured = None
+            try:
+                output = self.G.synthesis(ws.unsqueeze(0), noise_mode=mode)
+            finally:
+                captured = self._captured
+                self._frame_transforms = ()
+                self._frame_capture = ""
+                self._captured = None
             # Autolume's custom stylegan2 synthesis returns (img, rgb_list);
             # standard stylegan synthesis returns the img tensor directly.
             if isinstance(output, tuple):
                 output = output[0]
-            return to_uint8_frame(derive_float_image(output[0], params))
+            activation = output if captured is None else captured
+            return to_uint8_frame(derive_float_image(activation[0], params))
 
 
 def load_model(path: str, device=None) -> LoadedModel:
