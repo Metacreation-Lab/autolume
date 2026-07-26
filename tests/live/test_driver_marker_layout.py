@@ -505,8 +505,26 @@ def keyframe_row_edges(width: float, font_scale: float) -> list[float]:
     return edges
 
 
-@pytest.mark.parametrize("font_scale", (1.0, 1.5, 2.0))
-@pytest.mark.parametrize("width", (448.0, 360.0, 280.0))
+_KEYFRAME_ROW_COMBOS = tuple(
+    (width, font_scale)
+    for width in (448.0, 360.0, 280.0)
+    for font_scale in (1.0, 1.5, 2.0)
+    # 280 at 2.0x excluded on purpose, not silently: the perform panel's
+    # nine combination bar was calibrated against rows that carry one
+    # control each, and a keyframe entry is a compound row (index, kind,
+    # Project, two seed fields, Snap, Remove). Remove stays spelled out in
+    # full rather than abbreviated, since it is the entry's one destructive
+    # control and a performer must never have to infer what it deletes.
+    # Narrowing the seed fields enough to also clear this one combination
+    # left them too small to read a typical seed value in (task 9 review,
+    # finding 1, round 4, the coordinator's pre-approved fallback). Every
+    # other combination fits with comfortable margin; this one measured
+    # +29pt over at the seed width this entry actually ships with.
+    if (width, font_scale) != (280.0, 2.0)
+)
+
+
+@pytest.mark.parametrize("width, font_scale", _KEYFRAME_ROW_COMBOS)
 def test_no_keyframe_row_runs_past_the_panel_it_is_drawn_in(width, font_scale):
     """The keyframe entry is the widest in the new UI, and the one the
     perform panel's equivalent guard cannot reach, since it draws a
@@ -514,10 +532,14 @@ def test_no_keyframe_row_runs_past_the_panel_it_is_drawn_in(width, font_scale):
     found the one-line version did not fit at any docked width (task 9
     review, finding 1): row 1 is the index, the kind switch and Project, row
     2 is indented under it and carries the seed fields or the vector state,
-    Snap and Del. Both lines are measured, and this includes the window's
-    own vertical scrollbar taking width once the panel's full content, not
-    just this entry, no longer fits the docked height either: the same
-    condition a performer would actually be looking at.
+    Snap and Remove. Both lines are measured, and this includes the
+    window's own vertical scrollbar taking width once the panel's full
+    content, not just this entry, no longer fits the docked height either:
+    the same condition a performer would actually be looking at.
+
+    Every combination this test runs is one the entry claims to support and
+    must keep fitting; see `_KEYFRAME_ROW_COMBOS` for the one combination
+    excluded, and why.
     """
     edges = keyframe_row_edges(width, font_scale)
     assert max(edges) <= 0.0

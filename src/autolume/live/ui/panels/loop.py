@@ -132,6 +132,23 @@ class LoopPanel:
         layout rather than a reason to keep it. The second line is indented
         to read as a continuation of the first rather than a row of its own.
 
+        Remove lives on the content line, in full, never abbreviated: it is
+        the one destructive control in the entry, and a performer must never
+        have to infer what a button deletes. A round of this review tried it
+        on the kind line instead, on the theory that line had more slack;
+        measured, that made the kind line the one that overflowed, by more
+        than "Remove" ever cost the content line, so it moved back (task 9
+        review, finding 1, round 4). The seed fields were narrowed to buy
+        back most of what "Remove" costs over the abbreviation it replaced,
+        but not all of it: narrowing them enough to also clear the last
+        combination would have left them too small to read a typical seed
+        value in, so this entry's documented floor is 280px at 1.5x rather
+        than 2.0x (`test_no_keyframe_row_runs_past_the_panel_it_is_drawn_in`
+        excludes that one combination, with this same reasoning). A
+        five-control compound row does not share the one-control perform
+        panel rows' floor, and a readable field beats squeezing to a bar
+        that was never calibrated for a row this wide.
+
         The content half is two seed fields or nothing, never both, so a
         vector keyframe's row is not left with two live number fields for a
         value it cannot hold. Snap is offered either way: it is the only way
@@ -178,7 +195,7 @@ class LoopPanel:
         imgui.same_line()
         if count <= 1:
             imgui.begin_disabled()
-        if imgui.button("Del"):
+        if imgui.button("Remove"):
             self._emit(KEYFRAME_REMOVE, RemoveKeyframe(index))
         if count <= 1:
             imgui.end_disabled()
