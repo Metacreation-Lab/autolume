@@ -885,11 +885,14 @@ def test_two_screenshots_in_the_same_second_are_two_files(monkeypatch, tmp_path)
 def test_a_sink_never_starts_once_the_runtime_has_stopped(
     ndilib, writers, monkeypatch, tmp_path
 ):
-    """Shutdown stops the sinks before the control loop that drives them.
+    """The guard underneath the ordering, for a tick that outlives shutdown.
 
-    An event still in the queue at that moment must not start a thread the
-    runtime has no way left to stop, so a start is refused once stopping has
-    begun. A stop is always allowed.
+    `Runtime.stop()` stops this loop before the sinks, which is what closes
+    the window in practice, but that join gives up after two seconds. A tick
+    still running past it must not start a thread the runtime has no way left
+    to stop, so a start is refused once stopping has begun. A stop is always
+    allowed. Ticking by hand after `stop()` has returned is exactly the shape
+    of that overrunning tick.
     """
     use_data_root(monkeypatch, tmp_path)
     runtime = running_runtime()

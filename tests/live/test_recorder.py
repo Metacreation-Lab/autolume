@@ -672,3 +672,76 @@ def test_repeated_screenshot_failures_log_once_per_cause(tmp_path, caplog):
         if "Could not save the screenshot" in record.getMessage()
     ]
     assert len(failures) == 1
+
+
+class _ParkOnceLock:
+    """Wraps a real lock and parks the first entrant, then gets out of the way.
+
+    `threading.Lock` instances refuse attribute assignment (`acquire` is
+    read-only on the builtin type), so the interception has to be a
+    replacement object rather than a monkeypatched method. Every caller in
+    `recorder.py` uses `with self._lock:`, never bare `acquire`/`release`, so
+    wrapping the context manager protocol is enough.
+    """
+
+    def __init__(self, real_lock, parked, resume):
+        self._real = real_lock
+        self._parked = parked
+        self._resume = resume
+        self._armed = True
+
+    def __enter__(self):
+        if self._armed:
+            self._armed = False
+            self._parked.set()
+            self._resume.wait(2.0)
+        self._real.acquire()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self._real.release()
+        return False
+
+
+def test_a_frame_that_races_the_end_of_a_take_is_not_stranded(writers, tmp_path):
+    """The `_active` check outside the lock can be passed just as a take ends.
+
+    Nothing drains the queue after the encoder's last clear, so a frame that
+    lands there is held until the next take starts. That is 48 MiB at
+    4096x4096, which the byte budget makes reachable rather than theoretical.
+
+    The window is between `on_frame`'s outer check (active is still True) and
+    its lock acquisition. To hit that window deterministically rather than by
+    timing luck, the racer is parked exactly there with `_ParkOnceLock`, and
+    only let through after the encoder has genuinely finished the take
+    (through a real `stop()`, not a simulated one) and released the lock
+    itself. A version without the recheck inside the lock appends the
+    racer's frame into a deque nothing will ever drain again.
+    """
+    recorder = Recorder()
+    recorder.start(str(tmp_path / "take.mp4"), 30)
+    recorder.on_frame(frame(1), 0)
+    assert wait_for(lambda: writers and writers[0].frames)
+
+    parked = threading.Event()
+    resume = threading.Event()
+    recorder._lock = _ParkOnceLock(recorder._lock, parked, resume)
+    racer = threading.Thread(target=lambda: recorder.on_frame(frame(2), 1))
+    racer.start()
+    # The racer has passed the outer `_active` check (still True here) and is
+    # parked immediately before entering the lock.
+    assert parked.wait(2.0)
+
+    # Run the take to completion for real, through the same wrapped lock:
+    # `_finish` sets `_active` False and clears the (still empty) deque.
+    recorder.stop(timeout=2.0)
+    assert recorder.status().recording is False
+    assert list(recorder._frames) == []
+
+    # Only now does the racer's on_frame proceed into the locked section,
+    # exactly as if the take had ended out from under it.
+    resume.set()
+    racer.join(2.0)
+
+    assert list(recorder._frames) == []
+    recorder.stop()

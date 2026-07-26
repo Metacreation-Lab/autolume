@@ -280,6 +280,13 @@ class Recorder:
         if not self._active:
             return
         with self._lock:
+            # Checked again, under the lock this time. A render thread
+            # already past the check above when the take ends appends to a
+            # deque the encoder has just finished clearing, and nothing
+            # drains it afterwards, so that frame is held until the next
+            # take starts: 48 MiB of it at 4096x4096.
+            if not self._active:
+                return
             if self._allowance is None:
                 self._allowance = _queue_allowance(
                     getattr(frame, "nbytes", 0), self._capacity, self._byte_budget

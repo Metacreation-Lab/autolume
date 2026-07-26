@@ -146,20 +146,37 @@ def test_the_sender_exists_before_any_frame_arrives(ndilib, sink):
     assert ndilib.senders[0].sent == []
 
 
-def test_the_runtime_is_released_with_the_session(ndilib, sink):
-    """`initialize` reference counts, so a session that never releases leaks one."""
+def test_the_ndi_runtime_is_never_torn_down_process_wide(ndilib, sink):
+    """`destroy` is process-wide, and this process has another NDI user.
+
+    Pairing `initialize` with `destroy` per session looks like the obvious
+    hygiene, and it leaks a refcount not to do it. But `modules/visualizer.py`
+    creates a sender in this same process without ever calling `initialize`,
+    so pairing them here takes the count to zero and unloads the SDK under a
+    legacy sender that is still sending, every time this checkbox is
+    unticked. This test exists so that reasoning is not rediscovered the hard
+    way.
+    """
     sink.start("Autolume Live")
     assert wait_for(lambda: len(ndilib.senders) == 1)
     sink.stop()
     assert ndilib.initialized == 1
-    assert ndilib.destroyed == 1
-
-
-def test_a_runtime_that_never_started_is_not_released(ndilib, sink):
-    ndilib.initialize_result = False
-    sink.start("Autolume Live")
-    assert wait_for(lambda: sink.status().sending is False)
     assert ndilib.destroyed == 0
+    assert ndilib.senders[0].destroyed is True
+
+
+def test_a_second_session_still_works_after_the_first_left_the_runtime_up(
+    ndilib, sink
+):
+    """The unreleased refcount must not be in the way of enabling again."""
+    sink.start("Autolume Live")
+    assert wait_for(lambda: len(ndilib.senders) == 1)
+    sink.stop()
+
+    sink.start("Autolume Live")
+    sink.on_frame(frame(3), 0)
+    assert wait_for(lambda: len(ndilib.senders) == 2 and ndilib.senders[1].sent)
+    assert sink.status().sending is True
 
 
 def test_disable_destroys_the_sender_and_stops_the_thread(ndilib, sink):

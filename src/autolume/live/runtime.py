@@ -142,7 +142,15 @@ class Runtime:
         # `_is_running` and then call `start`, which is two statements with a
         # preemption point between them, so stopping a sink while a tick can
         # still be inside that window leaves behind a thread nothing is left
-        # to stop. Once this join returns, nothing can start a sink.
+        # to stop.
+        #
+        # What this buys is that a tick which finishes normally is finished
+        # before any sink is asked to stop. It is not an absolute guarantee:
+        # `ControlLoop.stop()` joins with its own two second timeout and
+        # gives up quietly, so a tick that overruns that (measured with an
+        # artificial 2.6 s tick) can still start a sink behind this. Closing
+        # that residual belongs in `core/control.py`, which reports nothing
+        # when its join expires.
         self.control_loop.stop()
         # Sinks before the render loop: each one stops accepting frames the
         # moment it is told to, so the frames the loop is still fanning out
@@ -240,9 +248,11 @@ class _ModelWatchingControlLoop(ControlLoop):
         self._ndi = ndi
         self._recorder = recorder
         self._on_screenshot = on_screenshot
-        # `Runtime.stop()` stops the sinks before this loop, so a start
-        # request still in the queue at that moment would leave a thread
-        # behind that nothing is left to stop. Stops are always allowed.
+        # Second layer under `Runtime.stop()`'s ordering, which stops this
+        # loop before the sinks it drives. That ordering is what actually
+        # closes the window, but its join can expire on a badly overrunning
+        # tick, and this keeps such a tick from starting a sink the runtime
+        # has already torn down. Stops are always allowed.
         self._is_running = is_running or (lambda: True)
         self._last_pkl_path: str | None = None
         # Seeded from the store directly, at construction, rather than
@@ -344,9 +354,9 @@ class _ModelWatchingControlLoop(ControlLoop):
             if state.ndi_enabled:
                 self._ndi.set_name(state.ndi_name)
             return
-        # `_is_running` again: during shutdown the sinks are stopped before
-        # this loop, so "enabled but not sending" is true of every tick left,
-        # and there is no panel left to correct anyway.
+        # `_is_running` again: a tick that outlives shutdown's join sees
+        # "enabled but not sending" for every sink already torn down, and
+        # there is no panel left to correct by then anyway.
         if state.ndi_enabled and not self._ndi.status().sending and self._is_running():
             self._last_ndi_enabled = False
             self._ndi.stop(timeout=0.0)

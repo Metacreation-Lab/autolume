@@ -163,7 +163,6 @@ class NdiSink:
         sender = None
         current_name = None
         reason: str | None = None
-        started = False
         try:
             import cv2
 
@@ -171,7 +170,6 @@ class NdiSink:
                 reason = "The NDI runtime could not be started."
                 logger.warning(reason)
                 return
-            started = True
             video = ndi.VideoFrameV2()
             # The SDK's send is asynchronous and reads the buffer after it
             # returns, and the frame object holds the array rather than
@@ -215,14 +213,20 @@ class NdiSink:
         finally:
             if sender is not None:
                 self._destroy(ndi, sender)
-            if started:
-                # `initialize` reference counts inside the native runtime, so
-                # a session that never releases leaks one for the life of the
-                # process. Only paired with an initialize that succeeded.
-                try:
-                    ndi.destroy()
-                except Exception:
-                    logger.exception("Releasing the NDI runtime failed")
+            # Deliberately no `ndi.destroy()` here, and this is not an
+            # oversight. `initialize` reference counts, so pairing it per
+            # session leaks one count for the life of the process, which
+            # looks like the thing to fix. It is not: `destroy` is
+            # process-wide and unloads the SDK at zero, and
+            # `modules/visualizer.py` creates a sender in this same process
+            # without ever calling `initialize`. Pairing them here would
+            # take the count to zero and tear the runtime out from under a
+            # legacy sender that is still sending, every time this checkbox
+            # is unticked. The leak is a refcount only: measured across five
+            # initialize calls with no sockets, no descriptors and no growth,
+            # and it never blocks a later enable. That is the cheaper of the
+            # two costs. Do not add it back without owning the legacy
+            # surface's lifetime too.
             self._finish(reason)
 
     @staticmethod
