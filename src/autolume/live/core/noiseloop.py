@@ -227,7 +227,8 @@ class NoiseLoopTableBuilder:
                 won = self._pending_key == key
                 if won:
                     self._pending_key = None
+                pending = self._pending_key is not None
             if won:
                 self.store.set(table)
-            if self._pending_key is not None:
+            if pending:
                 self._wakeup.set()

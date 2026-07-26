@@ -223,6 +223,15 @@ class ControlLoop:
         not read `wrapped` on its own; the alpha write below is gated on the
         same condition for the same reason, and reusing it keeps the two
         decisions from drifting apart.
+
+        This is also why a binding that writes `loop_alpha` every tick
+        permanently suppresses both the pulse and the perfect-loop stop:
+        `alpha_is_integrated` is false on any tick an event changed the
+        value, and a binding firing every tick means every tick is such a
+        tick. Deliberate, per the same scrub ruling above: a value under
+        continuous outside control is being scrubbed by definition, and must
+        not stop the show or fire a pulse out from under whatever is driving
+        it. Do not change this without revisiting that ruling.
         """
         step = advance(state, dt)
         if state.loop_active and not was_active:

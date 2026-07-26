@@ -39,6 +39,10 @@ _PENDING_NOTE = (
     "Noise table is rebuilding. "
     "Motion stays on the previous table until it is ready."
 )
+_PROJECT_NOTE = (
+    "Project in Perform also applies to this loop. "
+    "Off, each step is read as a raw W row instead of a latent."
+)
 _IP_NOTE = "This must be an IP address. A host name will not work."
 
 
@@ -245,6 +249,8 @@ class LoopPanel:
         self._binder.slider_float(
             "noise_radius", "Radius", enabled=live, commit_on_release=True
         )
+        if live:
+            self._note(_PROJECT_NOTE)
         self._noise_pending_row(state)
 
     def _noise_pending_row(self, state: ControlState) -> None:
