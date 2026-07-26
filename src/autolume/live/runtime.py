@@ -5,9 +5,12 @@ model loader, osc server. The UI is not part of the runtime; it is one
 more producer of control events and one consumer of the preview mailbox.
 """
 
+import dataclasses
+import logging
 from typing import Callable
 
 from autolume.live.core.control import ControlLoop
+from autolume.live.core.events import ControlEvent
 from autolume.live.core.generator import ModelHost
 from autolume.live.core.engine import RenderLoop
 from autolume.live.core.params import ControlState, to_render_params
@@ -16,6 +19,23 @@ from autolume.live.core.sources import SourceTable
 from autolume.live.core.store import LatestValueStore
 from autolume.live.io.audio import AudioEngineLike, AudioInput
 from autolume.live.io.osc import OscEmitter, OscInput
+
+logger = logging.getLogger(__name__)
+
+
+@dataclasses.dataclass(frozen=True)
+class OscStatus:
+    """What the inbound OSC transport is doing, published for the panel.
+
+    `bound_port` is the actual port after the scan-upward behavior, the
+    truth a panel must show rather than the requested value on
+    `ControlState.osc_port`. `error` is set only when the most recent rebind
+    attempt failed; the previous transport keeps serving in that case,
+    unaffected, and `bound_port` still names the port it is serving on.
+    """
+
+    bound_port: int | None = None
+    error: str | None = None
 
 
 class Runtime:
@@ -27,6 +47,7 @@ class Runtime:
         start_audio: bool = True,
         audio_engine: AudioEngineLike | None = None,
         emit: Callable[[str, int, str, float], None] | None = None,
+        osc_factory: Callable[[int], object] | None = None,
     ) -> None:
         self.control_store = LatestValueStore(ControlState())
         self.render_store = LatestValueStore(to_render_params(ControlState()))
@@ -45,6 +66,7 @@ class Runtime:
             model_host,
             model_info_store=self.model_info_store,
             emit=emit or OscEmitter().send,
+            on_osc_port_change=self._restart_osc,
         )
         self.render_loop = RenderLoop(
             self.render_store, self.model_host, [self.preview]
@@ -52,11 +74,21 @@ class Runtime:
         self.submit = self.control_loop.submit
         self._start_osc = start_osc
         self._start_audio = start_audio
+        # `osc_factory` builds the transport for both the initial start and
+        # every later rebind, so a test can inject a fake transport once and
+        # never open a real socket, the same way `audio_engine` stands in for
+        # the audio device.
+        self._osc_factory = osc_factory or (
+            lambda port: OscInput(self.control_loop.submit, port=port)
+        )
+        self.osc = self._osc_factory(osc_port)
+        self.osc_status_store: LatestValueStore[OscStatus] = LatestValueStore(
+            OscStatus()
+        )
         # `audio_engine` stays None in the app so the audio thread builds and
         # owns its engine. Only a test passes one, and only a test may hold a
         # reference to an engine another thread touches.
         self.audio = AudioInput(self.control_loop.submit, engine=audio_engine)
-        self.osc = OscInput(self.control_loop.submit, port=osc_port)
         self._started = False
 
     def start(self) -> None:
@@ -74,7 +106,8 @@ class Runtime:
             if self._start_audio:
                 self.audio.start()
             if self._start_osc:
-                self.osc.start()
+                bound_port = self.osc.start()
+                self.osc_status_store.set(OscStatus(bound_port=bound_port, error=None))
         except Exception:
             self.stop()
             raise
@@ -89,20 +122,64 @@ class Runtime:
         self.control_loop.stop()
         self.model_host.stop()
 
+    def _restart_osc(self, new_port: int) -> None:
+        """Rebind the OSC transport to `new_port`, called from the control
+        thread on an `osc_port` transition.
+
+        The replacement is built and started before the previous transport is
+        touched, so a bind failure never drops the one currently serving:
+        losing OSC mid-performance over a taken port would be a serious
+        regression. Never raises; a failure is logged and left on
+        `osc_status_store` for the panel instead.
+        """
+        if not self._start_osc:
+            return
+        try:
+            candidate = self._osc_factory(new_port)
+            bound_port = candidate.start()
+        except Exception as exc:
+            logger.warning("Could not rebind OSC to port %s: %s", new_port, exc)
+            previous = self.osc_status_store.snapshot()
+            self.osc_status_store.set(dataclasses.replace(previous, error=str(exc)))
+            return
+        previous_osc = self.osc
+        self.osc = candidate
+        try:
+            previous_osc.stop()
+        except Exception:
+            logger.exception("Failed stopping the previous OSC transport")
+        self.osc_status_store.set(OscStatus(bound_port=bound_port, error=None))
+
 
 class _ModelWatchingControlLoop(ControlLoop):
-    """Control loop that forwards pkl_path changes to the model host.
+    """Control loop that forwards pkl_path, device and osc_port changes to
+    the model host, the render device, and the OSC transport respectively.
 
-    Model loading is a side effect of a state change, so it triggers on
-    the control tick where every state change already flows.
+    All three are side effects of a state change, so they trigger on the
+    control tick where every state change already flows.
     """
 
     def __init__(
-        self, control_store, render_store, source_store, model_host, **kwargs
+        self,
+        control_store,
+        render_store,
+        source_store,
+        model_host,
+        on_osc_port_change: Callable[[int], None] | None = None,
+        **kwargs,
     ) -> None:
         super().__init__(control_store, render_store, source_store, **kwargs)
         self._model_host = model_host
+        self._on_osc_port_change = on_osc_port_change
         self._last_pkl_path: str | None = None
+        # None means "not yet initialized"; the first tick adopts whatever
+        # the state already holds without acting on it, since that value is
+        # already what is running (the initial model load, the initial OSC
+        # bind). Only a later change is a transition worth forwarding.
+        self._last_device: str | None = None
+        self._device_fallback: str = "auto"
+        self._seen_device_status = None
+        self._last_osc_port: int | None = None
 
     def tick(self):
         result = super().tick()
@@ -110,7 +187,54 @@ class _ModelWatchingControlLoop(ControlLoop):
             self._last_pkl_path = result.pkl_path
             if result.pkl_path:
                 self._model_host.request_load(result.pkl_path)
+        self._watch_device()
+        self._watch_osc_port()
         return result
+
+    def _watch_device(self) -> None:
+        """Forward a `device` transition to the host, and revert it if the
+        host reports the switch failed.
+
+        Edge triggered exactly like `pkl_path` above: `_last_device` moves to
+        the new value the instant the switch is requested, not once it
+        completes, so a request in flight is never re-issued every tick.
+        `_device_fallback` is what a failed switch reverts to, the value
+        that was actually working before this request.
+        """
+        state = self._control_store.snapshot()
+        if self._last_device is None:
+            self._last_device = state.device
+        elif state.device != self._last_device:
+            self._device_fallback = self._last_device
+            self._last_device = state.device
+            self._model_host.request_device(state.device)
+
+        status = self._model_host.device_store.snapshot()
+        if status is self._seen_device_status:
+            return
+        self._seen_device_status = status
+        if status.requested != self._last_device:
+            return
+        if status.error:
+            reverted = self._device_fallback
+            self._last_device = reverted
+            # source="ui": this correction must always land, whatever the
+            # mapping panel has bound to /render/device, and "ui" is the one
+            # source `_apply`'s remote gate never blocks (see
+            # `ControlLoop._accepts_direct`). It is not a stand-in for a real
+            # click; it is the one source that means "trusted, apply it".
+            self.submit(ControlEvent("/render/device", reverted, source="ui"))
+
+    def _watch_osc_port(self) -> None:
+        if self._on_osc_port_change is None:
+            return
+        port = self._control_store.snapshot().osc_port
+        if self._last_osc_port is None:
+            self._last_osc_port = port
+            return
+        if port != self._last_osc_port:
+            self._last_osc_port = port
+            self._on_osc_port_change(port)
 
 
 def build_runtime(
@@ -120,6 +244,7 @@ def build_runtime(
     start_audio: bool = True,
     audio_engine: AudioEngineLike | None = None,
     emit: Callable[[str, int, str, float], None] | None = None,
+    osc_factory: Callable[[int], object] | None = None,
 ) -> Runtime:
     return Runtime(
         model_host=model_host or ModelHost(),
@@ -128,4 +253,5 @@ def build_runtime(
         start_audio=start_audio,
         audio_engine=audio_engine,
         emit=emit,
+        osc_factory=osc_factory,
     )

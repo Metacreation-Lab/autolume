@@ -9,7 +9,21 @@ from autolume.live.core.generator import ModelHost, ModelInfo
 from autolume.live.core.params import BINDING_SET, Binding
 from autolume.live.core.presets import PRESET_APPLY
 from autolume.live.io.osc import OscEmitter
-from autolume.live.runtime import build_runtime
+from autolume.live.runtime import OscStatus, build_runtime
+
+
+class DeviceAwareFakeModel:
+    """Like FakeModel, but records the device it was built with, the way a
+    real LoadedModel does, so device-switch tests can check it."""
+
+    def __init__(self, path, device=None):
+        self.pkl_path = path
+        self.z_dim = 4
+        self.num_ws = 2
+        self.device = device
+
+    def render_frame(self, params, frame_index):
+        return np.zeros((8, 8, 3), dtype=np.uint8)
 
 
 class FakeModel:
@@ -293,3 +307,135 @@ def test_stop_is_clean_and_idempotent_with_audio_running():
     runtime.stop()
     assert engine.enabled is False
     assert engine.disabled_count == 1
+
+
+# --- device switching ------------------------------------------------------
+
+
+def test_device_change_reloads_the_current_pkl_on_the_new_device():
+    import torch
+
+    host = ModelHost(loader=DeviceAwareFakeModel)
+    runtime = make_runtime(model_host=host)
+    runtime.start()
+    try:
+        runtime.submit(ControlEvent("/model/path", "/tmp/fake.pkl", source="ui"))
+        assert wait_for(lambda: host.current() is not None)
+
+        runtime.submit(ControlEvent("/render/device", "cpu", source="ui"))
+        assert wait_for(
+            lambda: host.current() is not None
+            and host.current().device == torch.device("cpu")
+        )
+        assert wait_for(lambda: runtime.control_store.snapshot().device == "cpu")
+        assert host.device_store.snapshot().error is None
+    finally:
+        runtime.stop()
+
+
+def test_device_change_to_an_unavailable_device_reverts_to_the_previous_value():
+    host = ModelHost(loader=DeviceAwareFakeModel)
+    runtime = make_runtime(model_host=host)
+    runtime.start()
+    try:
+        runtime.submit(ControlEvent("/model/path", "/tmp/fake.pkl", source="ui"))
+        assert wait_for(lambda: host.current() is not None)
+
+        runtime.submit(ControlEvent("/render/device", "cpu", source="ui"))
+        assert wait_for(lambda: runtime.control_store.snapshot().device == "cpu")
+        running = host.current()
+
+        # This machine never has CUDA, so this is a genuine failure, not a
+        # mocked one. The revert must land back on "cpu", the value that was
+        # actually working, not on the registry's "auto" default: that is
+        # the only way this test can tell "reverted" from "never changed".
+        runtime.submit(ControlEvent("/render/device", "cuda", source="ui"))
+        assert wait_for(lambda: host.device_store.snapshot().error is not None)
+        assert wait_for(lambda: runtime.control_store.snapshot().device == "cpu")
+        assert host.current() is running
+    finally:
+        runtime.stop()
+
+
+# --- OSC port restart --------------------------------------------------
+
+
+class FakeOscTransport:
+    """A stand-in transport whose start/stop are observable and whose
+    failure is controllable, so a restart test never opens a real socket."""
+
+    def __init__(self, port, fail=False):
+        self.requested_port = port
+        self.fail = fail
+        self.started = 0
+        self.stopped = 0
+        self.port = None
+
+    def start(self):
+        self.started += 1
+        if self.fail:
+            raise OSError(f"port {self.requested_port} is taken")
+        # Simulates the scan-upward behavior: the bound port is not always
+        # the one requested.
+        self.port = self.requested_port + 1
+        return self.port
+
+    def stop(self):
+        self.stopped += 1
+
+
+def test_osc_port_change_restarts_the_transport_once():
+    transports = []
+
+    def factory(port):
+        transport = FakeOscTransport(port)
+        transports.append(transport)
+        return transport
+
+    runtime = make_runtime(start_osc=True, osc_factory=factory)
+    runtime.start()
+    try:
+        assert len(transports) == 1
+        first = transports[0]
+        assert first.started == 1
+        assert runtime.osc_status_store.snapshot().bound_port == first.port
+
+        runtime.submit(ControlEvent("/osc/port", 6000, source="ui"))
+        assert wait_for(lambda: len(transports) == 2)
+        second = transports[1]
+        assert wait_for(lambda: second.started == 1)
+        assert wait_for(lambda: first.stopped == 1)
+        assert second.started == 1
+        assert runtime.osc is second
+        assert runtime.osc_status_store.snapshot() == OscStatus(
+            bound_port=second.port, error=None
+        )
+    finally:
+        runtime.stop()
+
+
+def test_a_failed_osc_rebind_keeps_the_old_transport_serving():
+    transports = []
+
+    def factory(port):
+        transport = FakeOscTransport(port, fail=(port == 6000))
+        transports.append(transport)
+        return transport
+
+    runtime = make_runtime(start_osc=True, osc_factory=factory)
+    runtime.start()
+    try:
+        first = transports[0]
+        bound_before = runtime.osc_status_store.snapshot().bound_port
+
+        runtime.submit(ControlEvent("/osc/port", 6000, source="ui"))
+        assert wait_for(lambda: len(transports) == 2)
+        assert wait_for(lambda: runtime.osc_status_store.snapshot().error is not None)
+
+        assert runtime.osc is first
+        assert first.stopped == 0
+        status = runtime.osc_status_store.snapshot()
+        assert status.bound_port == bound_before
+        assert status.error is not None
+    finally:
+        runtime.stop()
