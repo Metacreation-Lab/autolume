@@ -1491,16 +1491,21 @@ def perform_widget_enabled_flags(state: ControlState) -> dict[str, bool]:
     return seen
 
 
-def test_latent_xy_grey_whenever_a_loop_has_taken_the_frame(frame):
-    """The Latent-section counterpart to Project's own greying (item A).
+def test_latent_xy_stay_live_through_a_loop_only_vector_mode_greys_them(frame):
+    """`latent_x`/`latent_y` are a deliberate exception to the mode-driven
+    greying every other latent control in this section follows.
 
-    `_blended_w` (`generator.py`), the only reader of `latent_x`/`latent_y`,
-    runs exclusively in `derive_mode`'s `"seed"` branch. `drives()`
-    (`motion.py`) already stood motion down for these two while a loop
-    plays, so the marker read undriven, but the widgets themselves stayed
-    live and editable regardless of which kind of loop, or whether
-    `vector_mode` was also on: the same live-but-inert shape Project shipped
-    with twice, on the two controls this sweep found it hiding a third time.
+    A loop (either kind) takes the latent over entirely while it plays, the
+    same as `_blended_w` (`generator.py`) only ever running in `derive_mode`'s
+    `"seed"` branch, and greying them while one plays was tried once. The
+    maintainer reverted it: the same panel already leaves Speed, Seconds and
+    Loop speed live while a loop is armed but not yet playing, an
+    "arm ahead of playing" exemption, and `latent_x`/`latent_y` are held to
+    the same rule rather than a stricter one applied only to them. A
+    performer dials in the seed they want while a loop plays, then stops the
+    loop already there. `vector_mode` alone still greys them, the same as it
+    always has: with a raw vector driving the frame, the seed grid genuinely
+    has nothing to read.
     """
     seed_mode = perform_widget_enabled_flags(ControlState())
     assert seed_mode["latent_x"] is True
@@ -1513,15 +1518,15 @@ def test_latent_xy_grey_whenever_a_loop_has_taken_the_frame(frame):
 
     imgui.new_line()
     keyframe_loop = perform_widget_enabled_flags(ControlState(loop_active=True))
-    assert keyframe_loop["latent_x"] is False
-    assert keyframe_loop["latent_y"] is False
+    assert keyframe_loop["latent_x"] is True
+    assert keyframe_loop["latent_y"] is True
 
     imgui.new_line()
     noise_loop = perform_widget_enabled_flags(
         ControlState(loop_active=True, noise_loop=True)
     )
-    assert noise_loop["latent_x"] is False
-    assert noise_loop["latent_y"] is False
+    assert noise_loop["latent_x"] is True
+    assert noise_loop["latent_y"] is True
 
 
 def loop_panel_height(panel: LoopPanel) -> float:

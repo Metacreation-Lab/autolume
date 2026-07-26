@@ -165,15 +165,14 @@ class PerformPanel:
             dataclasses.replace(self._binder.state(), vector_mode=vector_mode)
         )
         self._binder.checkbox("latent_project", "Project", enabled=mode == "vec")
-        # Was `enabled=not vector_mode`: correct outside a loop, but a loop
-        # (either kind) takes the latent over entirely, per this method's own
-        # docstring, and `_blended_w` (`generator.py`) is only ever called in
-        # the `"seed"` branch, never while one plays. The marker already
-        # showed this (`drives()` stands motion down during `loop_active`),
-        # but the widget itself stayed live and editable regardless, the same
-        # live-but-inert shape Project shipped with twice before this sweep.
-        self._binder.drag_float("latent_x", "Latent x", enabled=mode == "seed")
-        self._binder.drag_float("latent_y", "Latent y", enabled=mode == "seed")
+        # Greyed only by `vector_mode`, not by a running loop, deliberately:
+        # a loop takes the latent over while it plays, the same as Speed,
+        # Seconds and Loop speed in the Loop panel stay live while nothing
+        # is playing yet, an "arm ahead of playing" exemption applied
+        # consistently here too. It lets a performer dial in the seed they
+        # want to land on, then stop the loop already there.
+        self._binder.drag_float("latent_x", "Latent x", enabled=not vector_mode)
+        self._binder.drag_float("latent_y", "Latent y", enabled=not vector_mode)
         self._vector_row(vector_mode)
         self._binder.checkbox("anim_playing", "Animate")
         self._binder.slider_float("anim_speed_x", "Speed x")
