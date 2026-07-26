@@ -26,16 +26,74 @@ class RecordingModel(torch.nn.Module):
         return torch.zeros(1, c, h * 4, w * 4)
 
 
-@pytest.fixture
-def fake_weights(monkeypatch, tmp_path):
-    """A weight file that exists, and a fake network class to load onto it."""
-    weight_path = tmp_path / "Fast.pt"
-    torch.save({}, weight_path)
-    monkeypatch.setattr(resource_paths, "resource_path", lambda *parts: weight_path)
-    import super_res.net_base as net_base
+class MoveFailsModel(torch.nn.Module):
+    """`.to()` always raises, like an out-of-memory device move would."""
 
-    monkeypatch.setattr(net_base, "SRVGGNetPlus", RecordingModel)
-    return weight_path
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+
+    def load_state_dict(self, state_dict, *args, **kwargs):
+        return None
+
+    def to(self, device, *args, **kwargs):
+        raise RuntimeError("device move boom")
+
+    def forward(self, x):
+        raise AssertionError("forward should not run when the move already failed")
+
+
+class AlwaysFailsForwardModel(torch.nn.Module):
+    """The forward pass always raises, like a CUDA OOM would."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+
+    def load_state_dict(self, state_dict, *args, **kwargs):
+        return None
+
+    def forward(self, x):
+        raise RuntimeError("forward pass boom")
+
+
+class FlakyForwardModel(torch.nn.Module):
+    """Fails the first forward call, then succeeds every call after."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        self.calls = 0
+
+    def load_state_dict(self, state_dict, *args, **kwargs):
+        return None
+
+    def forward(self, x):
+        self.calls += 1
+        if self.calls == 1:
+            raise RuntimeError("transient boom")
+        _, c, h, w = x.shape
+        return torch.zeros(1, c, h * 4, w * 4)
+
+
+@pytest.fixture
+def install_model(monkeypatch, tmp_path):
+    """Factory fixture: install_model(cls) makes a real weight file exist and
+    swaps SRVGGNetPlus for the given fake class."""
+
+    def _install(model_cls):
+        weight_path = tmp_path / "Fast.pt"
+        torch.save({}, weight_path)
+        monkeypatch.setattr(resource_paths, "resource_path", lambda *parts: weight_path)
+        import super_res.net_base as net_base
+
+        monkeypatch.setattr(net_base, "SRVGGNetPlus", model_cls)
+        return weight_path
+
+    return _install
+
+
+@pytest.fixture
+def fake_weights(install_model):
+    """A weight file that exists, and a device-move-recording fake network."""
+    return install_model(RecordingModel)
 
 
 def test_apply_moves_only_when_device_changes(fake_weights):
@@ -131,6 +189,60 @@ def test_guard_boundary_allows_exactly_max_short_side(fake_weights):
     output = sr.apply(image, "cpu")
 
     assert output.shape == (3, MAX_SHORT_SIDE * 4, MAX_SHORT_SIDE * 4)
+
+
+def test_device_move_failure_returns_original_image(install_model):
+    install_model(MoveFailsModel)
+    sr = SuperRes()
+    image = torch.zeros(3, 8, 8)
+
+    output = sr.apply(image, "cpu")
+
+    assert output is image
+    assert not sr.disabled
+    assert sr.last_error is not None
+
+
+def test_forward_failure_returns_original_image(install_model):
+    install_model(AlwaysFailsForwardModel)
+    sr = SuperRes()
+    image = torch.zeros(3, 8, 8)
+
+    output = sr.apply(image, "cpu")
+
+    assert output is image
+    assert not sr.disabled
+    assert sr.last_error is not None
+
+
+def test_forward_failure_logs_once_across_repeated_calls(install_model, caplog):
+    install_model(AlwaysFailsForwardModel)
+    sr = SuperRes()
+    image = torch.zeros(3, 8, 8)
+
+    with caplog.at_level(logging.WARNING):
+        for _ in range(3):
+            output = sr.apply(image, "cpu")
+            assert output is image
+
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert not sr.disabled
+
+
+def test_forward_failure_recovers_on_next_success(install_model):
+    install_model(FlakyForwardModel)
+    sr = SuperRes()
+    image = torch.zeros(3, 8, 8)
+
+    first = sr.apply(image, "cpu")
+    assert first is image
+    assert sr.last_error is not None
+    assert not sr.disabled
+
+    second = sr.apply(image, "cpu")
+    assert second.shape == (3, 32, 32)
+    assert sr.last_error is None
 
 
 _REAL_WEIGHTS = resource_paths.resource_path("sr_models", "Fast.pt")

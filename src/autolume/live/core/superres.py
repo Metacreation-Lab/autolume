@@ -28,6 +28,8 @@ class SuperRes:
         self._disabled = False
         self.disabled_reason: str | None = None
         self._guard_logged = False
+        self.last_error: str | None = None
+        self._logged_errors: set[str] = set()
 
     @property
     def disabled(self) -> bool:
@@ -38,8 +40,16 @@ class SuperRes:
 
         ``device`` is whatever the caller's model currently lives on, so a
         device switch is picked up on the next call rather than requiring a
-        new ``SuperRes`` instance. Never raises: missing or broken weights
-        and an oversized frame just skip the stage.
+        new ``SuperRes`` instance. Never raises: missing or broken weights,
+        an oversized frame, a failed device move, and a failed forward pass
+        all just skip the stage for that call instead.
+
+        A load failure (missing or corrupt weights) is permanent: it is a
+        fact about this install, not this frame, so it sets ``disabled`` and
+        stays that way. A device-move or forward failure is transient: it
+        depends on frame size and current memory pressure, so it only sets
+        ``last_error`` for that call, cleared again on the next success,
+        rather than permanently killing the stage over one bad frame.
         """
         import torch
 
@@ -61,12 +71,32 @@ class SuperRes:
                 return image
         device = torch.device(device)
         if self._device != device:
-            self._model = self._model.to(device)
+            try:
+                self._model = self._model.to(device)
+            except Exception as exc:
+                self._record_forward_failure(f"Super-res failed to move to {device}: {exc}")
+                return image
             self._device = device
-        with torch.inference_mode(), self._autocast(device):
-            batch = image.unsqueeze(0).to(device)
-            output = self._model(batch).float()
+        try:
+            with torch.inference_mode(), self._autocast(device):
+                batch = image.unsqueeze(0).to(device)
+                output = self._model(batch).float()
+        except Exception as exc:
+            self._record_forward_failure(f"Super-res forward pass failed: {exc}")
+            return image
+        self.last_error = None
         return output[0]
+
+    def _record_forward_failure(self, message: str) -> None:
+        """Note a transient (input- or memory-dependent) failure, logged once per cause.
+
+        Unlike `_load`'s permanent sentinel, this never sets `disabled`: the
+        very next frame, at a smaller size or with memory freed up, may work.
+        """
+        self.last_error = message
+        if message not in self._logged_errors:
+            self._logged_errors.add(message)
+            logger.warning(message)
 
     def _load(self):
         weight_path = resource_paths.resource_path("sr_models", "Fast.pt")
@@ -98,6 +128,11 @@ class SuperRes:
 
         if device.type == "cuda":
             return torch.autocast("cuda")
-        # MPS has no autocast support, and CPU autocast would corrupt the
-        # dtype of ops that fall back to CPU on MPS, so both stay full precision.
+        if device.type == "mps":
+            # MPS has no autocast support of its own, and enabling CPU
+            # autocast here would corrupt the dtype of ops MPS silently
+            # falls back to running on CPU. Full precision only.
+            return contextlib.nullcontext()
+        # CPU (or any other backend): this network is small enough that
+        # autocast buys no measurable speedup, so skip the dtype juggling.
         return contextlib.nullcontext()
