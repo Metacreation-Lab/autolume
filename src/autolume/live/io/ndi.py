@@ -163,6 +163,7 @@ class NdiSink:
         sender = None
         current_name = None
         reason: str | None = None
+        started = False
         try:
             import cv2
 
@@ -170,6 +171,7 @@ class NdiSink:
                 reason = "The NDI runtime could not be started."
                 logger.warning(reason)
                 return
+            started = True
             video = ndi.VideoFrameV2()
             # The SDK's send is asynchronous and reads the buffer after it
             # returns, and the frame object holds the array rather than
@@ -213,6 +215,14 @@ class NdiSink:
         finally:
             if sender is not None:
                 self._destroy(ndi, sender)
+            if started:
+                # `initialize` reference counts inside the native runtime, so
+                # a session that never releases leaks one for the life of the
+                # process. Only paired with an initialize that succeeded.
+                try:
+                    ndi.destroy()
+                except Exception:
+                    logger.exception("Releasing the NDI runtime failed")
             self._finish(reason)
 
     @staticmethod

@@ -822,7 +822,12 @@ def test_the_sinks_stop_before_the_render_loop(monkeypatch, ndilib):
     assert order.index("ndi") < order.index("render")
     assert order.index("recorder") < order.index("render")
     assert order.index("screenshots") > order.index("render")
-    assert order.index("control") > order.index("render")
+    # The control loop is the only thing that starts a sink, so it goes
+    # first: a check of "is the runtime still running" followed by a
+    # `start()` is two statements, and stopping the sinks while something
+    # can still be between them is a thread nothing is left to stop.
+    assert order.index("control") < order.index("ndi")
+    assert order.index("control") < order.index("recorder")
 
 
 def test_a_frame_after_the_sinks_stopped_is_harmless(ndilib, writers, monkeypatch, tmp_path):
@@ -843,6 +848,38 @@ def test_a_frame_after_the_sinks_stopped_is_harmless(ndilib, writers, monkeypatc
 
     assert len(ndilib.senders[0].sent) == sent
     assert len(writers[0].frames) == written
+
+
+def test_a_screenshot_fires_on_the_press_and_not_the_release(monkeypatch, tmp_path):
+    """A momentary OSC button sends 1 then 0, and that is one screenshot.
+
+    This address exists for hardware rigs. Keying on the address alone made
+    every button press take two pictures.
+    """
+    use_data_root(monkeypatch, tmp_path)
+    runtime = running_runtime()
+    captures = tmp_path / "captures"
+    try:
+        runtime.submit(ControlEvent(SCREENSHOT_ADDRESS, 1.0, source="osc"))
+        assert wait_for(lambda: captures.exists() and list(captures.glob("*.png")))
+        runtime.submit(ControlEvent(SCREENSHOT_ADDRESS, 0.0, source="osc"))
+        time.sleep(0.2)
+    finally:
+        runtime.stop()
+    assert len(list(captures.glob("*.png"))) == 1
+
+
+def test_two_screenshots_in_the_same_second_are_two_files(monkeypatch, tmp_path):
+    use_data_root(monkeypatch, tmp_path)
+    runtime = running_runtime()
+    captures = tmp_path / "captures"
+    try:
+        runtime.submit(ControlEvent(SCREENSHOT_ADDRESS, 1.0, source="ui"))
+        assert wait_for(lambda: captures.exists() and list(captures.glob("*.png")))
+        runtime.submit(ControlEvent(SCREENSHOT_ADDRESS, 1.0, source="ui"))
+        assert wait_for(lambda: len(list(captures.glob("*.png"))) == 2)
+    finally:
+        runtime.stop()
 
 
 def test_a_sink_never_starts_once_the_runtime_has_stopped(

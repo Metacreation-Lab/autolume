@@ -15,7 +15,7 @@ from autolume.live.core.generator import ModelHost
 from autolume.live.core.engine import RenderLoop
 from autolume.live.core.params import ControlState, to_render_params
 from autolume.live.core.sinks import PreviewMailbox
-from autolume.live.core.sources import SourceTable, canonical_address
+from autolume.live.core.sources import SourceTable, as_float, canonical_address
 from autolume.live.core.store import LatestValueStore
 from autolume.live.io.audio import AudioEngineLike, AudioInput
 from autolume.live.io.ndi import NdiSink
@@ -138,6 +138,12 @@ class Runtime:
         self._started = False
         self.osc.stop()
         self.audio.stop()
+        # The control loop before the sinks it drives. Its watchers check
+        # `_is_running` and then call `start`, which is two statements with a
+        # preemption point between them, so stopping a sink while a tick can
+        # still be inside that window leaves behind a thread nothing is left
+        # to stop. Once this join returns, nothing can start a sink.
+        self.control_loop.stop()
         # Sinks before the render loop: each one stops accepting frames the
         # moment it is told to, so the frames the loop is still fanning out
         # while it winds down go nowhere, and the sender and the writer are
@@ -145,10 +151,13 @@ class Runtime:
         # goes after the loop instead, so a request latched on the last frame
         # is still written rather than dropped on the doorstep.
         self.ndi.stop()
-        self.recorder.stop()
+        # `abort_on_timeout`: the encoder is a daemon thread, so a flush that
+        # outlives the join is abandoned mid write and the mp4 never gets its
+        # header, which loses the whole take rather than its tail. A short
+        # recording beats an unopenable one.
+        self.recorder.stop(abort_on_timeout=True)
         self.render_loop.stop()
         self.screenshots.stop()
-        self.control_loop.stop()
         self.model_host.stop()
 
     def _request_screenshot(self, path: str) -> None:
@@ -283,13 +292,18 @@ class _ModelWatchingControlLoop(ControlLoop):
 
         `/capture/screenshot` asks for a file and changes nothing about the
         show, so it never reaches the mapping. It is also deliberately
-        reachable from raw OSC, which is why the message's value is ignored
-        entirely: the file name is derived here, under the captures folder,
-        and a path arriving from the network would be a write-anywhere
-        primitive rather than a screenshot button.
+        reachable from raw OSC, which is why the message's value never names
+        the file: the name is derived here, under the captures folder, and a
+        path arriving from the network would be a write-anywhere primitive
+        rather than a screenshot button.
+
+        The value still decides *whether* to fire. A momentary button sends 1
+        on the press and 0 on the release, and firing on the address alone
+        made every press take two pictures.
         """
         if canonical_address(event.address) == SCREENSHOT_ADDRESS:
-            self._capture_screenshot(state)
+            if _is_trigger(event.value):
+                self._capture_screenshot(state)
             return state, sources
         return super()._apply(state, sources, event, now)
 
@@ -440,6 +454,17 @@ class _ModelWatchingControlLoop(ControlLoop):
         if port != self._last_osc_port:
             self._last_osc_port = port
             self._on_osc_port_change(port)
+
+
+def _is_trigger(value: object) -> bool:
+    """Whether a bare action message means "now" rather than "not any more".
+
+    A number is a switch: zero is a release, anything else is a press. A
+    bang carries no number at all (`OscInput` gives it 1.0, a UI click sends
+    the same), and neither does a string, so anything unnumbered fires.
+    """
+    number = as_float(value)
+    return number is None or number != 0.0
 
 
 def build_runtime(

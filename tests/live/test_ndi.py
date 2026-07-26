@@ -48,6 +48,7 @@ class FakeNDIlib:
     def __init__(self):
         self.senders = []
         self.initialized = 0
+        self.destroyed = 0
         self.initialize_result = True
         self.create_result = True
         self.send_gate = None
@@ -56,6 +57,9 @@ class FakeNDIlib:
     def initialize(self):
         self.initialized += 1
         return self.initialize_result
+
+    def destroy(self):
+        self.destroyed += 1
 
     def SendCreate(self):
         return types.SimpleNamespace(ndi_name="")
@@ -140,6 +144,22 @@ def test_the_sender_exists_before_any_frame_arrives(ndilib, sink):
     sink.start("Autolume Live")
     assert wait_for(lambda: len(ndilib.senders) == 1)
     assert ndilib.senders[0].sent == []
+
+
+def test_the_runtime_is_released_with_the_session(ndilib, sink):
+    """`initialize` reference counts, so a session that never releases leaks one."""
+    sink.start("Autolume Live")
+    assert wait_for(lambda: len(ndilib.senders) == 1)
+    sink.stop()
+    assert ndilib.initialized == 1
+    assert ndilib.destroyed == 1
+
+
+def test_a_runtime_that_never_started_is_not_released(ndilib, sink):
+    ndilib.initialize_result = False
+    sink.start("Autolume Live")
+    assert wait_for(lambda: sink.status().sending is False)
+    assert ndilib.destroyed == 0
 
 
 def test_disable_destroys_the_sender_and_stops_the_thread(ndilib, sink):
