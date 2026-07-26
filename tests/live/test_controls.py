@@ -43,6 +43,7 @@ from autolume.live.ui.controls import (
     text_value,
     values_agree,
     widget_events,
+    widget_submits,
 )
 
 
@@ -632,6 +633,76 @@ def test_touch_events_are_sourced_from_the_ui():
     # The control loop honors touch only from the ui, so this is load bearing.
     events = _events(activated=True, changed=True, deactivated=True)
     assert {event.source for event in events} == {"ui"}
+
+
+def test_an_ordinary_control_submits_every_frame_it_changes():
+    # commit_on_release defaults to False, so `changed` decides on its own,
+    # exactly as it did before the flag existed.
+    assert widget_submits(
+        True,
+        commit_on_release=False,
+        live=True,
+        deactivated=False,
+        deactivated_after_edit=False,
+    )
+    assert not widget_submits(
+        False,
+        commit_on_release=False,
+        live=True,
+        deactivated=False,
+        deactivated_after_edit=False,
+    )
+
+
+def test_a_commit_on_release_control_stays_silent_mid_drag():
+    """The whole point: a dragged noise_radius must not queue one event a tick.
+
+    `changed` is true on every frame the handle moves, and this is the frame
+    a plain slider would submit on. A commit-on-release one must not, or the
+    control loop's noise table builder sees one rebuild request per tick of
+    the drag (task-9-brief item 3).
+    """
+    assert not widget_submits(
+        True,
+        commit_on_release=True,
+        live=True,
+        deactivated=False,
+        deactivated_after_edit=False,
+    )
+
+
+def test_a_commit_on_release_control_submits_once_on_release():
+    assert widget_submits(
+        False,
+        commit_on_release=True,
+        live=True,
+        deactivated=True,
+        deactivated_after_edit=True,
+    )
+
+
+def test_a_commit_on_release_control_submits_nothing_for_a_click_with_no_edit():
+    # Released without ever having moved: imgui never reports it as an edit,
+    # so nothing should reach the control thread either.
+    assert not widget_submits(
+        False,
+        commit_on_release=True,
+        live=True,
+        deactivated=True,
+        deactivated_after_edit=False,
+    )
+
+
+def test_a_commit_on_release_control_never_submits_while_disabled():
+    # A binding took the row read only mid-drag: the release must not still
+    # fire the hand's last value over whatever the source just wrote.
+    assert not widget_submits(
+        False,
+        commit_on_release=True,
+        live=False,
+        deactivated=True,
+        deactivated_after_edit=True,
+    )
 
 
 class _Clock:

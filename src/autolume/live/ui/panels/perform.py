@@ -9,17 +9,37 @@ the row was the only one with nowhere to say so.
 What the model is doing goes in the preview rather than here. A load takes
 seconds and can fail, and the surface the performer is looking at while it
 happens is the one showing the frames it is about to change.
+
+The latent section carries two ways to navigate: the seed grid and a raw
+vector, switched by `vector_mode`. Only one drives the frame at a time, so the
+rows for the one not in play grey out rather than disappear, the same rule
+every other conditional row in this panel already follows. The vector itself
+is structured state, not a registry parameter (design.md), so it has no
+address of its own and no driver marker: it reaches the control thread through
+`/vector/set` and `/vector/randomize` instead.
 """
 
+import logging
+import random
+from pathlib import Path
 from typing import Callable
 
+import numpy as np
 from imgui_bundle import imgui, portable_file_dialogs as pfd
 
 from autolume.live.core.events import ControlEvent
+from autolume.live.core.params import VECTOR_RANDOMIZE, VECTOR_SET
+from autolume.live.errors import describe
 from autolume.live.ui.controls import ControlBinder
+from autolume.live.ui.theme import ERROR_COLOR
+
+logger = logging.getLogger(__name__)
 
 _BROWSE = "Browse"
 _NO_MODEL = "No model loaded"
+_VECTOR_FILTER = ["Vector files", "*.npy *.pt"]
+_VECTOR_TENSOR_SUFFIXES = (".pt", ".pth")
+_SEED_CEILING = 2**31 - 1
 
 
 def button_width(label: str) -> float:
@@ -31,6 +51,37 @@ def button_width(label: str) -> float:
     return imgui.calc_text_size(label).x + imgui.get_style().frame_padding.x * 2.0
 
 
+def load_vector_file(path: str) -> list[float]:
+    """Read a `.npy` or a `.pt`/`.pth` file into a plain list of floats.
+
+    Flattened and coerced here, so `/vector/set` always receives the same
+    shape of data whichever format was on disk, the way the old app accepted
+    either. `torch.load` is imported locally: nothing under `ui/` pays for it
+    until a performer actually opens a vector file.
+    """
+    if Path(path).suffix.lower() in _VECTOR_TENSOR_SUFFIXES:
+        import torch
+
+        array = torch.load(path, map_location="cpu", weights_only=True).numpy()
+    else:
+        array = np.load(path)
+    return [float(value) for value in np.asarray(array, dtype=np.float64).reshape(-1)]
+
+
+def save_vector_file(path: str, vector: tuple[float, ...]) -> None:
+    """Write `vector` to `path`, as a `.pt` tensor or an `.npy` array.
+
+    `np.save` appends `.npy` itself when the name lacks it, which is also
+    the format an unrecognized or missing suffix falls back to here.
+    """
+    if Path(path).suffix.lower() in _VECTOR_TENSOR_SUFFIXES:
+        import torch
+
+        torch.save(torch.tensor(vector, dtype=torch.float32), path)
+    else:
+        np.save(path, np.asarray(vector, dtype=np.float32))
+
+
 class PerformPanel:
     def __init__(
         self, runtime, mapping_popup: Callable[[str], None] | None = None
@@ -38,6 +89,9 @@ class PerformPanel:
         self._runtime = runtime
         self._binder = ControlBinder(runtime, mapping_popup)
         self._open_dialog: pfd.open_file | None = None
+        self._open_vector_dialog: pfd.open_file | None = None
+        self._save_vector_dialog: pfd.save_file | None = None
+        self._vector_error: str | None = None
 
     def gui(self) -> None:
         self._model_row()
@@ -87,13 +141,88 @@ class PerformPanel:
             self._emit("/model/path", str(result[0]))
 
     def _latent_rows(self) -> None:
+        """Seed grid or raw vector, whichever `vector_mode` picks, plus motion.
+
+        Both halves are drawn every frame, one of them greyed, so switching
+        modes never reflows the panel. While a loop plays it takes the latent
+        over entirely (design.md), which the seed rows already show on their
+        own: `drives()` stands motion down for them during `loop_active`, so
+        their marker reads as undriven exactly when the loop, not the seed
+        walk, is the one moving the frame.
+        """
         imgui.separator_text("Latent")
-        self._binder.drag_float("latent_x", "Latent x")
-        self._binder.drag_float("latent_y", "Latent y")
+        self._binder.checkbox("vector_mode", "Vector mode")
+        vector_mode = bool(self._binder.value("vector_mode"))
+        self._binder.checkbox("latent_project", "Project")
+        self._binder.drag_float("latent_x", "Latent x", enabled=not vector_mode)
+        self._binder.drag_float("latent_y", "Latent y", enabled=not vector_mode)
+        self._vector_row(vector_mode)
         self._binder.checkbox("anim_playing", "Animate")
         self._binder.slider_float("anim_speed_x", "Speed x")
         self._binder.slider_float("anim_speed_y", "Speed y")
         self._binder.slider_float("truncation_psi", "Truncation")
+
+    def _vector_row(self, vector_mode: bool) -> None:
+        """Randomize, Load and Save, greyed together outside vector mode.
+
+        One block rather than a bound control: `latent_vec` is structured
+        state with no registry address, so there is no gutter to draw beside
+        it, the same reason the model row's Browse button carries none either.
+        """
+        if not vector_mode:
+            imgui.begin_disabled()
+        if imgui.button("Randomize"):
+            self._emit(VECTOR_RANDOMIZE, random.randint(0, _SEED_CEILING))
+        imgui.same_line()
+        if imgui.button("Load"):
+            self._open_vector_dialog = pfd.open_file(
+                "Load a latent vector", "", _VECTOR_FILTER
+            )
+        imgui.same_line()
+        if imgui.button("Save"):
+            self._save_vector_dialog = pfd.save_file(
+                "Save the latent vector", "vector.npy", _VECTOR_FILTER
+            )
+        if not vector_mode:
+            imgui.end_disabled()
+        # Drained outside the disabled block, matching the model dialog: a
+        # dialog opened before the mode changed underneath it still delivers.
+        self._take_vector_load()
+        self._take_vector_save()
+        if self._vector_error:
+            imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(*ERROR_COLOR))
+            imgui.text_wrapped(self._vector_error)
+            imgui.pop_style_color()
+
+    def _take_vector_load(self) -> None:
+        if self._open_vector_dialog is None or not self._open_vector_dialog.ready():
+            return
+        result = self._open_vector_dialog.result()
+        self._open_vector_dialog = None
+        if not result:
+            return
+        self._vector_error = None
+        try:
+            values = load_vector_file(result[0])
+        except Exception as exc:
+            logger.exception("Could not load vector %s", result[0])
+            self._vector_error = f"Could not load the vector. {describe(exc)}"
+            return
+        self._emit(VECTOR_SET, values)
+
+    def _take_vector_save(self) -> None:
+        if self._save_vector_dialog is None or not self._save_vector_dialog.ready():
+            return
+        path = self._save_vector_dialog.result()
+        self._save_vector_dialog = None
+        if not path:
+            return
+        self._vector_error = None
+        try:
+            save_vector_file(path, self._binder.state().latent_vec)
+        except Exception as exc:
+            logger.exception("Could not save vector %s", path)
+            self._vector_error = f"Could not save the vector. {describe(exc)}"
 
     def _noise_rows(self) -> None:
         imgui.separator_text("Noise")

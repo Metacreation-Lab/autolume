@@ -134,6 +134,20 @@ class ControlLoop:
         """
         return self._last_loop_step
 
+    @property
+    def noise_table_key(self) -> tuple[int, float, int] | None:
+        """The `(seed, radius, z_dim)` the published noise table was built from.
+
+        None before any table has finished building. Read-only, through the
+        same `LatestValueStore.snapshot()` every other cross-thread read in
+        this module already goes through, so a UI can compare it against the
+        key the current state and model would build and show a rebuild
+        pending indicator (Task 9) without reaching into a private field or
+        opening a new channel.
+        """
+        table = self._noise_table_builder.store.snapshot()
+        return None if table is None else table.key
+
     def tick(self) -> RenderParams:
         now = self._clock()
         dt = now - self._last_tick if self._last_tick is not None else 0.0

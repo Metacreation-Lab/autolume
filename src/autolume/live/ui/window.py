@@ -7,6 +7,7 @@ from imgui_bundle import hello_imgui, imgui, immvision
 from autolume.live.ui import theme
 from autolume.live.ui.panels import (
     AudioPanel,
+    LoopPanel,
     MappingPanel,
     PerformPanel,
     PresetsPanel,
@@ -78,6 +79,7 @@ def _build_runner_params(runtime) -> hello_imgui.RunnerParams:
     # opens, so it is built first and handed to the panel drawing the controls.
     mapping = MappingPanel(runtime)
     perform = PerformPanel(runtime, mapping.popup)
+    loop = LoopPanel(runtime, mapping.popup)
     preview = PreviewPanel(runtime)
     audio = AudioPanel(runtime)
     presets = PresetsPanel(runtime)
@@ -99,14 +101,17 @@ def _build_runner_params(runtime) -> hello_imgui.RunnerParams:
     )
     # A saved layout wins over the code default, and the condition to apply a
     # layout is first use ever. Naming this layout makes it fire again for
-    # installs that already have an ini from the two pane arrangement.
-    params.docking_params.layout_name = "Patch"
+    # installs that already have an ini from an earlier pane arrangement,
+    # which is what keeps a new dockable window from hiding behind a saved
+    # one that predates it.
+    params.docking_params.layout_name = "PatchLoop"
     params.docking_params.docking_splits = [
         _split(_MAIN_SPACE, _CONTROLS_SPACE, imgui.Dir.left, 0.35),
         _split(_CONTROLS_SPACE, _PATCH_SPACE, imgui.Dir.down, 0.5),
     ]
     params.docking_params.dockable_windows = [
         _dockable("Controls", _CONTROLS_SPACE, perform.gui),
+        _dockable("Loop", _PATCH_SPACE, loop.gui),
         _dockable("Audio", _PATCH_SPACE, audio.gui),
         _dockable("Mapping", _PATCH_SPACE, mapping.gui),
         _dockable("Presets", _PATCH_SPACE, presets.gui),

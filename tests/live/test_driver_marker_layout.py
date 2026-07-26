@@ -18,12 +18,15 @@ theme the app runs under. Which driver wins and what a tooltip says are
 """
 
 import collections
+import dataclasses
 import itertools
+from typing import Callable
 
 import numpy as np
 import pytest
 from imgui_bundle import hello_imgui, imgui, immvision
 
+from autolume.live.core.generator import ModelInfo
 from autolume.live.core.params import Binding, ControlState
 from autolume.live.core.sources import SourceTable
 from autolume.live.core.store import LatestValueStore
@@ -35,6 +38,7 @@ from autolume.live.ui.controls import (
     idle_color,
 )
 from autolume.live.ui.panels import preview as preview_module
+from autolume.live.ui.panels.loop import LoopPanel
 from autolume.live.ui.panels.mapping import bindable_specs
 from autolume.live.ui.panels.perform import PerformPanel, button_width
 from autolume.live.ui.panels.preview import (
@@ -291,8 +295,15 @@ class FakeOsc:
     port = 1338
 
 
+class FakeControlLoop:
+    """Stands in for the one thing the Loop panel reads off `ControlLoop`."""
+
+    def __init__(self, noise_table_key=None):
+        self.noise_table_key = noise_table_key
+
+
 class PanelRuntime(FakeRuntime):
-    """A runtime with the parts the two panels read, and nothing behind them."""
+    """A runtime with the parts the panels read, and nothing behind them."""
 
     def __init__(self, state=IDLE, sources=SILENT, host=None):
         super().__init__(state, sources)
@@ -300,6 +311,8 @@ class PanelRuntime(FakeRuntime):
         self.preview = FakePreview()
         self.render_loop = FakeRenderLoop()
         self.osc = FakeOsc()
+        self.model_info_store = LatestValueStore(None)
+        self.control_loop = FakeControlLoop()
 
 
 def model_field(state, **kwargs):
@@ -363,8 +376,8 @@ def row_edges(width: float, font_scale: float) -> list[float]:
         theme.apply_theme()
         imgui.get_style().font_scale_main = font_scale
 
-        def measure_widget(self, spec, label, draw, enabled):
-            original_widget(self, spec, label, draw, enabled)
+        def measure_widget(self, spec, label, draw, enabled, **kwargs):
+            original_widget(self, spec, label, draw, enabled, **kwargs)
             edges.append(imgui.get_item_rect_max().x - right[0])
 
         def measure_row(self):
@@ -420,11 +433,66 @@ def test_no_row_runs_past_the_panel_it_is_drawn_in(width, font_scale):
     The row count is not checked against the full registry here: this panel
     draws its own fixed set of rows, one per bindable parameter it has chosen
     to show, and that set is smaller than the registry once parameters exist
-    that live in another panel. `max` on an empty list already fails loudly if
-    nothing got measured.
+    that live in another panel. It is checked against a literal instead
+    (below), which is the guard `max(edges) <= 0.0` alone cannot stand in
+    for: a row dropped from `PerformPanel.gui` draws one fewer edge, all of
+    them still `<= 0.0`, and this parametrization would keep passing. Update
+    the literal, deliberately, whenever a row is added to or removed from
+    this panel.
     """
     edges = row_edges(width, font_scale)
     assert max(edges) <= 0.0
+    # 8 latent rows (vector mode, project, latent x/y, animate, speed x/y,
+    # truncation) + 4 noise rows + 1 render row, drawn through `_widget`, plus
+    # the model row, measured separately since it is a text field.
+    assert len(edges) == 14
+
+
+def bound_rows(gui: Callable[[], None]) -> int:
+    """How many `ControlBinder` rows one call to `gui` draws.
+
+    Wraps both `_widget` (every numeric or bool row) and `_text_widget`
+    (every text row), so this counts a panel's bound rows whichever kind
+    they are, the same purpose `row_edges` serves for `PerformPanel` but
+    without needing a docked window to measure against.
+    """
+    count = 0
+    original_widget = ControlBinder._widget
+    original_text = ControlBinder._text_widget
+
+    def widget(self, *args, **kwargs):
+        nonlocal count
+        count += 1
+        return original_widget(self, *args, **kwargs)
+
+    def text_widget(self, *args, **kwargs):
+        nonlocal count
+        count += 1
+        return original_text(self, *args, **kwargs)
+
+    ControlBinder._widget = widget
+    ControlBinder._text_widget = text_widget
+    try:
+        gui()
+    finally:
+        ControlBinder._widget = original_widget
+        ControlBinder._text_widget = original_text
+    return count
+
+
+def test_no_loop_panel_row_is_silently_dropped(frame):
+    """The same guard as the perform panel's, for the Loop panel's own rows.
+
+    A row quietly removed from `LoopPanel.gui` still paints whatever is left
+    with `max(edges) <= 0.0` unbothered, since fewer rows is not a wider one;
+    only a count pinned to what the panel actually draws catches that, which
+    is what task 9's review found missing here too.
+    """
+    panel = LoopPanel(PanelRuntime(), mapping_popup=lambda name: None)
+    # Transport (5) + keyframe count (1) + scrub (2) + noise loop (3) +
+    # pulse (3, all text fields). The six default keyframe rows are plain
+    # widgets, not `ControlBinder` rows, and are not part of this count.
+    assert bound_rows(panel.gui) == 14
 
 
 def test_the_model_row_uses_the_width_it_is_given_and_no_more():
@@ -778,9 +846,16 @@ def test_only_the_preview_opens_itself_and_every_form_keeps_its_padding():
         for dockable in params.docking_params.dockable_windows
     }
     assert opens_itself["Preview"] is False
-    assert set(opens_itself) == {"Controls", "Audio", "Mapping", "Presets", "Preview"}
+    assert set(opens_itself) == {
+        "Controls",
+        "Loop",
+        "Audio",
+        "Mapping",
+        "Presets",
+        "Preview",
+    }
     forms = {label for label, own in opens_itself.items() if own}
-    assert forms == {"Controls", "Audio", "Mapping", "Presets"}
+    assert forms == {"Controls", "Loop", "Audio", "Mapping", "Presets"}
 
 
 def test_the_quad_is_drawn_at_the_size_the_mode_asked_for(frame):
@@ -816,3 +891,90 @@ def test_the_quad_is_drawn_at_the_size_the_mode_asked_for(frame):
     ((_, source, target),) = stretched.enlarged
     assert source == (8, 8)
     assert target == (int(width), int(height))
+
+
+def test_the_perform_panel_draws_in_vector_mode_without_raising(frame):
+    """The one branch no other test in this file puts the panel through.
+
+    Every other test here draws `PerformPanel` against the default
+    `ControlState`, which is seed mode. This is what stands between that and
+    an exception in the vector row, which nothing else in the suite can
+    reach: there is no headless way to click Randomize, Load or Save, only to
+    prove the row they are on draws at all.
+    """
+    state = ControlState(vector_mode=True, latent_vec=(1.0, 2.0, 3.0))
+    panel = PerformPanel(PanelRuntime(state=state), mapping_popup=lambda name: None)
+    panel.gui()
+
+
+def loop_panel_height(panel: LoopPanel) -> float:
+    """How far `panel.gui()` moves the cursor down, in one frame.
+
+    A stand in for "how many lines it drew" that needs nothing from imgui
+    beyond the cursor it already tracks, the same measurement the preview
+    panel's tests already take of a conditional overlay.
+    """
+    start = imgui.get_cursor_pos().y
+    panel.gui()
+    return imgui.get_cursor_pos().y - start
+
+
+def test_the_noise_pending_note_only_draws_when_the_table_is_stale(frame):
+    """`_noise_pending_row`, the whole of item 2's surfacing, end to end.
+
+    Two panels, differing only in whether the published table's key matches
+    what the state now asks for, and the stale one has to draw more, which is
+    the pending note and nothing else changed between them.
+    """
+    state = ControlState(
+        loop_active=True, noise_loop=True, noise_loop_seed=3, noise_radius=2.0
+    )
+    info = ModelInfo(pkl_path="model.pkl", z_dim=4, num_ws=8)
+
+    stale = PanelRuntime(state=state)
+    stale.model_info_store = LatestValueStore(info)
+    stale.control_loop = FakeControlLoop(noise_table_key=(1, 1.0, 4))
+
+    fresh = PanelRuntime(state=state)
+    fresh.model_info_store = LatestValueStore(info)
+    fresh.control_loop = FakeControlLoop(noise_table_key=(3, 2.0, 4))
+
+    stale_height = loop_panel_height(LoopPanel(stale, mapping_popup=lambda name: None))
+    imgui.new_line()  # separates the two panels on the same cursor column
+    fresh_height = loop_panel_height(LoopPanel(fresh, mapping_popup=lambda name: None))
+    assert stale_height > fresh_height
+
+
+def test_the_noise_pending_note_is_silent_while_the_loop_is_stopped(frame):
+    """No build was ever requested while stopped, so nothing should claim one.
+
+    The control loop only calls `request_build` under `loop_active and
+    noise_loop` (control.py `tick`), so a stale key with the loop stopped is
+    not a rebuild in progress, only one that has not been asked for yet. This
+    stopped, mismatched panel has to come out the same height as a playing,
+    matched one: neither has anything pending to report.
+    """
+    info = ModelInfo(pkl_path="model.pkl", z_dim=4, num_ws=8)
+
+    stopped = ControlState(
+        loop_active=False, noise_loop=True, noise_loop_seed=3, noise_radius=2.0
+    )
+    stopped_runtime = PanelRuntime(state=stopped)
+    stopped_runtime.model_info_store = LatestValueStore(info)
+    # Stale on purpose: this is exactly the key mismatch the playing case
+    # reads as pending, and here it must not be.
+    stopped_runtime.control_loop = FakeControlLoop(noise_table_key=(1, 1.0, 4))
+
+    playing = dataclasses.replace(stopped, loop_active=True)
+    playing_runtime = PanelRuntime(state=playing)
+    playing_runtime.model_info_store = LatestValueStore(info)
+    playing_runtime.control_loop = FakeControlLoop(noise_table_key=(3, 2.0, 4))
+
+    stopped_height = loop_panel_height(
+        LoopPanel(stopped_runtime, mapping_popup=lambda name: None)
+    )
+    imgui.new_line()
+    playing_height = loop_panel_height(
+        LoopPanel(playing_runtime, mapping_popup=lambda name: None)
+    )
+    assert stopped_height == pytest.approx(playing_height)

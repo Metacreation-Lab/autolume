@@ -10,6 +10,7 @@ import itertools
 import numpy as np
 
 from autolume.live.core import presets
+from autolume.live.core.generator import ModelInfo
 from autolume.live.core.params import (
     BINDING_CLEAR,
     BINDING_SET,
@@ -17,6 +18,7 @@ from autolume.live.core.params import (
     Binding,
     ClearBinding,
     ControlState,
+    Keyframe,
 )
 from autolume.live.errors import describe
 from autolume.live.ui.panels.audio import (
@@ -26,6 +28,11 @@ from autolume.live.ui.panels.audio import (
     spectrum_ceiling,
     spectrum_values,
 )
+from autolume.live.ui.panels.loop import (
+    captured_keyframe,
+    desired_noise_key,
+    noise_table_pending,
+)
 from autolume.live.ui.panels.mapping import (
     MappingPanel,
     bindable_specs,
@@ -33,6 +40,7 @@ from autolume.live.ui.panels.mapping import (
     display_label,
     reference_note,
 )
+from autolume.live.ui.panels.perform import load_vector_file, save_vector_file
 from autolume.live.ui.panels.presets import PresetsPanel, is_valid_name
 from autolume.live.ui.panels.preview import (
     DisplayMode,
@@ -677,3 +685,92 @@ def test_a_saved_preset_is_reported_after_a_transient_listing_failure(
     # An error takes precedence over the message, so a stale one hides "Saved".
     assert panel.report_error() is None
     assert panel._message == "Saved evening."
+
+
+# --- vector load and save (perform.py, task 9) --------------------------------
+
+
+def test_load_vector_file_round_trips_an_npy_array(tmp_path):
+    path = tmp_path / "vector.npy"
+    np.save(path, np.array([1.0, 2.0, 3.0], dtype=np.float32))
+    assert load_vector_file(str(path)) == [1.0, 2.0, 3.0]
+
+
+def test_save_vector_file_writes_an_npy_array_by_default(tmp_path):
+    path = tmp_path / "vector.npy"
+    save_vector_file(str(path), (1.0, -2.0, 3.5))
+    assert np.load(path).tolist() == [1.0, -2.0, 3.5]
+
+
+def test_a_saved_vector_loads_back_through_the_same_pair_of_helpers(tmp_path):
+    path = tmp_path / "vector.npy"
+    save_vector_file(str(path), (1.5, -2.5, 3.0))
+    assert load_vector_file(str(path)) == [1.5, -2.5, 3.0]
+
+
+def test_load_vector_file_reads_a_torch_tensor(tmp_path):
+    import torch
+
+    path = tmp_path / "vector.pt"
+    torch.save(torch.tensor([4.0, 5.0, -6.0]), path)
+    assert load_vector_file(str(path)) == [4.0, 5.0, -6.0]
+
+
+def test_save_vector_file_writes_a_torch_tensor_for_pt(tmp_path):
+    import torch
+
+    path = tmp_path / "vector.pt"
+    save_vector_file(str(path), (4.0, 5.0, -6.0))
+    assert torch.load(path, weights_only=True).tolist() == [4.0, 5.0, -6.0]
+
+
+def test_a_saved_torch_vector_loads_back_through_the_same_pair_of_helpers(tmp_path):
+    path = tmp_path / "vector.pt"
+    save_vector_file(str(path), (4.0, 5.0, -6.0))
+    assert load_vector_file(str(path)) == [4.0, 5.0, -6.0]
+
+
+# --- loop panel helpers (loop.py, task 9) --------------------------------------
+
+
+def test_desired_noise_key_is_none_without_a_loaded_model():
+    state = ControlState(noise_loop_seed=3, noise_radius=2.0)
+    assert desired_noise_key(state, None) is None
+
+
+def test_desired_noise_key_combines_the_state_and_the_models_z_dim():
+    state = ControlState(noise_loop_seed=3, noise_radius=2.0)
+    info = ModelInfo(pkl_path="model.pkl", z_dim=512, num_ws=16)
+    assert desired_noise_key(state, info) == (3, 2.0, 512)
+
+
+def test_noise_table_pending_is_false_with_no_desired_key():
+    assert noise_table_pending(None, None) is False
+    assert noise_table_pending(None, (1, 1.0, 4)) is False
+
+
+def test_noise_table_pending_compares_the_built_key_to_the_desired_one():
+    desired = (1, 2.0, 4)
+    assert noise_table_pending(desired, None) is True
+    assert noise_table_pending(desired, (1, 2.0, 4)) is False
+    assert noise_table_pending(desired, (1, 3.0, 4)) is True
+
+
+def test_captured_keyframe_takes_the_seed_position_for_a_seed_keyframe():
+    keyframe = Keyframe("seed", seed_x=0.0, seed_y=0.0)
+    state = ControlState(latent_x=4.0, latent_y=-1.0, latent_vec=(9.0,))
+    captured = captured_keyframe(keyframe, state)
+    assert (captured.seed_x, captured.seed_y) == (4.0, -1.0)
+    assert captured.kind == "seed"
+    assert captured.vec == ()
+
+
+def test_captured_keyframe_takes_the_vector_for_a_vector_keyframe():
+    keyframe = Keyframe("vec", vec=(0.0, 0.0))
+    state = ControlState(latent_x=4.0, latent_y=-1.0, latent_vec=(1.0, 2.0, 3.0))
+    captured = captured_keyframe(keyframe, state)
+    assert captured.vec == (1.0, 2.0, 3.0)
+    assert captured.kind == "vec"
+    # Untouched, so a later switch back to seed kind does not silently pick
+    # up whatever the vector capture left in these fields.
+    assert (captured.seed_x, captured.seed_y) == (0.0, 0.0)

@@ -575,6 +575,28 @@ def next_text_override(
     )
 
 
+def widget_submits(
+    changed: bool,
+    *,
+    commit_on_release: bool,
+    live: bool,
+    deactivated: bool,
+    deactivated_after_edit: bool,
+) -> bool:
+    """Whether one frame of a widget's interaction should reach the control thread.
+
+    Every widget but a commit-on-release one submits exactly when it changes.
+    A commit-on-release one (`ControlBinder.slider_float`,
+    `commit_on_release=True`) still tracks `changed` for its local display,
+    through `next_override`, but only tells the control thread once, on the
+    frame the drag ends: see `slider_float`'s docstring for why a parameter
+    would ask for this.
+    """
+    if not commit_on_release:
+        return changed
+    return live and deactivated and deactivated_after_edit
+
+
 def widget_events(
     spec: ParamSpec,
     value: object,
@@ -641,7 +663,26 @@ class ControlBinder:
         """
         return displayed_value(self._local, name, getattr(self._snapshot(), name))
 
-    def slider_float(self, name: str, label: str, *, enabled: bool = True) -> None:
+    def slider_float(
+        self,
+        name: str,
+        label: str,
+        *,
+        enabled: bool = True,
+        commit_on_release: bool = False,
+    ) -> None:
+        """Draw `name` as a slider.
+
+        `commit_on_release` holds the control event until the drag ends
+        instead of sending one on every frame the handle moves. A parameter
+        whose write is expensive, `noise_radius`'s table rebuild is the one
+        that exists today, would otherwise queue one rebuild request per
+        tick of a continuous drag; the builder already coalesces to the
+        newest key, but nothing is served by generating that storm in the
+        first place. The widget still tracks the drag locally so it reads as
+        live under the hand, the same way a text field's buffer follows the
+        keystrokes and only its commit reaches the store.
+        """
         spec = require_spec(name, ParamKind.FLOAT)
         minimum, maximum = slider_bounds(spec)
         self._widget(
@@ -649,6 +690,7 @@ class ControlBinder:
             label,
             lambda shown: imgui.slider_float(label, float(shown), minimum, maximum),
             enabled,
+            commit_on_release=commit_on_release,
         )
 
     def drag_float(
@@ -737,6 +779,8 @@ class ControlBinder:
         label: str,
         draw: Callable[[Value], tuple[bool, Value]],
         enabled: bool,
+        *,
+        commit_on_release: bool = False,
     ) -> None:
         name = spec.name
         state = self._snapshot()
@@ -756,11 +800,18 @@ class ControlBinder:
             imgui.end_disabled()
         activated = imgui.is_item_activated()
         deactivated = imgui.is_item_deactivated()
+        submits = widget_submits(
+            changed,
+            commit_on_release=commit_on_release,
+            live=live,
+            deactivated=deactivated,
+            deactivated_after_edit=imgui.is_item_deactivated_after_edit(),
+        )
         events = widget_events(
             spec,
             value,
             activated=activated,
-            changed=changed,
+            changed=submits,
             deactivated=deactivated,
         )
         override = next_override(
