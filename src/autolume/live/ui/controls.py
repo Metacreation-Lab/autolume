@@ -126,6 +126,13 @@ _ENTER = imgui.InputTextFlags_.enter_returns_true
 # the panel shrinks. Everything on the row keeps its size while the field gives
 # up its own, so the marker and the button beside it are the last things to go.
 _FIELD_MIN_EMS = 1.0
+# The natural ceiling for a typed quantity: `input_int`/`input_float` are for
+# a value a performer sets and stops looking at, per their own docstrings, so
+# nothing they hold ever needs more than this to read comfortably (a seed, a
+# radius, a frame limit). `input_text` has no single answer, since it also
+# draws the model path, which is unbounded content rather than a quantity, so
+# its cap is opt in per call rather than a default every text field inherits.
+_NATURAL_EMS_DEFAULT = 10.0
 
 T = TypeVar("T")
 Color = tuple[float, float, float, float]
@@ -429,15 +436,27 @@ def text_hold(
     return text if active else None
 
 
-def field_width(available: float, reserve: float, minimum: float) -> float:
+def field_width(
+    available: float, reserve: float, minimum: float, cap: float | None = None
+) -> float:
     """How wide a text field is drawn when the row keeps space to its right.
 
     The field takes everything left over, because the value in it is a path and
     the panel is narrow. `reserve` is what the row draws after it, so the field
     gives up its width first and the button beyond it stays on the row down to
     a panel width where nothing else in the panel works either.
+
+    `cap`, given, is a ceiling on top of that: a field holding a fixed-format
+    value (an OSC address, an IP) does not read any better for the extra space
+    a wide panel leaves it, unlike a path, which is why this is the caller's
+    choice rather than the default. It only ever narrows the field, never
+    widens it past what `available - reserve` already allowed, and the floor
+    below still wins if the panel is narrower than the cap itself.
     """
-    return max(available - reserve, minimum)
+    width = available - reserve
+    if cap is not None:
+        width = min(width, cap)
+    return max(width, minimum)
 
 
 def fitted_width(
@@ -742,7 +761,14 @@ class ControlBinder:
             spec, label, lambda shown: imgui.checkbox(label, bool(shown)), enabled
         )
 
-    def input_int(self, name: str, label: str, *, enabled: bool = True) -> None:
+    def input_int(
+        self,
+        name: str,
+        label: str,
+        *,
+        enabled: bool = True,
+        natural_ems: float = _NATURAL_EMS_DEFAULT,
+    ) -> None:
         """Draw `name` as a typed integer field that commits on Enter.
 
         For a quantity, not a position: `noise_loop_seed`, `pulse_port`,
@@ -751,6 +777,12 @@ class ControlBinder:
         intermediate values while dragging would be destructive, expensive
         or meaningless. The step buttons are switched off (`0, 0`), so Enter
         is the only way to commit, matching the rule exactly: never a drag.
+
+        `natural_ems` caps the field at the width the value actually needs,
+        the same reasoning `slider_bounds` has no part in, since a quantity
+        does not read any better in a wider box (`_NATURAL_EMS_DEFAULT`'s own
+        docstring). `pulse_port` overrides it narrower still, a port being
+        five digits at most.
         """
         spec = require_spec(name, ParamKind.INT)
         self._widget(
@@ -758,10 +790,17 @@ class ControlBinder:
             label,
             lambda shown: imgui.input_int(label, int(shown), 0, 0, _ENTER),
             enabled,
+            natural_ems=natural_ems,
         )
 
     def input_float(
-        self, name: str, label: str, *, enabled: bool = True, format: str = "%.3f"
+        self,
+        name: str,
+        label: str,
+        *,
+        enabled: bool = True,
+        format: str = "%.3f",
+        natural_ems: float = _NATURAL_EMS_DEFAULT,
     ) -> None:
         """`input_int`'s sibling for a FLOAT parameter. See its docstring."""
         spec = require_spec(name, ParamKind.FLOAT)
@@ -772,6 +811,7 @@ class ControlBinder:
                 label, float(shown), 0.0, 0.0, format, _ENTER
             ),
             enabled,
+            natural_ems=natural_ems,
         )
 
     def bool_radio(
@@ -853,6 +893,7 @@ class ControlBinder:
         hint: str = "",
         reserve: float = 0.0,
         enabled: bool = True,
+        natural_ems: float | None = None,
     ) -> bool:
         """Draw `name` as a text field, and say whether the hand may use it.
 
@@ -866,6 +907,15 @@ class ControlBinder:
         the whole row for itself. A hidden `##` label, the model row's, still
         reserves nothing, so that row is unaffected.
 
+        `natural_ems`, given, caps the field the way `input_int`/`input_float`
+        always do: an OSC address or an IP is a fixed-format value, not
+        unbounded content, so it does not read any better in a wide panel
+        than in a narrow one. `None`, the default, leaves the field filling
+        the row, which is what the model path field wants: a path is
+        unbounded content a performer benefits from seeing more of, the same
+        argument that keeps a slider filling rather than the argument that
+        caps a quantity.
+
         The returned flag is whether the field is live. A panel that draws a
         button beside it disables it on the same flag, because an explicit
         source drives the whole row or none of it: a button that still worked
@@ -875,11 +925,13 @@ class ControlBinder:
         spec = require_spec(name, ParamKind.STR)
 
         def draw(shown: str) -> tuple[bool, str]:
+            cap = None if natural_ems is None else natural_ems * imgui.get_font_size()
             imgui.set_next_item_width(
                 field_width(
                     imgui.get_content_region_avail().x,
                     reserve + label_reserve(label),
                     imgui.get_font_size() * _FIELD_MIN_EMS,
+                    cap,
                 )
             )
             return imgui.input_text_with_hint(label, hint, shown, _ENTER)
@@ -894,6 +946,7 @@ class ControlBinder:
         enabled: bool,
         *,
         commit_on_release: bool = False,
+        natural_ems: float | None = None,
     ) -> None:
         name = spec.name
         state = self._snapshot()
@@ -907,7 +960,7 @@ class ControlBinder:
         self._indicator(name, gutter)
         if not live:
             imgui.begin_disabled()
-        self._fit(label)
+        self._fit(label, natural_ems=natural_ems)
         changed, value = draw(displayed_value(self._local, name, stored))
         if not live:
             imgui.end_disabled()
@@ -1023,22 +1076,30 @@ class ControlBinder:
         imgui.pop_id()
         return live
 
-    def _fit(self, label: str) -> None:
+    def _fit(self, label: str, *, natural_ems: float | None = None) -> None:
         """Keep the row inside the panel, whatever its label and the font size.
 
-        imgui's default width is a fixed sixteen times the font size and the
-        label sits outside it, so a row costs more than the panel has as soon
-        as the font is scaled up or the column is dragged narrow, and what runs
-        past the edge grows the window's content instead. Nothing draws the
-        overflow: what shows is the separators, which span the content region
-        and so stop short of every row that has run past it.
+        imgui's default width is a fraction of the window and the label sits
+        outside it, so a row costs more than the panel has as soon as the font
+        is scaled up or the column is dragged narrow, and what runs past the
+        edge grows the window's content instead. Nothing draws the overflow:
+        what shows is the separators, which span the content region and so
+        stop short of every row that has run past it.
 
         Only ever narrower, never wider, so a panel that already fits looks
-        exactly as it did.
+        exactly as it did. `natural_ems`, given, lowers that ceiling further:
+        a typed quantity (`input_int`, `input_float`) has no use for imgui's
+        default width, which is wide enough to hand a five digit port
+        hundreds of spare pixels. A drag or a slider leaves this at `None`
+        and keeps imgui's own default, since a position control reads better
+        wide, not worse (`input_int`'s own docstring).
         """
+        default = imgui.calc_item_width()
+        if natural_ems is not None:
+            default = min(default, imgui.get_font_size() * natural_ems)
         imgui.set_next_item_width(
             fitted_width(
-                imgui.calc_item_width(),
+                default,
                 imgui.get_content_region_avail().x,
                 label_reserve(label),
                 imgui.get_font_size() * _FIELD_MIN_EMS,
