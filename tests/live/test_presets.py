@@ -127,23 +127,7 @@ def preset_names():
 
 
 def apply_payload(state, payload):
-    """Apply a preset payload the way the control loop does, plus the five
-    plan-4 structured fields `mapping.py`'s `_apply_preset` does not yet
-    forward onto `ControlState` (see task-11-report.md, "Concerns"). Layering
-    them in here keeps this helper's round trip meaningful for
-    `presets.py`'s own serialization contract without reaching into
-    `mapping.py`, which this task does not own.
-    """
-    applied = apply_event(state, ControlEvent(presets.PRESET_APPLY, payload))
-    data = presets.from_payload(payload)
-    return dataclasses.replace(
-        applied,
-        transforms=data.transforms,
-        layer_noise=data.layer_noise,
-        layer_ratios=data.layer_ratios,
-        directions=data.directions,
-        combined_layers=data.combined_layers,
-    )
+    return apply_event(state, ControlEvent(presets.PRESET_APPLY, payload))
 
 
 def test_sample_state_is_non_default_everywhere():
@@ -826,6 +810,31 @@ def test_round_trip_restores_transforms_layer_noise_ratios_directions_and_mixing
     assert data.layer_ratios == SAMPLE.layer_ratios
     assert data.directions == SAMPLE.directions
     assert data.combined_layers == SAMPLE.combined_layers
+
+
+def test_applying_a_preset_event_lands_the_five_structured_fields_on_live_state(
+    tmp_path,
+):
+    """The five plan-4 sections must not just serialize correctly through
+    `presets.py`, they must land on a live `ControlState` through the real
+    control loop path: `apply_event(PRESET_APPLY, ...)`, exactly how a
+    performer's preset recall actually works, not only through
+    `presets.from_payload` called directly.
+
+    This is the seam that fell between Task 3 and Task 11: `mapping.py`'s
+    `_apply_preset` used to forward only `bindings`, `latent_vec` and
+    `keyframes` onto the applied state, so recalling a preset with a bending
+    chain, per-layer noise/ratios, adjuster directions or mixing origins
+    silently left those five fields at whatever the live state already held.
+    """
+    path = tmp_path / "look.json"
+    presets.save(SAMPLE, path)
+    state = apply_payload(ControlState(), presets.load(path))
+    assert state.transforms == SAMPLE.transforms
+    assert state.layer_noise == SAMPLE.layer_noise
+    assert state.layer_ratios == SAMPLE.layer_ratios
+    assert state.directions == SAMPLE.directions
+    assert state.combined_layers == SAMPLE.combined_layers
 
 
 def test_saved_transforms_and_directions_are_plain_json(tmp_path):

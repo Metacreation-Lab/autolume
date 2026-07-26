@@ -134,6 +134,11 @@ def _apply_preset(state: ControlState, value: object) -> ControlState:
         bindings=data.bindings,
         latent_vec=data.latent_vec,
         keyframes=data.keyframes,
+        transforms=data.transforms,
+        layer_noise=data.layer_noise,
+        layer_ratios=data.layer_ratios,
+        directions=data.directions,
+        combined_layers=data.combined_layers,
     )
 
 
