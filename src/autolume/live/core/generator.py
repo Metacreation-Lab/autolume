@@ -25,9 +25,13 @@ _BILINEAR_CORNERS = ((0, 0), (1, 0), (0, 1), (1, 1))
 _SLERP_COLINEAR_THRESHOLD = 0.9995
 _KEYFRAME_CACHE_SIZE = 4
 _FRAME_CHANNELS = 3
-# Keeps a channel that is flat across the whole frame from normalizing to
-# infinity instead of staying flat.
+# An all zero channel has no peak to divide by, and 0/0 is NaN. Anything with
+# a peak at all normalizes normally, floor or no floor.
 _NORMALIZE_FLOOR = 1e-8
+# Distinct causes worth one warning each. Some log keys carry a layer name
+# straight from the params, and `capture_layer` is a free-form string an OSC
+# sender can vary every frame, so the set needs a ceiling.
+_LOG_ONCE_CAP = 64
 
 
 def slerp(alpha: float, w0, w1):
@@ -102,12 +106,28 @@ def hook_layer_names(params: RenderParams) -> tuple[str, ...]:
     return tuple(names)
 
 
-def manipulation_dict(transform: Transform) -> dict:
+def usable_indices(transform: Transform, channels: int) -> tuple[int, ...]:
+    """The transform's selected channels that this activation actually has.
+
+    Selections are authored against one model and then persist through
+    presets and model swaps, so a chain built on a 512 channel layer can
+    arrive at a 128 channel one. Every operator reaches its tensor through
+    `x[:, indices]`, and out of range advanced indexing is a device side
+    assert on CUDA: catchable, but it poisons the context, so every frame
+    after it fails too. Filtering here is the only place that knows the
+    tensor, and it is the difference between one skipped transform and a
+    dead render thread.
+    """
+    return tuple(index for index in transform.indices if 0 <= index < channels)
+
+
+def manipulation_dict(transform: Transform, indices) -> dict:
     """A `Transform` in the shape `ManipulationLayer.forward` reads.
 
-    `erode` and `dilate` size a `torch.ones` kernel with their parameter, so
-    the stored float has to become an int on the way in or the kernel cannot
-    be built at all.
+    `indices` is passed separately because the caller has already bounded it
+    against the activation. `erode` and `dilate` size a `torch.ones` kernel
+    with their parameter, so the stored float has to become an int on the way
+    in or the kernel cannot be built at all.
     """
     params = [float(value) for value in transform.params]
     if transform.op in ("erode", "dilate") and params:
@@ -115,7 +135,7 @@ def manipulation_dict(transform: Transform) -> dict:
     return {
         "transformID": transform.op,
         "params": params,
-        "indices": list(transform.indices),
+        "indices": list(indices),
     }
 
 
@@ -407,9 +427,11 @@ class LoadedModel:
         """One warning per distinct cause, however many frames repeat it.
 
         The render thread hits these paths at frame rate, so a line per
-        frame would bury the log and cost more than the failure itself.
+        frame would bury the log and cost more than the failure itself. Past
+        `_LOG_ONCE_CAP` distinct causes the model has bigger problems than a
+        missing log line, and the set stops growing.
         """
-        if key in self._logged_once:
+        if key in self._logged_once or len(self._logged_once) >= _LOG_ONCE_CAP:
             return
         self._logged_once.add(key)
         logger.warning(message, *args, exc_info=exc_info)
@@ -486,6 +508,11 @@ class LoadedModel:
         a transform's parameters, or the whole chain's values, costs no hook
         traffic at all. An empty key means the network carries no hooks.
         """
+        # Loaded before the key compare, not after: a capture layer and a
+        # transform on that same layer fold into one key, so the first
+        # transform of a session can arrive without the key moving at all.
+        if params.transforms:
+            self._ensure_manipulation()
         key = hook_layer_names(params)
         if key == self._hook_key:
             return
@@ -493,8 +520,6 @@ class LoadedModel:
             handle.remove()
         self._hook_handles = []
         self._hook_key = key
-        if params.transforms:
-            self._ensure_manipulation()
         modules = self._synthesis_modules()
         for name in key:
             module = modules.get(name)
@@ -508,9 +533,9 @@ class LoadedModel:
                 continue
             register = getattr(module, "register_forward_hook", None)
             if callable(register):
-                self._hook_handles.append(register(self._make_hook(name)))
+                self._hook_handles.append(register(self._bend_hook(name)))
 
-    def _make_hook(self, name: str):
+    def _bend_hook(self, name: str):
         def _hook(_module, _inputs, output):
             if isinstance(output, tuple):
                 tensor = output[0] if output else None
@@ -535,19 +560,32 @@ class LoadedModel:
     def _apply_transforms(self, name: str, tensor):
         """Every transform aimed at `name`, in chain order.
 
-        Called from a forward hook, so it cannot raise: a transform that
-        fails is logged once for that cause and dropped, and the frame
-        renders with whatever the rest of the chain produced.
+        Called from a forward hook, so it cannot raise a Python exception: a
+        transform that fails is logged once for that cause and dropped, and
+        the frame renders with whatever the rest of the chain produced.
         """
         manipulation = self._manipulation
         if manipulation is None:
             return tensor, False
+        channels = int(tensor.shape[1])
         applied = False
         for transform in self._frame_transforms:
             if transform.layer != name:
                 continue
+            indices = usable_indices(transform, channels)
+            if len(indices) != len(transform.indices):
+                self._log_once(
+                    ("indices", transform.op, name, channels),
+                    "Bending %s on %s selects channels this layer does not have, "
+                    "it only has %d",
+                    transform.op,
+                    name,
+                    channels,
+                )
+            if not indices:
+                continue
             try:
-                tensor = manipulation(tensor, manipulation_dict(transform))
+                tensor = manipulation(tensor, manipulation_dict(transform, indices))
                 applied = True
             except Exception as exc:
                 self._log_once(
@@ -601,7 +639,7 @@ class LoadedModel:
         layers: list[LayerInfo] = []
         handles = []
 
-        def _make_hook(name: str):
+        def _catalog_hook(name: str):
             def _hook(_module, _inputs, output):
                 if isinstance(output, tuple):
                     output = output[0] if output else None
@@ -622,7 +660,7 @@ class LoadedModel:
         try:
             synthesis = self.G.synthesis
             for name, module in synthesis.named_modules():
-                handles.append(module.register_forward_hook(_make_hook(name)))
+                handles.append(module.register_forward_hook(_catalog_hook(name)))
             w_dim = self._w_avg.shape[-1]
             row = np.random.RandomState(0).randn(1, w_dim).astype(np.float32)
             ws = torch.from_numpy(row).to(self.device).repeat(self.num_ws, 1)

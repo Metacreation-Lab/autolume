@@ -259,11 +259,14 @@ def test_the_loop_fans_out_a_bent_frame():
     assert frame.flags.writeable is False
 
 
-def test_the_loop_keeps_going_when_a_transform_fails():
+def test_the_loop_keeps_going_when_a_transform_cannot_be_applied():
     from autolume.live.core.params import Transform
 
     mailbox = PreviewMailbox()
-    # Channel 99 does not exist, so the operator raises inside the hook.
+    # Channel 99 does not exist on this layer, so the transform is dropped
+    # before it can reach the operator. It never becomes an exception at all,
+    # which is what keeps a CUDA context alive rather than merely catching a
+    # device side assert that has already poisoned it.
     store = make_store(
         fps_cap=0, transforms=(Transform("ablate", "conv1", (1.0,), (99,)),)
     )

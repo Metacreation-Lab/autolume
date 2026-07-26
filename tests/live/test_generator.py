@@ -18,7 +18,9 @@ from autolume.live.core.generator import (
     noise_mode,
     slerp,
     to_uint8_frame,
+    usable_indices,
 )
+from autolume.live.core.generator import _LOG_ONCE_CAP
 from autolume.live.core.params import (
     ControlState,
     Keyframe,
@@ -852,7 +854,7 @@ def test_derive_normalizes_before_scaling():
     assert image.tolist() == [[[5.0, -10.0]], [[0.0, 0.0]], [[7.5, 10.0]]]
 
 
-def test_derive_leaves_a_flat_channel_alone_instead_of_dividing_by_zero():
+def test_derive_keeps_an_all_zero_channel_at_zero_instead_of_nan():
     import torch
 
     image = derive_float_image(torch.zeros([3, 1, 2]), render_params(img_normalize=True))
@@ -1067,6 +1069,25 @@ def test_module_state_is_not_rewritten_while_nothing_moves():
     assert noisy.writes == [("global_noise", 0.25), ("global_noise", 0.75)]
 
 
+def test_module_state_is_not_rewritten_while_a_layer_override_holds():
+    # Each snapshot carries its own dict, so holding an override constant is
+    # what exercises the change cache's dict comparison rather than two
+    # empty dicts comparing equal.
+    conv1 = _state_block(global_noise=1.0, noise_regulator=0)
+    model = _fake_model(_stateful_synthesis(conv1=conv1))
+
+    model.render_frame(render_params(layer_noise=(("conv1", 0.7),)), 0)
+    after_first = list(conv1.writes)
+    model.render_frame(render_params(layer_noise=(("conv1", 0.7),)), 1)
+    assert conv1.writes == after_first
+
+    model.render_frame(render_params(layer_noise=(("conv1", 0.9),)), 2)
+    assert conv1.writes == after_first + [
+        ("global_noise", 1.0),
+        ("noise_regulator", 0.9),
+    ]
+
+
 def test_per_layer_noise_strength_reaches_its_layer_and_nothing_else():
     conv1 = _state_block(global_noise=1.0, noise_regulator=0)
     torgb = _state_block(global_noise=1.0, noise_regulator=0)
@@ -1191,7 +1212,9 @@ def test_adding_a_layer_to_the_chain_rebuilds_the_hook_set():
     model.render_frame(render_params(transforms=(first, second)), 1)
     synthesis = model.G.synthesis
     assert synthesis.torgb.hook_registrations == 1
-    # Re-registered, not doubled up: one live hook per module either way.
+    # The whole set is rebuilt, so conv1's hook is registered a second time,
+    # and re-registered rather than doubled up: one live hook per module.
+    assert synthesis.conv1.hook_registrations == 2
     assert len(synthesis.conv1._forward_hooks) == 1
     assert len(synthesis.torgb._forward_hooks) == 1
 
@@ -1268,7 +1291,8 @@ def test_an_erode_kernel_size_reaches_the_operator_as_an_int(caplog):
     # torch.ones((1.0, 1.0)) raises, so a float kernel would be logged and
     # skipped instead of applied. Kernel 1 erosion is the identity, which
     # makes "nothing was logged" the whole assertion.
-    assert manipulation_dict(Transform("erode", "conv1", (5.0,), (0,)))["params"] == [5]
+    kernel = manipulation_dict(Transform("erode", "conv1", (5.0,), (0,)), (0,))["params"][0]
+    assert kernel == 5 and isinstance(kernel, int)
     model = _bendable_model()
     params = render_params(
         transforms=(Transform("erode", "conv1", (1.0,), _ALL_CHANNELS),)
@@ -1278,9 +1302,20 @@ def test_an_erode_kernel_size_reaches_the_operator_as_an_int(caplog):
     assert [r for r in caplog.records if r.levelno == logging.WARNING] == []
 
 
-def test_a_failing_transform_is_skipped_and_logged_once(caplog):
+def test_usable_indices_drops_the_channels_an_activation_does_not_have():
+    transform = Transform("ablate", "conv1", (1.0,), (0, 2, 5, 99))
+    assert usable_indices(transform, 3) == (0, 2)
+    assert usable_indices(transform, 100) == (0, 2, 5, 99)
+    assert usable_indices(transform, 0) == ()
+
+
+def test_channels_this_layer_does_not_have_are_dropped_and_logged_once(caplog):
+    # Out of range advanced indexing is a device side assert on CUDA, and a
+    # poisoned context fails every later frame too, so nothing out of range
+    # may reach the operator in the first place. On CPU the caught IndexError
+    # would look identical from the outside, so the message is what says the
+    # operator was never called rather than called and forgiven.
     model = _bendable_model()
-    # Channel 99 does not exist, so the operator raises on the way in.
     params = render_params(
         transforms=(Transform("ablate", "conv1", (1.0,), (99,)),)
     )
@@ -1289,33 +1324,94 @@ def test_a_failing_transform_is_skipped_and_logged_once(caplog):
             assert _pixel(model.render_frame(params, index)) == _UNBENT
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert len(warnings) == 1
+    assert "does not have" in warnings[0].getMessage()
 
 
-def test_a_failing_transform_does_not_stop_the_rest_of_the_chain(caplog):
+def test_the_channels_that_do_exist_still_get_bent(caplog):
     model = _bendable_model()
     params = render_params(
+        transforms=(Transform("scalar-multiply", "conv1", (3.0,), (0, 99)),)
+    )
+    with caplog.at_level(logging.WARNING):
+        assert _pixel(model.render_frame(params, 0)) == [175, 143, 143]
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert "does not have" in warnings[0].getMessage()
+
+
+def _group_bendable_synthesis():
+    """A synthesis whose bendable layer carries a 5D G-CNN activation.
+
+    kornia's geometric operators reject a 5D input outright, which makes this
+    the real, device independent way an operator fails at render time. The
+    group mean of 0.25 quantizes to 159.
+    """
+    import torch
+    import torch.nn as nn
+
+    class _Group(nn.Module):
+        def forward(self, ws):
+            return torch.full([1, 3, 2, 1, 2], 0.25)
+
+    class _Synthesis(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv1 = _Group()
+
+        def forward(self, ws, noise_mode="const"):
+            return self.conv1(ws).mean(2)
+
+    return _Synthesis()
+
+
+def test_a_failing_operator_is_skipped_and_logged_once(caplog):
+    model = _fake_model(_group_bendable_synthesis())
+    params = render_params(
+        transforms=(Transform("rotate", "conv1", (10.0,), _ALL_CHANNELS),)
+    )
+    with caplog.at_level(logging.WARNING):
+        for index in range(3):
+            assert _pixel(model.render_frame(params, index)) == [159, 159, 159]
+    assert len([r for r in caplog.records if r.levelno == logging.WARNING]) == 1
+
+
+def test_a_failing_operator_does_not_stop_the_rest_of_the_chain(caplog):
+    model = _fake_model(_group_bendable_synthesis())
+    params = render_params(
         transforms=(
-            Transform("ablate", "conv1", (1.0,), (99,)),
-            Transform("invert", "conv1", (1.0,), _ALL_CHANNELS),
+            Transform("rotate", "conv1", (10.0,), _ALL_CHANNELS),
+            Transform("ablate", "conv1", (1.0,), _ALL_CHANNELS),
         )
     )
     with caplog.at_level(logging.WARNING):
-        assert _pixel(model.render_frame(params, 0)) == [175, 175, 175]
+        assert _pixel(model.render_frame(params, 0)) == [128, 128, 128]
     assert len([r for r in caplog.records if r.levelno == logging.WARNING]) == 1
 
 
 def test_two_different_failures_are_logged_separately(caplog):
-    model = _bendable_model()
+    model = _fake_model(_group_bendable_synthesis())
     params = render_params(
         transforms=(
-            Transform("ablate", "conv1", (1.0,), (99,)),
-            Transform("invert", "conv1", (1.0,), (99,)),
+            Transform("rotate", "conv1", (10.0,), _ALL_CHANNELS),
+            Transform("translate", "conv1", (1.0, 1.0), _ALL_CHANNELS),
         )
     )
     with caplog.at_level(logging.WARNING):
         model.render_frame(params, 0)
         model.render_frame(params, 1)
     assert len([r for r in caplog.records if r.levelno == logging.WARNING]) == 2
+
+
+def test_the_log_once_set_cannot_grow_without_bound(caplog):
+    # capture_layer is a free-form string an OSC sender can vary every frame,
+    # and it lands in a log key.
+    model = _bendable_model()
+    with caplog.at_level(logging.WARNING):
+        for index in range(_LOG_ONCE_CAP + 5):
+            model.render_frame(render_params(capture_layer=f"absent{index}"), index)
+    assert len(model._logged_once) == _LOG_ONCE_CAP
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == _LOG_ONCE_CAP
 
 
 def test_a_layer_name_this_model_does_not_have_is_logged_once_and_skipped(caplog):
@@ -1338,6 +1434,27 @@ def test_a_capture_layer_derives_the_image_from_that_layer():
         159,
         159,
     ]
+
+
+def test_a_transform_added_to_the_already_captured_layer_still_applies():
+    """The capture layer and a transform on it fold into one hook key.
+
+    So adding the session's first transform to the layer being captured does
+    not move the key, and anything the hook set up lazily on a key change
+    would never happen. This is the ordinary workflow: pick a layer to look
+    at, then start bending it.
+    """
+    model = _bendable_model()
+    assert _pixel(model.render_frame(render_params(capture_layer="conv1"), 0)) == [
+        159,
+        159,
+        159,
+    ]
+    params = render_params(
+        capture_layer="conv1",
+        transforms=(Transform("invert", "conv1", (1.0,), _ALL_CHANNELS),),
+    )
+    assert _pixel(model.render_frame(params, 1)) == [223, 223, 223]
 
 
 def test_a_captured_layer_carries_its_own_transform():
