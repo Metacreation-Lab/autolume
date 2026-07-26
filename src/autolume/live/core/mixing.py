@@ -147,6 +147,52 @@ def _merged_channels(
     return channels
 
 
+def _origin_by_module(
+    entries: tuple[str, ...], names_a: tuple[str, ...], names_b: tuple[str, ...]
+) -> dict[str, str]:
+    """Which model each synthesis submodule's weights came from.
+
+    Keyed by every ancestor module path of every chosen parameter, first
+    match in network order winning, so a lookup can walk up from a buffer's
+    own module until it finds the weights that buffer serves.
+    """
+    origins: dict[str, str] = {}
+    for index, entry in enumerate(entries):
+        if entry == ORIGIN_A:
+            name = names_a[index]
+        elif entry == ORIGIN_B:
+            name = names_b[index]
+        else:
+            continue
+        parts = name.split(".")[:-1]
+        while parts:
+            origins.setdefault(".".join(parts), entry)
+            parts = parts[:-1]
+    return origins
+
+
+def _buffer_origin(
+    key: str, module_origins: dict[str, str], mapping_origin: str | None
+) -> str | None:
+    """The model a non-parameter state entry should be taken from.
+
+    A buffer belongs with the weights it serves. `mapping.w_avg` is a
+    statistic of one mapping network's own W distribution, so it follows
+    whichever model provided the mapping; a synthesis buffer follows its
+    own block's weights. Anything that cannot be placed keeps the value it
+    was constructed with.
+    """
+    if key.startswith("mapping"):
+        return mapping_origin
+    parts = key.split(".")[:-1]
+    while parts:
+        origin = module_origins.get(".".join(parts))
+        if origin is not None:
+            return origin
+        parts = parts[:-1]
+    return None
+
+
 def combine(G_a, G_b, combined_layers):
     """Assemble a new generator from `G_a` and `G_b` per `combined_layers`.
 
@@ -174,6 +220,10 @@ def combine(G_a, G_b, combined_layers):
     channels = _merged_channels(
         entries, names_a, names_b, G_a, G_b, img_resolution
     )
+    # The mapping network is not per layer, so the first entry decides which
+    # model's whole mapping the mix inherits, its build arguments included.
+    mapping_origin = entries[0] if entries and entries[0] in (ORIGIN_A, ORIGIN_B) else None
+    mapping_source = G_b if mapping_origin == ORIGIN_B else G_a
     mixed = custom_stylegan2.Generator(
         z_dim=G_a.z_dim,
         c_dim=G_a.c_dim,
@@ -187,14 +237,10 @@ def combine(G_a, G_b, combined_layers):
     destination = mixed.state_dict()
     state_a = G_a.state_dict()
     state_b = G_b.state_dict()
-    # The mapping network is not per layer, so the first entry decides which
-    # model's whole mapping the mix inherits.
-    if entries and entries[0] == ORIGIN_A:
-        for name in mapping_names(G_a):
-            destination[name] = state_a[name]
-    elif entries and entries[0] == ORIGIN_B:
-        for name in mapping_names(G_b):
-            destination[name] = state_b[name]
+    state_by_origin = {ORIGIN_A: state_a, ORIGIN_B: state_b}
+    if mapping_origin is not None:
+        for name in mapping_names(mapping_source):
+            destination[name] = state_by_origin[mapping_origin][name]
     for index, entry in enumerate(entries):
         if entry == ORIGIN_A:
             name = names_a[index]
@@ -202,6 +248,23 @@ def combine(G_a, G_b, combined_layers):
         elif entry == ORIGIN_B:
             name = names_b[index]
             destination[name] = state_b[name]
+    # Buffers are not parameters, so nothing above has touched them, and a
+    # mixed model left with its own freshly constructed ones is not the model
+    # it was assembled from: `w_avg` would be zero, which moves every frame
+    # rendered below truncation 1, and each `noise_const` would be a fresh
+    # draw, which changes the picture outright wherever noise strength is not
+    # zero. Routed by the weights they serve, so all-A is bit identical to A.
+    module_origins = _origin_by_module(entries, names_a, names_b)
+    parameter_names = {name for name, _ in mixed.named_parameters()}
+    for key in destination:
+        if key in parameter_names:
+            continue
+        origin = _buffer_origin(key, module_origins, mapping_origin)
+        if origin is None:
+            continue
+        source = state_by_origin[origin]
+        if key in source:
+            destination[key] = source[key]
     try:
         mixed.load_state_dict(destination)
     except Exception as exc:

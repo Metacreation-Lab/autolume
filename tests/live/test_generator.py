@@ -2293,6 +2293,14 @@ def wait_for(predicate, timeout=5.0):
 def tiny_generator(seed=0, img_resolution=16, channel_max=8):
     """A real custom stylegan2 generator, small enough to build in tests.
 
+    Every parameter and stateful buffer is perturbed so no tensor is bit
+    identical to another model's. A freshly built generator zero-initialises
+    over half its tensors (every bias, every affine bias, every noise
+    strength, `w_avg`), and a pair of them would let a merge taking the
+    wrong source pass most of its assertions. See
+    `tests/live/test_mixing.py::randomize` for why this perturbs rather than
+    redraws, and why `resample_filter` is left alone.
+
     `synthesis_kwargs` is passed explicitly because `Generator.__init__`
     declares it as a mutable default and updates it in place.
     """
@@ -2301,7 +2309,7 @@ def tiny_generator(seed=0, img_resolution=16, channel_max=8):
     from architectures import custom_stylegan2
 
     torch.manual_seed(seed)
-    return custom_stylegan2.Generator(
+    model = custom_stylegan2.Generator(
         z_dim=8,
         c_dim=0,
         w_dim=8,
@@ -2309,6 +2317,13 @@ def tiny_generator(seed=0, img_resolution=16, channel_max=8):
         img_resolution=img_resolution,
         synthesis_kwargs={"channel_base": 64, "channel_max": channel_max},
     )
+    with torch.no_grad():
+        for parameter in model.parameters():
+            parameter.add_(torch.randn_like(parameter) * 0.1 + seed * 0.02)
+        for name, buffer in model.named_buffers():
+            if not name.endswith("resample_filter"):
+                buffer.add_(torch.randn_like(buffer) * 0.1 + seed * 0.02)
+    return model
 
 
 def generator_loader(by_path):
@@ -2670,6 +2685,17 @@ def test_model_host_saves_the_merged_model_next_to_the_users_models(
         data = pickle.load(handle)
     assert set(data) == {"G", "G_ema", "D"}
     assert data["G"] is data["G_ema"]
+
+    # The file has to be the mix that was on screen. `_save_mix` assembles a
+    # second time, so anything the merge draws fresh instead of copying
+    # would make the saved model quietly different from the preview.
+    import torch
+
+    rendering = host.current().G.state_dict()
+    saved = data["G_ema"].state_dict()
+    assert set(saved) == set(rendering)
+    for name in rendering:
+        assert torch.equal(saved[name], rendering[name].cpu()), name
     host.stop()
 
 
@@ -2741,17 +2767,17 @@ def test_request_mix_ignores_a_bare_string(caplog):
 
 
 def test_model_host_an_all_a_mix_renders_the_same_frame_as_model_a():
-    """The strongest form of "all A reproduces A": equal pixels through the
-    render path, not just equal tensors in a state dict.
+    """The plan's acceptance criterion at the far end of the pipeline:
+    equal pixels through the render path, not just equal tensors.
 
-    Noise off and truncation at 1 because the merge copies parameters and
-    not buffers, so the mixed model has its own constant noise and a zero
-    `w_avg`. Those are the two places an all-A mix legitimately diverges
-    from A under the ported behavior, and this test is about the merge.
+    At the registry defaults, so truncation (0.8, which reads `w_avg`) and
+    the const noise mode (which reads every `noise_const`) are both live.
+    Those are exactly the two buffers a parameters-only merge would leave
+    freshly constructed, and both are what this asserts against.
     """
     a, b = tiny_generator(seed=1), tiny_generator(seed=2)
     host = mixing_host(a, b)
-    params = render_params(noise_enabled=False, truncation_psi=1.0)
+    params = render_params()
     plain = host.current().render_frame(params, 0)
 
     host.set_mixing_enabled(True)
@@ -2768,7 +2794,7 @@ def test_model_host_a_split_mix_renders_a_different_frame_from_model_a():
     """Guards the test above from passing on a mix that is silently A."""
     a, b = tiny_generator(seed=1), tiny_generator(seed=2)
     host = mixing_host(a, b)
-    params = render_params(noise_enabled=False, truncation_psi=1.0)
+    params = render_params()
     plain = host.current().render_frame(params, 0)
 
     host.set_mixing_enabled(True)

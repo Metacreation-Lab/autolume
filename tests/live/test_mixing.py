@@ -36,8 +36,35 @@ pytestmark = [
 ]
 
 
+def randomize(model, seed):
+    """Give every parameter and stateful buffer a value distinct from any
+    other model's.
+
+    A freshly constructed generator zero-initialises 29 of its 54
+    parameters (every bias, every affine bias, every noise strength) and
+    leaves `w_avg` at zero, so two of them are bit identical across more
+    than half their tensors. Merge assertions against such a pair pass just
+    as happily on a merge that takes the wrong source.
+
+    Perturbs the real initialisation rather than replacing it: drawing
+    every weight afresh at any scale drives the synthesis output far past
+    the uint8 range, so every model renders a uniform white frame and the
+    tests that compare frames stop meaning anything. `resample_filter` is
+    left alone deliberately: it is a real filter kernel, construction
+    deterministic and identical in both models by definition, so it is the
+    one tensor a merge cannot get wrong.
+    """
+    with torch.no_grad():
+        for parameter in model.parameters():
+            parameter.add_(torch.randn_like(parameter) * 0.1 + seed * 0.02)
+        for name, buffer in model.named_buffers():
+            if not name.endswith("resample_filter"):
+                buffer.add_(torch.randn_like(buffer) * 0.1 + seed * 0.02)
+    return model
+
+
 def generator(seed=0, img_resolution=16, channel_max=8, w_dim=8, z_dim=8):
-    """A tiny but genuine custom stylegan2 generator.
+    """A tiny but genuine custom stylegan2 generator, fully randomised.
 
     `synthesis_kwargs` is always passed explicitly: `Generator.__init__`
     declares it as a mutable default and then calls `.update()` on it, so a
@@ -47,13 +74,16 @@ def generator(seed=0, img_resolution=16, channel_max=8, w_dim=8, z_dim=8):
     from architectures import custom_stylegan2
 
     torch.manual_seed(seed)
-    return custom_stylegan2.Generator(
-        z_dim=z_dim,
-        c_dim=0,
-        w_dim=w_dim,
-        img_channels=3,
-        img_resolution=img_resolution,
-        synthesis_kwargs={"channel_base": 64, "channel_max": channel_max},
+    return randomize(
+        custom_stylegan2.Generator(
+            z_dim=z_dim,
+            c_dim=0,
+            w_dim=w_dim,
+            img_channels=3,
+            img_resolution=img_resolution,
+            synthesis_kwargs={"channel_base": 64, "channel_max": channel_max},
+        ),
+        seed,
     )
 
 
@@ -277,22 +307,66 @@ def test_combine_leaves_the_sources_on_their_own_device():
     assert next(a.parameters()).device == torch.device("cpu")
 
 
-def test_a_mix_does_not_inherit_the_sources_buffers():
-    """Ported behavior, pinned deliberately rather than left implicit.
-
-    The merge copies parameters and not buffers, because that is what the
-    two legacy paths do. A mixed model therefore starts with a zero `w_avg`
-    and its own freshly drawn constant noise, so an all-A mix diverges from
-    A exactly where those two are read: truncation below 1, and the "const"
-    noise mode. Flagged in the task report for the maintainer to decide on,
-    not changed here.
-    """
+def test_an_all_a_mix_is_bit_identical_to_model_a():
+    """The plan's acceptance criterion, as a test: every entry of the mixed
+    state dict, parameters and buffers alike, equal to A's."""
     a = generator(seed=1)
     b = generator(seed=2)
-    # A trained model's w_avg is whatever training left there, never zero.
-    with torch.no_grad():
-        a.mapping.w_avg.fill_(0.5)
     mixed = combine(a, b, ["A"] * selection_length(a, b))
-    assert torch.equal(mixed.mapping.w_avg, torch.zeros_like(mixed.mapping.w_avg))
-    noise = "synthesis.b8.conv0.noise_const"
-    assert not torch.equal(mixed.state_dict()[noise], a.state_dict()[noise])
+    state_a, state_mixed = a.state_dict(), mixed.state_dict()
+    assert set(state_mixed) == set(state_a)
+    for name in state_a:
+        assert same(state_mixed[name], state_a[name]), name
+
+
+def test_an_all_b_mix_is_bit_identical_to_model_b():
+    a = generator(seed=1)
+    b = generator(seed=2)
+    mixed = combine(a, b, ["B"] * selection_length(a, b))
+    state_b, state_mixed = b.state_dict(), mixed.state_dict()
+    assert set(state_mixed) == set(state_b)
+    for name in state_b:
+        assert same(state_mixed[name], state_b[name]), name
+
+
+def test_a_mix_inherits_the_buffers_of_the_weights_they_serve():
+    """`w_avg` follows the mapping network it is a statistic of, and each
+    `noise_const` follows the block whose weights it is added to."""
+    a = generator(seed=1)
+    b = generator(seed=2)
+    names = conv_names(a)
+    entries = ["A" if layer_resolution(n) <= 8 else "B" for n in names]
+    mixed = combine(a, b, entries)
+    state_a, state_b, state_mixed = a.state_dict(), b.state_dict(), mixed.state_dict()
+
+    assert same(state_mixed["mapping.w_avg"], state_a["mapping.w_avg"])
+    assert same(
+        state_mixed["synthesis.b8.conv0.noise_const"],
+        state_a["synthesis.b8.conv0.noise_const"],
+    )
+    assert same(
+        state_mixed["synthesis.b16.conv0.noise_const"],
+        state_b["synthesis.b16.conv0.noise_const"],
+    )
+
+
+def test_the_mapping_buffer_follows_the_mapping_network_not_model_a():
+    a = generator(seed=1)
+    b = generator(seed=2)
+    names = conv_names(a)
+    entries = ["B"] + ["A"] * (len(names) - 1)
+    mixed = combine(a, b, entries)
+    assert same(mixed.state_dict()["mapping.w_avg"], b.state_dict()["mapping.w_avg"])
+
+
+def test_a_mix_repeated_from_the_same_pair_is_reproducible():
+    """The save path assembles a second time, so two builds from one pair
+    must agree or the file written is not the mix being previewed."""
+    a = generator(seed=1)
+    b = generator(seed=2)
+    entries = ["A" if layer_resolution(n) <= 8 else "B" for n in conv_names(a)]
+    first = combine(a, b, entries).state_dict()
+    second = combine(a, b, entries).state_dict()
+    assert set(first) == set(second)
+    for name in first:
+        assert same(first[name], second[name]), name
