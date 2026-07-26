@@ -223,7 +223,13 @@ class ControlLoop:
             "loop_index", now
         ):
             state = apply_value(state, "loop_index", step.index)
-        if step.wrapped and state.perfect_loop:
+        # Gated on the same `alpha_is_integrated` as the pulse: a scrub-induced
+        # `wrapped` is not a completed cycle, so it must not silently stop
+        # playback either. Stopping on a false wrap is the worse failure of
+        # the two (a stray pulse is noise, a stopped show is a mistake with
+        # nothing to explain it), so this shares the guard rather than only
+        # the pulse getting it.
+        if step.wrapped and alpha_is_integrated and state.perfect_loop:
             state = apply_value(state, "loop_active", False)
         self._emit_pulse(state, step, alpha_is_integrated)
         return state, step

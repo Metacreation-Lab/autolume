@@ -5,6 +5,7 @@ outbound side, called directly from the control thread (Task 7): it never
 raises, so a dead receiver or a bad address is a log line, not a stalled show.
 """
 
+import ipaddress
 import logging
 import threading
 from typing import Callable
@@ -80,13 +81,18 @@ class OscInput:
 
 
 class OscEmitter:
-    """Sends one OSC message per call. Never raises.
+    """Sends one OSC message per call. Never raises, never blocks on DNS.
 
     The client is lazily created and recreated only when (ip, port) changes,
-    so a steady destination reuses one socket across the show. Every
-    exception, construction or send, is swallowed and logged once per
-    distinct error string: a receiver that vanished mid set must not turn
-    into a log line per tick at 125 Hz.
+    so a steady destination reuses one socket across the show. `ip` must be an
+    IP literal: `pythonosc`'s client resolves whatever string it is given via
+    `socket.getaddrinfo` at construction time, and a hostname there can block
+    on a DNS lookup for seconds, which the control thread cannot afford for a
+    field a performer can type freely. A non-literal is rejected before any
+    client is built. Every exception, construction or send, is swallowed and
+    logged once per distinct error string: this is called only on a
+    `started`/`wrapped` edge, not every tick, but a receiver that stays gone
+    for the rest of the show must still produce one line, not one per edge.
     """
 
     def __init__(
@@ -98,6 +104,9 @@ class OscEmitter:
         self._logged_errors: set[str] = set()
 
     def send(self, ip: str, port: int, address: str, value: float) -> None:
+        if not _is_ip_literal(ip):
+            self._log_once(f"pulse ip {ip!r} is not a literal address")
+            return
         try:
             key = (ip, port)
             if self._client is None or key != self._client_key:
@@ -114,3 +123,11 @@ class OscEmitter:
             self._logged_errors.clear()
         self._logged_errors.add(error)
         logger.warning("OSC pulse send failed: %s", error)
+
+
+def _is_ip_literal(ip: str) -> bool:
+    try:
+        ipaddress.ip_address(ip)
+        return True
+    except ValueError:
+        return False

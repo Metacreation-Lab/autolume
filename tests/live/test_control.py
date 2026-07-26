@@ -1323,6 +1323,8 @@ def test_pulse_does_not_fire_for_a_wrap_scrubbed_while_holding_loop_alpha():
     still tips `divmod` over the edge on its own. `last_loop_step.wrapped`
     still reports that raw signal (it does not know about touch), but the
     pulse must not: nothing here is a completed cycle, the hand has not let go.
+    `perfect_loop` shares the same guard, so playback must not silently stop
+    either: that failure is worse than a stray pulse, not milder.
     """
     clock = FakeClock()
     clock.now = 10.0
@@ -1332,6 +1334,7 @@ def test_pulse_does_not_fire_for_a_wrap_scrubbed_while_holding_loop_alpha():
         loop_speed=5.0,
         loop_alpha=0.999,
         loop_index=5,
+        perfect_loop=True,
         pulse_address="/pulse",
     )
     emitted, emit = make_recorder()
@@ -1344,6 +1347,7 @@ def test_pulse_does_not_fire_for_a_wrap_scrubbed_while_holding_loop_alpha():
     assert control_store.snapshot().loop_alpha == 0.999
     assert loop.last_loop_step.wrapped is True
     assert emitted == []
+    assert control_store.snapshot().loop_active is True
 
 
 def test_pulse_does_not_fire_for_a_wrap_from_a_manual_alpha_write_this_tick():
@@ -1354,6 +1358,7 @@ def test_pulse_does_not_fire_for_a_wrap_from_a_manual_alpha_write_this_tick():
         loop_speed=0.1,
         loop_alpha=0.5,
         loop_index=5,
+        perfect_loop=True,
         pulse_address="/pulse",
     )
     emitted, emit = make_recorder()
@@ -1367,6 +1372,32 @@ def test_pulse_does_not_fire_for_a_wrap_from_a_manual_alpha_write_this_tick():
     assert control_store.snapshot().loop_alpha == 0.999
     assert loop.last_loop_step.wrapped is True
     assert emitted == []
+    assert control_store.snapshot().loop_active is True
+
+
+def test_perfect_loop_still_stops_on_an_integration_driven_wrap():
+    """Companion to the two scrub tests above.
+
+    Nothing here is held or manually written, so `alpha_is_integrated` is
+    True and the existing, unattended-completion behavior must be unaffected
+    by the new gate.
+    """
+    clock = FakeClock()
+    state = ControlState(
+        loop_active=True,
+        perfect_loop=True,
+        loop_uses_time=True,
+        loop_time=4.0,
+        pulse_address="/pulse",
+    )
+    emitted, emit = make_recorder()
+    loop, control_store, _, _ = make_loop_with_state(clock, state, emit=emit)
+    loop.tick()
+    clock.now = 4.0
+    loop.tick()
+
+    assert control_store.snapshot().loop_active is False
+    assert [value for *_, value in emitted] == [1.0]
 
 
 def test_a_raising_emit_never_propagates_out_of_the_tick():

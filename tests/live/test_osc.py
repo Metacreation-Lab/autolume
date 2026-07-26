@@ -1,4 +1,5 @@
 import logging
+import socket
 import time
 
 from pythonosc.udp_client import SimpleUDPClient
@@ -116,8 +117,8 @@ def test_a_failing_client_factory_never_propagates_and_keeps_retrying():
         raise OSError("no route to host")
 
     emitter = OscEmitter(client_factory=factory)
-    emitter.send("bad-host", 5005, "/pulse", 2.0)
-    emitter.send("bad-host", 5005, "/pulse", 2.0)
+    emitter.send("10.0.0.9", 5005, "/pulse", 2.0)
+    emitter.send("10.0.0.9", 5005, "/pulse", 2.0)
     assert len(attempts) == 2
 
 
@@ -129,3 +130,48 @@ def test_send_logs_one_line_per_distinct_error_string(caplog):
         emitter.send("127.0.0.1", 5005, "/pulse", 1.0)
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert len(warnings) == 1
+
+
+# --- hostname-shaped `pulse_ip` never resolves on the control thread --------
+#
+# `pulse_ip` is a free-typed STR param. `pythonosc`'s client resolves
+# whatever it is given via `socket.getaddrinfo` at construction time, and a
+# hostname there can block on DNS for seconds. `OscEmitter` requires an IP
+# literal so `getaddrinfo` is never reachable from `send`, not merely
+# unlikely to be slow.
+
+
+def test_a_hostname_ip_never_reaches_the_client_factory(caplog):
+    factory, clients = make_factory()
+    emitter = OscEmitter(client_factory=factory)
+    with caplog.at_level(logging.WARNING):
+        emitter.send("example.com", 5005, "/pulse", 2.0)
+    assert clients == []
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+
+
+def test_a_hostname_pulse_ip_never_reaches_getaddrinfo(monkeypatch):
+    """End to end with the real default client factory, no fake in the way.
+
+    Patching `socket.getaddrinfo` to explode is the strongest available proof
+    that a hostname cannot reach it from `send`: if the literal check were
+    missing or bypassed, this test would fail with the patched error instead
+    of passing quietly.
+    """
+
+    def exploding_getaddrinfo(*args, **kwargs):
+        raise AssertionError("getaddrinfo must not be called for a non literal ip")
+
+    monkeypatch.setattr(socket, "getaddrinfo", exploding_getaddrinfo)
+    emitter = OscEmitter()
+    emitter.send("autolume-mixer.local", 5005, "/pulse", 2.0)
+
+
+def test_an_ip_literal_still_reaches_the_client_factory():
+    factory, clients = make_factory()
+    emitter = OscEmitter(client_factory=factory)
+    emitter.send("127.0.0.1", 5005, "/pulse", 2.0)
+    assert len(clients) == 1
+    emitter.send("::1", 5006, "/pulse", 2.0)
+    assert len(clients) == 2
