@@ -15,7 +15,12 @@ manual.
 import pytest
 from imgui_bundle import imgui
 
-from autolume.live.core.generator import DeviceStatus, LayerInfo, ModelInfo
+from autolume.live.core.generator import (
+    DeviceStatus,
+    LayerInfo,
+    MixSaveStatus,
+    ModelInfo,
+)
 from autolume.live.core.params import ControlState, Transform
 from autolume.live.core.sources import SourceTable
 from autolume.live.core.store import LatestValueStore
@@ -24,6 +29,7 @@ from autolume.live.io.recorder import RecorderStatus
 from autolume.live.runtime import OscStatus
 from autolume.live.ui import theme
 from autolume.live.ui.panels.bending import BendingPanel
+from autolume.live.ui.panels.mixing import MixingPanel
 from autolume.live.ui.panels.performance import PerformancePanel
 
 # The docked width at the shipped window size, and the two narrower docks a
@@ -45,29 +51,75 @@ class Stage:
     last_error = None
 
 
-class Model:
-    """Stands in for a `LoadedModel` for the parts a panel reads off one."""
+class Network:
+    def __init__(self, names):
+        self._names = names
 
-    def __init__(self, pkl_path="/models/a.pkl"):
+    def named_parameters(self):
+        return [(name, None) for name in self._names]
+
+
+class Model:
+    """Stands in for a `LoadedModel` for the parts a panel reads off one.
+
+    `G` carries the parameter names `mixing.conv_names` walks, so the mixing
+    panel's row derivation runs against a real name list rather than a mocked
+    out one.
+    """
+
+    def __init__(self, pkl_path="/models/a.pkl", names=()):
         self.pkl_path = pkl_path
+        self.G = Network(names)
         self._superres = Stage()
 
 
+def block_names(resolutions, per_block=2):
+    """Parameter names shaped like a StyleGAN generator's, plus the mapping."""
+    names = ["mapping.fc0.weight"]
+    for resolution in resolutions:
+        for index in range(per_block):
+            names.append(f"synthesis.b{resolution}.conv{index}.weight")
+        names.append(f"synthesis.b{resolution}.torgb.weight")
+    return tuple(names)
+
+
 class Host:
-    def __init__(self, current=None, error=None):
+    def __init__(self, current=None, current_b=None, error=None, mixing=False):
         self._current = current
+        self._current_b = current_b
         self._error = error
+        self._mixing = mixing
         self.device_store = LatestValueStore(DeviceStatus(active="cpu"))
+        self.mix_save_store = LatestValueStore(MixSaveStatus())
         self.calls = []
 
     def current(self):
         return self._current
 
+    def current_b(self):
+        return self._current_b
+
     def pending(self):
+        return None
+
+    def pending_b(self):
         return None
 
     def error(self):
         return self._error
+
+    def mixing_enabled(self):
+        return self._mixing
+
+    def request_mix(self, entries):
+        self.calls.append(("mix", tuple(entries)))
+
+    def set_mixing_enabled(self, enabled):
+        self._mixing = bool(enabled)
+        self.calls.append(("enable", enabled))
+
+    def request_save_mix(self, name):
+        self.calls.append(("save", name))
 
 
 class RenderLoop:
@@ -215,7 +267,55 @@ BENDING_CASES = [
     ),
 ]
 
-CASES = PERFORMANCE_CASES + BENDING_CASES
+# Raw parameter names, mapping network included, which is what a real `G`
+# reports. `conv_names` drops the mapping entries, so a selection is one shorter
+# than these are.
+PARAMS_A = block_names((4, 8, 16))
+PARAMS_B = block_names((4, 8, 16, 32, 64, 128, 256, 512, 1024))
+
+PAIRED = ControlState(pkl_path="/models/a.pkl", pkl2="/models/b.pkl")
+
+MIXING_CASES = [
+    ("mixing empty", lambda: MixingPanel(Runtime())),
+    (
+        "mixing one slot",
+        lambda: MixingPanel(
+            Runtime(LOADED, Host(current=Model(names=PARAMS_A)))
+        ),
+    ),
+    (
+        # A deep second model, so the widest resolution label the panel can draw
+        # is on screen and every row it produces is measured.
+        "mixing both slots",
+        lambda: MixingPanel(
+            Runtime(
+                PAIRED,
+                Host(
+                    current=Model("/models/a.pkl", PARAMS_A),
+                    current_b=Model("/models/b.pkl", PARAMS_B),
+                ),
+            )
+        ),
+    ),
+    (
+        "mixing failed",
+        lambda: MixingPanel(
+            Runtime(
+                PAIRED,
+                Host(
+                    current=Model("/models/a.pkl", PARAMS_A),
+                    current_b=Model("/models/b.pkl", PARAMS_B),
+                    error=(
+                        "These models are incompatible. Compressed models "
+                        "generally can not be used for mixing."
+                    ),
+                ),
+            )
+        ),
+    ),
+]
+
+CASES = PERFORMANCE_CASES + BENDING_CASES + MIXING_CASES
 
 
 @pytest.mark.parametrize("font_scale", FONT_SCALES)
@@ -245,6 +345,31 @@ def test_a_panel_draws_without_raising(name, build):
     all drawn here rather than only the happy one.
     """
     widest_overflow(build, 448.0, 1.0)
+
+
+def test_a_pair_with_no_selection_yet_is_given_the_default_and_asks_for_it():
+    """The one thing the mixing panel does without being clicked.
+
+    A pair whose selection does not fit them cannot be drawn against, so the
+    panel adopts the default. Adopting it has to reach both the state and the
+    host, or a performer's first click lands on a selection the host has never
+    heard of. It also has to happen once rather than every frame, since
+    `request_mix` builds a whole generator on the loader thread.
+    """
+    host = Host(
+        current=Model("/models/a.pkl", PARAMS_A),
+        current_b=Model("/models/b.pkl", PARAMS_B),
+    )
+    runtime = Runtime(PAIRED, host)
+    widest_overflow(lambda: MixingPanel(runtime), 448.0, 1.0)
+    requests = [entries for name, entries in host.calls if name == "mix"]
+    assert len(requests) == 1
+    assert set(requests[0]) == {"A", "B"}
+    # One entry per synthesis parameter: the mapping network is not part of a
+    # selection, so the single mapping entry in each fake is not counted.
+    assert len(requests[0]) == max(len(PARAMS_A), len(PARAMS_B)) - 1
+    addresses = [event.address for event in runtime.submitted]
+    assert addresses.count("/mix/layers") == 1
 
 
 def test_a_wrapped_note_measures_one_pixel_past_its_own_wrap_width():

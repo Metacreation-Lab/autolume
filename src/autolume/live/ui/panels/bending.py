@@ -51,8 +51,15 @@ from autolume.live.core.params import (
     Transform,
 )
 from autolume.live.errors import describe
-from autolume.live.ui.controls import ControlBinder, fitted_width, label_reserve
-from autolume.live.ui.panels.perform import button_width, combo_index, string_combo
+from autolume.live.ui.controls import ControlBinder
+from autolume.live.ui.panels.perform import (
+    combo_index,
+    fit_item,
+    paired_control_width,
+    same_line_if_it_fits,
+    string_combo,
+    trailing_width,
+)
 from autolume.live.ui.theme import ERROR_COLOR
 
 logger = logging.getLogger(__name__)
@@ -162,23 +169,6 @@ def is_bendable(name: str) -> bool:
 
 def is_torgb(name: str) -> bool:
     return name.rsplit(".", 1)[-1].startswith("torgb")
-
-
-def paired_control_width(label: str) -> float:
-    """Width imgui gives a checkbox or a radio button: its box, then its label.
-
-    Read off the live style and font rather than assumed, so a theme or font
-    change is already accounted for. Neither can be narrowed by
-    `set_next_item_width`, because the label is drawn outside the item, so this
-    is the only way a row carrying one can tell whether it fits.
-
-    `loop.py` measures the same thing privately for the keyframe row. Not shared
-    yet, because the shared home for panel helpers is `perform.py` and moving it
-    there means editing `loop.py`, which is out of this task's scope. Noted as a
-    follow-up rather than left silent.
-    """
-    box = imgui.get_frame_height()
-    return box + imgui.get_style().item_inner_spacing.x + imgui.calc_text_size(label).x
 
 
 def visible_layers(
@@ -605,7 +595,7 @@ class BendingPanel:
         """
         if imgui.radio_button("Simple", self._simple):
             self._simple = True
-        self._same_line_if_it_fits(
+        same_line_if_it_fits(
             imgui.get_style().item_spacing.x + paired_control_width("Advanced")
         )
         if imgui.radio_button("Advanced", not self._simple):
@@ -712,7 +702,7 @@ class BendingPanel:
     ) -> None:
         imgui.push_id(index)
         # The combo gives its width up so Remove stays on the row beside it.
-        reserve = button_width(_REMOVE) + imgui.get_style().item_spacing.x
+        reserve = trailing_width(_REMOVE)
         picked = string_combo(
             "##op", transform.op, OPERATOR_NAMES, reserve=reserve
         )
@@ -748,7 +738,7 @@ class BendingPanel:
                 if edited:
                     values[slot], changed = (1.0 if on else 0.0), True
             else:
-                self._fit(label, _NUMBER_EMS)
+                fit_item(label, ems=_NUMBER_EMS)
                 edited, number = imgui.input_float(
                     label or "##value", float(values[slot]), 0.0, 0.0, "%.3f",
                     imgui.InputTextFlags_.enter_returns_true,
@@ -759,56 +749,6 @@ class BendingPanel:
             imgui.pop_id()
         if changed:
             self._set(index, transform, params=tuple(values))
-
-    def _fit(
-        self, label: str, ems: float | None = None, reserve: float = 0.0
-    ) -> None:
-        """Keep an unbound widget inside the panel, the way `ControlBinder` does.
-
-        `ControlBinder._fit` does this for every bound row; the plain widgets in
-        this panel (a transform parameter, a layer's noise, a selection bound)
-        are not registry parameters and so have none of that plumbing. Same
-        rule: never wider than imgui would have drawn it, only narrower where
-        the row would otherwise run off the edge.
-
-        `ems`, given, caps it further, for a typed quantity that reads no better
-        in a wide box than a narrow one. `reserve` is what the row still draws
-        after this widget on the same line, so the widget gives its width up
-        first and the button beside it stays on the row.
-        """
-        default = imgui.calc_item_width()
-        if ems is not None:
-            default = min(default, imgui.get_font_size() * ems)
-        imgui.set_next_item_width(
-            fitted_width(
-                default,
-                imgui.get_content_region_avail().x,
-                label_reserve(label) + reserve,
-                imgui.get_font_size(),
-            )
-        )
-
-    def _trailing(self, label: str) -> float:
-        """The width a button drawn after a widget on the same line needs."""
-        return button_width(label) + imgui.get_style().item_spacing.x
-
-    def _same_line_if_it_fits(self, needed: float) -> None:
-        """Keep the next item on this line only while there is room for it.
-
-        For a pair of controls neither of which can be narrowed: a button is as
-        wide as its label plus padding, a checkbox draws its label outside its
-        item, and nothing shrinks either, so below the width the pair needs the
-        second one goes to its own line rather than off the panel edge.
-
-        Measured from the previous item's right edge, not from
-        `get_content_region_avail`: the item just drawn has already ended its
-        line, so the available region reports the full width of the next one and
-        every pair would look like it fits. Getting that wrong is what made this
-        helper pass a row it had not actually checked.
-        """
-        right = imgui.get_cursor_screen_pos().x + imgui.get_content_region_avail().x
-        if imgui.get_item_rect_max().x + needed <= right:
-            imgui.same_line()
 
     def _selection_editor(
         self, index: int, transform: Transform, layer: LayerInfo
@@ -846,7 +786,7 @@ class BendingPanel:
         live = selection.mode == MODE_RANDOM
         if not live:
             imgui.begin_disabled()
-        self._fit("percent", _PERCENT_EMS, self._trailing(_REROLL))
+        fit_item("percent", ems=_PERCENT_EMS, reserve=trailing_width(_REROLL))
         changed, percent = imgui.input_float(
             "percent", float(selection.percent), 0.0, 0.0, "%.0f",
             imgui.InputTextFlags_.enter_returns_true,
@@ -865,11 +805,11 @@ class BendingPanel:
         live = selection.mode == MODE_RANGE
         if not live:
             imgui.begin_disabled()
-        self._fit("first", _NUMBER_EMS)
+        fit_item("first", ems=_NUMBER_EMS)
         changed_low, low = imgui.input_int(
             "first", int(selection.low), 0, 0, imgui.InputTextFlags_.enter_returns_true
         )
-        self._fit("last", _NUMBER_EMS)
+        fit_item("last", ems=_NUMBER_EMS)
         changed_high, high = imgui.input_int(
             "last", int(selection.high), 0, 0, imgui.InputTextFlags_.enter_returns_true
         )
@@ -895,7 +835,7 @@ class BendingPanel:
         ids = cluster_ids(selection.cluster_config, layer.name)
         labels = [str(value) for value in ids]
         if labels:
-            self._fit("cluster", _NUMBER_EMS)
+            fit_item("cluster", ems=_NUMBER_EMS)
             changed, chosen = imgui.combo(
                 "cluster", combo_index(str(selection.cluster_id), labels), labels
             )
@@ -966,14 +906,14 @@ class BendingPanel:
         if not live:
             imgui.begin_disabled()
         strength = layer_noise_value(state.layer_noise, layer.name)
-        self._fit("Strength")
+        fit_item("Strength")
         changed, value = imgui.slider_float("Strength", strength, 0.0, 2.0)
         if changed:
             self._emit(BEND_NOISE, SetLayerNoise(layer.name, float(value)))
         rx, ry = layer_ratio_value(state.layer_ratios, layer.name)
-        self._fit("Ratio x")
+        fit_item("Ratio x")
         changed_x, new_x = imgui.slider_float("Ratio x", rx, 0.0, 4.0)
-        self._fit("Ratio y")
+        fit_item("Ratio y")
         changed_y, new_y = imgui.slider_float("Ratio y", ry, 0.0, 4.0)
         if changed_x or changed_y:
             self._emit(
@@ -1020,7 +960,7 @@ class BendingPanel:
         """
         slots = tuple(range(min(loaded + 1, _ADJUST_SLOTS)))
         labels = [str(slot + 1) for slot in slots]
-        self._fit("Slot", _NUMBER_EMS, self._trailing(_LOAD))
+        fit_item("Slot", ems=_NUMBER_EMS, reserve=trailing_width(_LOAD))
         changed, chosen = imgui.combo(
             "Slot", min(self._direction_slot, len(slots) - 1), labels
         )
@@ -1039,7 +979,7 @@ class BendingPanel:
                 None,
                 pfd.open_file("Load directions", "", _DIRECTION_FILTER),
             )
-        self._same_line_if_it_fits(self._trailing(_RANDOMIZE))
+        same_line_if_it_fits(trailing_width(_RANDOMIZE))
         # Randomize needs the model's W width to make a vector the sum against
         # W can use, so it is greyed until a model publishes one.
         width = info.z_dim if info else 0

@@ -11,6 +11,7 @@ from autolume.live.ui.panels import (
     BendingPanel,
     LoopPanel,
     MappingPanel,
+    MixingPanel,
     PerformancePanel,
     PerformPanel,
     PresetsPanel,
@@ -88,6 +89,7 @@ def _build_runner_params(runtime) -> hello_imgui.RunnerParams:
     presets = PresetsPanel(runtime)
     performance = PerformancePanel(runtime, mapping.popup)
     bending = BendingPanel(runtime, mapping.popup)
+    mixing = MixingPanel(runtime, mapping.popup)
     # Not a dockable panel: it has no form of its own, only a GLFW window it
     # opens and drives on the side. `show_gui` runs every frame regardless of
     # which dock tab is focused, which a dockable window's own gui function
@@ -147,6 +149,7 @@ def _build_runner_params(runtime) -> hello_imgui.RunnerParams:
         _dockable("Mapping", _PATCH_SPACE, mapping.gui),
         _dockable("Presets", _PATCH_SPACE, presets.gui),
         _dockable("Bending", _PATCH_SPACE, bending.gui),
+        _dockable("Mixing", _PATCH_SPACE, mixing.gui),
         _dockable("Performance", _PATCH_SPACE, performance.gui),
         _viewport_dockable("Preview", _MAIN_SPACE, preview.gui),
     ]

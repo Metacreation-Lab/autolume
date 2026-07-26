@@ -57,6 +57,75 @@ def button_width(label: str) -> float:
     return imgui.calc_text_size(label).x + imgui.get_style().frame_padding.x * 2.0
 
 
+def paired_control_width(label: str) -> float:
+    """Width imgui gives a checkbox or a radio button: its box, then its label.
+
+    Read off the live style and font rather than assumed, so a theme or font
+    change is already accounted for. Neither can be narrowed by
+    `set_next_item_width`, because the label is drawn outside the item, so this
+    is the only way a row carrying one can tell whether it fits.
+
+    `loop.py` measures the same thing privately for the keyframe row, and should
+    come here too. Not done in this pass because it means editing that panel,
+    which the task adding this did not own.
+    """
+    box = imgui.get_frame_height()
+    return box + imgui.get_style().item_inner_spacing.x + imgui.calc_text_size(label).x
+
+
+def trailing_width(label: str) -> float:
+    """The width a button drawn after a widget on the same line needs.
+
+    The button plus the spacing in front of it, which is what a widget giving up
+    room for one has to hold back.
+    """
+    return button_width(label) + imgui.get_style().item_spacing.x
+
+
+def fit_item(label: str, *, ems: float | None = None, reserve: float = 0.0) -> None:
+    """Keep an unbound widget inside the panel, the way `ControlBinder` does.
+
+    `ControlBinder._fit` does this for every bound row. A plain widget (a
+    transform parameter, a layer's noise, a merged model's name) is not a
+    registry parameter and has none of that plumbing, so the panels that draw
+    one call this instead. Same rule: never wider than imgui would have drawn
+    it, only narrower where the row would otherwise run off the edge.
+
+    `ems`, given, caps it further, for a typed quantity that reads no better in
+    a wide box than a narrow one. `reserve` is what the row still draws after
+    this widget on the same line.
+    """
+    default = imgui.calc_item_width()
+    if ems is not None:
+        default = min(default, imgui.get_font_size() * ems)
+    imgui.set_next_item_width(
+        fitted_width(
+            default,
+            imgui.get_content_region_avail().x,
+            label_reserve(label) + reserve,
+            imgui.get_font_size(),
+        )
+    )
+
+
+def same_line_if_it_fits(needed: float) -> None:
+    """Keep the next item on this line only while there is room for it.
+
+    For a pair of controls neither of which can be narrowed: a button is as wide
+    as its label plus padding, a checkbox draws its label outside its item, and
+    nothing shrinks either, so below the width the pair needs the second one
+    goes to its own line rather than off the panel edge.
+
+    Measured from the previous item's right edge, not from
+    `get_content_region_avail`: the item just drawn has already ended its line,
+    so the available region reports the full width of the next one and every
+    pair would look like it fits.
+    """
+    right = imgui.get_cursor_screen_pos().x + imgui.get_content_region_avail().x
+    if imgui.get_item_rect_max().x + needed <= right:
+        imgui.same_line()
+
+
 def combo_index(current: str, values: Sequence[str]) -> int:
     """Which entry of `values` a combo showing `current` is on, or -1.
 
