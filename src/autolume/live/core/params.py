@@ -93,6 +93,41 @@ _SPECS = (
     ParamSpec(
         "pulse_port", ParamKind.INT, 5005, "/loop/pulse/port", 1, 65535, preset=False
     ),
+    # Image derivation. Applied render-side in the uint8 conversion path.
+    ParamSpec("grayscale", ParamKind.BOOL, False, "/image/grayscale"),
+    ParamSpec("img_scale_db", ParamKind.FLOAT, 0.0, "/image/contrast", -40.0, 40.0),
+    ParamSpec("img_normalize", ParamKind.BOOL, False, "/image/normalize"),
+    ParamSpec("base_channel", ParamKind.INT, 0, "/image/channel", 0, 8192),
+    ParamSpec("capture_layer", ParamKind.STR, "", "/image/layer"),
+    # Adjuster weights. Eight fixed slots, not dynamic: `direction = sum(w_i *
+    # dir_i)`, computed in the generator from the directions in ControlState
+    # and these weights, never here.
+    ParamSpec("adjust_w1", ParamKind.FLOAT, 0.0, "/adjust/1", -5.0, 5.0),
+    ParamSpec("adjust_w2", ParamKind.FLOAT, 0.0, "/adjust/2", -5.0, 5.0),
+    ParamSpec("adjust_w3", ParamKind.FLOAT, 0.0, "/adjust/3", -5.0, 5.0),
+    ParamSpec("adjust_w4", ParamKind.FLOAT, 0.0, "/adjust/4", -5.0, 5.0),
+    ParamSpec("adjust_w5", ParamKind.FLOAT, 0.0, "/adjust/5", -5.0, 5.0),
+    ParamSpec("adjust_w6", ParamKind.FLOAT, 0.0, "/adjust/6", -5.0, 5.0),
+    ParamSpec("adjust_w7", ParamKind.FLOAT, 0.0, "/adjust/7", -5.0, 5.0),
+    ParamSpec("adjust_w8", ParamKind.FLOAT, 0.0, "/adjust/8", -5.0, 5.0),
+    # Second network for mixing. STR kind but a None default, matching
+    # pkl_path: unset means no second model loaded yet.
+    ParamSpec("pkl2", ParamKind.STR, None, "/mix/model"),
+    ParamSpec("mixing_enabled", ParamKind.BOOL, False, "/mix/enabled"),
+    # Machine settings below, not persisted: each describes the hardware or
+    # network a performance runs on, not the look itself. A preset saved on
+    # one machine must not silently reconfigure another's device, port, or
+    # output surface.
+    ParamSpec("use_superres", ParamKind.BOOL, False, "/render/superres", preset=False),
+    ParamSpec("device", ParamKind.STR, "auto", "/render/device", preset=False),
+    ParamSpec("force_fp32", ParamKind.BOOL, False, "/render/fp32", preset=False),
+    ParamSpec("osc_port", ParamKind.INT, 1338, "/osc/port", 1, 65535, preset=False),
+    ParamSpec("ndi_enabled", ParamKind.BOOL, False, "/ndi/enabled", preset=False),
+    ParamSpec(
+        "ndi_name", ParamKind.STR, "Autolume Live", "/ndi/name", preset=False
+    ),
+    ParamSpec("recording", ParamKind.BOOL, False, "/record", preset=False),
+    ParamSpec("fullscreen", ParamKind.BOOL, False, "/output/fullscreen", preset=False),
 )
 
 REGISTRY: dict[str, ParamSpec] = {spec.name: spec for spec in _SPECS}
@@ -109,6 +144,12 @@ VECTOR_SET = "/vector/set"
 VECTOR_RANDOMIZE = "/vector/randomize"
 KEYFRAME_SET = "/keyframe/set"
 KEYFRAME_REMOVE = "/keyframe/remove"
+BEND_SET = "/bend/set"
+BEND_REMOVE = "/bend/remove"
+BEND_NOISE = "/bend/noise"
+BEND_RATIO = "/bend/ratio"
+ADJUST_DIRECTIONS = "/adjust/directions"
+MIX_LAYERS = "/mix/layers"
 
 
 @dataclass(frozen=True)
@@ -224,6 +265,77 @@ class RemoveKeyframe:
 
 
 @dataclass(frozen=True)
+class Transform:
+    """One bending operation in the chain, applied in order.
+
+    Validation is not this dataclass's job, same as `Keyframe`: it happens
+    where a `Transform` is applied to state (`mapping.py`), not where one is
+    built.
+    """
+
+    op: str
+    layer: str
+    params: tuple[float, ...]
+    indices: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class SetTransform:
+    """Replace or append the transform at `index` in the bending chain."""
+
+    index: int
+    transform: Transform
+
+
+@dataclass(frozen=True)
+class RemoveTransform:
+    """Remove the transform at `index` from the bending chain."""
+
+    index: int
+
+
+@dataclass(frozen=True)
+class SetLayerNoise:
+    """Set one layer's per-layer noise strength.
+
+    A strength of 0 is neutral and is stored as absence, not as a zero entry.
+    """
+
+    layer: str
+    strength: float
+
+
+@dataclass(frozen=True)
+class SetLayerRatio:
+    """Set one layer's x/y noise ratio.
+
+    `(1, 1)` is neutral and is stored as absence, not as a (1, 1) entry.
+    """
+
+    layer: str
+    rx: float
+    ry: float
+
+
+@dataclass(frozen=True)
+class SetDirections:
+    """Replace the adjuster's direction vectors wholesale, up to eight.
+
+    The eight weights that scale these directions are ordinary registry
+    parameters (`adjust_w1`...`adjust_w8`), not part of this value object.
+    """
+
+    vectors: tuple[tuple[float, ...], ...]
+
+
+@dataclass(frozen=True)
+class SetCombinedLayers:
+    """Replace the mixing origin, `"A"`/`"B"`/`"X"`, for every mixed layer."""
+
+    entries: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class ControlState:
     """The whole control surface, as one value.
 
@@ -261,6 +373,29 @@ class ControlState:
     pulse_address: str = ""
     pulse_ip: str = "127.0.0.1"
     pulse_port: int = 5005
+    grayscale: bool = False
+    img_scale_db: float = 0.0
+    img_normalize: bool = False
+    base_channel: int = 0
+    capture_layer: str = ""
+    adjust_w1: float = 0.0
+    adjust_w2: float = 0.0
+    adjust_w3: float = 0.0
+    adjust_w4: float = 0.0
+    adjust_w5: float = 0.0
+    adjust_w6: float = 0.0
+    adjust_w7: float = 0.0
+    adjust_w8: float = 0.0
+    pkl2: str | None = None
+    mixing_enabled: bool = False
+    use_superres: bool = False
+    device: str = "auto"
+    force_fp32: bool = False
+    osc_port: int = 1338
+    ndi_enabled: bool = False
+    ndi_name: str = "Autolume Live"
+    recording: bool = False
+    fullscreen: bool = False
     # Structured state, not a registry parameter: empty means unset, and the
     # generator derives a deterministic fallback from it (see design.md).
     latent_vec: tuple[float, ...] = ()
@@ -268,6 +403,18 @@ class ControlState:
     # keyframes by default, matching the old app.
     keyframes: tuple[Keyframe, ...] = _DEFAULT_KEYFRAMES
     bindings: tuple[Binding, ...] = ()
+    # Structured state, not a registry parameter: the bending chain, applied
+    # in order. Sparse, unlike keyframes: an empty tuple is the common case.
+    transforms: tuple[Transform, ...] = ()
+    # Structured state, not a registry parameter: sparse (layer, strength) and
+    # (layer, rx, ry) rows. Only non-neutral entries are ever stored.
+    layer_noise: tuple[tuple[str, float], ...] = ()
+    layer_ratios: tuple[tuple[str, float, float], ...] = ()
+    # Structured state, not a registry parameter: up to eight direction
+    # vectors, scaled by the adjust_w1...adjust_w8 registry weights.
+    directions: tuple[tuple[float, ...], ...] = ()
+    # Structured state, not a registry parameter: one origin per mixed layer.
+    combined_layers: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -289,6 +436,34 @@ class RenderParams:
     # "seed", "vec" or "loop": what the generator evaluates this frame, see
     # `derive_mode`.
     mode: str
+    # Bending chain, applied in order.
+    transforms: tuple[Transform, ...]
+    # Per-layer noise/ratio overrides, as mappings for O(1) lookup by layer
+    # name. Sparse: a layer absent from either mapping is neutral.
+    layer_noise: dict[str, float]
+    layer_ratios: dict[str, tuple[float, float]]
+    # Adjuster: raw directions and the eight weights, not their product. The
+    # generator computes `direction = sum(w_i * dir_i)` from these each frame,
+    # so the control tick never has to.
+    directions: tuple[tuple[float, ...], ...]
+    adjust_w1: float
+    adjust_w2: float
+    adjust_w3: float
+    adjust_w4: float
+    adjust_w5: float
+    adjust_w6: float
+    adjust_w7: float
+    adjust_w8: float
+    # Image derivation, applied render-side in the uint8 conversion path.
+    grayscale: bool
+    img_scale_db: float
+    img_normalize: bool
+    base_channel: int
+    capture_layer: str
+    # Mixing.
+    pkl2: str | None
+    mixing_enabled: bool
+    combined_layers: tuple[str, ...]
 
 
 def derive_mode(state: ControlState) -> str:
@@ -337,6 +512,26 @@ def to_render_params(state: ControlState) -> RenderParams:
         # `ControlState` can still be built directly with a stale index.
         loop_index=state.loop_index % keyframe_count if keyframe_count else 0,
         mode=derive_mode(state),
+        transforms=state.transforms,
+        layer_noise=dict(state.layer_noise),
+        layer_ratios={layer: (rx, ry) for layer, rx, ry in state.layer_ratios},
+        directions=state.directions,
+        adjust_w1=state.adjust_w1,
+        adjust_w2=state.adjust_w2,
+        adjust_w3=state.adjust_w3,
+        adjust_w4=state.adjust_w4,
+        adjust_w5=state.adjust_w5,
+        adjust_w6=state.adjust_w6,
+        adjust_w7=state.adjust_w7,
+        adjust_w8=state.adjust_w8,
+        grayscale=state.grayscale,
+        img_scale_db=state.img_scale_db,
+        img_normalize=state.img_normalize,
+        base_channel=state.base_channel,
+        capture_layer=state.capture_layer,
+        pkl2=state.pkl2,
+        mixing_enabled=state.mixing_enabled,
+        combined_layers=state.combined_layers,
     )
 
 

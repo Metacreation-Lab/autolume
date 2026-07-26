@@ -5,11 +5,39 @@ import pytest
 from autolume.live.core import params
 
 # Fields of ControlState that hold user intent rather than a registry parameter.
-NON_PARAM_FIELDS = {"bindings", "latent_vec", "keyframes"}
+NON_PARAM_FIELDS = {
+    "bindings",
+    "latent_vec",
+    "keyframes",
+    "transforms",
+    "layer_noise",
+    "layer_ratios",
+    "directions",
+    "combined_layers",
+}
 
 # Address prefixes reserved for structured control events, which carry Python
-# objects instead of scalars and are never registry parameters.
-RESERVED_PREFIXES = ("/binding/", "/touch/", "/preset/", "/vector/", "/keyframe/")
+# objects instead of scalars and are never registry parameters. "/bend/" is
+# reserved wholesale because no registry row lives under it. "/adjust/" and
+# "/mix/" cannot be reserved wholesale, since adjust_w1...adjust_w8 and
+# pkl2/mixing_enabled are legitimate registry rows in those same namespaces;
+# their structured siblings (/adjust/directions, /mix/layers) are checked by
+# exact address instead, below.
+RESERVED_PREFIXES = (
+    "/binding/",
+    "/touch/",
+    "/preset/",
+    "/vector/",
+    "/keyframe/",
+    "/bend/",
+)
+
+# Structured addresses whose namespace also hosts registry rows, so they
+# cannot be covered by a reserved prefix. Checked by exact membership instead.
+NAMESPACE_SHARED_STRUCTURED_ADDRESSES = (
+    "/adjust/directions",
+    "/mix/layers",
+)
 
 
 def test_registry_covers_control_state_fields():
@@ -67,9 +95,21 @@ def test_addresses_avoid_reserved_namespaces():
         params.VECTOR_RANDOMIZE,
         params.KEYFRAME_SET,
         params.KEYFRAME_REMOVE,
+        params.BEND_SET,
+        params.BEND_REMOVE,
+        params.BEND_NOISE,
+        params.BEND_RATIO,
     )
     for address in structured:
         assert address.startswith(RESERVED_PREFIXES)
+        assert address not in params.BY_ADDRESS
+
+
+def test_namespace_shared_structured_addresses_are_never_registered():
+    # /adjust/directions and /mix/layers live in namespaces that also carry
+    # registry rows (/adjust/1..8, /mix/model, /mix/enabled), so they cannot
+    # be swept up by a reserved prefix. Checked individually instead.
+    for address in NAMESPACE_SHARED_STRUCTURED_ADDRESSES:
         assert address not in params.BY_ADDRESS
 
 
@@ -81,6 +121,12 @@ def test_registry_addresses_do_not_collide_with_structured_addresses():
         params.KEYFRAME_REMOVE,
         params.BINDING_SET,
         params.BINDING_CLEAR,
+        params.BEND_SET,
+        params.BEND_REMOVE,
+        params.BEND_NOISE,
+        params.BEND_RATIO,
+        params.ADJUST_DIRECTIONS,
+        params.MIX_LAYERS,
     }
     addresses = {spec.address for spec in params.REGISTRY.values()}
     assert not (addresses & structured)
@@ -318,3 +364,166 @@ def test_to_render_params_loop_index_within_bounds_is_unchanged():
     keyframes = tuple(params.default_keyframe(i) for i in range(6))
     state = params.ControlState(keyframes=keyframes, loop_index=2)
     assert params.to_render_params(state).loop_index == 2
+
+
+# --- Plan 4 registry growth: image, adjuster and mixing registry rows ------
+
+
+def test_image_derivation_specs_declare_expected_addresses_kinds_and_bounds():
+    expected = {
+        "grayscale": ("/image/grayscale", params.ParamKind.BOOL, False, None, None),
+        "img_scale_db": ("/image/contrast", params.ParamKind.FLOAT, 0.0, -40.0, 40.0),
+        "img_normalize": ("/image/normalize", params.ParamKind.BOOL, False, None, None),
+        "base_channel": ("/image/channel", params.ParamKind.INT, 0, 0, 8192),
+        "capture_layer": ("/image/layer", params.ParamKind.STR, "", None, None),
+    }
+    for name, (address, kind, default, minimum, maximum) in expected.items():
+        spec = params.REGISTRY[name]
+        assert (spec.address, spec.kind, spec.default) == (address, kind, default)
+        assert (spec.minimum, spec.maximum) == (minimum, maximum)
+        assert spec.preset is True
+
+
+def test_adjuster_weight_specs_declare_the_eight_fixed_slots():
+    for i in range(1, 9):
+        name = f"adjust_w{i}"
+        spec = params.REGISTRY[name]
+        assert spec.address == f"/adjust/{i}"
+        assert spec.kind is params.ParamKind.FLOAT
+        assert spec.default == 0.0
+        assert (spec.minimum, spec.maximum) == (-5.0, 5.0)
+        assert spec.preset is True
+    assert "adjust_w9" not in params.REGISTRY
+
+
+def test_mixing_specs_declare_expected_addresses_kinds_and_defaults():
+    pkl2 = params.REGISTRY["pkl2"]
+    assert (pkl2.address, pkl2.kind, pkl2.default) == ("/mix/model", params.ParamKind.STR, None)
+    assert pkl2.preset is True
+
+    mixing_enabled = params.REGISTRY["mixing_enabled"]
+    assert (mixing_enabled.address, mixing_enabled.kind, mixing_enabled.default) == (
+        "/mix/enabled",
+        params.ParamKind.BOOL,
+        False,
+    )
+    assert mixing_enabled.preset is True
+
+
+def test_machine_level_specs_declare_expected_addresses_kinds_and_are_not_preset():
+    expected = {
+        "use_superres": ("/render/superres", params.ParamKind.BOOL, False, None, None),
+        "device": ("/render/device", params.ParamKind.STR, "auto", None, None),
+        "force_fp32": ("/render/fp32", params.ParamKind.BOOL, False, None, None),
+        "osc_port": ("/osc/port", params.ParamKind.INT, 1338, 1, 65535),
+        "ndi_enabled": ("/ndi/enabled", params.ParamKind.BOOL, False, None, None),
+        "ndi_name": ("/ndi/name", params.ParamKind.STR, "Autolume Live", None, None),
+        "recording": ("/record", params.ParamKind.BOOL, False, None, None),
+        "fullscreen": ("/output/fullscreen", params.ParamKind.BOOL, False, None, None),
+    }
+    for name, (address, kind, default, minimum, maximum) in expected.items():
+        spec = params.REGISTRY[name]
+        assert (spec.address, spec.kind, spec.default) == (address, kind, default)
+        assert (spec.minimum, spec.maximum) == (minimum, maximum)
+        assert spec.preset is False
+
+
+# --- Plan 4: Transform and the structured bending value objects ------------
+
+
+def test_transform_construction_does_not_validate():
+    # Validation is the mapping layer's job, not the dataclass's.
+    transform = params.Transform("nope", "", params=(), indices=(-1,))
+    assert transform.op == "nope"
+
+
+def test_control_state_defaults_to_no_transforms_directions_or_mixing():
+    state = params.ControlState()
+    assert state.transforms == ()
+    assert state.layer_noise == ()
+    assert state.layer_ratios == ()
+    assert state.directions == ()
+    assert state.combined_layers == ()
+
+
+# --- Plan 4: RenderParams derivation for bending, adjuster, image, mixing --
+
+
+def test_to_render_params_carries_the_bending_chain_in_order():
+    transforms = (
+        params.Transform("translate", "L1", (1.0, 2.0), (0, 1)),
+        params.Transform("ablate", "L2", (1.0,), (3,)),
+    )
+    state = params.ControlState(transforms=transforms)
+    rp = params.to_render_params(state)
+    assert rp.transforms == transforms
+
+
+def test_to_render_params_projects_layer_noise_and_ratios_as_mappings():
+    state = params.ControlState(
+        layer_noise=(("L1", 0.5), ("L2", 1.5)),
+        layer_ratios=(("L1", 2.0, 0.5),),
+    )
+    rp = params.to_render_params(state)
+    assert rp.layer_noise == {"L1": 0.5, "L2": 1.5}
+    assert rp.layer_ratios == {"L1": (2.0, 0.5)}
+
+
+def test_to_render_params_projects_empty_layer_noise_and_ratios():
+    rp = params.to_render_params(params.ControlState())
+    assert rp.layer_noise == {}
+    assert rp.layer_ratios == {}
+
+
+def test_to_render_params_carries_directions_and_weights_without_computing_a_product():
+    directions = ((1.0, 0.0), (0.0, 1.0))
+    state = params.ControlState(directions=directions, adjust_w1=2.0, adjust_w2=3.0)
+    rp = params.to_render_params(state)
+    assert rp.directions == directions
+    assert rp.adjust_w1 == 2.0
+    assert rp.adjust_w2 == 3.0
+    # The directions x weights product is the generator's job, not this
+    # snapshot's: RenderParams must not carry a precomputed "direction" field.
+    assert not hasattr(rp, "direction")
+
+
+def test_to_render_params_carries_image_derivation_fields():
+    state = params.ControlState(
+        grayscale=True,
+        img_scale_db=6.0,
+        img_normalize=True,
+        base_channel=12,
+        capture_layer="L4",
+    )
+    rp = params.to_render_params(state)
+    assert rp.grayscale is True
+    assert rp.img_scale_db == 6.0
+    assert rp.img_normalize is True
+    assert rp.base_channel == 12
+    assert rp.capture_layer == "L4"
+
+
+def test_to_render_params_carries_mixing_fields():
+    state = params.ControlState(
+        pkl2="/tmp/second.pkl",
+        mixing_enabled=True,
+        combined_layers=("A", "B", "X"),
+    )
+    rp = params.to_render_params(state)
+    assert rp.pkl2 == "/tmp/second.pkl"
+    assert rp.mixing_enabled is True
+    assert rp.combined_layers == ("A", "B", "X")
+
+
+def test_to_render_params_default_mixing_and_image_fields():
+    rp = params.to_render_params(params.ControlState())
+    assert rp.pkl2 is None
+    assert rp.mixing_enabled is False
+    assert rp.combined_layers == ()
+    assert rp.grayscale is False
+    assert rp.img_scale_db == 0.0
+    assert rp.img_normalize is False
+    assert rp.base_channel == 0
+    assert rp.capture_layer == ""
+    assert rp.directions == ()
+    assert all(getattr(rp, f"adjust_w{i}") == 0.0 for i in range(1, 9))
