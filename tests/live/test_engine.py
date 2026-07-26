@@ -8,6 +8,13 @@ from autolume.live.core.params import ControlState, to_render_params
 from autolume.live.core.sinks import PreviewMailbox
 from autolume.live.core.store import LatestValueStore
 
+# The bending tests below make the generator import the operator library, and
+# merely importing kornia trips a torch FutureWarning from its lightglue
+# submodule. Matched by message so it cannot mask anything else.
+pytestmark = pytest.mark.filterwarnings(
+    r"ignore:.*torch\.cuda\.amp\.custom_fwd.*:FutureWarning"
+)
+
 
 class FakeModel:
     pkl_path = "/tmp/fake.pkl"
@@ -190,3 +197,90 @@ def test_thread_start_stop_produces_frames():
     loop.stop()
     assert mailbox.latest()[1] is not None
     assert loop.fps() >= 0.0
+
+
+# --- the render loop against a real generator -----------------------------
+#
+# Everything above stands a fake model in for the generator. These drive the
+# whole plan 4 render path (bending hooks, layer capture, image derivation)
+# through a real LoadedModel, which is the only place the two halves meet.
+
+
+def _bendable_model():
+    import torch
+    import torch.nn as nn
+
+    from autolume.live.core.generator import LoadedModel
+
+    class _Conv(nn.Module):
+        def forward(self, x):
+            return x * 0.5
+
+    class _Synthesis(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv1 = _Conv()
+
+        def forward(self, ws, noise_mode="const"):
+            return self.conv1(torch.full([1, 3, 2, 4], 0.5))
+
+    class _Mapping:
+        def __init__(self):
+            self.w_avg = torch.zeros([8])
+            self.c_dim = 0
+
+        def __call__(self, z, c, truncation_psi):
+            return torch.zeros([z.shape[0], 2, 8])
+
+    class _G:
+        z_dim = 4
+        num_ws = 2
+
+        def __init__(self):
+            self.mapping = _Mapping()
+            self.synthesis = _Synthesis()
+
+    return LoadedModel("/tmp/bendable.pkl", _G(), torch.device("cpu"))
+
+
+def test_the_loop_fans_out_a_bent_frame():
+    from autolume.live.core.params import Transform
+
+    mailbox = PreviewMailbox()
+    store = make_store(
+        fps_cap=0, transforms=(Transform("ablate", "conv1", (1.0,), (0, 1, 2)),)
+    )
+    loop = RenderLoop(store, FakeHost(_bendable_model()), [mailbox])
+
+    assert loop.render_one() is True
+    frame = mailbox.latest()[1]
+    assert frame.shape == (2, 4, 3)
+    assert frame[0, 0].tolist() == [128, 128, 128]
+    assert frame.flags.writeable is False
+
+
+def test_the_loop_keeps_going_when_a_transform_fails():
+    from autolume.live.core.params import Transform
+
+    mailbox = PreviewMailbox()
+    # Channel 99 does not exist, so the operator raises inside the hook.
+    store = make_store(
+        fps_cap=0, transforms=(Transform("ablate", "conv1", (1.0,), (99,)),)
+    )
+    loop = RenderLoop(store, FakeHost(_bendable_model()), [mailbox])
+
+    assert loop.render_one() is True
+    assert loop.render_one() is True
+    # 0.5 through conv1 is 0.25, the unbent value.
+    assert mailbox.latest()[1][0, 0].tolist() == [159, 159, 159]
+
+
+def test_the_loop_fans_out_a_captured_layer_at_its_own_size():
+    mailbox = PreviewMailbox()
+    store = make_store(fps_cap=0, capture_layer="output", grayscale=True)
+    loop = RenderLoop(store, FakeHost(_bendable_model()), [mailbox])
+
+    assert loop.render_one() is True
+    frame = mailbox.latest()[1]
+    assert frame.shape == (2, 4, 3)
+    assert frame[0, 0].tolist() == [159, 159, 159]
