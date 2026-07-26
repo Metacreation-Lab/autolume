@@ -843,3 +843,27 @@ def test_a_frame_after_the_sinks_stopped_is_harmless(ndilib, writers, monkeypatc
 
     assert len(ndilib.senders[0].sent) == sent
     assert len(writers[0].frames) == written
+
+
+def test_a_sink_never_starts_once_the_runtime_has_stopped(
+    ndilib, writers, monkeypatch, tmp_path
+):
+    """Shutdown stops the sinks before the control loop that drives them.
+
+    An event still in the queue at that moment must not start a thread the
+    runtime has no way left to stop, so a start is refused once stopping has
+    begun. A stop is always allowed.
+    """
+    use_data_root(monkeypatch, tmp_path)
+    runtime = running_runtime()
+    runtime.stop()
+
+    runtime.submit(ControlEvent("/record", 1.0, source="ui"))
+    runtime.submit(ControlEvent("/ndi/enabled", 1.0, source="ui"))
+    runtime.control_loop.tick()
+    runtime.control_loop.tick()
+
+    assert writers == []
+    assert ndilib.senders == []
+    assert runtime.recorder.status().recording is False
+    assert runtime.ndi.status().sending is False

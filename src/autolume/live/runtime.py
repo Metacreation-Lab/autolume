@@ -83,6 +83,7 @@ class Runtime:
             ndi=self.ndi,
             recorder=self.recorder,
             on_screenshot=self._request_screenshot,
+            is_running=lambda: self._started,
         )
         self.render_loop = RenderLoop(
             self.render_store,
@@ -221,6 +222,7 @@ class _ModelWatchingControlLoop(ControlLoop):
         ndi=None,
         recorder=None,
         on_screenshot: Callable[[str], None] | None = None,
+        is_running: Callable[[], bool] | None = None,
         **kwargs,
     ) -> None:
         super().__init__(control_store, render_store, source_store, **kwargs)
@@ -229,6 +231,10 @@ class _ModelWatchingControlLoop(ControlLoop):
         self._ndi = ndi
         self._recorder = recorder
         self._on_screenshot = on_screenshot
+        # `Runtime.stop()` stops the sinks before this loop, so a start
+        # request still in the queue at that moment would leave a thread
+        # behind that nothing is left to stop. Stops are always allowed.
+        self._is_running = is_running or (lambda: True)
         self._last_pkl_path: str | None = None
         # Seeded from the store directly, at construction, rather than
         # lazily adopted on the first tick: nothing can have submitted an
@@ -314,7 +320,8 @@ class _ModelWatchingControlLoop(ControlLoop):
             self._last_ndi_enabled = state.ndi_enabled
             self._last_ndi_name = state.ndi_name
             if state.ndi_enabled:
-                self._ndi.start(state.ndi_name)
+                if self._is_running():
+                    self._ndi.start(state.ndi_name)
             else:
                 self._ndi.stop(timeout=0.0)
             return
@@ -351,7 +358,8 @@ class _ModelWatchingControlLoop(ControlLoop):
                     self._last_recording = False
                     self.submit(ControlEvent("/record", False, source="ui"))
                     return
-                self._recorder.start(path, state.fps_cap)
+                if self._is_running():
+                    self._recorder.start(path, state.fps_cap)
             else:
                 self._recorder.stop(timeout=0.0)
             return
