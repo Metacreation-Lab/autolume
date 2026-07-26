@@ -8,27 +8,34 @@ every platform. It is driven from `window.py`'s per-frame callback rather
 than a thread of its own because GLFW window creation has to happen on the
 main thread, and this app only has the one.
 
-`decide_action` and `letterbox_rect` are the pure logic and are unit tested.
-Everything else here is GL and GLFW calls, which cannot be driven headless
-and stay manual-only (see `tests/live/test_output_window.py`).
+`decide_action`, `letterbox_rect` and `suppressed_fullscreen` are the pure
+logic and are unit tested. Everything else here is GL and GLFW calls, which
+cannot be driven headless and stay manual-only (see
+`tests/live/test_output_window.py`).
 """
 
 import ctypes
 import logging
+import time
 from dataclasses import dataclass
 from enum import Enum
 from typing import Callable
 
 import numpy as np
-
-# `imgui_bundle` must be imported before `glfw`: importing it points pyglfw's
-# dynamic library search at imgui_bundle's own bundled libglfw, so both end up
-# using the same native library. Reversed, pyglfw loads its own copy and a
-# window handle from one is not valid for the other, which is exactly what
-# `glfw.make_context_current(glfw_utils.glfw_window_hello_imgui())` needs to
-# be true every frame.
 from imgui_bundle import glfw_utils, imgui
-import glfw
+
+# `glfw_utils.glfw` rather than a bare `import glfw`: `imgui_bundle` points
+# pyglfw's dynamic library search at its own bundled libglfw as a side effect
+# of being imported, and `glfw_utils` is the module that does that import
+# itself, so this is guaranteed to be the same native library
+# `glfw_window_hello_imgui` uses. A plain `import glfw` here would work today
+# only because `imgui_bundle` happens to be imported first in this file, an
+# order an import sorter would happily reverse, which would silently load a
+# second, independent GLFW instance whose window handles are not valid for
+# the other's calls, including the `make_context_current` this module relies
+# on every frame to hand control back to hello_imgui.
+glfw = glfw_utils.glfw
+
 from OpenGL import GL
 
 from autolume.live.core.events import ControlEvent
@@ -39,6 +46,11 @@ logger = logging.getLogger(__name__)
 _ADDRESS = "/output/fullscreen"
 _TITLE = "Autolume Output"
 _UNAVAILABLE_STATUS = "Fullscreen output is unavailable. Check the log for details."
+# Comfortably longer than one control loop tick (its default is 125 Hz, an
+# 8 ms period) so a stale `True` this window's own submit has not caught up
+# with yet reliably clears, short enough that a performer re-enabling
+# fullscreen right after closing it never feels delayed.
+_SUPPRESS_SECONDS = 0.25
 
 
 class Action(Enum):
@@ -75,6 +87,32 @@ def decide_action(
     if latest_seq != last_seq:
         return Action.UPLOAD
     return Action.NONE
+
+
+def suppressed_fullscreen(
+    fullscreen: bool, suppress_until: float | None, now: float
+) -> tuple[bool, float | None]:
+    """The fullscreen value `decide_action` should see this poll, and the
+    suppression deadline to carry into the next one.
+
+    A destroy this window starts on its own initiative (ESC, the OS closing
+    it, a failed create, or a drawing failure) submits `fullscreen=False` to
+    the control loop, which publishes it asynchronously. The very next poll
+    can still read the stale `True` the loop has not caught up with yet,
+    which without this would create the window right back, or in the failed
+    create case, retry the failing create every poll.
+
+    Bounded by `suppress_until` rather than held until an observed `False`:
+    a source that keeps asserting `fullscreen=True` past the control loop's
+    own propagation delay, such as a binding or an OSC surface resending
+    stale state, must not be locked out of fullscreen for the rest of the
+    session. Once `now` reaches the deadline, whatever `fullscreen` actually
+    says wins again, stale or genuine, which is what lets a real re-enable
+    come back rather than staying masked forever.
+    """
+    if suppress_until is None or now >= suppress_until:
+        return fullscreen, None
+    return False, suppress_until
 
 
 @dataclass(frozen=True)
@@ -219,6 +257,12 @@ def _create_texture() -> int:
     GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR)
     GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_S, GL.GL_CLAMP_TO_EDGE)
     GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_T, GL.GL_CLAMP_TO_EDGE)
+    # Default unpack alignment is 4 bytes, which skews any upload whose row
+    # width in bytes is not a multiple of that. Today's frames are
+    # power-of-two and would never show it, but a future non-power-of-two
+    # model would upload diagonally sheared, and that is not a bug anyone
+    # would think to look for from the projector.
+    GL.glPixelStorei(GL.GL_UNPACK_ALIGNMENT, 1)
     GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
     return texture
 
@@ -232,8 +276,13 @@ class OutputWindow:
     the UI thread waiting on a projector's vblank.
     """
 
-    def __init__(self, submit: Callable[[ControlEvent], None]) -> None:
+    def __init__(
+        self,
+        submit: Callable[[ControlEvent], None],
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
         self._submit = submit
+        self._clock = clock
         self._window = None
         self._program = 0
         self._vao = 0
@@ -243,17 +292,10 @@ class OutputWindow:
         self._frame_size = (0, 0)
         self._last_seq = -1
         self._status: str | None = None
-        # Set the moment this window submits `fullscreen=False` on its own
-        # initiative (ESC, the OS closing it, or a failed create), and held
-        # until the control loop's state actually reports it false. Without
-        # this, the param the control thread publishes still reads true for
-        # a tick or two after the submit, and the very next UI frame would
-        # read that stale true and create the window right back, or in the
-        # failed create case, retry the failing create every frame.
-        self._suppress_create = False
-
-    def status(self) -> str | None:
-        return self._status
+        # See `suppressed_fullscreen`: set whenever this window submits
+        # `fullscreen=False` on its own initiative, cleared once that
+        # suppression window elapses or the param is genuinely false again.
+        self._suppress_until: float | None = None
 
     def poll(self, fullscreen: bool, preview) -> None:
         """Run one frame of the output window's lifecycle.
@@ -265,37 +307,46 @@ class OutputWindow:
 
         The outer `except` is a last resort beyond the create and render
         paths, which already degrade on their own: a projector hiccup must
-        not kill a live set, and that has to hold for whatever GLFW call
-        turns out to be the one that fails, not only the ones anticipated
-        here today.
+        not kill a live set, and that has to hold for whatever GLFW or imgui
+        call turns out to be the one that fails, not only the ones
+        anticipated here today, which is also why drawing the status is
+        inside this same guard rather than after it.
         """
         try:
             self._poll(fullscreen, preview)
+            self._draw_status()
         except Exception:
             logger.exception("Fullscreen output failed, closing it")
             self._force_close()
         finally:
             self._restore_main_context()
-        self._draw_status()
 
     def _poll(self, fullscreen: bool, preview) -> None:
-        if self._suppress_create:
-            if fullscreen:
-                fullscreen = False
-            else:
-                self._suppress_create = False
+        if not fullscreen:
+            # Off is never itself a failure, whether it was always off or
+            # just settled there after one: there is nothing left to warn
+            # about, which is what keeps a status from an old failure stuck
+            # on screen for the rest of the session.
+            self._status = None
+        now = self._clock()
+        effective, self._suppress_until = suppressed_fullscreen(
+            fullscreen, self._suppress_until, now
+        )
         seq, frame = preview.latest()
         close_requested = self._window is not None and glfw.window_should_close(
             self._window
         )
         action = decide_action(
-            fullscreen, self._window is not None, close_requested, seq, self._last_seq
+            effective, self._window is not None, close_requested, seq, self._last_seq
         )
         if action is Action.CREATE:
             self._try_create()
             return
         if action is Action.DESTROY:
-            self._close()
+            # Nothing to suppress if the destroy is only catching up to a
+            # param that already reads false: the two are already in
+            # agreement, so there is no race for the guard to protect.
+            self._close(suppress=fullscreen)
             return
         if self._window is None:
             return
@@ -303,7 +354,7 @@ class OutputWindow:
             self._render(frame, seq, action is Action.UPLOAD)
         except Exception:
             logger.exception("Fullscreen output failed while drawing, closing it")
-            self._close()
+            self._close(suppress=True)
             self._status = _UNAVAILABLE_STATUS
 
     def _try_create(self) -> None:
@@ -311,7 +362,7 @@ class OutputWindow:
             self._create()
         except Exception:
             logger.exception("Could not open the fullscreen output window")
-            self._close()
+            self._close(suppress=True)
             self._status = _UNAVAILABLE_STATUS
         else:
             self._status = None
@@ -331,6 +382,12 @@ class OutputWindow:
         if mode is None:
             raise RuntimeError("No video mode reported for the primary monitor")
         window = glfw.create_window(mode.size.width, mode.size.height, _TITLE, None, None)
+        # Hints are process-global and only consumed at creation, so they are
+        # put back to GLFW's own defaults immediately after, rather than left
+        # sitting there for whatever creates the next GLFW window, which
+        # would otherwise inherit undecorated, non-resizable and a pinned GL
+        # version meant only for this one.
+        glfw.default_window_hints()
         if window is None:
             raise RuntimeError("glfw.create_window returned no window")
         self._window = window
@@ -400,8 +457,12 @@ class OutputWindow:
                 data,
             )
 
-    def _close(self) -> None:
+    def _close(self, *, suppress: bool) -> None:
         """Tear the window down and always report it gone.
+
+        `suppress` is whatever `fullscreen` still read at the moment this
+        window decided to close on its own: see `suppressed_fullscreen` for
+        why that matters and `_submit_off` for what it does with it.
 
         `_submit_off` runs in a `finally` around `_destroy_gl` so that even an
         unexpected failure while releasing GL resources still ends with the
@@ -413,12 +474,12 @@ class OutputWindow:
         try:
             self._destroy_gl()
         finally:
-            self._submit_off()
+            self._submit_off(suppress=suppress)
 
     def _force_close(self) -> None:
         """Best-effort teardown after a failure `_close` itself did not expect."""
         try:
-            self._close()
+            self._close(suppress=True)
         except Exception:
             logger.exception("Failed to close the fullscreen output cleanly")
             self._window = None
@@ -465,8 +526,9 @@ class OutputWindow:
         except Exception:
             logger.exception("Error destroying the fullscreen output window")
 
-    def _submit_off(self) -> None:
-        self._suppress_create = True
+    def _submit_off(self, *, suppress: bool) -> None:
+        if suppress:
+            self._suppress_until = self._clock() + _SUPPRESS_SECONDS
         self._submit(ControlEvent(_ADDRESS, False, source="ui"))
 
     def _restore_main_context(self) -> None:

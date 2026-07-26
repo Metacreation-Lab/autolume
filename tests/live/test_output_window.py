@@ -6,7 +6,13 @@ decides before it ever touches GL: the letterbox rectangle's arithmetic and
 the lifecycle state machine that decides create, destroy, upload or nothing.
 """
 
-from autolume.live.ui.output_window import Action, Rect, decide_action, letterbox_rect
+from autolume.live.ui.output_window import (
+    Action,
+    Rect,
+    decide_action,
+    letterbox_rect,
+    suppressed_fullscreen,
+)
 
 # --- letterbox_rect -----------------------------------------------------
 
@@ -60,6 +66,20 @@ def test_letterbox_no_frame_yet_draws_nothing():
 def test_letterbox_no_monitor_area_draws_nothing():
     rect = letterbox_rect((1024, 768), (0, 0))
     assert rect == Rect(0, 0, 0, 0)
+
+
+def test_letterbox_rounds_without_distorting_aspect():
+    # 1000x999 does not divide evenly into 1920x1080 on either axis, so this
+    # exercises int(round(...)) landing off the exact value and the //2
+    # centring absorbing an odd pixel of leftover, neither of which the other
+    # cases (chosen to divide evenly) touch at all.
+    rect = letterbox_rect((1000, 999), (1920, 1080))
+    assert rect == Rect(419, 0, 1081, 1080)
+    frame_aspect = 1000 / 999
+    rect_aspect = rect.width / rect.height
+    assert abs(frame_aspect - rect_aspect) < 0.001
+    assert rect.x == (1920 - rect.width) // 2
+    assert rect.y == (1080 - rect.height) // 2
 
 
 # --- decide_action --------------------------------------------------------
@@ -143,3 +163,42 @@ def test_no_window_and_close_requested_is_moot():
         fullscreen=False, exists=False, close_requested=True, latest_seq=0, last_seq=-1
     )
     assert action is Action.NONE
+
+
+# --- suppressed_fullscreen -------------------------------------------------
+
+
+def test_suppression_masks_a_stale_true():
+    # This window just submitted fullscreen=False, setting the deadline to
+    # 10.0, and the control loop has not published it back yet, so this poll
+    # still reads the stale True the submit is trying to undo.
+    fullscreen, deadline = suppressed_fullscreen(True, suppress_until=10.0, now=9.9)
+    assert fullscreen is False
+    assert deadline == 10.0
+
+
+def test_suppression_releases_a_genuine_reenable_after_the_deadline():
+    # A submit-off followed later by a real re-enable: once the deadline has
+    # passed, a True is no longer assumed stale and is handed straight
+    # through, with the deadline cleared so it does not linger.
+    fullscreen, deadline = suppressed_fullscreen(True, suppress_until=10.0, now=10.25)
+    assert fullscreen is True
+    assert deadline is None
+
+
+def test_suppression_releases_exactly_at_the_deadline():
+    fullscreen, deadline = suppressed_fullscreen(True, suppress_until=10.0, now=10.0000001)
+    assert fullscreen is True
+    assert deadline is None
+
+
+def test_no_active_suppression_passes_true_through():
+    fullscreen, deadline = suppressed_fullscreen(True, suppress_until=None, now=5.0)
+    assert fullscreen is True
+    assert deadline is None
+
+
+def test_no_active_suppression_passes_false_through():
+    fullscreen, deadline = suppressed_fullscreen(False, suppress_until=None, now=5.0)
+    assert fullscreen is False
+    assert deadline is None
