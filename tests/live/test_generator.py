@@ -456,6 +456,105 @@ def test_model_host_a_device_request_during_an_in_flight_pkl_load_does_not_stran
     host.stop()
 
 
+def test_model_host_a_failed_switch_does_not_strand_the_sticky_device():
+    """Regression: request_device set _device_name unconditionally and
+    nothing ever restored it on failure, so every plain load after a
+    failed switch kept hitting the same dead device forever, silently
+    (no error(), no info_store, `_pending` just cleared)."""
+    import torch
+
+    calls = []
+
+    def loader(path, device=None):
+        # Resolves the auto/no-device case to a fixed concrete device, the
+        # way a real loader's own `device or pick_device()` would, so
+        # `.device` reads a comparable, deterministic value regardless of
+        # whether this call came through the "auto" path or an explicit one.
+        resolved = device or torch.device("cpu")
+        calls.append((path, device))
+        return _DeviceAwareModel(path, resolved)
+
+    host = ModelHost(loader=loader)
+    host.request_load("/tmp/a.pkl")
+    deadline = time.monotonic() + 2.0
+    while host.current() is None and time.monotonic() < deadline:
+        time.sleep(0.005)
+
+    # This machine never has CUDA, so this genuinely fails.
+    host.request_device("cuda")
+    deadline = time.monotonic() + 2.0
+    while host.device_store.snapshot().error is None and time.monotonic() < deadline:
+        time.sleep(0.005)
+    assert host.device_store.snapshot().error is not None
+
+    host.request_load("/tmp/b.pkl")
+
+    def loaded_b():
+        current = host.current()
+        return current is not None and current.pkl_path == "/tmp/b.pkl"
+
+    deadline = time.monotonic() + 2.0
+    while not loaded_b() and time.monotonic() < deadline:
+        time.sleep(0.005)
+
+    assert loaded_b()
+    assert host.current().device == torch.device("cpu")
+    assert host.error() is None
+    assert host.info_store.snapshot() is not None
+    # The sticky device was restored to "cpu" (read straight off a.pkl's
+    # own device) rather than dropped back to "auto", so b.pkl resolves it
+    # explicitly here rather than falling through to a bare loader(path).
+    assert calls[-1] == ("/tmp/b.pkl", torch.device("cpu"))
+    host.stop()
+
+
+def test_model_host_a_failed_switch_during_an_in_flight_load_does_not_drop_the_pkl():
+    """Regression: request_device redirecting a pkl load already in flight
+    (see the test above this one) used to be fine only because that
+    redirected reload always succeeded. When it fails, the old code
+    cleared both `_pending` and `_pending_device` and gave up: the pkl the
+    user asked for was never loaded, never reported as failed either
+    (`error()` stayed None, `loading()` stayed False)."""
+    import torch
+
+    release = threading.Event()
+
+    def loader(path, device=None):
+        if path == "/tmp/b.pkl" and device is None:
+            release.wait(timeout=2.0)
+        if device is not None and str(device) == "cuda":
+            raise RuntimeError("should never reach the loader for cuda here")
+        resolved = device or torch.device("cpu")
+        return _DeviceAwareModel(path, resolved)
+
+    host = ModelHost(loader=loader)
+    host.request_load("/tmp/a.pkl")
+    deadline = time.monotonic() + 2.0
+    while host.current() is None and time.monotonic() < deadline:
+        time.sleep(0.005)
+
+    host.request_load("/tmp/b.pkl")
+    time.sleep(0.05)  # give the loader thread time to enter the block on b.pkl
+
+    # This machine never has CUDA: resolve_device fails before the loader
+    # is ever called for "cuda", so b.pkl's load is redirected and then
+    # immediately fails to resolve, never touching the loader with device.
+    host.request_device("cuda")
+    release.set()
+
+    def loaded_b():
+        current = host.current()
+        return current is not None and current.pkl_path == "/tmp/b.pkl"
+
+    deadline = time.monotonic() + 2.0
+    while not loaded_b() and time.monotonic() < deadline:
+        time.sleep(0.005)
+
+    assert loaded_b()
+    assert host.current().device == torch.device("cpu")
+    host.stop()
+
+
 class _FakeMapping:
     def __init__(self, w_avg, num_ws):
         self.w_avg = w_avg

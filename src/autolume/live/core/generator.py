@@ -1003,9 +1003,18 @@ class ModelHost:
             logger.warning("Could not load %s on device %s: %s", path, device_name, exc)
             with self._lock:
                 won = self._pending == path and self._pending_device is None
+                active = getattr(self._current, "device", None)
                 if won:
                     self._pending = None
-                active = getattr(self._current, "device", None)
+                    self._error = str(exc)
+                    # Never keep a device name that just failed to resolve:
+                    # fall back to whatever is actually running (or "auto"
+                    # if nothing is), so this host's own state stays
+                    # self-consistent no matter whether anything
+                    # downstream ever notices and re-requests a good
+                    # value. Without this, every load after the first
+                    # failure keeps hitting the same dead device forever.
+                    self._device_name = str(active) if active is not None else "auto"
             if won:
                 self.device_store.set(
                     DeviceStatus(
@@ -1014,6 +1023,12 @@ class ModelHost:
                         error=str(exc),
                     )
                 )
+                # A load that does not happen must be reported the same
+                # way any other load failure is, not silently: `error()`
+                # and `info_store` are the channels a caller already
+                # polls, and leaving them untouched is what made this
+                # unrecoverable rather than merely annoying.
+                self.info_store.set(None)
             return
         try:
             model = (
@@ -1073,10 +1088,35 @@ class ModelHost:
                 won = (
                     self._pending == path and self._pending_device == device_name
                 )
-                if won:
-                    self._pending = None
-                    self._pending_device = None
                 active = getattr(self._current, "device", None)
+                already_current = (
+                    self._current is not None and self._current.pkl_path == path
+                )
+                if won:
+                    # Never keep a device name that just failed: fall back
+                    # to whatever is actually running (or "auto" if
+                    # nothing is), the same value the status below
+                    # publishes, so this host's own state stays self
+                    # consistent regardless of what the control loop does
+                    # next (see the Critical this fixes).
+                    self._device_name = str(active) if active is not None else "auto"
+                    if already_current:
+                        # `path` is the model already settled in
+                        # `_current`; there is nothing to retry, the
+                        # render loop is already showing it, just on its
+                        # previous device.
+                        self._pending = None
+                        self._pending_device = None
+                    else:
+                        # `path` was never actually loaded: this reload
+                        # was redirecting a pkl request already in flight
+                        # (`request_device` on a load that has not landed
+                        # yet). Dropping it here would silently discard a
+                        # model the user is still waiting on, so `_pending`
+                        # stays put and only `_pending_device` clears, so
+                        # `_run`'s own re-wake retries it as a plain load
+                        # on the device just restored above.
+                        self._pending_device = None
             if won:
                 self.device_store.set(
                     DeviceStatus(
