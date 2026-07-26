@@ -262,7 +262,17 @@ def _validate_transform(transform: Transform) -> Transform | None:
     if not isinstance(transform.layer, str) or not transform.layer:
         return None
     try:
-        params_values = tuple(float(p) for p in transform.params)
+        raw_params = tuple(transform.params)
+    except TypeError:
+        return None
+    # bool is an int subclass, so float(True) == 1.0 would otherwise sail
+    # through as a normal value, same trap the indices guard below already
+    # defends against. Rejected uniformly across all eleven operators: no
+    # legitimate producer sends True as a rotation angle or a kernel size.
+    if any(isinstance(p, bool) for p in raw_params):
+        return None
+    try:
+        params_values = tuple(float(p) for p in raw_params)
     except (TypeError, ValueError):
         return None
     if len(params_values) != arity or not all(math.isfinite(p) for p in params_values):

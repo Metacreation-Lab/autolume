@@ -695,6 +695,27 @@ def test_bend_set_accepts_a_valid_integral_kernel_size(op):
     assert state.transforms == (transform,)
 
 
+def test_bend_set_rejects_a_bool_kernel_size(caplog):
+    # bool is an int subclass: float(True) == 1.0, which is integral and >= 1,
+    # so without an explicit guard a stray True would sail through as a
+    # silent 1x1 no-op erode instead of being dropped.
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = set_transform(before, 0, Transform("erode", "L1", (True,), (0,)))
+    assert after == before
+    assert any("invalid transform" in m for m in warnings_from(caplog, MAPPING_LOGGER))
+
+
+def test_bend_set_rejects_a_bool_param_on_a_float_wanting_operator(caplog):
+    # The bool guard is uniform across all eleven operators, not just
+    # erode/dilate's kernel size.
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = set_transform(before, 0, Transform("scale", "L1", (True,), (0,)))
+    assert after == before
+    assert any("invalid transform" in m for m in warnings_from(caplog, MAPPING_LOGGER))
+
+
 def test_bend_set_out_of_range_index_ignored(caplog):
     before = ControlState()
     with caplog.at_level(logging.WARNING):
