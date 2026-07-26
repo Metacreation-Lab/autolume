@@ -54,13 +54,14 @@ from autolume.live.errors import describe
 from autolume.live.ui.controls import ControlBinder
 from autolume.live.ui.panels.perform import (
     combo_index,
+    draw_error,
     fit_item,
+    draw_note,
     paired_control_width,
     same_line_if_it_fits,
     string_combo,
     trailing_width,
 )
-from autolume.live.ui.theme import ERROR_COLOR
 
 logger = logging.getLogger(__name__)
 
@@ -574,7 +575,7 @@ class BendingPanel:
         imgui.separator_text("Layers")
         self._detail_row()
         if not layers:
-            self._note(_NO_LAYERS if loaded else _NO_MODEL)
+            draw_note(_NO_LAYERS if loaded else _NO_MODEL)
             return
         if self._layer == "":
             self._layer = layers[0].name
@@ -653,7 +654,7 @@ class BendingPanel:
         """
         imgui.separator_text("Transforms")
         if layer is None:
-            self._note(_NO_MODEL)
+            draw_note(_NO_MODEL)
             return
         self._sync_selections(state)
         rows = [
@@ -662,7 +663,7 @@ class BendingPanel:
             if transform.layer == layer.name
         ]
         if not rows:
-            self._note(_NO_TRANSFORMS)
+            draw_note(_NO_TRANSFORMS)
         for index, transform in rows:
             # Stop at a removal. `_transform_row` takes that row's editor out of
             # `_selections` immediately, while `state.transforms` is still the
@@ -745,6 +746,19 @@ class BendingPanel:
                 edited, on = imgui.checkbox(label or "On", bool(values[slot]))
                 if edited:
                     values[slot], changed = (1.0 if on else 0.0), True
+            elif kind == "kernel":
+                # A whole-number field, not a float one showing "3.000". The
+                # value is still stored as a float, because `Transform.params`
+                # is uniformly `tuple[float, ...]` across all eleven operators,
+                # but a kernel size is a count of pixels and reads as one.
+                fit_item(label, ems=_NUMBER_EMS)
+                edited, count = imgui.input_int(
+                    label or "##value", int(values[slot]), 0, 0,
+                    imgui.InputTextFlags_.enter_returns_true,
+                )
+                if edited:
+                    values[slot] = clamp_param(transform.op, slot, float(count))
+                    changed = True
             else:
                 fit_item(label, ems=_NUMBER_EMS)
                 edited, number = imgui.input_float(
@@ -767,7 +781,7 @@ class BendingPanel:
         use greyed, so switching modes never changes how tall the row is.
         """
         selection = self._selections[index]
-        self._note(f"{len(transform.indices)} of {layer.channels} channels")
+        draw_note(f"{len(transform.indices)} of {layer.channels} channels")
         picked = string_combo(
             "##mode", selection.mode, SELECTION_MODES, SELECTION_LABELS
         )
@@ -788,7 +802,7 @@ class BendingPanel:
         if not ready:
             imgui.end_disabled()
         if selection.error:
-            self._error(selection.error)
+            draw_error(selection.error)
 
     def _random_controls(self, selection: IndexSelection) -> None:
         live = selection.mode == MODE_RANDOM
@@ -839,18 +853,30 @@ class BendingPanel:
                 index,
                 pfd.open_file("Choose a cluster file", "", _CLUSTER_FILTER),
             )
-        imgui.same_line()
         ids = cluster_ids(selection.cluster_config, layer.name)
         labels = [str(value) for value in ids]
-        if labels:
-            fit_item("cluster", ems=_NUMBER_EMS)
-            changed, chosen = imgui.combo(
-                "cluster", combo_index(str(selection.cluster_id), labels), labels
-            )
-            if changed and 0 <= chosen < len(ids):
-                selection.cluster_id = ids[chosen]
-        else:
-            self._note("No clusters loaded")
+        # The combo is always the combo, empty and greyed until a file names
+        # some clusters. Swapping it for a line of text instead changed the
+        # row's height the moment a file was picked, which is the reflow the
+        # rest of this panel is careful not to do.
+        #
+        # Its label is hidden and the button beside it says "Cluster file"
+        # instead: a visible label reserves its own width outside the item, and
+        # at a scaled up font in a narrow dock there is nothing left for the
+        # combo itself.
+        same_line_if_it_fits(
+            imgui.get_style().item_spacing.x + imgui.get_font_size()
+        )
+        if not ids:
+            imgui.begin_disabled()
+        fit_item("##cluster", ems=_NUMBER_EMS)
+        changed, chosen = imgui.combo(
+            "##cluster", combo_index(str(selection.cluster_id), labels), labels
+        )
+        if not ids:
+            imgui.end_disabled()
+        if changed and 0 <= chosen < len(ids):
+            selection.cluster_id = ids[chosen]
         if not live:
             imgui.end_disabled()
 
@@ -907,7 +933,7 @@ class BendingPanel:
         """
         imgui.separator_text("Layer noise")
         if layer is None:
-            self._note(_NO_MODEL)
+            draw_note(_NO_MODEL)
             return
         live = not is_torgb(layer.name)
         if not live:
@@ -929,7 +955,7 @@ class BendingPanel:
             )
         if not live:
             imgui.end_disabled()
-            self._note(_TORGB_NOTE)
+            draw_note(_TORGB_NOTE)
 
     def _adjuster_rows(self, state: ControlState, info) -> None:
         """Eight weights, and the directions they scale.
@@ -949,7 +975,7 @@ class BendingPanel:
         imgui.separator_text("Adjuster")
         loaded = len(state.directions)
         if not loaded:
-            self._note(_NO_DIRECTIONS)
+            draw_note(_NO_DIRECTIONS)
         for slot in range(_ADJUST_SLOTS):
             self._binder.slider_float(
                 f"adjust_w{slot + 1}", f"{slot + 1}", enabled=slot < loaded
@@ -957,7 +983,7 @@ class BendingPanel:
         self._direction_load_row(loaded)
         self._direction_action_row(state, info)
         if self._direction_error:
-            self._error(self._direction_error)
+            draw_error(self._direction_error)
 
     def _direction_load_row(self, loaded: int) -> None:
         """Pick a slot, load one vector into it.
@@ -1049,16 +1075,4 @@ class BendingPanel:
         if picked is not None:
             self._emit("/image/layer", picked)
         if state.capture_layer and combo_index(state.capture_layer, values) < 0:
-            self._note(f"{state.capture_layer} is not a layer in this model.")
-
-    def _note(self, text: str) -> None:
-        imgui.push_style_color(
-            imgui.Col_.text, imgui.get_style_color_vec4(imgui.Col_.text_disabled)
-        )
-        imgui.text_wrapped(text)
-        imgui.pop_style_color()
-
-    def _error(self, text: str) -> None:
-        imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(*ERROR_COLOR))
-        imgui.text_wrapped(text)
-        imgui.pop_style_color()
+            draw_note(f"{state.capture_layer} is not a layer in this model.")

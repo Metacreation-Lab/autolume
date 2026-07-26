@@ -57,6 +57,35 @@ def button_width(label: str) -> float:
     return imgui.calc_text_size(label).x + imgui.get_style().frame_padding.x * 2.0
 
 
+def draw_note(text: str | None) -> None:
+    """Draw a quiet explanatory line under a control, or nothing.
+
+    Wrapped, because a note is a sentence and a plain text item is as wide as
+    its string, which runs off a narrow dock at a scaled up font and takes the
+    panel's separators with it. Drawn in the theme's disabled colour rather than
+    a constant, so it keeps its polarity in a light theme.
+
+    `None` and the empty string both draw nothing, so a caller can hand this the
+    result of a note builder without testing it first.
+    """
+    if not text:
+        return
+    imgui.push_style_color(
+        imgui.Col_.text, imgui.get_style_color_vec4(imgui.Col_.text_disabled)
+    )
+    imgui.text_wrapped(text)
+    imgui.pop_style_color()
+
+
+def draw_error(text: str | None) -> None:
+    """`draw_note`, in the error colour. For a failure, not for a fact."""
+    if not text:
+        return
+    imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(*ERROR_COLOR))
+    imgui.text_wrapped(text)
+    imgui.pop_style_color()
+
+
 def paired_control_width(label: str) -> float:
     """Width imgui gives a checkbox or a radio button: its box, then its label.
 

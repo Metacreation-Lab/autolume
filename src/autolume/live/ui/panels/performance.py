@@ -22,8 +22,12 @@ from autolume.live.core.events import ControlEvent
 from autolume.live.io import ndi
 from autolume.live.io.recorder import SCREENSHOT_ADDRESS
 from autolume.live.ui.controls import ControlBinder
-from autolume.live.ui.panels.perform import combo_index, string_combo
-from autolume.live.ui.theme import ERROR_COLOR
+from autolume.live.ui.panels.perform import (
+    combo_index,
+    draw_error,
+    draw_note,
+    string_combo,
+)
 
 # The four the device parameter accepts (plan-4 decisions). "auto" first
 # because it is the default and the answer for almost every performer.
@@ -213,7 +217,7 @@ class PerformancePanel:
         if picked is not None:
             self._emit("/render/device", picked)
         status = self._runtime.model_host.device_store.snapshot()
-        self._note(device_note(state.device, status.active, status.error))
+        draw_note(device_note(state.device, status.active, status.error))
 
     def _superres_row(self) -> None:
         self._binder.checkbox("use_superres", "Super-res")
@@ -222,9 +226,9 @@ class PerformancePanel:
         reason, last_error = superres_state(self._runtime.model_host.current())
         note = superres_note(reason, last_error)
         if note is None:
-            self._note(_SUPERRES_LIMIT)
+            draw_note(_SUPERRES_LIMIT)
         else:
-            self._error(note)
+            draw_error(note)
 
     def _stats_rows(self) -> None:
         imgui.separator_text("Stats")
@@ -242,7 +246,7 @@ class PerformancePanel:
         self._binder.input_int("osc_port", "Port", natural_ems=7.0)
         status = self._runtime.osc_status_store.snapshot()
         requested = int(self._binder.value("osc_port") or 0)
-        self._note(osc_note(requested, status.bound_port, status.error))
+        draw_note(osc_note(requested, status.bound_port, status.error))
 
     def _ndi_rows(self) -> None:
         """The NDI toggle and the name it advertises.
@@ -264,15 +268,15 @@ class PerformancePanel:
         # produces is not the error: a machine without NDI installed is a fact
         # about the machine, and drawing it red says something went wrong.
         if available and status.error:
-            self._error(note)
+            draw_error(note)
         else:
-            self._note(note)
+            draw_note(note)
 
     def _output_rows(self) -> None:
         imgui.separator_text("Output")
         if imgui.button("Screenshot"):
             self._emit(SCREENSHOT_ADDRESS, 1.0)
-        self._note(_CAPTURES_NOTE)
+        draw_note(_CAPTURES_NOTE)
         self._record_row()
         # "Fullscreen", not "Fullscreen output": a checkbox's label is drawn
         # outside its item and nothing can narrow it, so a long one runs past
@@ -294,9 +298,9 @@ class PerformancePanel:
         elapsed = self._take_elapsed(status.recording)
         note = recording_note(status, elapsed)
         if status.error:
-            self._error(note)
+            draw_error(note)
         else:
-            self._note(note)
+            draw_note(note)
 
     def _take_elapsed(self, recording: bool) -> float | None:
         if not recording:
@@ -306,19 +310,3 @@ class PerformancePanel:
         if self._record_started is None:
             self._record_started = now
         return now - self._record_started
-
-    def _note(self, text: str | None) -> None:
-        if not text:
-            return
-        imgui.push_style_color(
-            imgui.Col_.text, imgui.get_style_color_vec4(imgui.Col_.text_disabled)
-        )
-        imgui.text_wrapped(text)
-        imgui.pop_style_color()
-
-    def _error(self, text: str | None) -> None:
-        if not text:
-            return
-        imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(*ERROR_COLOR))
-        imgui.text_wrapped(text)
-        imgui.pop_style_color()
