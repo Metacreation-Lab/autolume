@@ -51,10 +51,13 @@ _STEPS_PER_RADIUS_UNIT = 42
 # needs enough temporal samples to read as a smoothly varying loop rather
 # than a handful of straight-line segments.
 _TABLE_STEPS_MIN = 128
-# Ceiling: the largest allowed radius (100.0, the top of `noise_radius`'s
-# registry bounds) lands here; this is the previously validated worst case
-# step count, error ~0.006 (mean ~0.001) out of a [-1, 1] range, which does
-# not read as a visible degradation of the loop.
+# Ceiling: 100.0 used to be the top of `noise_radius`'s registry bounds and
+# landed here; the registry ceiling has since been lowered to 10.0 (build
+# time, see the bound's own comment in params.py), but this function is not
+# only read through that bound (a preset can still carry a larger value, and
+# the fidelity measurements below exercise 100.0 directly), so the cap stays
+# where it was validated: error ~0.006 (mean ~0.001) out of a [-1, 1] range,
+# which does not read as a visible degradation of the loop.
 _TABLE_STEPS_MAX = 4096
 
 
@@ -69,6 +72,32 @@ def table_steps(radius: float) -> int:
     return min(
         _TABLE_STEPS_MAX,
         max(_TABLE_STEPS_MIN, math.ceil(_STEPS_PER_RADIUS_UNIT * radius)),
+    )
+
+
+# Measured wall clock build time on the dev machine (task-5-report.md and the
+# maintainer's manual pass after task 9): ~1.3 s at the step floor (128),
+# ~35 s at the step ceiling (4096). The build loops once per step doing a
+# fixed amount of work per dimension each time, so it is close to linear in
+# the step count, and a line through those two points is what the UI shows
+# as an ETA.
+_BUILD_SECONDS_AT_MIN_STEPS = 1.3
+_BUILD_SECONDS_AT_MAX_STEPS = 35.0
+
+
+def estimated_build_seconds(radius: float) -> float:
+    """About how long building the table for `radius` will take, in seconds.
+
+    An estimate for a status line, not a promise: it is a straight line
+    through two measured points on one machine, and actual wall time depends
+    on the machine and whatever else the control thread is doing while it
+    builds.
+    """
+    steps = table_steps(radius)
+    span = _TABLE_STEPS_MAX - _TABLE_STEPS_MIN
+    fraction = (steps - _TABLE_STEPS_MIN) / span
+    return _BUILD_SECONDS_AT_MIN_STEPS + fraction * (
+        _BUILD_SECONDS_AT_MAX_STEPS - _BUILD_SECONDS_AT_MIN_STEPS
     )
 
 

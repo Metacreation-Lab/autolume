@@ -27,7 +27,7 @@ import pytest
 from imgui_bundle import hello_imgui, imgui, immvision
 
 from autolume.live.core.generator import ModelInfo
-from autolume.live.core.params import Binding, ControlState
+from autolume.live.core.params import Binding, ControlState, Keyframe, default_keyframe
 from autolume.live.core.sources import SourceTable
 from autolume.live.core.store import LatestValueStore
 from autolume.live.ui import theme, window
@@ -449,22 +449,19 @@ def test_no_row_runs_past_the_panel_it_is_drawn_in(width, font_scale):
 
 
 def keyframe_row_edges(width: float, font_scale: float) -> list[float]:
-    """Every keyframe entry's two rows' right edges, against the content edge.
+    """Every keyframe entry's right edge, against the content edge.
 
     The same measurement `row_edges` takes for the perform panel, aimed at
     the loop panel's own widest entry instead: a keyframe row is not a
     `ControlBinder` widget (design.md: keyframes are structured state, not
-    registry parameters), so it is measured by wrapping
-    `LoopPanel._keyframe_kind_row` and `LoopPanel._keyframe_content_row`
-    directly rather than `ControlBinder._widget`. Both are measured, not
-    just the second: an entry that fits on its content line but not its
-    kind line is still an entry that overflows.
+    registry parameters), so it is measured by wrapping `LoopPanel._keyframe_row`
+    directly rather than `ControlBinder._widget`. One line, one edge: item 8
+    put the whole entry back on one line, so there is only the one to check.
     """
     context = imgui.create_context()
     edges: list[float] = []
     right = [0.0]
-    original_kind_row = LoopPanel._keyframe_kind_row
-    original_content_row = LoopPanel._keyframe_content_row
+    original_row = LoopPanel._keyframe_row
     try:
         io = imgui.get_io()
         io.set_ini_filename(None)
@@ -474,17 +471,11 @@ def keyframe_row_edges(width: float, font_scale: float) -> list[float]:
         theme.apply_theme()
         imgui.get_style().font_scale_main = font_scale
 
-        def measure_kind_row(self, index, keyframe):
-            result = original_kind_row(self, index, keyframe)
-            edges.append(imgui.get_item_rect_max().x - right[0])
-            return result
-
-        def measure_content_row(self, index, keyframe, state, is_vector, count):
-            original_content_row(self, index, keyframe, state, is_vector, count)
+        def measure_row(self, index, keyframe, state, count):
+            original_row(self, index, keyframe, state, count)
             edges.append(imgui.get_item_rect_max().x - right[0])
 
-        LoopPanel._keyframe_kind_row = measure_kind_row
-        LoopPanel._keyframe_content_row = measure_content_row
+        LoopPanel._keyframe_row = measure_row
         panel = LoopPanel(PanelRuntime(), mapping_popup=lambda name: None)
         for _ in range(3):
             imgui.new_frame()
@@ -499,28 +490,27 @@ def keyframe_row_edges(width: float, font_scale: float) -> list[float]:
             imgui.end()
             imgui.render()
     finally:
-        LoopPanel._keyframe_kind_row = original_kind_row
-        LoopPanel._keyframe_content_row = original_content_row
+        LoopPanel._keyframe_row = original_row
         imgui.destroy_context(context)
     return edges
 
 
+# 960 is this panel's documented minimum supported width: the keyframe row is
+# the widest thing the Loop panel draws (index, Vec, Proj, two seed fields,
+# Load, Randomize, Snap, Remove, nine items on one line, task 8), and at the
+# largest font scale this suite checks the row measured needing ~930px, so
+# 960 is the next round number with margin to spare (measured at -33px,
+# i.e. 33px of slack at the panel edge). The perform panel's 280px floor was
+# never calibrated for a row this wide, and borrowing it anyway is the
+# mistake item 8 undoes; this is the Loop panel's own number in its place.
+# 1100 and 1280 are checked alongside it for the same reason the perform
+# panel checks more than one width: 1280 is the app's shipped window size
+# (window.py), so the panel is never actually asked to be narrower than its
+# dock allows without the performer dragging a split themselves.
 _KEYFRAME_ROW_COMBOS = tuple(
     (width, font_scale)
-    for width in (448.0, 360.0, 280.0)
+    for width in (1280.0, 1100.0, 960.0)
     for font_scale in (1.0, 1.5, 2.0)
-    # 280 at 2.0x excluded on purpose, not silently: the perform panel's
-    # nine combination bar was calibrated against rows that carry one
-    # control each, and a keyframe entry is a compound row (index, kind,
-    # Project, two seed fields, Snap, Remove). Remove stays spelled out in
-    # full rather than abbreviated, since it is the entry's one destructive
-    # control and a performer must never have to infer what it deletes.
-    # Narrowing the seed fields enough to also clear this one combination
-    # left them too small to read a typical seed value in (task 9 review,
-    # finding 1, round 4, the coordinator's pre-approved fallback). Every
-    # other combination fits with comfortable margin; this one measured
-    # +29pt over at the seed width this entry actually ships with.
-    if (width, font_scale) != (280.0, 2.0)
 )
 
 
@@ -528,18 +518,17 @@ _KEYFRAME_ROW_COMBOS = tuple(
 def test_no_keyframe_row_runs_past_the_panel_it_is_drawn_in(width, font_scale):
     """The keyframe entry is the widest in the new UI, and the one the
     perform panel's equivalent guard cannot reach, since it draws a
-    different panel. Restructured onto two lines after the review round
-    found the one-line version did not fit at any docked width (task 9
-    review, finding 1): row 1 is the index, the kind switch and Project, row
-    2 is indented under it and carries the seed fields or the vector state,
-    Snap and Remove. Both lines are measured, and this includes the
-    window's own vertical scrollbar taking width once the panel's full
-    content, not just this entry, no longer fits the docked height either:
-    the same condition a performer would actually be looking at.
+    different panel. One line: index, the kind switch, Project, the seed
+    fields, Load, Randomize, Snap, Remove, everything the row draws
+    regardless of kind (`_keyframe_row`'s own docstring on why they are
+    all always drawn). This includes the window's own vertical scrollbar
+    taking width once the panel's full content, not just this entry, no
+    longer fits the docked height either: the same condition a performer
+    would actually be looking at.
 
     Every combination this test runs is one the entry claims to support and
-    must keep fitting; see `_KEYFRAME_ROW_COMBOS` for the one combination
-    excluded, and why.
+    must keep fitting; see `_KEYFRAME_ROW_COMBOS` for the width it is
+    measured against and why.
     """
     edges = keyframe_row_edges(width, font_scale)
     assert max(edges) <= 0.0
@@ -586,10 +575,12 @@ def test_no_loop_panel_row_is_silently_dropped(frame):
     is what task 9's review found missing here too.
     """
     panel = LoopPanel(PanelRuntime(), mapping_popup=lambda name: None)
-    # Transport (5) + keyframe count (1) + scrub (2) + noise loop (3) +
-    # pulse (3, all text fields). The six default keyframe rows are plain
-    # widgets, not `ControlBinder` rows, and are not part of this count.
-    assert bound_rows(panel.gui) == 14
+    # Transport (5) + scrub (2) + noise loop (3) + pulse (3, all text
+    # fields). No keyframe count row any more (item 10-12 of the manual
+    # review): the count has no UI control left, only Add keyframe, a plain
+    # button. The six default keyframe rows themselves are plain widgets
+    # too, not `ControlBinder` rows, and were never part of this count.
+    assert bound_rows(panel.gui) == 13
 
 
 def test_the_model_row_uses_the_width_it_is_given_and_no_more():
@@ -1075,3 +1066,197 @@ def test_the_noise_pending_note_is_silent_while_the_loop_is_stopped(frame):
         LoopPanel(playing_runtime, mapping_popup=lambda name: None)
     )
     assert stopped_height == pytest.approx(playing_height)
+
+
+# --- item 3: the index scrubber is one-based and bounded to the count -----
+
+
+def test_loop_index_is_shown_one_based_and_bounded_to_the_keyframe_count(
+    frame, monkeypatch
+):
+    """`drag_int_mapped`'s whole reason to exist.
+
+    The old app showed `self.params.index + 1` and stored `(idx - 1) %
+    num_keyframes` (`widgets/looping_widget.py`); this is the same
+    translation at the new architecture's UI edge, with `ControlState` and
+    OSC staying zero-based throughout. `imgui.drag_int` is stubbed rather
+    than clicked, since simulating a real drag is what `test_controls.py`'s
+    own comment on the null backend says not to try; the stub is what
+    proves the widget was asked to show 3 (stored 2, one-based) ranged 1..6
+    (six keyframes) and reports a submitted display value of 5 back as the
+    zero-based 4.
+    """
+    seen = {}
+    submitted = []
+
+    class RecordingRuntime(FakeRuntime):
+        def submit(self, event):
+            submitted.append(event)
+
+    def fake_drag_int(label, value, speed, minimum, maximum):
+        seen["value"] = value
+        seen["bounds"] = (minimum, maximum)
+        return True, 5
+
+    monkeypatch.setattr(imgui, "drag_int", fake_drag_int)
+    state = ControlState(loop_index=2)
+    binder = ControlBinder(
+        RecordingRuntime(state, SILENT), mapping_popup=lambda name: None, clock=lambda: NOW
+    )
+    binder.drag_int_mapped(
+        "loop_index",
+        "Index",
+        minimum=1,
+        maximum=6,
+        to_display=lambda stored: stored + 1,
+        to_stored=lambda shown: shown - 1,
+    )
+    assert seen["value"] == 3
+    assert seen["bounds"] == (1, 6)
+    assert submitted[-1].address == "/loop/index"
+    assert submitted[-1].value == 4
+
+
+# --- items 10-12: no count field, Add keyframe at the bottom --------------
+
+
+def _click_only(monkeypatch, label: str) -> None:
+    """Make `imgui.button(label)` report clicked, every other button real.
+
+    The real function still runs first, so a button inside `begin_disabled`
+    still reports unclicked exactly as it would in the app: only the exact
+    label's own, undisabled, result is forced to True. Forcing every button
+    at once would also fire whichever ones open a native file dialog
+    (Load), which must not happen in a headless test run.
+    """
+    original = imgui.button
+
+    def targeted(text, *args, **kwargs):
+        result = original(text, *args, **kwargs)
+        return True if text == label else result
+
+    monkeypatch.setattr(imgui, "button", targeted)
+
+
+def test_add_keyframe_emits_the_next_count_and_nothing_else_touches_the_registry(
+    frame, monkeypatch
+):
+    """No count field left to drive a resize through: only Add keyframe does.
+
+    If a count field had survived the removal it would have had its own
+    write path to `/loop/keyframes` independent of this button, so this
+    also stands in for "the field is really gone" beyond the row count
+    `test_no_loop_panel_row_is_silently_dropped` already pins.
+    """
+    submitted = []
+
+    class RecordingRuntime(PanelRuntime):
+        def submit(self, event):
+            submitted.append(event)
+
+    _click_only(monkeypatch, "Add keyframe")
+    panel = LoopPanel(RecordingRuntime(), mapping_popup=lambda name: None)
+    panel.gui()
+    keyframe_writes = [e for e in submitted if e.address == "/loop/keyframes"]
+    # Six default keyframes, so Add asks for a seventh.
+    assert [event.value for event in keyframe_writes] == [7]
+
+
+def test_the_final_keyframes_remove_is_greyed_rather_than_live(frame):
+    """The minimum-one-keyframe rule, now enforced only at the row.
+
+    A header Remove used to share this job; item 11 removes it, so the
+    last row's own Remove is the only place left that has to refuse to
+    take the loop to zero keyframes. Greyed, not hidden: the stable
+    footprint rule the rest of this row already follows.
+    """
+    one = ControlState(keyframes=(default_keyframe(0),))
+    six = ControlState()
+    assert len(six.keyframes) == 6
+
+    def remove_is_enabled(state: ControlState) -> bool:
+        # Scoped to `_keyframe_actions` alone, not the whole panel: the
+        # noise and pulse rows below the keyframes also call
+        # `begin_disabled` (for their own, unrelated, off switches), and a
+        # spy on the bare global function would pick up whichever of those
+        # happened to be drawn last instead of Remove's own.
+        disabled_calls: list[bool] = []
+        original_actions = LoopPanel._keyframe_actions
+        original_begin_disabled = imgui.begin_disabled
+
+        def spy(disabled: bool = True):
+            disabled_calls.append(disabled)
+            return original_begin_disabled(disabled)
+
+        def wrapped(self, index, keyframe, state_, count):
+            imgui.begin_disabled = spy
+            try:
+                return original_actions(self, index, keyframe, state_, count)
+            finally:
+                imgui.begin_disabled = original_begin_disabled
+
+        LoopPanel._keyframe_actions = wrapped
+        try:
+            panel = LoopPanel(PanelRuntime(state=state), mapping_popup=lambda n: None)
+            panel.gui()
+        finally:
+            LoopPanel._keyframe_actions = original_actions
+        return not any(disabled_calls)
+
+    assert remove_is_enabled(one) is False
+    assert remove_is_enabled(six) is True
+
+
+# --- item 8: per-keyframe Load and Randomize -------------------------------
+
+
+def test_a_vector_keyframe_row_draws_with_and_without_a_loaded_model(frame):
+    """The one branch no other test in this file puts the row through.
+
+    Matches `test_the_perform_panel_draws_in_vector_mode_without_raising`'s
+    own reasoning: there is no headless way to click Load or Randomize, only
+    to prove the row they are on draws at all, with Randomize greyed and
+    live in turn as `model_info_store` does and does not carry a model.
+    """
+    keyframes = (Keyframe("vec", vec=(1.0, 2.0, 3.0)),)
+    state = ControlState(keyframes=keyframes)
+
+    without_model = PanelRuntime(state=state)
+    LoopPanel(without_model, mapping_popup=lambda name: None).gui()
+
+    with_model = PanelRuntime(state=state)
+    with_model.model_info_store = LatestValueStore(
+        ModelInfo(pkl_path="model.pkl", z_dim=3, num_ws=8)
+    )
+    imgui.new_line()
+    LoopPanel(with_model, mapping_popup=lambda name: None).gui()
+
+
+def test_randomizing_a_keyframe_submits_a_vector_of_the_models_z_dim(frame, monkeypatch):
+    """Randomize, end to end through the one button that needs `z_dim`.
+
+    Greyed without a model (the row test above draws that state); this is
+    the live one, stubbing `imgui.button` the same way the Add keyframe
+    test does, so the emitted keyframe is checked instead of only the fact
+    that drawing did not raise.
+    """
+    submitted = []
+
+    class RecordingRuntime(PanelRuntime):
+        def submit(self, event):
+            submitted.append(event)
+
+    keyframes = (Keyframe("vec", vec=(0.0, 0.0)),)
+    state = ControlState(keyframes=keyframes)
+    runtime = RecordingRuntime(state=state)
+    runtime.model_info_store = LatestValueStore(
+        ModelInfo(pkl_path="model.pkl", z_dim=5, num_ws=8)
+    )
+    _click_only(monkeypatch, "Randomize")
+    LoopPanel(runtime, mapping_popup=lambda name: None).gui()
+    keyframe_sets = [e for e in submitted if e.address == "/keyframe/set"]
+    assert keyframe_sets, "Randomize should have submitted a keyframe edit"
+    randomized = keyframe_sets[-1].value.keyframe
+    assert randomized.kind == "vec"
+    assert len(randomized.vec) == 5
+    assert all(v != 0.0 for v in randomized.vec)

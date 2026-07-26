@@ -213,7 +213,7 @@ def test_motion_specs_declare_expected_addresses_kinds_and_bounds():
         "keyframe_count": ("/loop/keyframes", params.ParamKind.INT, 6, 1, 256),
         "perfect_loop": ("/loop/perfect", params.ParamKind.BOOL, False, None, None),
         "noise_loop": ("/loop/noise", params.ParamKind.BOOL, False, None, None),
-        "noise_radius": ("/loop/radius", params.ParamKind.FLOAT, 1.0, 0.01, 100.0),
+        "noise_radius": ("/loop/radius", params.ParamKind.FLOAT, 1.0, 0.01, 10.0),
         "noise_loop_seed": ("/loop/seed", params.ParamKind.INT, 0, 0, 2**31 - 1),
         "pulse_address": ("/loop/pulse/address", params.ParamKind.STR, "", None, None),
         "pulse_ip": ("/loop/pulse/ip", params.ParamKind.STR, "127.0.0.1", None, None),

@@ -68,7 +68,11 @@ _SPECS = (
     ParamSpec("keyframe_count", ParamKind.INT, 6, "/loop/keyframes", 1, 256),
     ParamSpec("perfect_loop", ParamKind.BOOL, False, "/loop/perfect"),
     ParamSpec("noise_loop", ParamKind.BOOL, False, "/loop/noise"),
-    ParamSpec("noise_radius", ParamKind.FLOAT, 1.0, "/loop/radius", 0.01, 100.0),
+    # 10.0, not the table builder's own 100.0 ceiling: a table build is close
+    # to linear in the step count (noiseloop.py), and at 100 it takes ~35s
+    # against ~4s at 10, which read as the UI hanging. A preset carrying a
+    # value above this clamps down to it, same as any other bound.
+    ParamSpec("noise_radius", ParamKind.FLOAT, 1.0, "/loop/radius", 0.01, 10.0),
     ParamSpec("noise_loop_seed", ParamKind.INT, 0, "/loop/seed", 0, 2**31 - 1),
     # Loop pulse: one OSC message per loop-start or loop-complete event, sent
     # to a user configured address, separate from the control input port.

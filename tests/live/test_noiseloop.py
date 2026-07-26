@@ -8,6 +8,7 @@ from autolume.live.core.noiseloop import (
     NoiseLoop,
     NoiseLoopTable,
     NoiseLoopTableBuilder,
+    estimated_build_seconds,
     table_steps,
 )
 
@@ -200,6 +201,28 @@ def test_table_steps_scales_linearly_above_the_floor():
 def test_table_steps_caps_at_the_maximum_allowed_radius():
     assert table_steps(100.0) == 4096
     assert table_steps(1000.0) == 4096  # still capped past the registry's bound
+
+
+# --- estimated_build_seconds: the ETA the UI shows -----------------------
+
+
+def test_estimated_build_seconds_matches_the_two_measured_anchors():
+    # table_steps floors at 128 for any small radius, so this is the floor.
+    assert math.isclose(estimated_build_seconds(1.0), 1.3, abs_tol=1e-9)
+    # table_steps(100.0) == 4096, the step ceiling.
+    assert math.isclose(estimated_build_seconds(100.0), 35.0, abs_tol=1e-9)
+
+
+def test_estimated_build_seconds_is_around_four_at_the_new_registry_ceiling():
+    # table_steps(10.0) == 420, matching the "~4 s at 10" the bound's own
+    # comment in params.py cites.
+    assert 3.0 < estimated_build_seconds(10.0) < 5.0
+
+
+def test_estimated_build_seconds_increases_monotonically_with_radius():
+    radii = (0.01, 1.0, 5.0, 10.0, 50.0, 100.0)
+    estimates = [estimated_build_seconds(r) for r in radii]
+    assert estimates == sorted(estimates)
 
 
 # --- fidelity: table-plus-interpolation vs direct sampling -------------------
