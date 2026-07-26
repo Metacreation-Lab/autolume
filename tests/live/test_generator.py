@@ -1302,11 +1302,48 @@ def test_an_erode_kernel_size_reaches_the_operator_as_an_int(caplog):
     assert [r for r in caplog.records if r.levelno == logging.WARNING] == []
 
 
+def test_a_failed_operator_import_is_attempted_only_once(monkeypatch, caplog):
+    # A broken bending install (a kornia or torchvision import failure) must
+    # not retry the full import machinery every frame: that is exactly the
+    # frame rate cost this task exists to make cheap. Patching `__import__`
+    # itself, rather than pre-seeding sys.modules, means the count is real
+    # regardless of whatever caching Python's own import system would do.
+    import builtins
+
+    real_import = builtins.__import__
+    attempts = []
+
+    def fake_import(name, *args, **kwargs):
+        if name == "autolume.bending.transform_layers":
+            attempts.append(name)
+            raise ImportError("boom")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    model = _bendable_model()
+    params = render_params(
+        transforms=(Transform("ablate", "conv1", (1.0,), _ALL_CHANNELS),)
+    )
+    with caplog.at_level(logging.WARNING):
+        for index in range(5):
+            assert _pixel(model.render_frame(params, index)) == _UNBENT
+    assert len(attempts) == 1
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+
+
 def test_usable_indices_drops_the_channels_an_activation_does_not_have():
     transform = Transform("ablate", "conv1", (1.0,), (0, 2, 5, 99))
     assert usable_indices(transform, 3) == (0, 2)
     assert usable_indices(transform, 100) == (0, 2, 5, 99)
     assert usable_indices(transform, 0) == ()
+
+
+def test_usable_indices_returns_the_same_tuple_when_nothing_is_out_of_range():
+    # The fully in range case is the common one, so it must not allocate an
+    # equal copy every frame.
+    transform = Transform("ablate", "conv1", (1.0,), (0, 2, 5))
+    assert usable_indices(transform, 100) is transform.indices
 
 
 def test_channels_this_layer_does_not_have_are_dropped_and_logged_once(caplog):
@@ -1411,7 +1448,21 @@ def test_the_log_once_set_cannot_grow_without_bound(caplog):
             model.render_frame(render_params(capture_layer=f"absent{index}"), index)
     assert len(model._logged_once) == _LOG_ONCE_CAP
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
-    assert len(warnings) == _LOG_ONCE_CAP
+    # One warning per distinct cause, plus exactly one more saying the cap
+    # was reached and further distinct causes will not be logged.
+    assert len(warnings) == _LOG_ONCE_CAP + 1
+    assert "further" in warnings[-1].getMessage()
+    assert "not be logged" in warnings[-1].getMessage()
+
+
+def test_the_log_once_cap_warning_is_itself_logged_only_once(caplog):
+    model = _bendable_model()
+    with caplog.at_level(logging.WARNING):
+        for index in range(_LOG_ONCE_CAP + 20):
+            model.render_frame(render_params(capture_layer=f"absent{index}"), index)
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    cap_warnings = [r for r in warnings if "further" in r.getMessage()]
+    assert len(cap_warnings) == 1
 
 
 def test_a_layer_name_this_model_does_not_have_is_logged_once_and_skipped(caplog):

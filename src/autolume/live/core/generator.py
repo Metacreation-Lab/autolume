@@ -117,8 +117,15 @@ def usable_indices(transform: Transform, channels: int) -> tuple[int, ...]:
     after it fails too. Filtering here is the only place that knows the
     tensor, and it is the difference between one skipped transform and a
     dead render thread.
+
+    The common case is every index already in range, so the fully-in-range
+    path returns `transform.indices` itself rather than building an equal
+    copy every frame.
     """
-    return tuple(index for index in transform.indices if 0 <= index < channels)
+    indices = transform.indices
+    if all(0 <= index < channels for index in indices):
+        return indices
+    return tuple(index for index in indices if 0 <= index < channels)
 
 
 def manipulation_dict(transform: Transform, indices) -> dict:
@@ -308,9 +315,11 @@ class LoadedModel:
         self._vec_fallback_logged = False
         self._keyframe_w_cache: dict = {}
         self._logged_once: set = set()
+        self._log_cap_warned = False
         self._hook_key: tuple[str, ...] | None = None
         self._hook_handles: list = []
         self._manipulation = None
+        self._manipulation_failed = False
         # What the hooks act on for the frame being rendered right now, and
         # where the capture hook leaves what it grabbed. Empty between frames.
         self._frame_transforms: tuple[Transform, ...] = ()
@@ -429,9 +438,21 @@ class LoadedModel:
         The render thread hits these paths at frame rate, so a line per
         frame would bury the log and cost more than the failure itself. Past
         `_LOG_ONCE_CAP` distinct causes the model has bigger problems than a
-        missing log line, and the set stops growing.
+        missing log line, and the set stops growing. The cap tripping is
+        itself logged, once, so a session that goes quiet on new failure
+        causes says why instead of just falling silent.
         """
-        if key in self._logged_once or len(self._logged_once) >= _LOG_ONCE_CAP:
+        if key in self._logged_once:
+            return
+        if len(self._logged_once) >= _LOG_ONCE_CAP:
+            if not self._log_cap_warned:
+                self._log_cap_warned = True
+                logger.warning(
+                    "Reached %d distinct logged causes for %s, further "
+                    "distinct causes will not be logged",
+                    _LOG_ONCE_CAP,
+                    self.pkl_path,
+                )
             return
         self._logged_once.add(key)
         logger.warning(message, *args, exc_info=exc_info)
@@ -486,15 +507,25 @@ class LoadedModel:
         """The operator library, loaded the first time a transform needs it.
 
         Imported here rather than at module scope so a session that never
-        bends anything never pays for kornia.
+        bends anything never pays for kornia. A failed import is remembered
+        as a failure, not just as "not yet succeeded": this runs from
+        `_sync_hooks`, which now fires on every frame that has a transform
+        (moved there to fix an unrelated bug where a transform on an
+        already-captured layer never applied), and a broken install would
+        otherwise retry the full import machinery, including kornia's own
+        slow import chain, at frame rate. This model is never given a
+        working bending install mid-session, so the failure does not need
+        to be retryable; a fresh `LoadedModel` on the next model load is the
+        natural place a fixed install gets picked up again.
         """
-        if self._manipulation is not None:
+        if self._manipulation is not None or self._manipulation_failed:
             return
         try:
             from autolume.bending.transform_layers import ManipulationLayer
 
             self._manipulation = ManipulationLayer()
         except Exception:
+            self._manipulation_failed = True
             self._log_once(
                 ("manipulation",),
                 "Could not load the bending operators, transforms stay inactive",
