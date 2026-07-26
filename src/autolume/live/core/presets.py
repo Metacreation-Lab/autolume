@@ -217,11 +217,29 @@ def _finite_or_none(value: object) -> float | None:
     return float(value)
 
 
-def _encode_transform(transform: Transform) -> dict:
+def _encode_transform(transform: Transform) -> dict | None:
+    """One transform as JSON, or None if its params are not all finite.
+
+    `json.dump` defaults to writing a bare NaN/Infinity token for a non-finite
+    float, which is not valid JSON for a strict parser reading this
+    user-facing file back. Dropping the whole transform (not just the bad
+    param) is the only sound choice: a `Transform`'s params are positional and
+    fixed by its op's arity, so there is no way to omit just one and keep the
+    rest meaningful.
+    """
+    params = [float(p) for p in transform.params]
+    if not all(math.isfinite(p) for p in params):
+        logger.warning(
+            "Not writing transform %s on %s, non finite params %r",
+            transform.op,
+            transform.layer,
+            params,
+        )
+        return None
     return {
         "op": transform.op,
         "layer": transform.layer,
-        "params": [float(p) for p in transform.params],
+        "params": params,
         "indices": [int(i) for i in transform.indices],
     }
 
@@ -254,12 +272,26 @@ def _read_index_list(raw: object, what: str) -> tuple[int, ...] | None:
 
 
 def _read_transform(entry: object, index: int) -> Transform | None:
+    """Structural validation, plus the one thing that is knowable without a
+    model: `op` and its arity. The eleven-operator set is a fixed design
+    decision (`mapping.py`'s `_OPERATOR_ARITY`), not a property of any
+    particular model, so unlike `layer` it does not fall under "a preset is
+    not validated against a model" and is rejected here rather than handed
+    off to the render path.
+
+    Imported locally rather than at module level: `mapping.py` imports from
+    this module, so a top-level import here would be circular. By the time
+    this function runs, both modules have already finished loading, the same
+    reasoning `_models_dir` already relies on for its own local import.
+    """
     if not isinstance(entry, dict):
         logger.warning("Skipping transform %d, not an object", index)
         return None
+    from autolume.live.core.mapping import _OPERATOR_ARITY
+
     op = entry.get("op")
     layer = entry.get("layer")
-    if not isinstance(op, str) or not op:
+    if not isinstance(op, str) or op not in _OPERATOR_ARITY:
         logger.warning("Skipping transform %d, invalid op %r", index, op)
         return None
     if not isinstance(layer, str) or not layer:
@@ -267,6 +299,15 @@ def _read_transform(entry: object, index: int) -> Transform | None:
         return None
     params = _read_number_list(entry.get("params"), f"transform {index} params")
     if params is None:
+        return None
+    if len(params) != _OPERATOR_ARITY[op]:
+        logger.warning(
+            "Skipping transform %d, op %s expects %d params, got %d",
+            index,
+            op,
+            _OPERATOR_ARITY[op],
+            len(params),
+        )
         return None
     indices = _read_index_list(entry.get("indices"), f"transform {index} indices")
     if indices is None:
@@ -290,12 +331,23 @@ def _read_transforms(raw: object) -> tuple[Transform, ...]:
 def _encode_layer_noise(entries: tuple[tuple[str, float], ...]) -> list[dict]:
     # Defends the sparse invariant even against a directly built ControlState
     # that skipped mapping.py's own neutral-drop, not only against what a
-    # legitimate edit path would ever produce.
-    return [
-        {"layer": layer, "strength": strength}
-        for layer, strength in entries
-        if strength != 0.0
-    ]
+    # legitimate edit path would ever produce. Also drops a non-finite
+    # strength rather than writing it: `json.dump` would otherwise emit a
+    # literal NaN/Infinity token, which is not valid JSON for a strict parser
+    # reading this user-facing file back.
+    result = []
+    for layer, strength in entries:
+        if strength == 0.0:
+            continue
+        if not math.isfinite(strength):
+            logger.warning(
+                "Not writing layer_noise for %s, non finite strength %r",
+                layer,
+                strength,
+            )
+            continue
+        result.append({"layer": layer, "strength": strength})
+    return result
 
 
 def _read_layer_noise(raw: object) -> tuple[tuple[str, float], ...]:
@@ -304,7 +356,10 @@ def _read_layer_noise(raw: object) -> tuple[tuple[str, float], ...]:
     if not isinstance(raw, list):
         logger.warning("Ignoring preset layer_noise of type %s", type(raw).__name__)
         return ()
-    entries: list[tuple[str, float]] = []
+    # Last-wins by layer: `mapping.py` maintains at most one entry per layer,
+    # so a hand edited file with two rows for the same layer must not load
+    # both and leave a stale duplicate `/bend/noise` can no longer see.
+    seen: dict[str, float] = {}
     for index, entry in enumerate(raw):
         if not isinstance(entry, dict):
             logger.warning("Skipping layer_noise %d, not an object", index)
@@ -321,21 +376,34 @@ def _read_layer_noise(raw: object) -> tuple[tuple[str, float], ...]:
                 entry.get("strength"),
             )
             continue
+        if layer in seen:
+            logger.warning("Overriding duplicate layer_noise entry for %s", layer)
         # Neutral is stored as absence, matching the sparse invariant
         # mapping.py keeps at apply time: a hand edited file that writes one
-        # anyway must not materialize it back.
+        # anyway must not materialize it back, and a later neutral entry for
+        # a layer already seen removes it rather than merely being skipped.
         if strength == 0.0:
+            seen.pop(layer, None)
             continue
-        entries.append((layer, strength))
-    return tuple(entries)
+        seen[layer] = strength
+    return tuple(seen.items())
 
 
 def _encode_layer_ratios(entries: tuple[tuple[str, float, float], ...]) -> list[dict]:
-    return [
-        {"layer": layer, "rx": rx, "ry": ry}
-        for layer, rx, ry in entries
-        if not (rx == 1.0 and ry == 1.0)
-    ]
+    result = []
+    for layer, rx, ry in entries:
+        if rx == 1.0 and ry == 1.0:
+            continue
+        if not (math.isfinite(rx) and math.isfinite(ry)):
+            logger.warning(
+                "Not writing layer_ratios for %s, non finite ratio (%r, %r)",
+                layer,
+                rx,
+                ry,
+            )
+            continue
+        result.append({"layer": layer, "rx": rx, "ry": ry})
+    return result
 
 
 def _read_layer_ratios(raw: object) -> tuple[tuple[str, float, float], ...]:
@@ -344,7 +412,8 @@ def _read_layer_ratios(raw: object) -> tuple[tuple[str, float, float], ...]:
     if not isinstance(raw, list):
         logger.warning("Ignoring preset layer_ratios of type %s", type(raw).__name__)
         return ()
-    entries: list[tuple[str, float, float]] = []
+    # Last-wins by layer, same reasoning as `_read_layer_noise` above.
+    seen: dict[str, tuple[float, float]] = {}
     for index, entry in enumerate(raw):
         if not isinstance(entry, dict):
             logger.warning("Skipping layer_ratios %d, not an object", index)
@@ -358,10 +427,13 @@ def _read_layer_ratios(raw: object) -> tuple[tuple[str, float, float], ...]:
         if rx is None or ry is None:
             logger.warning("Skipping layer_ratios %d, invalid ratio %r", index, entry)
             continue
+        if layer in seen:
+            logger.warning("Overriding duplicate layer_ratios entry for %s", layer)
         if rx == 1.0 and ry == 1.0:
+            seen.pop(layer, None)
             continue
-        entries.append((layer, rx, ry))
-    return tuple(entries)
+        seen[layer] = (rx, ry)
+    return tuple((layer, rx, ry) for layer, (rx, ry) in seen.items())
 
 
 def _encode_directions(directions: tuple[tuple[float, ...], ...]) -> dict | None:
@@ -370,8 +442,26 @@ def _encode_directions(directions: tuple[tuple[float, ...], ...]) -> dict | None
     Reuses `_encode_array`'s dtype/base64 machinery on the flattened values,
     then overrides the shape it would have computed (1D) with the real
     `[rows, cols]` shape, rather than inventing a second encoding.
+
+    Guards ragged rows and an over-eight count itself, the same standard
+    already applied to `layer_noise`/`layer_ratios`: a directly built
+    `ControlState` that skips `mapping.py`'s own invariants must not silently
+    write corrupted or truncated data, flattening ragged rows into a
+    plausible-looking but wrong rectangle, or losing rows past eight with no
+    warning.
     """
     if not directions:
+        return None
+    if len(directions) > 8:
+        logger.warning(
+            "Not writing directions, more than eight vectors (%d)", len(directions)
+        )
+        return None
+    lengths = {len(vector) for vector in directions}
+    if len(lengths) > 1:
+        logger.warning(
+            "Not writing directions, vectors of differing lengths %r", sorted(lengths)
+        )
         return None
     flat = tuple(value for vector in directions for value in vector)
     encoded = _encode_array(flat)
@@ -448,7 +538,11 @@ def to_payload(state: ControlState) -> dict:
             }
             for keyframe in state.keyframes
         ],
-        "transforms": [_encode_transform(t) for t in state.transforms],
+        "transforms": [
+            encoded
+            for t in state.transforms
+            if (encoded := _encode_transform(t)) is not None
+        ],
         "layer_noise": _encode_layer_noise(state.layer_noise),
         "layer_ratios": _encode_layer_ratios(state.layer_ratios),
         "directions": _encode_directions(state.directions),

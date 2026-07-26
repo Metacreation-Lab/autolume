@@ -328,6 +328,19 @@ def test_path_values_are_str_wrapped(tmp_path, monkeypatch):
     assert stored == {"path": r"C:\models\m.pkl"}
 
 
+def test_second_model_path_values_are_str_wrapped(tmp_path, monkeypatch):
+    """Same as `test_path_values_are_str_wrapped`, for `pkl2`/`model2`: this
+    repo's recurring `WindowsPath`-reaching-JSON bug class applies just as
+    much to the second model as to the first."""
+    _use_data_root(monkeypatch, tmp_path)
+    state = dataclasses.replace(SAMPLE, pkl2=PureWindowsPath(r"C:\models\m2.pkl"))
+    path = tmp_path / "look.json"
+    presets.save(state, path)
+    with open(path, "r", encoding="utf-8") as fp:
+        stored = json.load(fp)["model2"]
+    assert stored == {"path": r"C:\models\m2.pkl"}
+
+
 def test_unknown_param_key_is_skipped_and_the_rest_applied(caplog):
     payload = presets.to_payload(SAMPLE)
     payload["params"]["gone_in_v9"] = 3.0
@@ -883,7 +896,11 @@ def test_missing_structured_sections_load_at_their_defaults():
         ("layer_ratios", [{"layer": "b8", "rx": "nope", "ry": 1.0}]),
         ("layer_ratios", [{"layer": "b8", "rx": float("nan"), "ry": 1.0}]),
         ("directions", "not a dict"),
-        ("directions", {"dtype": "float32", "shape": [1, 2, 2], "b64": "AAAAAA=="}),
+        # Correctly encoded (valid dtype/shape/base64/finite), but 1D: this is
+        # what actually exercises the "expected a 2D shape" guard, unlike a
+        # shape/byte-length mismatch, which `_decode_array` itself already
+        # rejects before that guard is ever reached.
+        ("directions", _array_payload((1.0, 2.0, 3.0))),
         ("directions", {"dtype": "float32", "shape": [9, 1], "b64": "AA==" * 9}),
         ("combined_layers", "not a list"),
         ("combined_layers", ["A", "Q", "B"]),
@@ -945,6 +962,111 @@ def test_layer_ratios_sparseness_round_trip_and_neutral_entries_are_dropped():
     assert data.layer_ratios == (("b8.conv1", 1.2, 0.8),)
 
 
+def test_duplicate_layer_noise_entries_last_wins(caplog):
+    """`mapping.py` maintains at most one `layer_noise` entry per layer, so a
+    hand edited file with two rows for the same layer must resolve to one,
+    the last, rather than loading both."""
+    payload = presets.to_payload(SAMPLE)
+    payload["layer_noise"] = [
+        {"layer": "b8.conv1", "strength": 0.2},
+        {"layer": "b8.conv1", "strength": 0.9},
+    ]
+    with caplog.at_level(logging.WARNING):
+        data = presets.from_payload(payload)
+    assert data.layer_noise == (("b8.conv1", 0.9),)
+    assert any("b8.conv1" in m for m in warnings_from(caplog))
+
+
+def test_duplicate_layer_noise_entry_resolving_to_neutral_removes_it():
+    payload = presets.to_payload(SAMPLE)
+    payload["layer_noise"] = [
+        {"layer": "b8.conv1", "strength": 0.2},
+        {"layer": "b8.conv1", "strength": 0.0},
+    ]
+    data = presets.from_payload(payload)
+    assert data.layer_noise == ()
+
+
+def test_duplicate_layer_ratios_entries_last_wins(caplog):
+    payload = presets.to_payload(SAMPLE)
+    payload["layer_ratios"] = [
+        {"layer": "b8.conv1", "rx": 1.1, "ry": 0.9},
+        {"layer": "b8.conv1", "rx": 1.5, "ry": 0.5},
+    ]
+    with caplog.at_level(logging.WARNING):
+        data = presets.from_payload(payload)
+    assert data.layer_ratios == (("b8.conv1", 1.5, 0.5),)
+    assert any("b8.conv1" in m for m in warnings_from(caplog))
+
+
+def test_duplicate_layer_ratios_entry_resolving_to_neutral_removes_it():
+    payload = presets.to_payload(SAMPLE)
+    payload["layer_ratios"] = [
+        {"layer": "b8.conv1", "rx": 1.1, "ry": 0.9},
+        {"layer": "b8.conv1", "rx": 1.0, "ry": 1.0},
+    ]
+    data = presets.from_payload(payload)
+    assert data.layer_ratios == ()
+
+
+def test_non_finite_transform_param_is_not_written(caplog):
+    """`json.dump` writes a bare NaN token for a non-finite float by default,
+    which is invalid JSON for a strict parser. A directly built `ControlState`
+    (bypassing `mapping.py`'s own finite checks) must not have that leak into
+    a saved file."""
+    state = dataclasses.replace(
+        SAMPLE, transforms=(Transform("rotate", "b8.conv1", (float("nan"),), ()),)
+    )
+    with caplog.at_level(logging.WARNING):
+        payload = presets.to_payload(state)
+    assert payload["transforms"] == []
+    assert "NaN" not in json.dumps(payload)
+    assert any("non finite" in m for m in warnings_from(caplog))
+
+
+def test_non_finite_layer_noise_strength_is_not_written(caplog):
+    state = dataclasses.replace(SAMPLE, layer_noise=(("b8.conv1", float("inf")),))
+    with caplog.at_level(logging.WARNING):
+        payload = presets.to_payload(state)
+    assert payload["layer_noise"] == []
+    assert "Infinity" not in json.dumps(payload)
+    assert any("non finite" in m for m in warnings_from(caplog))
+
+
+def test_non_finite_layer_ratio_is_not_written(caplog):
+    state = dataclasses.replace(
+        SAMPLE, layer_ratios=(("b8.conv1", float("nan"), 1.0),)
+    )
+    with caplog.at_level(logging.WARNING):
+        payload = presets.to_payload(state)
+    assert payload["layer_ratios"] == []
+    assert "NaN" not in json.dumps(payload)
+    assert any("non finite" in m for m in warnings_from(caplog))
+
+
+def test_ragged_directions_are_not_written(caplog):
+    """A directly built `ControlState` with rows of differing lengths must
+    not silently write a plausible-looking but wrong rectangle: flattening
+    `((1,2),(3,4,5),(6,))` into a `[3, 2]` shape reads back as
+    `((1,2),(3,4),(5,6))`, different data, with no warning."""
+    state = dataclasses.replace(
+        SAMPLE, directions=((1.0, 2.0), (3.0, 4.0, 5.0), (6.0,))
+    )
+    with caplog.at_level(logging.WARNING):
+        payload = presets.to_payload(state)
+    assert payload["directions"] is None
+    assert any("differing lengths" in m for m in warnings_from(caplog))
+
+
+def test_more_than_eight_directions_are_not_written(caplog):
+    nine = tuple((float(i),) for i in range(9))
+    state = dataclasses.replace(SAMPLE, directions=nine)
+    with caplog.at_level(logging.WARNING):
+        payload = presets.to_payload(state)
+    assert payload["directions"] is None
+    assert any("eight" in m for m in warnings_from(caplog))
+
+
 def test_directions_up_to_eight_equal_length_vectors_round_trip():
     eight = tuple((float(i), float(-i)) for i in range(8))
     payload = presets.to_payload(dataclasses.replace(SAMPLE, directions=eight))
@@ -975,17 +1097,62 @@ def test_directions_with_more_than_eight_vectors_is_rejected(caplog):
     assert any("eight" in m for m in warnings_from(caplog))
 
 
-def test_transforms_layer_and_op_are_not_validated_against_a_model(caplog):
-    """An unknown layer or op name loads as-is: presets are not validated
-    against a model, only against basic structural shape."""
+def test_directions_with_a_valid_but_non_2d_shape_is_rejected(caplog):
+    """A correctly encoded array (valid dtype, shape, base64, all finite) but
+    1D must still be rejected: `_decode_array` alone cannot tell a 1D vector
+    from a 2D block, so `_read_directions`'s own 2D guard is what has to catch
+    it. Uses a genuinely valid descriptor so this guard, not an earlier one,
+    is what is actually exercised."""
+    payload = presets.to_payload(SAMPLE)
+    payload["directions"] = _array_payload((1.0, 2.0, 3.0))
+    with caplog.at_level(logging.WARNING):
+        data = presets.from_payload(payload)
+    assert data.directions == ()
+    assert any("2D shape" in m for m in warnings_from(caplog))
+
+
+def test_transforms_unknown_layer_loads_as_is():
+    """An unknown layer name loads as-is: a preset is not validated against a
+    model, so a layer this build's loaded model doesn't have is the render
+    path's business, not this module's."""
     payload = presets.to_payload(SAMPLE)
     payload["transforms"] = [
-        {"op": "not-a-real-op", "layer": "no.such.layer", "params": [1.0], "indices": [0]}
+        {"op": "rotate", "layer": "no.such.layer", "params": [1.0], "indices": [0]}
     ]
     data = presets.from_payload(payload)
-    assert data.transforms == (
-        Transform("not-a-real-op", "no.such.layer", (1.0,), (0,)),
-    )
+    assert data.transforms == (Transform("rotate", "no.such.layer", (1.0,), (0,)),)
+
+
+def test_transforms_unknown_op_is_dropped_and_logged(caplog):
+    """Unlike a layer name, the eleven-operator set is a fixed design
+    decision, not model-dependent, so it is fully knowable at load time and
+    is rejected here rather than handed off to the render path."""
+    payload = presets.to_payload(SAMPLE)
+    payload["transforms"] = [
+        {"op": "not-a-real-op", "layer": "b8", "params": [1.0], "indices": [0]}
+    ]
+    with caplog.at_level(logging.WARNING):
+        data = presets.from_payload(payload)
+    assert data.transforms == ()
+    assert any("not-a-real-op" in m for m in warnings_from(caplog))
+
+
+@pytest.mark.parametrize(
+    "op,bad_params",
+    [
+        ("rotate", [1.0, 2.0]),  # arity 1, given 2
+        ("translate", [1.0]),  # arity 2, given 1
+    ],
+)
+def test_transforms_arity_mismatch_is_dropped_and_logged(op, bad_params, caplog):
+    payload = presets.to_payload(SAMPLE)
+    payload["transforms"] = [
+        {"op": op, "layer": "b8", "params": bad_params, "indices": []}
+    ]
+    with caplog.at_level(logging.WARNING):
+        data = presets.from_payload(payload)
+    assert data.transforms == ()
+    assert any("expects" in m for m in warnings_from(caplog))
 
 
 # --- hostile input never raises -----------------------------------------
