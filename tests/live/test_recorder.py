@@ -4,6 +4,7 @@ Every test here stands a fake `cv2.VideoWriter` in for the real one: the codec
 is not what is under test, the queue discipline and the thread lifecycle are.
 """
 
+import datetime
 import threading
 import time
 
@@ -13,6 +14,7 @@ import pytest
 
 from autolume.live.io.recorder import (
     DEFAULT_FPS,
+    MIN_QUEUE_FRAMES,
     QUEUE_CAPACITY,
     SCREENSHOT_CAPACITY,
     Recorder,
@@ -45,6 +47,7 @@ class FakeWriter:
     created = []
     open_gate = None
     write_gate = None
+    write_delay = 0.0
     opened = True
     write_error = None
 
@@ -65,6 +68,8 @@ class FakeWriter:
     def write(self, image):
         if FakeWriter.write_gate is not None:
             FakeWriter.write_gate.wait(3.0)
+        if FakeWriter.write_delay:
+            time.sleep(FakeWriter.write_delay)
         if FakeWriter.write_error is not None:
             raise FakeWriter.write_error
         self.frames.append(np.array(image, copy=True))
@@ -78,6 +83,7 @@ def writers(monkeypatch):
     FakeWriter.created = []
     FakeWriter.open_gate = None
     FakeWriter.write_gate = None
+    FakeWriter.write_delay = 0.0
     FakeWriter.opened = True
     FakeWriter.write_error = None
     monkeypatch.setattr(cv2, "VideoWriter", FakeWriter)
@@ -458,3 +464,211 @@ def test_capture_path_lands_under_captures_and_is_a_string():
     assert path.endswith(".mp4")
     assert "captures" in path
     assert "thing_" in path
+
+
+# --- the queue is bounded in bytes, not in frames --------------------------
+
+
+def big_frame(value=1, side=64):
+    image = np.zeros((side, side, 3), dtype=np.uint8)
+    image[:, :] = (value, value + 1, value + 2)
+    image.flags.writeable = False
+    return image
+
+
+def test_the_queue_allowance_falls_as_the_frame_size_rises(writers, tmp_path):
+    """120 frames is a frame count, and a frame count is not a memory bound.
+
+    Super-res 4x on a 1024 model renders 4096x4096, which is 50 MB a frame:
+    120 of those is 6 GB of host RAM alongside two StyleGAN models. The
+    budget is what is bounded; the frame count is only its ceiling.
+    """
+    budget = 4 * 1024 * 1024
+    small = Recorder(byte_budget=budget)
+    small.start(str(tmp_path / "small.mp4"), 30)
+    small.on_frame(big_frame(1, side=32), 0)
+    assert wait_for(lambda: small.queue_allowance() is not None)
+    small_allowance = small.queue_allowance()
+    small.stop()
+
+    large = Recorder(byte_budget=budget)
+    large.start(str(tmp_path / "large.mp4"), 30)
+    large.on_frame(big_frame(1, side=512), 0)
+    assert wait_for(lambda: large.queue_allowance() is not None)
+    large_allowance = large.queue_allowance()
+    large.stop()
+
+    assert small_allowance > large_allowance
+    assert small_allowance == QUEUE_CAPACITY
+    assert large_allowance == budget // (512 * 512 * 3)
+
+
+def test_the_allowance_never_falls_below_a_usable_floor(writers, tmp_path):
+    recorder = Recorder(byte_budget=1)
+    recorder.start(str(tmp_path / "huge.mp4"), 30)
+    try:
+        recorder.on_frame(big_frame(1, side=256), 0)
+        assert wait_for(lambda: recorder.queue_allowance() is not None)
+    finally:
+        recorder.stop()
+    assert recorder.queue_allowance() == MIN_QUEUE_FRAMES
+
+
+def test_the_byte_budget_is_what_actually_bounds_the_queue(writers, tmp_path):
+    """The allowance is not just reported, it is the drop threshold."""
+    FakeWriter.open_gate = threading.Event()
+    allowance = 4
+    recorder = Recorder(byte_budget=allowance * 64 * 64 * 3)
+    recorder.start(str(tmp_path / "take.mp4"), 30)
+    try:
+        recorder.on_frame(big_frame(0), 0)
+        assert wait_for(lambda: len(writers) == 1)
+        for value in range(1, 20):
+            recorder.on_frame(big_frame(value), value)
+        assert recorder.queue_allowance() == allowance
+        assert recorder.status().frames_dropped == 19 - allowance
+        FakeWriter.open_gate.set()
+        assert wait_for(lambda: len(writers[0].frames) == allowance + 1)
+    finally:
+        FakeWriter.open_gate.set()
+        recorder.stop()
+
+
+# --- shutdown always finalizes the file ------------------------------------
+
+
+def test_a_stop_that_runs_out_of_time_still_releases_the_writer(writers, tmp_path):
+    """An abandoned encoder means no `release()`, and no moov atom.
+
+    A file whose header was never written is not a short recording, it is a
+    lost performance: nothing can open it at all. Dropping the backlog and
+    finalizing is strictly better.
+    """
+    # A backlog that needs a second to flush, against a stop that has a fifth
+    # of one. Measured mp4v cost at 4096x4096 is 118 ms a frame, so this is
+    # the shape of a real shutdown during a high resolution take.
+    FakeWriter.write_delay = 0.05
+    recorder = Recorder()
+    recorder.start(str(tmp_path / "take.mp4"), 30)
+    for value in range(20):
+        recorder.on_frame(frame(value), value)
+    assert wait_for(lambda: len(writers) == 1)
+
+    started = time.monotonic()
+    recorder.stop(timeout=0.2, abort_on_timeout=True)
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 1.0
+    assert writers[0].released is True
+    assert 0 < len(writers[0].frames) < 20
+    assert recorder.status().recording is False
+    assert recorder.status().error is not None
+
+
+def test_an_ordinary_stop_never_abandons_the_backlog(writers, tmp_path):
+    """Only a shutdown deadline aborts. A normal Stop flushes everything."""
+    FakeWriter.write_delay = 0.01
+    recorder = Recorder()
+    recorder.start(str(tmp_path / "take.mp4"), 30)
+    for value in range(20):
+        recorder.on_frame(frame(value), value)
+    recorder.stop()
+    assert len(writers[0].frames) == 20
+    assert recorder.status().error is None
+
+
+# --- the refusal message outlives the take that caused it ------------------
+
+
+def test_the_refusal_survives_the_finishing_take(writers, tmp_path):
+    """Otherwise the reason vanishes and Record is simply dead for a while.
+
+    The take that was still saving publishes its own clean finish a moment
+    later. If that clears the refusal, the performer is left with an unlit
+    Record button, no second file, and nothing on screen that says why.
+    """
+    FakeWriter.write_gate = threading.Event()
+    recorder = Recorder()
+    recorder.start(str(tmp_path / "one.mp4"), 30)
+    recorder.on_frame(frame(1), 0)
+    assert wait_for(lambda: len(writers) == 1)
+    recorder.stop(timeout=0.0)
+
+    recorder.start(str(tmp_path / "two.mp4"), 30)
+    refusal = recorder.status().error
+    assert refusal is not None
+
+    FakeWriter.write_gate.set()
+    assert wait_for(lambda: writers[0].released)
+    time.sleep(0.1)
+    assert recorder.status().error == refusal
+
+    recorder.start(str(tmp_path / "three.mp4"), 30)
+    assert recorder.status().error is None
+    recorder.stop()
+
+
+def test_frames_written_keeps_moving_while_a_take_is_flushing(writers, tmp_path):
+    """The counter a performer watches at Stop must not be the one that freezes."""
+    FakeWriter.write_gate = threading.Event()
+    recorder = Recorder()
+    recorder.start(str(tmp_path / "take.mp4"), 30)
+    for value in range(6):
+        recorder.on_frame(frame(value), value)
+    assert wait_for(lambda: len(writers) == 1)
+    recorder.stop(timeout=0.0)
+
+    FakeWriter.write_gate.set()
+    assert wait_for(lambda: recorder.status().frames_written >= 3)
+    assert wait_for(lambda: recorder.status().frames_written == 6)
+    recorder.stop()
+
+
+# --- screenshot naming and failure logging ---------------------------------
+
+
+def test_two_captures_in_the_same_second_do_not_overwrite(tmp_path, monkeypatch):
+    from utils import user_data
+
+    monkeypatch.setattr(user_data, "_prefs", {"version": 1, "data_root": str(tmp_path)})
+    monkeypatch.setattr(user_data, "_data_root", str(tmp_path))
+    frozen = datetime.datetime(2026, 7, 26, 12, 0, 0)
+
+    first = capture_path("/models/thing.pkl", ".png", now=frozen)
+    second = capture_path("/models/thing.pkl", ".png", now=frozen)
+    third = capture_path("/models/thing.pkl", ".png", now=frozen)
+
+    assert len({first, second, third}) == 3
+    assert first.endswith("thing_2026-07-26_12-00-00.png")
+
+
+def test_a_name_already_on_disk_is_not_reused(tmp_path, monkeypatch):
+    from utils import user_data
+
+    monkeypatch.setattr(user_data, "_prefs", {"version": 1, "data_root": str(tmp_path)})
+    monkeypatch.setattr(user_data, "_data_root", str(tmp_path))
+    frozen = datetime.datetime(2026, 7, 26, 13, 0, 0)
+    captures = tmp_path / "captures"
+    captures.mkdir()
+    (captures / "thing_2026-07-26_13-00-00.mp4").write_bytes(b"old take")
+
+    path = capture_path("/models/thing.pkl", ".mp4", now=frozen)
+    assert path.endswith("thing_2026-07-26_13-00-00-2.mp4")
+
+
+def test_repeated_screenshot_failures_log_once_per_cause(tmp_path, caplog):
+    """An unwritable folder under an OSC sweep must not flood the log."""
+    worker = ScreenshotWorker()
+    target = tmp_path / "wall"
+    target.write_bytes(b"not a folder")
+    with caplog.at_level("WARNING"):
+        for index in range(4):
+            worker.save_png(str(target / f"shot{index}.png"), frame(index))
+            time.sleep(0.05)
+        worker.stop()
+    failures = [
+        record
+        for record in caplog.records
+        if "Could not save the screenshot" in record.getMessage()
+    ]
+    assert len(failures) == 1

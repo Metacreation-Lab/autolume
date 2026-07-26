@@ -32,19 +32,44 @@ logger = logging.getLogger(__name__)
 # cannot express (see constraints.md).
 SCREENSHOT_ADDRESS = "/capture/screenshot"
 
-# Two seconds of frames at 60 fps. Long enough to ride out an encoder stall,
-# short enough that the queue is not a second copy of the whole take.
+# Ceiling on the queue depth, not the bound that matters: two seconds of
+# frames at 60 fps, which is a deep enough buffer for any frame small enough
+# that 120 of them are affordable.
 QUEUE_CAPACITY = 120
+# What actually bounds the queue. A frame count is not a memory bound: 4x
+# super-res on a 1024 model renders 4096x4096, 50 MB a frame, and 120 of
+# those is 6 GB of host RAM sitting next to two StyleGAN models. The
+# allowance is derived from the first frame's size against this budget, so a
+# small frame still gets a deep queue and a huge one gets a shallow one.
+BYTE_BUDGET = 320 * 1024 * 1024
+# Floor, so even a frame bigger than the whole budget gets some buffering:
+# without it a single slow write would drop every frame behind it.
+MIN_QUEUE_FRAMES = 4
 # What the file records at when the render loop is uncapped: an mp4 has to
 # name a rate, and the old app's hard coded 30 is a sane one to inherit.
 DEFAULT_FPS = 30
 STOP_TIMEOUT = 5.0
+# How long the encoder gets to finalize the file after it has been told to
+# drop the backlog. Only one write and a release remain at that point.
+ABORT_GRACE = 2.0
 SCREENSHOT_CAPACITY = 8
 _IDLE_WAIT = 0.05
 _DROP_LOG_INTERVAL = 100
+# Mirrors ndi.py and superres.py: past this many distinct causes the log
+# stops growing and says so once.
+_LOG_ONCE_CAP = 64
+_DIGIT_RUN = re.compile(r"\d+")
+_MAX_ERROR_TEXT = 200
 
 _SIZE_CHANGED = "The frame size changed. The recording was stopped."
-_STILL_SAVING = "The previous recording is still saving. Try again in a moment."
+# Past tense on purpose. It stays on the status until a new take starts, and
+# by then the take it refers to has usually finished saving, so a present
+# tense sentence would have turned into a lie while the performer read it.
+_STILL_SAVING = (
+    "The previous recording was still saving. Press Record again to start a "
+    "new take."
+)
+_ABORTED = "Autolume was closing. The recording was cut short and saved."
 
 
 @dataclasses.dataclass(frozen=True)
@@ -79,6 +104,15 @@ def capture_path(
 ) -> str:
     """Where a capture lands: `<data root>/captures/<basename><extension>`.
 
+    The basename is timestamped to the second, so two captures inside one
+    second would otherwise be one file. This address is reachable from a
+    hardware button, where two taps in a second is a normal thing to do, so a
+    taken name gets `-2`, `-3` and so on appended.
+
+    Both an on-disk check and a short memory of what was just handed out are
+    needed: the writes are asynchronous, so the first file may well not exist
+    yet when the second name is asked for.
+
     A string, never a `Path`: this crosses into a status snapshot, a log line
     and OpenCV, and a `WindowsPath` in any of those is a recurring bug in this
     repo. `data_path` is imported here rather than at module scope to keep the
@@ -87,7 +121,33 @@ def capture_path(
     """
     from utils.user_data import data_path
 
-    return str(data_path("captures", f"{capture_basename(pkl_path, now)}{extension}"))
+    base = capture_basename(pkl_path, now)
+    folder = data_path("captures")
+    with _naming_lock:
+        name = f"{base}{extension}"
+        index = 1
+        while index < _MAX_NAME_ATTEMPTS and _is_taken(folder, name):
+            index += 1
+            name = f"{base}-{index}{extension}"
+        _handed_out.append(name)
+    return str(data_path("captures", name))
+
+
+def _is_taken(folder, name: str) -> bool:
+    if name in _handed_out:
+        return True
+    try:
+        return os.path.exists(os.path.join(str(folder), name))
+    except OSError:
+        return False
+
+
+# The last few names handed out, so a capture whose file has not been
+# written yet still takes its name out of circulation. Bounded, because this
+# address can be swept from OSC.
+_handed_out: collections.deque[str] = collections.deque(maxlen=64)
+_naming_lock = threading.Lock()
+_MAX_NAME_ATTEMPTS = 100
 
 
 class Recorder:
@@ -99,16 +159,25 @@ class Recorder:
     """
 
     def __init__(
-        self, capacity: int = QUEUE_CAPACITY, stop_timeout: float = STOP_TIMEOUT
+        self,
+        capacity: int = QUEUE_CAPACITY,
+        stop_timeout: float = STOP_TIMEOUT,
+        byte_budget: int = BYTE_BUDGET,
+        abort_grace: float = ABORT_GRACE,
     ) -> None:
         self._capacity = int(capacity)
+        self._byte_budget = int(byte_budget)
         self._stop_timeout = float(stop_timeout)
+        self._abort_grace = float(abort_grace)
         self._lock = threading.Lock()
-        self._frames: collections.deque[np.ndarray] = collections.deque(
-            maxlen=self._capacity
-        )
+        # Bounded by `_allowance` rather than by the deque's own maxlen: the
+        # allowance is only knowable once a frame's size is, and a deque
+        # cannot be re-bounded after construction.
+        self._frames: collections.deque[np.ndarray] = collections.deque()
+        self._allowance: int | None = None
         self._wake = threading.Event()
         self._stopping = threading.Event()
+        self._abort = threading.Event()
         self._thread: threading.Thread | None = None
         # Read by the render thread on every frame, so it is a plain flag and
         # not a lock acquisition. Cleared by whichever of the two threads ends
@@ -118,12 +187,21 @@ class Recorder:
         self._fps = DEFAULT_FPS
         self._written = 0
         self._dropped = 0
+        # A refused start, kept until a new take actually begins. The take
+        # that was still saving publishes its own clean finish a moment
+        # later, and that must not wipe the only explanation the performer
+        # has for why their second take never happened.
+        self._refusal: str | None = None
         self._store: LatestValueStore[RecorderStatus] = LatestValueStore(
             RecorderStatus()
         )
 
     def status(self) -> RecorderStatus:
         return self._store.snapshot()
+
+    def queue_allowance(self) -> int | None:
+        """How many frames this take may hold, or None before the first frame."""
+        return self._allowance
 
     def start(self, path: str, fps: int) -> None:
         """Begin a take. Called from the control thread: never blocks, never raises.
@@ -140,37 +218,58 @@ class Recorder:
             # Starting here would interleave two takes into one file, so the
             # request is refused with a reason the panel can show instead.
             logger.info("Ignoring a record request while the previous take is saving")
-            self._publish(_STILL_SAVING)
+            self._refusal = _STILL_SAVING
+            self._publish()
             return
+        self._refusal = None
         with self._lock:
             self._frames.clear()
+            self._allowance = None
             self._written = 0
             self._dropped = 0
         self._path = str(path)
         self._fps = _positive_fps(fps)
         self._stopping.clear()
+        self._abort.clear()
         self._wake.clear()
         self._active = True
         self._publish()
         self._thread = threading.Thread(target=self._run, name="recorder", daemon=True)
         self._thread.start()
 
-    def stop(self, timeout: float | None = None) -> None:
+    def stop(self, timeout: float | None = None, abort_on_timeout: bool = False) -> None:
         """End the take and let the encoder flush what is queued.
 
         `timeout` bounds the join. The control thread passes 0.0: the tail of
         a take can be a hundred frames of encoding and the show's heartbeat
         cannot wait for it, so the encoder finishes, releases the writer and
-        publishes its final counts on its own thread. Shutdown passes the full
-        timeout, because there the flush is the point.
+        publishes its final counts on its own thread.
+
+        `abort_on_timeout` is what shutdown passes, and it is the difference
+        between a short recording and a lost one. The encoder is a daemon
+        thread, so a process that exits while it is still flushing abandons it
+        mid write: `release()` never runs, the mp4 header is never finalized,
+        and the whole take is unopenable rather than merely short. Past the
+        deadline the encoder is told to drop whatever is left and finalize.
         """
+        # Cleared first and unconditionally, so a take started in the window
+        # between another thread reading `_thread` and this line cannot leave
+        # the sink accepting frames forever.
+        self._active = False
         thread = self._thread
         if thread is None:
             return
-        self._active = False
         self._stopping.set()
         self._wake.set()
         thread.join(self._stop_timeout if timeout is None else float(timeout))
+        if thread.is_alive() and abort_on_timeout:
+            logger.warning(
+                "The recording did not finish saving in time. Cutting it short "
+                "so the file is playable"
+            )
+            self._abort.set()
+            self._wake.set()
+            thread.join(self._abort_grace)
         if thread.is_alive():
             logger.info("The recording is still saving in the background")
             return
@@ -181,8 +280,13 @@ class Recorder:
         if not self._active:
             return
         with self._lock:
-            dropped = len(self._frames) == self._capacity
+            if self._allowance is None:
+                self._allowance = _queue_allowance(
+                    getattr(frame, "nbytes", 0), self._capacity, self._byte_budget
+                )
+            dropped = len(self._frames) >= self._allowance
             if dropped:
+                self._frames.popleft()
                 self._dropped += 1
             self._frames.append(frame)
         self._wake.set()
@@ -203,6 +307,9 @@ class Recorder:
                 self._wake.clear()
                 frames = self._drain()
                 for frame in frames:
+                    if self._abort.is_set():
+                        reason = _ABORTED
+                        break
                     frame_size = (int(frame.shape[1]), int(frame.shape[0]))
                     if writer is None:
                         size = frame_size
@@ -228,14 +335,14 @@ class Recorder:
                         break
                     with self._lock:
                         self._written += 1
+                    # Per frame, not per drained batch: a batch can be a
+                    # hundred frames and several seconds of encoding, and a
+                    # counter that freezes for the whole flush freezes at
+                    # exactly the moment somebody is watching it to see
+                    # whether their recording is going anywhere.
+                    self._publish()
                 if reason is not None:
                     break
-                # Only while the take is live: once `stop` has cleared
-                # `_active` this thread is flushing, and republishing here
-                # would erase whatever the status is now carrying (a refused
-                # second take says so through the same channel).
-                if self._active:
-                    self._publish()
                 if self._stopping.is_set() and not self._pending():
                     break
                 if not frames:
@@ -281,9 +388,14 @@ class Recorder:
             return bool(self._frames)
 
     def _publish(self, error: str | None = None) -> None:
-        """Publish the current counters. `recording` is `_active`, not an
-        argument: the flag is what says whether frames are still being taken,
-        and a status that disagreed with it would be the panel's truth."""
+        """Publish the current counters.
+
+        `recording` is `_active` rather than an argument: the flag is what
+        says whether frames are still being taken, and a status that
+        disagreed with it would be the panel's truth. `error` falls back to a
+        pending refusal, which is the one message that has to outlive the
+        take it is about.
+        """
         with self._lock:
             written, dropped = self._written, self._dropped
         self._store.set(
@@ -292,7 +404,7 @@ class Recorder:
                 path=self._path,
                 frames_written=written,
                 frames_dropped=dropped,
-                error=error,
+                error=error or self._refusal,
             )
         )
 
@@ -341,6 +453,8 @@ class ScreenshotWorker:
         self._running = False
         self._stopped = False
         self._drops = 0
+        self._logged_errors: set[str] = set()
+        self._log_cap_warned = False
 
     def save_png(self, path: str, frame: np.ndarray) -> None:
         """Queue one PNG write. Called from the render thread: never blocks."""
@@ -420,13 +534,66 @@ class ScreenshotWorker:
             if directory:
                 os.makedirs(directory, exist_ok=True)
             written = cv2.imwrite(path, cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
-        except Exception:
-            logger.exception("Could not save the screenshot %s", path)
+        except Exception as exc:
+            self._record_failure(path, exc)
             return
         if written:
             logger.info("Screenshot saved to %s", path)
         else:
-            logger.warning("Could not save the screenshot %s", path)
+            self._record_failure(path, None)
+
+    def _record_failure(self, path: str, exc: Exception | None) -> None:
+        """Log a failed write once per cause, following `ndi.py`'s shape.
+
+        A captures folder that cannot be written to fails identically for
+        every request, and this address can be swept from OSC, so an
+        unthrottled traceback per failure buries the log under one mistake.
+        The key normalises digit runs so a message carrying an errno or a
+        frame number is still one cause.
+        """
+        text = _safe_error_text(exc) if exc is not None else "OpenCV would not write it"
+        key = f"{type(exc).__name__ if exc is not None else 'refused'}:{_DIGIT_RUN.sub('N', text)}"
+        if key in self._logged_errors:
+            return
+        if len(self._logged_errors) >= _LOG_ONCE_CAP:
+            if not self._log_cap_warned:
+                self._log_cap_warned = True
+                logger.warning(
+                    "Reached %d distinct screenshot failure causes, further "
+                    "distinct causes will not be logged",
+                    _LOG_ONCE_CAP,
+                )
+            return
+        self._logged_errors.add(key)
+        logger.warning("Could not save the screenshot %s. %s", path, text)
+
+
+def _safe_error_text(exc: Exception) -> str:
+    """`describe(exc)`, defensively: this feeds a log line and a dedup key.
+
+    Neither may raise nor be unbounded. Same shape as `ndi.py`'s and
+    `superres.py`'s; the three of them want lifting into `errors.py`, which
+    is not this task's file to touch.
+    """
+    try:
+        text = describe(exc)
+    except Exception:
+        text = type(exc).__name__
+    if len(text) > _MAX_ERROR_TEXT:
+        text = text[:_MAX_ERROR_TEXT] + "...(truncated)"
+    return text
+
+
+def _queue_allowance(nbytes: int, capacity: int, budget: int) -> int:
+    """How many frames of `nbytes` fit the budget, within the ceiling and floor.
+
+    The ceiling keeps a small frame's queue at the depth it always had; the
+    floor keeps a frame bigger than the whole budget from having no queue at
+    all.
+    """
+    if nbytes <= 0:
+        return capacity
+    return max(MIN_QUEUE_FRAMES, min(capacity, budget // int(nbytes)))
 
 
 def _positive_fps(fps: object) -> int:
