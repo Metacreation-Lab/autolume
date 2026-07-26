@@ -2408,6 +2408,25 @@ def test_model_host_reports_a_slot_b_load_failure():
     host.stop()
 
 
+def test_model_host_a_slot_b_load_does_not_clear_model_as_error():
+    """Slot B succeeding says nothing about a slot A that is still not
+    loaded, and the preview overlay must keep saying so."""
+    def loader(path, device=None):
+        if path == "/tmp/a.pkl":
+            raise RuntimeError("bad first pkl")
+        return LoadedModel(path, tiny_generator(), device)
+
+    host = ModelHost(loader=loader)
+    host.request_load("/tmp/a.pkl")
+    assert wait_for(lambda: host.error() is not None)
+
+    host.request_load_b("/tmp/b.pkl")
+    assert wait_for(lambda: host.current_b() is not None)
+    assert "bad first pkl" in host.error()
+    assert host.current() is None
+    host.stop()
+
+
 def test_model_host_renders_the_mix_once_it_is_built():
     a, b = tiny_generator(seed=1), tiny_generator(seed=2)
     host = mixing_host(a, b, split_at_resolution(a, 8))

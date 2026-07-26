@@ -1215,7 +1215,9 @@ class ModelHost:
                 previous = self._current_b
                 self._current_b = model
                 self._pending_b = None
-                self._error = None
+                # Deliberately not clearing `_error`: it belongs to whatever
+                # last failed, and slot B succeeding says nothing about a
+                # slot A that is still not loaded.
                 stale_mix = self._retire_mix_locked()
         if won:
             _release_quietly(previous)
