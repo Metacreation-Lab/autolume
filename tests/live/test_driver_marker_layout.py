@@ -1491,6 +1491,47 @@ def perform_widget_enabled_flags(state: ControlState) -> dict[str, bool]:
     return seen
 
 
+def test_project_greys_unless_the_render_mode_is_vec(frame):
+    """Item A: `latent_project` (Perform panel, Latent section) is greyed
+    unless `derive_mode` says `"vec"`, the only branch `generator.py`'s
+    `_keyframe_to_w`/`render_frame` ever reads it in.
+
+    This had zero coverage before: the reviewer could remove
+    `enabled=mode == "vec"` from `_latent_rows` entirely and the suite still
+    reported every test passing. Four cases, matching `derive_mode`'s own
+    branches: seed navigation (seed grid, no loop) is `"seed"`, greyed;
+    vector navigation (no loop) is `"vec"`, live; a keyframe loop playing is
+    `"loop"` regardless of `vector_mode`, greyed; a noise loop playing is
+    `"vec"` regardless of `vector_mode`, live, which is what visibly ungreys
+    the checkbox the moment a noise loop starts.
+    """
+    seed_mode = perform_widget_enabled_flags(ControlState())
+    assert seed_mode["latent_project"] is False
+
+    imgui.new_line()
+    vector_mode = perform_widget_enabled_flags(ControlState(vector_mode=True))
+    assert vector_mode["latent_project"] is True
+
+    imgui.new_line()
+    keyframe_loop = perform_widget_enabled_flags(ControlState(loop_active=True))
+    assert keyframe_loop["latent_project"] is False
+
+    imgui.new_line()
+    noise_loop = perform_widget_enabled_flags(
+        ControlState(loop_active=True, noise_loop=True)
+    )
+    assert noise_loop["latent_project"] is True
+
+    imgui.new_line()
+    # `vector_mode` alone must not be what `latent_project` reads: a
+    # keyframe loop is `"loop"`, not `"vec"`, even with `vector_mode` on,
+    # since a keyframe loop takes the latent over regardless of it.
+    vector_mode_keyframe_loop = perform_widget_enabled_flags(
+        ControlState(vector_mode=True, loop_active=True)
+    )
+    assert vector_mode_keyframe_loop["latent_project"] is False
+
+
 def test_latent_xy_stay_live_through_a_loop_only_vector_mode_greys_them(frame):
     """`latent_x`/`latent_y` are a deliberate exception to the mode-driven
     greying every other latent control in this section follows.
