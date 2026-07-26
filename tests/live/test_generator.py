@@ -8,9 +8,11 @@ from autolume.live.core.generator import (
     LayerInfo,
     ModelHost,
     ModelInfo,
+    adjust_weights,
     channel_window,
     corner_seeds,
     derive_float_image,
+    direction_delta,
     effective_noise_seed,
     noise_mode,
     slerp,
@@ -152,36 +154,19 @@ class _FakeG:
     z_dim = 4
     num_ws = 2
 
-    def __init__(self, synthesis, modules=()):
+    def __init__(self, synthesis):
         import torch
 
         self.mapping = _FakeMapping(torch.zeros([8]), num_ws=2)
         self.synthesis = synthesis
-        self._modules = list(modules)
-        self.module_walks = 0
-
-    def modules(self):
-        self.module_walks += 1
-        return list(self._modules)
 
 
-class _NoisyModule:
-    def __init__(self):
-        self.global_noise = 1.0
-
-
-class _PlainModule:
-    pass
-
-
-def _fake_model(synthesis, modules=()):
+def _fake_model(synthesis):
     import torch
 
     from autolume.live.core.generator import LoadedModel
 
-    return LoadedModel(
-        "/tmp/fake.pkl", _FakeG(synthesis, modules), torch.device("cpu")
-    )
+    return LoadedModel("/tmp/fake.pkl", _FakeG(synthesis), torch.device("cpu"))
 
 
 def _zeros_synthesis(ws, noise_mode):
@@ -289,27 +274,6 @@ def test_render_frame_leaves_the_global_rng_alone_outside_random_noise(
     assert seeds == []
 
 
-def test_global_noise_applied_only_to_modules_that_declare_it():
-    noisy = _NoisyModule()
-    plain = _PlainModule()
-    model = _fake_model(_zeros_synthesis, modules=[noisy, plain])
-    model.render_frame(render_params(global_noise=0.25), 0)
-    assert noisy.global_noise == 0.25
-    assert not hasattr(plain, "global_noise")
-
-
-def test_global_noise_walk_is_skipped_when_value_is_unchanged():
-    noisy = _NoisyModule()
-    model = _fake_model(_zeros_synthesis, modules=[noisy])
-    model.render_frame(render_params(global_noise=0.25), 0)
-    assert model.G.module_walks == 1
-    model.render_frame(render_params(global_noise=0.25), 1)
-    assert model.G.module_walks == 1
-    model.render_frame(render_params(global_noise=0.75), 2)
-    assert model.G.module_walks == 2
-    assert noisy.global_noise == 0.75
-
-
 # --- vec and loop modes -----------------------------------------------------
 #
 # These fixtures use z_dim == w_dim (unlike the fixtures above, which keep
@@ -337,9 +301,6 @@ class _VecG:
         self.num_ws = num_ws
         self.mapping = _RecordingMapping(z_dim, num_ws)
         self.synthesis = synthesis
-
-    def modules(self):
-        return []
 
 
 def _recording_synthesis(sink):
@@ -932,3 +893,193 @@ def test_render_frame_grayscale_replicates_one_channel():
     frame = model.render_frame(render_params(base_channel=1, grayscale=True), 0)
     assert frame.shape == (1, 2, 3)
     assert frame[0, 0].tolist() == [153, 153, 153]
+
+
+# --- adjuster direction --------------------------------------------------
+
+
+def test_adjust_weights_are_returned_in_slot_order():
+    params = render_params(adjust_w1=1.0, adjust_w5=-2.0, adjust_w8=3.0)
+    assert adjust_weights(params) == (1.0, 0.0, 0.0, 0.0, -2.0, 0.0, 0.0, 3.0)
+
+
+def test_direction_delta_is_none_when_every_weight_is_zero():
+    params = render_params(directions=((1.0, 2.0, 3.0, 4.0),))
+    assert direction_delta(params, 4) == (None, ())
+
+
+def test_direction_delta_is_none_when_no_direction_is_loaded():
+    params = render_params(adjust_w1=3.0)
+    assert direction_delta(params, 4) == (None, ())
+
+
+def test_direction_delta_scales_one_direction_by_its_weight():
+    params = render_params(directions=((1.0, 0.0, -0.5, 0.0),), adjust_w1=2.0)
+    delta, mismatched = direction_delta(params, 4)
+    assert delta.tolist() == [2.0, 0.0, -1.0, 0.0]
+    assert mismatched == ()
+
+
+def test_direction_delta_sums_every_weighted_direction():
+    params = render_params(
+        directions=((1.0, 0.0, 0.0, 0.0), (0.0, 1.0, 0.0, 0.0), (0.0, 0.0, 1.0, 0.0)),
+        adjust_w1=2.0,
+        adjust_w2=0.0,
+        adjust_w3=-1.0,
+    )
+    delta, mismatched = direction_delta(params, 4)
+    assert delta.tolist() == [2.0, 0.0, -1.0, 0.0]
+    assert mismatched == ()
+
+
+def test_direction_delta_ignores_weights_past_the_loaded_directions():
+    params = render_params(directions=((1.0, 1.0, 1.0, 1.0),), adjust_w1=1.0, adjust_w4=9.0)
+    delta, mismatched = direction_delta(params, 4)
+    assert delta.tolist() == [1.0, 1.0, 1.0, 1.0]
+    assert mismatched == ()
+
+
+def test_direction_delta_reports_a_wrong_width_instead_of_contributing_it():
+    params = render_params(
+        directions=((1.0, 2.0), (0.0, 0.0, 1.0, 0.0)), adjust_w1=5.0, adjust_w2=2.0
+    )
+    delta, mismatched = direction_delta(params, 4)
+    assert delta.tolist() == [0.0, 0.0, 2.0, 0.0]
+    assert mismatched == (0,)
+
+
+def test_direction_delta_stays_quiet_about_a_wrong_width_nobody_asked_for():
+    params = render_params(directions=((1.0, 2.0),), adjust_w1=0.0)
+    assert direction_delta(params, 4) == (None, ())
+
+
+def test_render_frame_adds_the_weighted_direction_to_w():
+    sink = []
+    model = _vec_model(z_dim=4, num_ws=3, synthesis=_recording_synthesis(sink))
+    model.render_frame(render_params(), 0)
+    plain = sink[-1]
+    model.render_frame(
+        render_params(directions=((1.0, 0.0, -0.5, 0.0),), adjust_w1=2.0), 1
+    )
+    shifted = sink[-1]
+    assert (shifted - plain)[0].tolist() == [[2.0, 0.0, -1.0, 0.0]] * 3
+
+
+def test_render_frame_leaves_w_alone_when_no_weight_is_set():
+    import torch
+
+    sink = []
+    model = _vec_model(z_dim=4, num_ws=3, synthesis=_recording_synthesis(sink))
+    model.render_frame(render_params(), 0)
+    plain = sink[-1]
+    model.render_frame(render_params(directions=((1.0, 0.0, -0.5, 0.0),)), 1)
+    assert torch.equal(sink[-1], plain)
+
+
+def test_render_frame_logs_a_wrong_width_direction_once(caplog):
+    import torch
+
+    sink = []
+    model = _vec_model(z_dim=4, num_ws=3, synthesis=_recording_synthesis(sink))
+    model.render_frame(render_params(), 0)
+    plain = sink[-1]
+    params = render_params(directions=((1.0, 2.0),), adjust_w1=1.0)
+    with caplog.at_level(logging.WARNING):
+        model.render_frame(params, 1)
+        model.render_frame(params, 2)
+    assert torch.equal(sink[-1], plain)
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+
+
+# --- per layer module attributes -----------------------------------------
+
+
+def _state_block(**attrs):
+    import torch.nn as nn
+
+    class _StateBlock(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.writes = []
+            for name, value in attrs.items():
+                object.__setattr__(self, name, value)
+
+        def __setattr__(self, name, value):
+            if name in ("global_noise", "noise_regulator", "ratio"):
+                self.writes.append((name, value))
+            super().__setattr__(name, value)
+
+    return _StateBlock()
+
+
+def _stateful_synthesis(**blocks):
+    import torch
+    import torch.nn as nn
+
+    class _Synthesis(nn.Module):
+        def __init__(self):
+            super().__init__()
+            for name, block in blocks.items():
+                setattr(self, name, block)
+
+        def forward(self, ws, noise_mode="const"):
+            return torch.zeros([1, 3, 2, 2])
+
+    return _Synthesis()
+
+
+def test_module_state_is_written_only_where_the_attribute_already_exists():
+    noisy = _state_block(global_noise=1.0)
+    plain = _state_block()
+    model = _fake_model(_stateful_synthesis(conv1=noisy, torgb=plain))
+
+    model.render_frame(render_params(global_noise=0.25), 0)
+
+    assert noisy.writes == [("global_noise", 0.25)]
+    assert plain.writes == []
+    assert not hasattr(plain, "global_noise")
+
+
+def test_module_state_is_not_rewritten_while_nothing_moves():
+    noisy = _state_block(global_noise=1.0)
+    model = _fake_model(_stateful_synthesis(conv1=noisy))
+
+    model.render_frame(render_params(global_noise=0.25), 0)
+    model.render_frame(render_params(global_noise=0.25), 1)
+    assert noisy.writes == [("global_noise", 0.25)]
+
+    model.render_frame(render_params(global_noise=0.75), 2)
+    assert noisy.writes == [("global_noise", 0.25), ("global_noise", 0.75)]
+
+
+def test_per_layer_noise_strength_reaches_its_layer_and_nothing_else():
+    conv1 = _state_block(global_noise=1.0, noise_regulator=0)
+    torgb = _state_block(global_noise=1.0, noise_regulator=0)
+    model = _fake_model(_stateful_synthesis(conv1=conv1, torgb=torgb))
+
+    model.render_frame(render_params(layer_noise=(("conv1", 0.7),)), 0)
+
+    assert ("noise_regulator", 0.7) in conv1.writes
+    assert ("noise_regulator", 0.0) in torgb.writes
+
+
+def test_a_removed_noise_strength_returns_the_layer_to_neutral():
+    conv1 = _state_block(noise_regulator=0)
+    model = _fake_model(_stateful_synthesis(conv1=conv1))
+
+    model.render_frame(render_params(layer_noise=(("conv1", 0.7),)), 0)
+    model.render_frame(render_params(), 1)
+
+    assert conv1.writes == [("noise_regulator", 0.7), ("noise_regulator", 0.0)]
+
+
+def test_per_layer_ratio_reaches_its_layer_and_the_rest_stay_square():
+    conv1 = _state_block(ratio=(1, 1))
+    torgb = _state_block(ratio=(1, 1))
+    model = _fake_model(_stateful_synthesis(conv1=conv1, torgb=torgb))
+
+    model.render_frame(render_params(layer_ratios=(("conv1", 2.0, 3.0),)), 0)
+
+    assert conv1.writes == [("ratio", (2.0, 3.0))]
+    assert torgb.writes == [("ratio", (1.0, 1.0))]

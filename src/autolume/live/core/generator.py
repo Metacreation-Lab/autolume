@@ -86,6 +86,47 @@ def effective_noise_seed(params: RenderParams, frame_index: int) -> int:
     return seed & _SEED_MASK
 
 
+def adjust_weights(params: RenderParams) -> tuple[float, ...]:
+    """The eight adjuster weights in slot order."""
+    return (
+        params.adjust_w1,
+        params.adjust_w2,
+        params.adjust_w3,
+        params.adjust_w4,
+        params.adjust_w5,
+        params.adjust_w6,
+        params.adjust_w7,
+        params.adjust_w8,
+    )
+
+
+def direction_delta(
+    params: RenderParams, width: int
+) -> tuple[np.ndarray | None, tuple[int, ...]]:
+    """The adjuster's weighted direction sum, and the slots that could not join.
+
+    None means there is nothing to add to W: every weight is zero, no
+    direction is loaded, or the only weighted directions are the wrong
+    width for this model. A direction of the wrong width is reported back
+    for the caller to log rather than padded or truncated into the sum.
+    Zero-weighted slots are never checked, so a stale direction from
+    another model stays silent until somebody actually asks for it.
+    """
+    delta = None
+    mismatched: list[int] = []
+    for index, (weight, direction) in enumerate(
+        zip(adjust_weights(params), params.directions)
+    ):
+        if weight == 0.0:
+            continue
+        if len(direction) != width:
+            mismatched.append(index)
+            continue
+        term = np.array(direction, dtype=np.float32) * np.float32(weight)
+        delta = term if delta is None else delta + term
+    return delta, tuple(mismatched)
+
+
 def channel_window(activation, base_channel: int, grayscale: bool):
     """The three channel window a `[C, H, W]` activation is shown through.
 
@@ -209,9 +250,11 @@ class LoadedModel:
         self.z_dim = int(G.z_dim)
         self.num_ws = int(G.num_ws)
         self._c_dim = int(G.mapping.c_dim)
-        self._applied_global_noise: float | None = None
+        self._applied_module_state: tuple | None = None
+        self._named_modules: dict | None = None
         self._vec_fallback_logged = False
         self._keyframe_w_cache: dict = {}
+        self._logged_once: set = set()
 
     def _blended_w(self, latent_x, latent_y, truncation_psi):
         import torch
@@ -319,19 +362,79 @@ class LoadedModel:
         w1 = self._cached_keyframe_w(keyframes[index], params.truncation_psi)
         return slerp(params.loop_alpha, w0, w1)
 
-    def _apply_global_noise(self, value: float) -> None:
-        """Push the global noise scale onto the layers that support it.
+    def _log_once(self, key, message: str, *args, exc_info: bool = False) -> None:
+        """One warning per distinct cause, however many frames repeat it.
 
-        Runs every frame, so it walks the network only when the value moved.
-        Autolume's custom architecture defines `global_noise` on its noise
-        layers, stock StyleGAN networks do not, and we never invent it.
+        The render thread hits these paths at frame rate, so a line per
+        frame would bury the log and cost more than the failure itself.
         """
-        if value == self._applied_global_noise:
+        if key in self._logged_once:
             return
-        for module in self.G.modules():
+        self._logged_once.add(key)
+        logger.warning(message, *args, exc_info=exc_info)
+
+    def _synthesis_modules(self) -> dict:
+        """Catalog name to submodule, resolved once for this loaded model.
+
+        Names match `enumerate_layers`: relative to `G.synthesis`, with the
+        synthesis module itself called "output". A `G` whose synthesis is
+        not a module (a test double, a future wrapper) simply has no
+        addressable layers rather than failing the frame.
+        """
+        if self._named_modules is None:
+            named = getattr(getattr(self.G, "synthesis", None), "named_modules", None)
+            if callable(named):
+                self._named_modules = {
+                    name or "output": module for name, module in named()
+                }
+            else:
+                self._named_modules = {}
+        return self._named_modules
+
+    def _apply_module_state(self, params: RenderParams) -> None:
+        """Push global noise, per-layer noise strength and per-layer ratios
+        onto the layers that support them.
+
+        Runs every frame, so it walks the network only when one of the three
+        moved. Autolume's custom architecture defines these on its synthesis
+        layers, stock StyleGAN networks do not, and we never invent them. A
+        layer that has dropped out of either sparse mapping is written back
+        to neutral, so removing an override actually removes its effect.
+        """
+        state = (params.global_noise, params.layer_noise, params.layer_ratios)
+        if state == self._applied_module_state:
+            return
+        for name, module in self._synthesis_modules().items():
             if hasattr(module, "global_noise"):
-                module.global_noise = value
-        self._applied_global_noise = value
+                module.global_noise = params.global_noise
+            if hasattr(module, "noise_regulator"):
+                module.noise_regulator = params.layer_noise.get(name, 0.0)
+            if hasattr(module, "ratio"):
+                module.ratio = params.layer_ratios.get(name, (1.0, 1.0))
+        # Copied, never aliased: the snapshot these came from is shared with
+        # the control thread and must not be reachable from here.
+        self._applied_module_state = (
+            params.global_noise,
+            dict(params.layer_noise),
+            dict(params.layer_ratios),
+        )
+
+    def _direction(self, params: RenderParams):
+        import torch
+
+        width = int(self._w_avg.shape[-1])
+        delta, mismatched = direction_delta(params, width)
+        for index in mismatched:
+            self._log_once(
+                ("direction", index, len(params.directions[index])),
+                "Adjuster direction %d has %d values but W is %d wide here, skipping it",
+                index + 1,
+                len(params.directions[index]),
+                width,
+            )
+        if delta is None:
+            return None
+        return torch.from_numpy(delta).to(self.device)
 
     def enumerate_layers(self) -> tuple[LayerInfo, ...]:
         """Build the layer catalog with one hooked dry synthesis pass.
@@ -399,7 +502,7 @@ class LoadedModel:
         import torch
 
         with torch.no_grad():
-            self._apply_global_noise(params.global_noise)
+            self._apply_module_state(params)
             if params.mode == "vec":
                 ws = self._vec_to_w(
                     params.latent_vec, params.latent_project, params.truncation_psi
@@ -410,6 +513,9 @@ class LoadedModel:
                 ws = self._blended_w(
                     params.latent_x, params.latent_y, params.truncation_psi
                 )
+            direction = self._direction(params)
+            if direction is not None:
+                ws = ws + direction
             mode = noise_mode(params)
             # Only "random" draws from torch's global generator, and seeding it
             # is a process wide side effect, so the other modes leave it alone.
