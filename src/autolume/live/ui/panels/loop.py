@@ -174,17 +174,50 @@ def _pending_note(radius: float) -> str:
 
 
 def captured_keyframe(keyframe: Keyframe, state: ControlState) -> Keyframe:
-    """`keyframe` with its content replaced by the current snapshot's latent state.
+    """`keyframe` replaced with an exact copy of the current navigation state.
 
-    The kind is not touched: a seed keyframe stays a seed keyframe, filled
-    from `latent_x`/`latent_y`, and a vector one stays a vector keyframe,
-    filled from `latent_vec`. This is the new architecture's replacement for
-    the old render-side Snap, one field object in rather than a mutation the
-    render thread had to reach back for.
+    The kind follows `state.vector_mode`, the navigation mode itself, not
+    whatever kind the keyframe already happened to be: Snap is "capture what
+    I am looking at right now", and what is on screen is decided by how the
+    performer is navigating, not by the row's previous content. Snapping
+    onto a seed keyframe while navigating by vector used to leave it a seed
+    keyframe filled from `latent_x`/`latent_y`, which are stale and do not
+    correspond to the frame on screen at all in vector mode; keeping the
+    previous kind meant Snap could capture something other than what was
+    actually being looked at.
+
+    `vector_mode`, not `derive_mode`: the latter also folds in `loop_active`,
+    answering "what is rendering this frame" rather than "how is the
+    performer navigating", and a running loop drives the frame regardless of
+    which mode Snap would otherwise read. Whether Snap itself should greyed
+    out while a loop plays is a separate, open question, not decided here.
+
+    The field the new kind does not use is cleared, not left stale: a vector
+    snap zeroes `seed_x`/`seed_y`, a seed snap empties `vec`. A leftover
+    value there is invisible in the UI right up until someone flips the
+    row's kind back, at which point it reappears as a position nobody chose.
+    `project` (vector mode only) is copied from `latent_project` too, since
+    it is part of what produced the frame being captured, deciding whether
+    `vec` is read as a `z` through the mapping network or already a `w`; in
+    seed mode it is left alone, since `_keyframe_to_w` never reads it for a
+    seed keyframe.
     """
-    if keyframe.kind == "vec":
-        return dataclasses.replace(keyframe, vec=state.latent_vec)
-    return dataclasses.replace(keyframe, seed_x=state.latent_x, seed_y=state.latent_y)
+    if state.vector_mode:
+        return dataclasses.replace(
+            keyframe,
+            kind="vec",
+            vec=state.latent_vec,
+            project=state.latent_project,
+            seed_x=0.0,
+            seed_y=0.0,
+        )
+    return dataclasses.replace(
+        keyframe,
+        kind="seed",
+        seed_x=state.latent_x,
+        seed_y=state.latent_y,
+        vec=(),
+    )
 
 
 class LoopPanel:
@@ -394,9 +427,10 @@ class LoopPanel:
         footprint rule as the seed fields and the vector controls, so the
         row's width does not change out from under the kind switch either.
         Every other per-row control was checked against the same question:
-        Snap and Remove act on whichever kind the row already is, and the
-        seed fields and Load/Randomize were already greyed by kind, so
-        Project was the only one left drawn live with no effect.
+        Remove acts on whichever kind the row already is, Snap replaces the
+        kind outright with the current navigation mode (`captured_keyframe`),
+        and the seed fields and Load/Randomize were already greyed by kind,
+        so Project was the only one left drawn live with no effect.
         """
         imgui.text(str(index))
         imgui.same_line()

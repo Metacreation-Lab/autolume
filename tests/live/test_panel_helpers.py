@@ -756,21 +756,65 @@ def test_noise_table_pending_compares_the_built_key_to_the_desired_one():
     assert noise_table_pending(desired, (1, 3.0, 4)) is True
 
 
-def test_captured_keyframe_takes_the_seed_position_for_a_seed_keyframe():
-    keyframe = Keyframe("seed", seed_x=0.0, seed_y=0.0)
-    state = ControlState(latent_x=4.0, latent_y=-1.0, latent_vec=(9.0,))
+def test_captured_keyframe_in_seed_mode_onto_a_seed_keyframe_clears_vec():
+    """Kind follows navigation mode, not the keyframe's own prior kind
+    (`vector_mode` False here), and the field the new kind does not use is
+    cleared rather than left stale.
+    """
+    keyframe = Keyframe("seed", seed_x=99.0, seed_y=99.0, vec=(9.0, 9.0), project=False)
+    state = ControlState(vector_mode=False, latent_x=4.0, latent_y=-1.0)
     captured = captured_keyframe(keyframe, state)
-    assert (captured.seed_x, captured.seed_y) == (4.0, -1.0)
     assert captured.kind == "seed"
+    assert (captured.seed_x, captured.seed_y) == (4.0, -1.0)
     assert captured.vec == ()
+    # Seed mode never reads `project` (`_keyframe_to_w`), so it is left
+    # alone rather than copied from `latent_project`.
+    assert captured.project is False
 
 
-def test_captured_keyframe_takes_the_vector_for_a_vector_keyframe():
-    keyframe = Keyframe("vec", vec=(0.0, 0.0))
-    state = ControlState(latent_x=4.0, latent_y=-1.0, latent_vec=(1.0, 2.0, 3.0))
+def test_captured_keyframe_in_seed_mode_onto_a_vector_keyframe_switches_kind():
+    """The bug this fixes: navigating in seed mode and snapping onto a
+    keyframe that happens to already be `"vec"` used to leave it `"vec"`,
+    filled from `latent_x`/`latent_y` as though they were a vector, which
+    they are not. Kind now always follows the navigation mode.
+    """
+    keyframe = Keyframe("vec", seed_x=1.0, seed_y=2.0, vec=(9.0, 9.0), project=False)
+    state = ControlState(vector_mode=False, latent_x=4.0, latent_y=-1.0)
     captured = captured_keyframe(keyframe, state)
-    assert captured.vec == (1.0, 2.0, 3.0)
+    assert captured.kind == "seed"
+    assert (captured.seed_x, captured.seed_y) == (4.0, -1.0)
+    assert captured.vec == ()
+    assert captured.project is False
+
+
+def test_captured_keyframe_in_vector_mode_onto_a_vector_keyframe_clears_seed_fields():
+    keyframe = Keyframe("vec", seed_x=99.0, seed_y=99.0, vec=(0.0, 0.0), project=False)
+    state = ControlState(
+        vector_mode=True, latent_vec=(1.0, 2.0, 3.0), latent_project=True
+    )
+    captured = captured_keyframe(keyframe, state)
     assert captured.kind == "vec"
-    # Untouched, so a later switch back to seed kind does not silently pick
-    # up whatever the vector capture left in these fields.
+    assert captured.vec == (1.0, 2.0, 3.0)
+    # Untouched by a later switch back to seed kind: a leftover seed
+    # position here would reappear as one nobody chose.
     assert (captured.seed_x, captured.seed_y) == (0.0, 0.0)
+    # Copied from `latent_project`, part of what produced the frame being
+    # captured (it decides whether `vec` reads as a `z` or a `w`).
+    assert captured.project is True
+
+
+def test_captured_keyframe_in_vector_mode_onto_a_seed_keyframe_switches_kind():
+    """The same bug as the seed-mode case, the other direction: navigating
+    by vector and snapping onto a `"seed"` keyframe used to leave it
+    `"seed"`, filled from stale `latent_x`/`latent_y` that render nothing
+    like the frame actually on screen in vector mode.
+    """
+    keyframe = Keyframe("seed", seed_x=1.0, seed_y=2.0, project=False)
+    state = ControlState(
+        vector_mode=True, latent_vec=(1.0, 2.0, 3.0), latent_project=True
+    )
+    captured = captured_keyframe(keyframe, state)
+    assert captured.kind == "vec"
+    assert captured.vec == (1.0, 2.0, 3.0)
+    assert (captured.seed_x, captured.seed_y) == (0.0, 0.0)
+    assert captured.project is True
