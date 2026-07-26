@@ -573,8 +573,18 @@ def test_every_selection_mode_has_a_label_to_read():
     assert len(SELECTION_MODES) == len(SELECTION_LABELS)
 
 
-def test_every_selection_mode_resolves_to_something():
-    # A mode with no branch behind it would fall through to the cluster case
-    # and silently select nothing.
-    handled = {MODE_ALL, MODE_RANDOM, MODE_RANGE, MODE_CLUSTER}
-    assert set(SELECTION_MODES) == handled
+def test_every_selection_mode_has_a_branch_of_its_own_behind_it():
+    # A mode with no branch would fall through to the cluster case and select
+    # nothing at all, which looks the same as a working mode nobody has
+    # configured yet. Told apart by giving each mode state only its own branch
+    # reads and checking the answers differ.
+    picked = {
+        mode: resolve_indices(
+            selection(mode=mode, percent=50.0, seed=1, low=0, high=2), "l", 8
+        )
+        for mode in SELECTION_MODES
+    }
+    assert picked[MODE_ALL] == tuple(range(8))
+    assert len(picked[MODE_RANDOM]) == 4
+    assert picked[MODE_RANGE] == (0, 1)
+    assert picked[MODE_CLUSTER] == ()

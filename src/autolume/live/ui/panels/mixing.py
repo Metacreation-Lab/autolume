@@ -218,10 +218,18 @@ def cut(
     What is kept before the cut is copied into `cached`, which is what Recover
     reads back. Nothing after the cut is copied, so `cached` never holds an `X`
     of its own and a Recover can always restore something applicable.
+
+    A `cached` shorter than `entries` is filled out from `entries` rather than
+    left short, and that is the case that matters rather than a defensive
+    nicety: the panel's cache starts empty and is only ever written by a cut, so
+    the very first cut of a session had nothing to hold on to and Recover put
+    nothing back. Filling from `entries` is exactly right, because a layer that
+    has not been cut yet is holding its own current value.
     """
     start = row.indices[0] if row.indices else len(entries)
     kept = tuple(entries[:start])
-    return kept + (ORIGIN_X,) * (len(entries) - start), kept + tuple(cached[start:])
+    held = tuple(cached) + tuple(entries[len(cached) :])
+    return kept + (ORIGIN_X,) * (len(entries) - start), kept + held[start:]
 
 
 def recover(

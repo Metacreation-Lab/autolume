@@ -7,9 +7,14 @@ that nothing it draws runs off the edge of the panel it is drawn in. The same
 technique the driver marker suite already uses for the Perform and Loop
 panels (`test_driver_marker_layout.py`, `row_edges`), aimed at the new ones.
 
+A press is real too. `click_button` puts a mouse position and a button event
+on `io`, and imgui hit tests them against the rect it placed the button at, so
+what runs is the panel's own click path. That is not a nicety: two bugs in
+these panels fire only on a press, and no amount of passive rendering reaches
+either.
+
 What is still not covered, and cannot be here: whether the result looks right,
-whether a click lands where it appears to, and every GL upload. Those stay
-manual.
+and every GL upload. Those stay manual.
 """
 
 import pytest
@@ -21,6 +26,7 @@ from autolume.live.core.generator import (
     MixSaveStatus,
     ModelInfo,
 )
+from autolume.live.core.mapping import apply_event
 from autolume.live.core.params import BY_ADDRESS, ControlState, Transform
 from autolume.live.core.sources import SourceTable
 from autolume.live.core.store import LatestValueStore
@@ -141,7 +147,18 @@ class Recorder:
 
 
 class Runtime:
-    def __init__(self, state=None, host=None, model_info=None):
+    """The parts of a runtime the panels read, and nothing behind them.
+
+    `live` runs every submitted event through the **real** `mapping.apply_event`
+    and puts the result back on the store, which is what the control thread does
+    a tick later in the app. Without it the store never moves, so a panel that
+    edits state and reads it back on the next frame is drawn against a snapshot
+    that has forgotten the edit, and a click test would be measuring the fake
+    rather than the panel. Off by default, because the drawing tests deliberately
+    hold one fixed state, some of it deliberately malformed.
+    """
+
+    def __init__(self, state=None, host=None, model_info=None, live=False):
         self.control_store = LatestValueStore(state or ControlState())
         self.source_store = LatestValueStore(SourceTable())
         self.model_host = host or Host()
@@ -151,9 +168,14 @@ class Runtime:
         self.ndi = Ndi()
         self.recorder = Recorder()
         self.submitted = []
+        self._live = live
 
     def submit(self, event):
         self.submitted.append(event)
+        if self._live:
+            self.control_store.set(
+                apply_event(self.control_store.snapshot(), event)
+            )
 
 
 def widest_overflow(build, width: float, font_scale: float) -> float:
@@ -199,6 +221,69 @@ def widest_overflow(build, width: float, font_scale: float) -> float:
     finally:
         imgui.destroy_context(context)
     return overflow
+
+
+def click_button(build, label: str, *, occurrence: int = 0, width: float = 448.0):
+    """Draw a panel and press a real button in it with a real mouse.
+
+    imgui decides the press, not the test. The mouse position and the button
+    events go through `io`, imgui hit tests them against the rect it placed the
+    button at, and `imgui.button` returns True on its own. `imgui.button` is
+    wrapped only to *record* where each one landed, never to change what it
+    returns, so what runs is the panel's real click path.
+
+    This exists because the passive draw tests cannot reach it. A panel bug that
+    only fires on a press (a list mutated mid-iteration, a cache never seeded)
+    is invisible to every test that only renders, and both kinds have already
+    happened here.
+
+    The press and the release are separate frames because a button fires on
+    release over itself, and the panel keeps being drawn afterwards so the frame
+    that has to survive the click's own consequences is drawn too.
+    """
+    context = imgui.create_context()
+    original = imgui.button
+    try:
+        io = imgui.get_io()
+        io.set_ini_filename(None)
+        io.display_size = imgui.ImVec2(1280.0, 800.0)
+        io.delta_time = 1.0 / 60.0
+        io.backend_flags |= imgui.BackendFlags_.renderer_has_textures
+        theme.apply_theme()
+        seen: list[tuple[float, float]] = []
+        target: list[tuple[float, float] | None] = [None]
+
+        def recording_button(text, *args, **kwargs):
+            pressed = original(text, *args, **kwargs)
+            if text == label:
+                low = imgui.get_item_rect_min()
+                high = imgui.get_item_rect_max()
+                seen.append(((low.x + high.x) * 0.5, (low.y + high.y) * 0.5))
+            return pressed
+
+        imgui.button = recording_button
+        panel = build()
+        for frame in range(8):
+            if target[0] is not None and frame in (4, 5):
+                io.add_mouse_pos_event(*target[0])
+                io.add_mouse_button_event(0, frame == 4)
+            imgui.new_frame()
+            imgui.set_next_window_pos(imgui.ImVec2(0.0, 0.0))
+            imgui.set_next_window_size(imgui.ImVec2(width, 900.0))
+            imgui.begin("Panel")
+            seen.clear()
+            panel.gui()
+            imgui.end()
+            imgui.render()
+            if frame == 2:
+                if occurrence >= len(seen):
+                    raise AssertionError(
+                        f"no button {label!r} at occurrence {occurrence}"
+                    )
+                target[0] = seen[occurrence]
+    finally:
+        imgui.button = original
+        imgui.destroy_context(context)
 
 
 LOADED = ControlState(pkl_path="/models/wikiart-1024.pkl")
@@ -395,6 +480,202 @@ def test_no_second_model_asks_for_no_load():
     host = Host()
     widest_overflow(lambda: MixingPanel(Runtime(LOADED, host)), 448.0, 1.0)
     assert not [call for call in host.calls if call[0] == "load_b"]
+
+
+def hostile_states(count: int, seed: int = 0):
+    """States a preset or an OSC message could genuinely put a panel in.
+
+    Not arbitrary noise: every field is filled with something the control loop
+    will actually accept and hold. Unknown operators and layer names, indices
+    past a tensor, direction vectors of mismatched lengths, a `combined_layers`
+    of the wrong length carrying an origin that is not A, B or X, a capture layer
+    from another model, a negative base channel. A preset written on a different
+    machine, against a different model, produces most of these.
+    """
+    random = __import__("random").Random(seed)
+    ops = [
+        "translate", "rotate", "scale", "erode", "dilate", "invert",
+        "flip-h", "flip-v", "binary-thresh", "scalar-multiply", "ablate",
+        "sobel", "not-an-op", "",
+    ]
+    layers = ["b4.conv1", "b8.conv1", "output", "b999.conv0", "", "weird.name"]
+    for _ in range(count):
+        yield ControlState(
+            pkl_path=random.choice(["", "/m/a.pkl"]),
+            pkl2=random.choice([None, "", "/m/b.pkl"]),
+            transforms=tuple(
+                Transform(
+                    random.choice(ops),
+                    random.choice(layers),
+                    tuple(random.uniform(-5, 5) for _ in range(random.randint(0, 3))),
+                    tuple(
+                        random.randint(-5, 2000) for _ in range(random.randint(0, 5))
+                    ),
+                )
+                for _ in range(random.randint(0, 4))
+            ),
+            layer_noise=tuple(
+                (random.choice(layers), random.uniform(-2, 2))
+                for _ in range(random.randint(0, 3))
+            ),
+            layer_ratios=tuple(
+                (random.choice(layers), random.uniform(-2, 4), random.uniform(-2, 4))
+                for _ in range(random.randint(0, 3))
+            ),
+            directions=tuple(
+                tuple(random.uniform(-1, 1) for _ in range(random.choice([0, 4, 512])))
+                for _ in range(random.randint(0, 10))
+            ),
+            combined_layers=tuple(
+                random.choice(["A", "B", "X", "Q"])
+                for _ in range(random.randint(0, 20))
+            ),
+            capture_layer=random.choice(["", "output", "b999.conv0"]),
+            base_channel=random.randint(-10, 9999),
+            device=random.choice(["auto", "cuda", "rocm", ""]),
+            mixing_enabled=random.choice([True, False]),
+            use_superres=random.choice([True, False]),
+            osc_port=random.randint(-5, 99999),
+        )
+
+
+HOSTS = [
+    lambda: Host(),
+    lambda: Host(current=Model("/m/a.pkl", PARAMS_A)),
+    lambda: Host(
+        current=Model("/m/a.pkl", PARAMS_A), current_b=Model("/m/b.pkl", PARAMS_B)
+    ),
+    # Parameter names with no resolution in them at all, which `layer_resolution`
+    # refuses. The panel has to survive a generator it cannot group.
+    lambda: Host(
+        current=Model("/m/a.pkl", ("bad",)), current_b=Model("/m/b.pkl", ("also.bad",))
+    ),
+]
+
+CATALOGS = [
+    None,
+    CATALOG,
+    ModelInfo("/m/a.pkl", 0, 0, ()),
+    ModelInfo("/m/a.pkl", 512, 18, (LayerInfo("", 0, 0, 0),)),
+]
+
+
+@pytest.mark.parametrize("state", list(hostile_states(8)))
+def test_no_state_a_preset_can_carry_makes_a_panel_raise(state):
+    """The UI thread, unlike the control thread, has no error channel.
+
+    A panel that raises takes the whole window down mid performance, and the
+    states below are the ones that reach a panel without ever being clicked into
+    it: a preset written against another model, an OSC message, a mix whose
+    sources changed underneath it. Every combination of state, host and catalog
+    is drawn for three frames.
+    """
+    for make_host in HOSTS:
+        for catalog in CATALOGS:
+            for panel in (BendingPanel, MixingPanel, PerformancePanel):
+                runtime = Runtime(state, make_host(), catalog)
+                widest_overflow(lambda: panel(runtime), 360.0, 1.0)
+
+
+CHAINED = ControlState(
+    pkl_path="/models/wikiart-1024.pkl",
+    transforms=(
+        Transform("ablate", "b4.conv1", (1.0,), (0,)),
+        Transform("invert", "b4.conv1", (1.0,), (1,)),
+        Transform("rotate", "b4.conv1", (30.0,), (2,)),
+    ),
+)
+
+
+def test_removing_a_transform_that_is_not_the_last_one_does_not_raise():
+    """The bug this harness was built for.
+
+    Remove takes that row's selection editor out of the panel's own list
+    straight away, while `state.transforms` is still the snapshot the frame was
+    drawn from. Every later row would then index a list one shorter than the
+    indices it was drawn with, which is an `IndexError` on the UI thread and the
+    whole window gone. Removing the *last* transform never hits it, which is why
+    the passive tests and a casual click both miss it.
+    """
+    runtime = Runtime(CHAINED, Host(), CATALOG)
+    click_button(lambda: BendingPanel(runtime), "Remove", occurrence=0)
+    removals = [
+        event.value.index
+        for event in runtime.submitted
+        if event.address == "/bend/remove"
+    ]
+    assert removals == [0]
+
+
+def test_removing_the_middle_transform_of_a_chain_does_not_raise():
+    runtime = Runtime(CHAINED, Host(), CATALOG)
+    click_button(lambda: BendingPanel(runtime), "Remove", occurrence=1)
+    removals = [
+        event.value.index
+        for event in runtime.submitted
+        if event.address == "/bend/remove"
+    ]
+    assert removals == [1]
+
+
+def test_adding_a_transform_sends_one_that_the_control_thread_accepts():
+    runtime = Runtime(LOADED, Host(), CATALOG)
+    click_button(lambda: BendingPanel(runtime), "Add transform")
+    sets = [event for event in runtime.submitted if event.address == "/bend/set"]
+    assert len(sets) == 1
+    applied = apply_event(LOADED, sets[0])
+    assert len(applied.transforms) == 1
+    assert applied.transforms[0].layer == "b4.conv1"
+
+
+def test_the_first_cut_of_a_session_can_be_recovered():
+    """The other bug this harness was built for.
+
+    The panel's cache starts empty and is only ever written by a cut, so before
+    this was fixed the very first cut had nothing to hold on to and Recover put
+    nothing back. Reachable whenever a preset's selection already fits the pair,
+    which is every preset saved and reloaded on the same machine.
+    """
+    host = Host(
+        current=Model("/models/a.pkl", PARAMS_A),
+        current_b=Model("/models/b.pkl", PARAMS_B),
+    )
+    # A selection that already fits the pair, which is what a preset saved and
+    # reloaded on the same machine carries. That is the case that reaches the
+    # bug: the panel only ever seeds its cache in the branch that replaces a
+    # selection which does *not* fit, so a fitting one leaves the cache empty.
+    runtime = Runtime(
+        ControlState(
+            pkl_path="/models/a.pkl",
+            pkl2="/models/b.pkl",
+            combined_layers=("A",) * 9 + ("B",) * 18,
+        ),
+        host,
+        live=True,
+    )
+    panel = MixingPanel(runtime)
+
+    def selections():
+        return [
+            event.value.entries
+            for event in runtime.submitted
+            if event.address == "/mix/layers"
+        ]
+
+    # Through the panel's own cache rather than the pure helpers, which is the
+    # whole point: the helpers were always handed a seeded cache by their tests,
+    # and the panel's starts empty.
+    click_button(lambda: panel, "X", occurrence=1)
+    after_cut = selections()[-1]
+    assert "X" in after_cut
+    cut_at = after_cut.index("X")
+    click_button(lambda: panel, "Recover", occurrence=0)
+    after_recover = selections()[-1]
+    assert after_recover != after_cut
+    assert after_recover[:cut_at] == after_cut[:cut_at]
+    # The resolution that was cut is back, and only that one.
+    assert "X" not in after_recover[cut_at : cut_at + 3]
+    assert after_recover[-1] == "X"
 
 
 def test_every_address_these_panels_write_by_hand_is_a_real_one():

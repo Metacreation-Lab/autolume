@@ -11,6 +11,8 @@ they do.
 
 import pytest
 
+from autolume.live.core.events import ControlEvent
+from autolume.live.core.mapping import apply_event
 from autolume.live.core.mixing import (
     ORIGIN_A,
     ORIGIN_B,
@@ -18,7 +20,7 @@ from autolume.live.core.mixing import (
     conv_names,
     selection_length,
 )
-from autolume.live.core.params import SetCombinedLayers
+from autolume.live.core.params import MIX_LAYERS, ControlState, SetCombinedLayers
 from autolume.live.ui.panels.mixing import (
     ORIGIN_MIXED,
     MixRow,
@@ -176,11 +178,16 @@ def test_a_selection_of_the_wrong_length_does_not_fit_the_pair():
     assert not fits_pair((), NAMES_A, NAMES_B)
 
 
-def test_the_default_is_a_valid_event_payload():
-    # `SetCombinedLayers` is the only way the selection reaches state, and the
-    # control thread refuses anything that is not A, B or X.
+def test_the_default_is_a_selection_the_control_thread_actually_accepts():
+    # `SetCombinedLayers` is the only way a selection reaches state, and the
+    # control thread drops one carrying anything that is not A, B or X. Run
+    # through the real handler rather than restated, so a default the control
+    # thread would silently refuse fails here instead of on a performer.
     entries = default_selection(NAMES_A, NAMES_B)
-    assert set(SetCombinedLayers(entries).entries) <= {ORIGIN_A, ORIGIN_B}
+    applied = apply_event(
+        ControlState(), ControlEvent(MIX_LAYERS, SetCombinedLayers(entries))
+    )
+    assert applied.combined_layers == entries
 
 
 # --- what a row displays ----------------------------------------------------

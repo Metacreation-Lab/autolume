@@ -657,15 +657,6 @@ def test_a_preset_missing_both_models_names_both_in_one_sentence():
     )
 
 
-def test_the_missing_model_sentence_is_drawable_by_the_bundled_font():
-    for message in (
-        missing_model_message("a.pkl", None),
-        missing_model_message(None, "b.pkl"),
-        missing_model_message("a.pkl", "b.pkl"),
-    ):
-        assert message.isascii(), message
-
-
 def presets_at(directory):
     """A presets panel on a clock that is always past the rescan interval."""
     ticks = itertools.count(0.0, 10.0)

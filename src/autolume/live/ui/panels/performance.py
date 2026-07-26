@@ -16,8 +16,6 @@ back on its own, so from here it simply pops back a moment later, and the
 status line beside it is the only place the reason exists.
 """
 
-import logging
-
 from imgui_bundle import imgui
 
 from autolume.live.core.events import ControlEvent
@@ -26,8 +24,6 @@ from autolume.live.io.recorder import SCREENSHOT_ADDRESS
 from autolume.live.ui.controls import ControlBinder
 from autolume.live.ui.panels.perform import combo_index, string_combo
 from autolume.live.ui.theme import ERROR_COLOR
-
-logger = logging.getLogger(__name__)
 
 # The four the device parameter accepts (plan-4 decisions). "auto" first
 # because it is the default and the answer for almost every performer.
@@ -264,7 +260,10 @@ class PerformancePanel:
         )
         status = self._runtime.ndi.status()
         note = ndi_note(status, available)
-        if status.error:
+        # `available` as well as `error`, because the note a missing runtime
+        # produces is not the error: a machine without NDI installed is a fact
+        # about the machine, and drawing it red says something went wrong.
+        if available and status.error:
             self._error(note)
         else:
             self._note(note)

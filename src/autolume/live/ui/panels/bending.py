@@ -309,7 +309,6 @@ class IndexSelection:
         self.percent = 50.0
         self.low = 0
         self.high = 0
-        self.cluster_path = ""
         self.cluster_id = 0
         self.seed = 0
         # Parsed at pick time and held, so resolving does not reread the file.
@@ -665,7 +664,14 @@ class BendingPanel:
         if not rows:
             self._note(_NO_TRANSFORMS)
         for index, transform in rows:
-            self._transform_row(index, transform, layer)
+            # Stop at a removal. `_transform_row` takes that row's editor out of
+            # `_selections` immediately, while `state.transforms` is still the
+            # snapshot this frame was drawn from, so every later row would index
+            # a list that is now one shorter. The chain is about to change
+            # anyway, and one frame with the tail of it undrawn is the cheapest
+            # honest answer.
+            if self._transform_row(index, transform, layer):
+                break
         if imgui.button("Add transform"):
             op = OPERATOR_NAMES[0]
             self._selections.append(IndexSelection())
@@ -699,7 +705,8 @@ class BendingPanel:
 
     def _transform_row(
         self, index: int, transform: Transform, layer: LayerInfo
-    ) -> None:
+    ) -> bool:
+        """Draw one transform. Returns whether it was removed this frame."""
         imgui.push_id(index)
         # The combo gives its width up so Remove stays on the row beside it.
         reserve = trailing_width(_REMOVE)
@@ -719,10 +726,11 @@ class BendingPanel:
             if 0 <= index < len(self._selections):
                 del self._selections[index]
             imgui.pop_id()
-            return
+            return True
         self._param_fields(index, transform)
         self._selection_editor(index, transform, layer)
         imgui.pop_id()
+        return False
 
     def _param_fields(self, index: int, transform: Transform) -> None:
         kinds = param_kinds(transform.op)
@@ -872,7 +880,6 @@ class BendingPanel:
             selection.cluster_config = None
             selection.error = f"Could not read the cluster file. {describe(exc)}"
             return
-        selection.cluster_path = str(result[0])
         ids = cluster_ids(selection.cluster_config, state.transforms[index].layer)
         selection.cluster_id = ids[0] if ids else 0
 
