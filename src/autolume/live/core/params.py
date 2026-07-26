@@ -496,6 +496,43 @@ def derive_mode(state: ControlState) -> str:
     return "vec" if state.vector_mode else "seed"
 
 
+def _ratio_pairs(layer_ratios):
+    """The `(rx, ry)` pairs out of either shape `layer_ratios` is held in.
+
+    `ControlState` keeps sparse `(layer, rx, ry)` rows and `RenderParams` a
+    mapping, and the predicate below has to answer both callers identically.
+    """
+    if isinstance(layer_ratios, dict):
+        yield from layer_ratios.values()
+        return
+    for _layer, rx, ry in layer_ratios:
+        yield rx, ry
+
+
+def ratio_forces_const_noise(state) -> bool:
+    """Whether a layer ratio is holding the noise mode on "const".
+
+    A ratio away from neutral resizes the activation, and the synthesis
+    layer's `random` branch draws its noise field at the layer's nominal
+    resolution regardless, so the two do not match and every frame raises.
+    Its `const` branch resizes the noise field along with the activation, so
+    const is the only mode a ratio renders in at all, and `noise_mode`
+    substitutes it whenever this holds.
+
+    Takes a `ControlState` or a `RenderParams`, because both callers must get
+    the same answer: `noise_mode` decides what synthesis is asked for, and the
+    Bending panel decides whether to say so. A neutral pair stored explicitly
+    does not count, since the sparse rows can carry one.
+    """
+    if not state.noise_enabled:
+        return False
+    if not (state.noise_anim or state.noise_seed != 0):
+        return False
+    return any(
+        rx != 1.0 or ry != 1.0 for rx, ry in _ratio_pairs(state.layer_ratios)
+    )
+
+
 def to_render_params(state: ControlState) -> RenderParams:
     keyframe_count = len(state.keyframes)
     return RenderParams(

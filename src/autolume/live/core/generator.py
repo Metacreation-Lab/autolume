@@ -17,7 +17,12 @@ from typing import Callable
 import numpy as np
 
 from autolume.live.core.mixing import combine
-from autolume.live.core.params import Keyframe, RenderParams, Transform
+from autolume.live.core.params import (
+    Keyframe,
+    RenderParams,
+    Transform,
+    ratio_forces_const_noise,
+)
 from autolume.live.core.store import LatestValueStore
 from autolume.live.core.superres import SuperRes
 
@@ -78,11 +83,17 @@ def noise_mode(params: RenderParams) -> str:
     Seed 0 means the model's own constant noise buffer, so composition stays
     put while any other seed redraws the texture. Animation forces "random"
     because the constant buffer cannot animate.
+
+    A layer ratio overrides all of that and holds the mode on "const": the
+    random branch draws its noise field at the layer's nominal resolution
+    while the activation beside it has been resized, and the two do not
+    broadcast, so the frame raises and the preview goes blank. The Bending
+    panel says so on screen, from the same predicate.
     """
     if not params.noise_enabled:
         return "none"
     if params.noise_anim or params.noise_seed != 0:
-        return "random"
+        return "const" if ratio_forces_const_noise(params) else "random"
     return "const"
 
 

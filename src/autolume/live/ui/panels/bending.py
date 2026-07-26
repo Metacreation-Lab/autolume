@@ -49,6 +49,7 @@ from autolume.live.core.params import (
     SetLayerRatio,
     SetTransform,
     Transform,
+    ratio_forces_const_noise,
 )
 from autolume.live.errors import describe
 from autolume.live.ui.controls import ControlBinder
@@ -140,6 +141,10 @@ _NO_LAYERS = "This model published no layer catalog."
 _NO_TRANSFORMS = "No transforms on this layer yet."
 _NO_DIRECTIONS = "No directions loaded. Load a file or randomize."
 _TORGB_NOTE = "A torgb layer carries no noise of its own."
+_RATIO_NOISE_NOTE = (
+    "A layer ratio is away from 1. Noise is held on the model's own field. "
+    "Animate noise and the noise seed do nothing until every ratio is back at 1."
+)
 _REMOVE = "Remove"
 _REROLL = "Re-roll"
 _LOAD = "Load"
@@ -930,6 +935,11 @@ class BendingPanel:
         render side only writes these onto a module that declares them, so a
         live control there would do nothing and say nothing. Greyed rather than
         hidden, so picking a tRGB layer does not change the panel's height.
+
+        A ratio anywhere in the model forces the whole frame's noise onto the
+        model's own field, so the note under the rows is drawn from the state
+        rather than from this layer: the performer needs to know why Animate
+        noise stopped doing anything whichever layer they are looking at.
         """
         imgui.separator_text("Layer noise")
         if layer is None:
@@ -956,6 +966,8 @@ class BendingPanel:
         if not live:
             imgui.end_disabled()
             draw_note(_TORGB_NOTE)
+        if ratio_forces_const_noise(state):
+            draw_note(_RATIO_NOISE_NOTE)
 
     def _adjuster_rows(self, state: ControlState, info) -> None:
         """Eight weights, and the directions they scale.

@@ -763,6 +763,31 @@ def test_render_frame_with_tuple_synthesis_output():
         ({"noise_seed": 0, "noise_anim": False}, "const"),
         ({"noise_seed": 9, "noise_anim": False}, "random"),
         ({"noise_seed": 0, "noise_anim": True}, "random"),
+        # A layer ratio holds the mode on const: the random branch draws its
+        # noise field at the layer's nominal resolution while the activation
+        # beside it has been resized, and the frame raises instead of drawing.
+        (
+            {"noise_anim": True, "layer_ratios": (("conv1", 2.0, 1.0),)},
+            "const",
+        ),
+        (
+            {"noise_seed": 9, "layer_ratios": (("conv1", 1.0, 0.5),)},
+            "const",
+        ),
+        # Ratios all neutral, so nothing is resized and random still runs.
+        (
+            {"noise_anim": True, "layer_ratios": (("conv1", 1.0, 1.0),)},
+            "random",
+        ),
+        # Noise off still wins over both.
+        (
+            {
+                "noise_enabled": False,
+                "noise_anim": True,
+                "layer_ratios": (("conv1", 2.0, 1.0),),
+            },
+            "none",
+        ),
     ],
 )
 def test_noise_mode_truth_table(changes, expected):
