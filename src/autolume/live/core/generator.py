@@ -123,7 +123,11 @@ def _model_info(path: str, model: object) -> ModelInfo | None:
 
     Duck-typed rather than an isinstance check: tests and future loaders
     stand in objects that are not `LoadedModel`. A double that omits the
-    dimensions simply does not publish, never raises the loader thread.
+    dimensions simply does not publish, never raises the loader thread. A
+    `model.enumerate_layers()` that raises (a future wrapper generator that
+    does not implement it faithfully, say) degrades to an empty catalog the
+    same way `LoadedModel`'s own enumeration does, rather than failing the
+    whole load.
     """
     z_dim = getattr(model, "z_dim", None)
     num_ws = getattr(model, "num_ws", None)
@@ -135,10 +139,14 @@ def _model_info(path: str, model: object) -> ModelInfo | None:
     except (TypeError, ValueError):
         return None
     enumerate_layers = getattr(model, "enumerate_layers", None)
-    layers = enumerate_layers() if callable(enumerate_layers) else ()
-    return ModelInfo(
-        pkl_path=str(path), z_dim=z_dim, num_ws=num_ws, layers=tuple(layers)
-    )
+    try:
+        layers = tuple(enumerate_layers()) if callable(enumerate_layers) else ()
+    except Exception:
+        logger.warning(
+            "Could not enumerate layers for %s", path, exc_info=True
+        )
+        layers = ()
+    return ModelInfo(pkl_path=str(path), z_dim=z_dim, num_ws=num_ws, layers=layers)
 
 
 class LoadedModel:
@@ -285,11 +293,14 @@ class LoadedModel:
         fire on a module only after its own forward() returns, which is
         after all its children have already fired theirs, so the top-level
         synthesis module (named '' by `named_modules()`, recorded here as
-        "output") is always last. Only 4D/5D outputs count as layers.
-        Hooks are removed in `finally` even if the dry pass raises: an
-        exotic architecture must not leave hooks on a model about to
-        render, and must not block the load either, so any failure here
-        logs one line and yields an empty catalog instead of raising.
+        "output") is always last. Only 4D/5D outputs count as layers. A 5D
+        output is a G-CNN group dimension laid out `(N, C, G, H, W)`, so
+        `shape[1]` is the channel count there too, not `shape[-3]` (the
+        group count). Hooks are removed in `finally` even if the dry pass
+        raises: an exotic architecture must not leave hooks on a model
+        about to render, and must not block the load either, so any
+        failure here logs one line and yields an empty catalog instead of
+        raising.
         """
         import torch
 
@@ -306,7 +317,7 @@ class LoadedModel:
                 layers.append(
                     LayerInfo(
                         name=name or "output",
-                        channels=int(shape[-3]),
+                        channels=int(shape[1]),
                         width=int(shape[-1]),
                         height=int(shape[-2]),
                     )
@@ -324,7 +335,9 @@ class LoadedModel:
             with torch.no_grad():
                 synthesis(ws.unsqueeze(0), noise_mode="const")
         except Exception:
-            logger.warning("Could not enumerate layers for %s", self.pkl_path)
+            logger.warning(
+                "Could not enumerate layers for %s", self.pkl_path, exc_info=True
+            )
             return ()
         finally:
             for handle in handles:

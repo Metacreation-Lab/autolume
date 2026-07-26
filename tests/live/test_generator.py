@@ -625,7 +625,9 @@ def _fake_synthesis_module():
     class _Synthesis(nn.Module):
         def __init__(self):
             super().__init__()
-            self.conv1 = _block(channels=8, height=4, width=4)
+            # conv1 is deliberately non-square: a width/height transposition
+            # bug would still pass a square-only fixture.
+            self.conv1 = _block(channels=8, height=4, width=6)
             self.torgb = _block(channels=3, height=8, width=8)
 
         def forward(self, ws, noise_mode="const"):
@@ -641,12 +643,33 @@ def _failing_synthesis_module():
     class _Boom(nn.Module):
         def __init__(self):
             super().__init__()
-            self.conv1 = _block(channels=8, height=4, width=4)
+            self.conv1 = _block(channels=8, height=4, width=6)
 
         def forward(self, ws, noise_mode="const"):
             raise RuntimeError("exotic architecture")
 
     return _Boom()
+
+
+def _group_cnn_synthesis_module():
+    """A single child whose output is 5D: `(N, C, G, H, W)`, the group-CNN
+    layout the 4D/5D filter is meant to also accept."""
+    import torch
+    import torch.nn as nn
+
+    class _GroupBlock(nn.Module):
+        def forward(self, ws):
+            return torch.zeros(ws.shape[0], 6, 3, 4, 5)
+
+    class _Synthesis(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.group_conv = _GroupBlock()
+
+        def forward(self, ws, noise_mode="const"):
+            return self.group_conv(ws)
+
+    return _Synthesis()
 
 
 def test_enumerate_layers_records_names_shapes_and_order():
@@ -655,9 +678,22 @@ def test_enumerate_layers_records_names_shapes_and_order():
     layers = model.enumerate_layers()
 
     assert layers == (
-        LayerInfo(name="conv1", channels=8, width=4, height=4),
+        LayerInfo(name="conv1", channels=8, width=6, height=4),
         LayerInfo(name="torgb", channels=3, width=8, height=8),
         LayerInfo(name="output", channels=3, width=8, height=8),
+    )
+
+
+def test_enumerate_layers_5d_output_channels_read_axis_1_not_axis_minus_3():
+    # 5D layout is (N, C, G, H, W): axis -3 is the group count (3), not the
+    # channel count (6). channels must come from axis 1.
+    model = _fake_model(_group_cnn_synthesis_module())
+
+    layers = model.enumerate_layers()
+
+    assert layers == (
+        LayerInfo(name="group_conv", channels=6, width=5, height=4),
+        LayerInfo(name="output", channels=6, width=5, height=4),
     )
 
 
@@ -677,7 +713,8 @@ def test_enumerate_layers_removes_hooks_afterward():
 
 
 def test_enumerate_layers_failure_yields_empty_catalog_and_logs_once(caplog):
-    model = _fake_model(_failing_synthesis_module())
+    synthesis = _failing_synthesis_module()
+    model = _fake_model(synthesis)
 
     with caplog.at_level(logging.WARNING):
         layers = model.enumerate_layers()
@@ -685,6 +722,10 @@ def test_enumerate_layers_failure_yields_empty_catalog_and_logs_once(caplog):
     assert layers == ()
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert len(warnings) == 1
+    # The safety-critical half of the finally contract: a raising dry pass
+    # must not leave hooks on a model about to render.
+    for module in synthesis.modules():
+        assert len(module._forward_hooks) == 0
 
 
 def test_model_host_publishes_empty_layer_catalog_when_enumeration_fails():
