@@ -93,17 +93,29 @@ def pick_device():
 
 
 @dataclass(frozen=True)
+class LayerInfo:
+    """One synthesis submodule's output shape, as seen by the layer catalog."""
+
+    name: str
+    channels: int
+    width: int
+    height: int
+
+
+@dataclass(frozen=True)
 class ModelInfo:
     """Immutable dimensions of a loaded model, published on the loader thread.
 
-    The control plane needs `z_dim` to materialize latent vectors and
-    `num_ws` for the layer catalog (Plan 4); one snapshot channel serves
-    both instead of poking through to the model itself.
+    The control plane needs `z_dim` to materialize latent vectors, `num_ws`
+    to build W tensors, and `layers` for the bending UI and event
+    validation. One snapshot channel serves all three instead of poking
+    through to the model itself.
     """
 
     pkl_path: str
     z_dim: int
     num_ws: int
+    layers: tuple[LayerInfo, ...] = ()
 
 
 def _model_info(path: str, model: object) -> ModelInfo | None:
@@ -118,9 +130,15 @@ def _model_info(path: str, model: object) -> ModelInfo | None:
     if z_dim is None or num_ws is None:
         return None
     try:
-        return ModelInfo(pkl_path=str(path), z_dim=int(z_dim), num_ws=int(num_ws))
+        z_dim = int(z_dim)
+        num_ws = int(num_ws)
     except (TypeError, ValueError):
         return None
+    enumerate_layers = getattr(model, "enumerate_layers", None)
+    layers = enumerate_layers() if callable(enumerate_layers) else ()
+    return ModelInfo(
+        pkl_path=str(path), z_dim=z_dim, num_ws=num_ws, layers=tuple(layers)
+    )
 
 
 class LoadedModel:
@@ -256,6 +274,63 @@ class LoadedModel:
                 module.global_noise = value
         self._applied_global_noise = value
 
+    def enumerate_layers(self) -> tuple[LayerInfo, ...]:
+        """Build the layer catalog with one hooked dry synthesis pass.
+
+        Hooks every synthesis submodule by its `named_modules()` name so a
+        later transform hook can look a module up by the same name, then
+        synthesizes once with a deterministic fallback W (the same
+        RandomState(0) technique `_w_rows_for_vec` falls back to, but
+        without its warning, since this runs on every load). Forward hooks
+        fire on a module only after its own forward() returns, which is
+        after all its children have already fired theirs, so the top-level
+        synthesis module (named '' by `named_modules()`, recorded here as
+        "output") is always last. Only 4D/5D outputs count as layers.
+        Hooks are removed in `finally` even if the dry pass raises: an
+        exotic architecture must not leave hooks on a model about to
+        render, and must not block the load either, so any failure here
+        logs one line and yields an empty catalog instead of raising.
+        """
+        import torch
+
+        layers: list[LayerInfo] = []
+        handles = []
+
+        def _make_hook(name: str):
+            def _hook(_module, _inputs, output):
+                if isinstance(output, tuple):
+                    output = output[0] if output else None
+                shape = getattr(output, "shape", None)
+                if shape is None or len(shape) not in (4, 5):
+                    return
+                layers.append(
+                    LayerInfo(
+                        name=name or "output",
+                        channels=int(shape[-3]),
+                        width=int(shape[-1]),
+                        height=int(shape[-2]),
+                    )
+                )
+
+            return _hook
+
+        try:
+            synthesis = self.G.synthesis
+            for name, module in synthesis.named_modules():
+                handles.append(module.register_forward_hook(_make_hook(name)))
+            w_dim = self._w_avg.shape[-1]
+            row = np.random.RandomState(0).randn(1, w_dim).astype(np.float32)
+            ws = torch.from_numpy(row).to(self.device).repeat(self.num_ws, 1)
+            with torch.no_grad():
+                synthesis(ws.unsqueeze(0), noise_mode="const")
+        except Exception:
+            logger.warning("Could not enumerate layers for %s", self.pkl_path)
+            return ()
+        finally:
+            for handle in handles:
+                handle.remove()
+        return tuple(layers)
+
     def render_frame(self, params: RenderParams, frame_index: int) -> np.ndarray:
         import torch
 
@@ -364,6 +439,11 @@ class ModelHost:
                 continue
             try:
                 model = self._loader(path)
+                # Enumerated before publishing: the layer catalog's dry
+                # synthesis pass attaches and removes hooks on this model's
+                # submodules, and that must be finished before the render
+                # thread can ever see this model through current().
+                info = _model_info(path, model)
                 with self._lock:
                     won = self._pending == path
                     if won:
@@ -372,7 +452,7 @@ class ModelHost:
                         self._pending = None
                     # else: a newer request arrived while loading; loop again
                 if won:
-                    self.info_store.set(_model_info(path, model))
+                    self.info_store.set(info)
             except Exception as exc:
                 logger.exception("Failed to load model %s", path)
                 with self._lock:

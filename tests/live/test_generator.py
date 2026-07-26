@@ -5,6 +5,7 @@ import time
 import pytest
 
 from autolume.live.core.generator import (
+    LayerInfo,
     ModelHost,
     ModelInfo,
     corner_seeds,
@@ -602,3 +603,131 @@ def test_slerp_alpha_bounds_reproduce_endpoints():
     w1 = torch.tensor([0.0, 1.0, 0.0])
     assert torch.allclose(slerp(0.0, w0, w1), w0, atol=1e-6)
     assert torch.allclose(slerp(1.0, w0, w1), w1, atol=1e-6)
+
+
+# --- layer catalog enumeration ------------------------------------------
+
+
+def _block(channels, height, width):
+    import torch
+    import torch.nn as nn
+
+    class _Block(nn.Module):
+        def forward(self, ws):
+            return torch.zeros(ws.shape[0], channels, height, width)
+
+    return _Block()
+
+
+def _fake_synthesis_module():
+    import torch.nn as nn
+
+    class _Synthesis(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv1 = _block(channels=8, height=4, width=4)
+            self.torgb = _block(channels=3, height=8, width=8)
+
+        def forward(self, ws, noise_mode="const"):
+            self.conv1(ws)
+            return self.torgb(ws)
+
+    return _Synthesis()
+
+
+def _failing_synthesis_module():
+    import torch.nn as nn
+
+    class _Boom(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv1 = _block(channels=8, height=4, width=4)
+
+        def forward(self, ws, noise_mode="const"):
+            raise RuntimeError("exotic architecture")
+
+    return _Boom()
+
+
+def test_enumerate_layers_records_names_shapes_and_order():
+    model = _fake_model(_fake_synthesis_module())
+
+    layers = model.enumerate_layers()
+
+    assert layers == (
+        LayerInfo(name="conv1", channels=8, width=4, height=4),
+        LayerInfo(name="torgb", channels=3, width=8, height=8),
+        LayerInfo(name="output", channels=3, width=8, height=8),
+    )
+
+
+def test_enumerate_layers_removes_hooks_afterward():
+    import torch
+
+    synthesis = _fake_synthesis_module()
+    model = _fake_model(synthesis)
+
+    model.enumerate_layers()
+
+    for module in synthesis.modules():
+        assert len(module._forward_hooks) == 0
+
+    # A second call to the same (now unhooked) synthesis must not raise.
+    synthesis(torch.zeros(1, 2, 8))
+
+
+def test_enumerate_layers_failure_yields_empty_catalog_and_logs_once(caplog):
+    model = _fake_model(_failing_synthesis_module())
+
+    with caplog.at_level(logging.WARNING):
+        layers = model.enumerate_layers()
+
+    assert layers == ()
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+
+
+def test_model_host_publishes_empty_layer_catalog_when_enumeration_fails():
+    import torch
+
+    from autolume.live.core.generator import LoadedModel
+
+    def loader(path):
+        return LoadedModel(
+            path, _FakeG(_failing_synthesis_module()), torch.device("cpu")
+        )
+
+    host = ModelHost(loader=loader)
+    host.request_load("/tmp/exotic.pkl")
+    deadline = time.monotonic() + 2.0
+    while host.info_store.snapshot() is None and time.monotonic() < deadline:
+        time.sleep(0.005)
+
+    info = host.info_store.snapshot()
+    assert info is not None
+    assert info.layers == ()
+    assert host.current() is not None
+    assert host.error() is None
+    host.stop()
+
+
+def test_model_host_publishes_layer_catalog_on_successful_load():
+    import torch
+
+    from autolume.live.core.generator import LoadedModel
+
+    def loader(path):
+        return LoadedModel(
+            path, _FakeG(_fake_synthesis_module()), torch.device("cpu")
+        )
+
+    host = ModelHost(loader=loader)
+    host.request_load("/tmp/good.pkl")
+    deadline = time.monotonic() + 2.0
+    while host.info_store.snapshot() is None and time.monotonic() < deadline:
+        time.sleep(0.005)
+
+    info = host.info_store.snapshot()
+    assert info is not None
+    assert [layer.name for layer in info.layers] == ["conv1", "torgb", "output"]
+    host.stop()
