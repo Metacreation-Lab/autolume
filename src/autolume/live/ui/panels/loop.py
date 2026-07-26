@@ -552,6 +552,21 @@ class LoopPanel:
         the row it was opened for may have moved or been removed, so the
         index is re-checked against the keyframes actually on hand right now
         rather than trusted blind.
+
+        The kind is set to `"vec"` alongside `vec` itself, not left as
+        whatever the row's kind happens to be by the time the dialog
+        resolves: Load can only be clicked on a vector row (`_keyframe_
+        vector_controls` greys it otherwise), but the picker is not
+        app-modal, so a performer can flip that same row to Seed while it is
+        still open, then pick a file. Writing only `vec` onto a keyframe now
+        reporting `kind="seed"` is exactly the stale-residue class Snap's
+        own rule (`captured_keyframe`) rules out: a vector sitting on a
+        field the row's current kind never reads, invisible until someone
+        flips the row back and gets a vector they never chose. Forcing the
+        kind to follow the vector Load actually delivers, the same as Snap
+        forces it to follow the navigation mode it actually captures, keeps
+        the picked file visible and applied rather than silently lost to a
+        kind that raced past it.
         """
         if self._vector_dialog is None:
             return
@@ -572,7 +587,9 @@ class LoopPanel:
             self._vector_error = f"Could not load the vector. {describe(exc)}"
             return
         keyframe = state.keyframes[index]
-        self._set_keyframe(index, dataclasses.replace(keyframe, vec=tuple(values)))
+        self._set_keyframe(
+            index, dataclasses.replace(keyframe, kind="vec", vec=tuple(values))
+        )
 
     def _set_keyframe(self, index: int, keyframe: Keyframe) -> None:
         self._emit(KEYFRAME_SET, SetKeyframe(index, keyframe))

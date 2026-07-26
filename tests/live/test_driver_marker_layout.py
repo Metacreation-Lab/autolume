@@ -656,7 +656,41 @@ def _isolated_keyframe_row(
 
 
 def _one_line_floor(margin_px: float, font_scale: float) -> float:
-    return _required_width_at(font_scale) + margin_px
+    """The *window* width `keyframe_row_edges` needs to give the row's
+    one-line layout `margin_px` of slack in its content region.
+
+    `keyframe_row_edges` sets the window's own width directly
+    (`imgui.set_next_window_size`), not its content region, unlike
+    `_isolated_keyframe_row` and `_true_two_line_need` above, which both
+    already convert. Window padding comes off a window's width before it
+    becomes `content_region_avail`, the number `keyframe_row_fits_one_line`
+    actually compares against, so feeding `_required_width_at`'s raw content
+    number straight in as a window width left every "one-line, at the
+    floor" combination silently drawing two lines instead: 16px of padding
+    was enough to push `content_region_avail` under the threshold at all
+    four font sizes, caught by instrumenting the dispatch directly rather
+    than trusting the overflow guard alone, which cannot tell the
+    difference (two-line mode fits comfortably inside that same width, so
+    the guard kept passing for the wrong reason).
+    """
+    context = imgui.create_context()
+    try:
+        io = imgui.get_io()
+        io.set_ini_filename(None)
+        io.display_size = imgui.ImVec2(900.0, 700.0)
+        io.delta_time = 1.0 / 60.0
+        io.backend_flags |= imgui.BackendFlags_.renderer_has_textures
+        theme.apply_theme()
+        imgui.get_style().font_scale_main = font_scale
+        imgui.new_frame()
+        imgui.begin("W")
+        required = keyframe_row_required_width(0) + margin_px
+        window_width = required + 2.0 * imgui.get_style().window_padding.x
+        imgui.end()
+        imgui.render()
+        return window_width
+    finally:
+        imgui.destroy_context(context)
 
 
 def _true_two_line_need(font_scale: float) -> float:
@@ -783,15 +817,20 @@ def test_keyframe_row_actually_uses_one_line_once_it_truly_fits(font_scale, font
     """
     required = _required_width_at(font_scale)
     assert _fits_one_line_at(font_scale, 0, required) is True
-    _, one_line_height = _isolated_keyframe_row(font_scale, required, force=True)
+    one_line_margin, one_line_height = _isolated_keyframe_row(
+        font_scale, required, force=True
+    )
     two_line_margin, two_line_height = _isolated_keyframe_row(
         font_scale, required, force=False
     )
     _, natural_height = _isolated_keyframe_row(font_scale, required, force=None)
-    # Sanity: the two layouts really do differ in height and the two-line
-    # one still fits at this width too, or the comparison below would pass
-    # no matter which one the real dispatch picked.
+    # Sanity: the two layouts really do differ in height and both actually
+    # fit the width this test claims for them, or the comparison below
+    # would pass no matter which one the real dispatch picked. The
+    # one-line case is the one most likely to regress: a row drawn at
+    # exactly its own required width, with no margin, must not overflow.
     assert two_line_height > one_line_height
+    assert one_line_margin >= 0.0
     assert two_line_margin >= 0.0
     assert natural_height == pytest.approx(one_line_height)
 
@@ -1960,3 +1999,46 @@ def test_a_pending_keyframe_load_drains_while_noise_loop_mode_is_selected(
     applied = keyframe_sets[-1].value
     assert applied.index == 2
     assert applied.keyframe.vec == (1.0, 2.0, 3.0)
+
+
+def test_a_pending_keyframe_load_adopts_vec_kind_if_the_row_flips_to_seed_while_open(
+    frame, monkeypatch
+):
+    """Minor 3: Load can only be clicked on a vector row (`_keyframe_vector_
+    controls` greys it otherwise), but the picker is not app-modal, so a
+    performer can flip that row to Seed while the dialog is still open, then
+    pick a file. Writing only `vec` in that case left the keyframe reporting
+    `kind="seed"` with a vector sitting on a field that kind never reads:
+    invisible until someone flipped the row back, at which point they got a
+    vector they never chose. This is the same stale-residue class the
+    maintainer's Snap ruling outlawed (`captured_keyframe`'s own docstring),
+    fixed the same way here: the kind now follows the vector Load actually
+    delivers, not whatever kind the row raced ahead to in the meantime.
+    """
+    monkeypatch.setattr(loop_module, "load_vector_file", lambda path: [4.0, 5.0, 6.0])
+    submitted = []
+
+    class RecordingRuntime(PanelRuntime):
+        def submit(self, event):
+            submitted.append(event)
+
+    # Row 2, "seed" by the time the dialog resolves: the flip-while-open
+    # race, driven directly rather than through an actual radio click.
+    keyframes = tuple(default_keyframe(i) for i in range(3))
+    keyframes = keyframes[:2] + (
+        dataclasses.replace(keyframes[2], kind="seed", seed_x=7.0, seed_y=8.0),
+    )
+    state = ControlState(keyframes=keyframes)
+    runtime = RecordingRuntime(state=state)
+    panel = LoopPanel(runtime, mapping_popup=lambda name: None)
+    panel._vector_dialog = (2, _ReadyVectorDialog("vector.npy"))
+
+    panel.gui()
+
+    assert panel._vector_dialog is None
+    keyframe_sets = [e for e in submitted if e.address == "/keyframe/set"]
+    assert keyframe_sets, "the picked vector should have been applied, not dropped"
+    applied = keyframe_sets[-1].value
+    assert applied.index == 2
+    assert applied.keyframe.kind == "vec"
+    assert applied.keyframe.vec == (4.0, 5.0, 6.0)

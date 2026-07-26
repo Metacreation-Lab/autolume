@@ -110,8 +110,9 @@ def _build_runner_params(runtime) -> hello_imgui.RunnerParams:
         _split(_CONTROLS_SPACE, _PATCH_SPACE, imgui.Dir.down, 0.5),
     ]
     # No per-window minimum size is set here for "Loop", even though its
-    # keyframe row has one it cares about (`loop.py`, `_ONE_LINE_EMS`): a
-    # docked window's size is the dock node's, and neither
+    # keyframe row has one it cares about (`loop.py`,
+    # `keyframe_row_required_width`): a docked window's size is the dock
+    # node's, and neither
     # `hello_imgui.DockableWindow` (its own `window_size` field is documented
     # unused once docked) nor plain `imgui.set_next_window_size_constraints`
     # binds to a dock node splitter drag, only to an undocked window's own
