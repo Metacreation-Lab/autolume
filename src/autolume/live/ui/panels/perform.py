@@ -19,6 +19,7 @@ address of its own and no driver marker: it reaches the control thread through
 `/vector/set` and `/vector/randomize` instead.
 """
 
+import dataclasses
 import logging
 import random
 from pathlib import Path
@@ -28,7 +29,7 @@ import numpy as np
 from imgui_bundle import imgui, portable_file_dialogs as pfd
 
 from autolume.live.core.events import ControlEvent
-from autolume.live.core.params import VECTOR_RANDOMIZE, VECTOR_SET
+from autolume.live.core.params import VECTOR_RANDOMIZE, VECTOR_SET, derive_mode
 from autolume.live.errors import describe
 from autolume.live.ui.controls import ControlBinder
 from autolume.live.ui.theme import ERROR_COLOR
@@ -153,9 +154,26 @@ class PerformPanel:
         imgui.separator_text("Latent")
         self._binder.bool_radio("vector_mode", "Seed", "Vec")
         vector_mode = bool(self._binder.value("vector_mode"))
-        self._binder.checkbox("latent_project", "Project")
-        self._binder.drag_float("latent_x", "Latent x", enabled=not vector_mode)
-        self._binder.drag_float("latent_y", "Latent y", enabled=not vector_mode)
+        # `derive_mode`, not a local re-derivation: `generator.py`'s
+        # `render_frame` reads `latent_project` only in its `"vec"` branch and
+        # the seed grid (`latent_x`/`latent_y`) only in its `"seed"` branch,
+        # so both have to ask the exact question the generator dispatches on
+        # or they can drift from it. `vector_mode` is swapped in from the
+        # displayed value above rather than the raw snapshot, so toggling the
+        # radio greys both in the same frame instead of one behind it.
+        mode = derive_mode(
+            dataclasses.replace(self._binder.state(), vector_mode=vector_mode)
+        )
+        self._binder.checkbox("latent_project", "Project", enabled=mode == "vec")
+        # Was `enabled=not vector_mode`: correct outside a loop, but a loop
+        # (either kind) takes the latent over entirely, per this method's own
+        # docstring, and `_blended_w` (`generator.py`) is only ever called in
+        # the `"seed"` branch, never while one plays. The marker already
+        # showed this (`drives()` stands motion down during `loop_active`),
+        # but the widget itself stayed live and editable regardless, the same
+        # live-but-inert shape Project shipped with twice before this sweep.
+        self._binder.drag_float("latent_x", "Latent x", enabled=mode == "seed")
+        self._binder.drag_float("latent_y", "Latent y", enabled=mode == "seed")
         self._vector_row(vector_mode)
         self._binder.checkbox("anim_playing", "Animate")
         self._binder.slider_float("anim_speed_x", "Speed x")

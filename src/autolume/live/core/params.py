@@ -287,11 +287,11 @@ class RenderParams:
     loop_alpha: float
     loop_index: int
     # "seed", "vec" or "loop": what the generator evaluates this frame, see
-    # `_derive_mode`.
+    # `derive_mode`.
     mode: str
 
 
-def _derive_mode(state: ControlState) -> str:
+def derive_mode(state: ControlState) -> str:
     """The generator mode for one frame, per the design's mode table.
 
     Loop playback overrides latent navigation entirely: while `loop_active`,
@@ -299,6 +299,13 @@ def _derive_mode(state: ControlState) -> str:
     mapping network), everything else that loops does so via keyframes.
     Outside a loop, `vector_mode` picks between the seed grid and a raw
     vector.
+
+    Public rather than private: `perform.py` calls this directly to grey
+    `latent_project`, which `generator.py`'s `render_frame` reads only in
+    the `"vec"` branch. The UI must ask the same question the generator
+    dispatches on rather than re-deriving it, or the two can drift; this
+    function is what makes that structurally impossible instead of merely
+    intended.
     """
     if state.loop_active:
         return "vec" if state.noise_loop else "loop"
@@ -329,7 +336,7 @@ def to_render_params(state: ControlState) -> RenderParams:
         # same way, so this rarely has anything to do; it stays because a
         # `ControlState` can still be built directly with a stale index.
         loop_index=state.loop_index % keyframe_count if keyframe_count else 0,
-        mode=_derive_mode(state),
+        mode=derive_mode(state),
     )
 
 
