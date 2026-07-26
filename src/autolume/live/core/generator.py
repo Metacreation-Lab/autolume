@@ -17,6 +17,7 @@ import numpy as np
 
 from autolume.live.core.params import Keyframe, RenderParams, Transform
 from autolume.live.core.store import LatestValueStore
+from autolume.live.core.superres import SuperRes
 
 logger = logging.getLogger(__name__)
 
@@ -374,6 +375,12 @@ class LoadedModel:
         self._manipulation = None
         self._manipulation_failed = False
         self._released = False
+        # One instance per LoadedModel, never module-global (the legacy bug
+        # this stage exists to shed): a device switch always builds a fresh
+        # LoadedModel with its own fixed `device`, so a fresh SuperRes comes
+        # along with it and loads/re-homes on its own first call instead of
+        # inheriting a previous model's device.
+        self._superres = SuperRes()
         # What the hooks act on for the frame being rendered right now, and
         # where the capture hook leaves what it grabbed. Empty between frames.
         self._frame_transforms: tuple[Transform, ...] = ()
@@ -836,7 +843,10 @@ class LoadedModel:
             if isinstance(output, tuple):
                 output = output[0]
             activation = output if captured is None else captured
-            return to_uint8_frame(derive_float_image(activation[0], params))
+            image = derive_float_image(activation[0], params)
+            if params.use_superres:
+                image = self._superres.apply(image, self.device)
+            return to_uint8_frame(image)
 
 
 def load_model(path: str, device=None) -> LoadedModel:

@@ -1461,6 +1461,76 @@ def test_render_frame_grayscale_replicates_one_channel():
     assert frame[0, 0].tolist() == [153, 153, 153]
 
 
+# --- super-res wiring ------------------------------------------------------
+
+
+class _RecordingSuperRes:
+    """Stands in for the real stage: records the tensor and device it is
+    handed and returns a recognizably different image, so the wiring can be
+    checked by what actually came out, not just that a frame came back."""
+
+    def __init__(self):
+        self.calls = []
+
+    def apply(self, image, device):
+        self.calls.append((image, device))
+        return image + 0.5
+
+
+def test_render_frame_never_touches_super_res_when_disabled():
+    model = _fake_model(_channel_ramp_synthesis())
+    stage = _RecordingSuperRes()
+    model._superres = stage
+    frame = model.render_frame(render_params(base_channel=1, use_superres=False), 0)
+    assert stage.calls == []
+    assert frame[0, 0].tolist() == [153, 179, 204]
+
+
+def test_render_frame_passes_the_float_image_through_super_res_before_quantizing():
+    model = _fake_model(_channel_ramp_synthesis())
+    stage = _RecordingSuperRes()
+    model._superres = stage
+    frame = model.render_frame(render_params(base_channel=1, use_superres=True), 0)
+    assert len(stage.calls) == 1
+    seen_image, _ = stage.calls[0]
+    assert seen_image.dtype.is_floating_point
+    assert seen_image.shape == (3, 1, 2)
+    # Channels 1-3 of the ramp are 0.2, 0.4, 0.6; the stage's own +0.5 lands
+    # on 0.7, 0.9, 1.1 (clamped), which only shows up in the frame if the
+    # stage ran before the uint8 conversion, not after it.
+    assert frame[0, 0].tolist() == [217, 242, 255]
+
+
+def test_render_frame_hands_super_res_the_models_device():
+    import torch
+
+    model = _fake_model(_channel_ramp_synthesis())
+    stage = _RecordingSuperRes()
+    model._superres = stage
+    model.render_frame(render_params(use_superres=True), 0)
+    _, seen_device = stage.calls[0]
+    assert seen_device is model.device
+    assert seen_device == torch.device("cpu")
+
+
+def test_render_frame_still_produces_a_frame_when_super_res_returns_unchanged():
+    """SuperRes itself guarantees it never raises, returning the original
+    image unchanged on any internal failure. The wiring must not assume
+    upscaling actually happened, or wrap `apply()` in its own exception
+    handling that could mask a genuine bug in the stage: it just uses
+    whatever `apply()` hands back."""
+
+    class _UnchangedSuperRes:
+        def apply(self, image, device):
+            return image
+
+    model = _fake_model(_channel_ramp_synthesis())
+    model._superres = _UnchangedSuperRes()
+    frame = model.render_frame(render_params(base_channel=1, use_superres=True), 0)
+    assert frame.shape == (1, 2, 3)
+    assert frame[0, 0].tolist() == [153, 179, 204]
+
+
 # --- adjuster direction --------------------------------------------------
 
 
