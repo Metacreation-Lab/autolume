@@ -455,13 +455,28 @@ def keyframe_row_edges(width: float, font_scale: float) -> list[float]:
     the loop panel's own widest entry instead: a keyframe row is not a
     `ControlBinder` widget (design.md: keyframes are structured state, not
     registry parameters), so it is measured by wrapping `LoopPanel._keyframe_row`
-    directly rather than `ControlBinder._widget`. One line, one edge: item 8
-    put the whole entry back on one line, so there is only the one to check.
+    directly rather than `ControlBinder._widget`.
+
+    Two checkpoints per row, not one: the row's own right edge (the last
+    item drawn, wherever `_keyframe_row` decided to end it), and the edge
+    right after `_keyframe_seed_fields`. In one-line mode that second
+    checkpoint lands mid-row and is never the binding one. In two-line mode
+    (below `keyframe_row_fits_one_line`'s threshold, `_keyframe_row_two_line`)
+    it is the true right edge of the first line, which the final checkpoint
+    alone cannot see: that one only ever reports the last item drawn, which
+    is on the second line, so a row that fits its second line but not its
+    first would read as fitting. This is not a hypothetical: measuring only
+    the final checkpoint let exactly that go unnoticed while the width
+    thresholds below were first being picked, until measuring the first
+    line directly (`_keyframe_row_two_line`'s own helpers, in isolation)
+    turned up a first line needing nearly double what the second line does
+    at the top font scale this suite checks.
     """
     context = imgui.create_context()
     edges: list[float] = []
     right = [0.0]
     original_row = LoopPanel._keyframe_row
+    original_seed_fields = LoopPanel._keyframe_seed_fields
     try:
         io = imgui.get_io()
         io.set_ini_filename(None)
@@ -471,11 +486,16 @@ def keyframe_row_edges(width: float, font_scale: float) -> list[float]:
         theme.apply_theme()
         imgui.get_style().font_scale_main = font_scale
 
+        def measure_seed_fields(self, index, keyframe, is_vector):
+            original_seed_fields(self, index, keyframe, is_vector)
+            edges.append(imgui.get_item_rect_max().x - right[0])
+
         def measure_row(self, index, keyframe, state, count):
             original_row(self, index, keyframe, state, count)
             edges.append(imgui.get_item_rect_max().x - right[0])
 
         LoopPanel._keyframe_row = measure_row
+        LoopPanel._keyframe_seed_fields = measure_seed_fields
         panel = LoopPanel(PanelRuntime(), mapping_popup=lambda name: None)
         for _ in range(3):
             imgui.new_frame()
@@ -491,26 +511,48 @@ def keyframe_row_edges(width: float, font_scale: float) -> list[float]:
             imgui.render()
     finally:
         LoopPanel._keyframe_row = original_row
+        LoopPanel._keyframe_seed_fields = original_seed_fields
         imgui.destroy_context(context)
     return edges
 
 
-# 960 is this panel's documented minimum supported width: the keyframe row is
-# the widest thing the Loop panel draws (index, Vec, Proj, two seed fields,
-# Load, Randomize, Snap, Remove, nine items on one line, task 8), and at the
-# largest font scale this suite checks the row measured needing ~930px, so
-# 960 is the next round number with margin to spare (measured at -33px,
-# i.e. 33px of slack at the panel edge). The perform panel's 280px floor was
-# never calibrated for a row this wide, and borrowing it anyway is the
-# mistake item 8 undoes; this is the Loop panel's own number in its place.
-# 1100 and 1280 are checked alongside it for the same reason the perform
-# panel checks more than one width: 1280 is the app's shipped window size
-# (window.py), so the panel is never actually asked to be narrower than its
-# dock allows without the performer dragging a split themselves.
+# The panel's two documented floors, both in font-relative units
+# (`keyframe_row_fits_one_line`, `_ONE_LINE_EMS`, `_TWO_LINE_EMS`), computed
+# at the three font sizes this theme actually renders at the font scales
+# this suite checks (13, 20, 26pt): one-line needs up to ~50 ems, two-line's
+# own worst line up to ~30 ems, both remeasured after item 14 (the kind
+# radio) and item 15 (Project spelled out) widened the row on both layouts.
+# `_row_floor` below is what turns that into a pixel width per combination,
+# so the combinations this test runs are exactly "one line, with a little
+# margin" and "two lines, with a little margin" at every font scale, rather
+# than fixed pixel literals that would silently stop meaning what they say
+# the day the font or the row's contents change again.
+from autolume.live.ui.panels.loop import (  # noqa: E402
+    _ONE_LINE_EMS,
+    _ROW_FLOOR_MARGIN_PX,
+    _TWO_LINE_EMS,
+)
+
+_KEYFRAME_ROW_FONT_SIZES = (13.0, 20.0, 26.0)  # font_scale_main 1.0, 1.5, 2.0
+
+
+def _row_floor(ems: float, margin_ems: float, font_size: float) -> float:
+    # The fixed scrollbar margin every claimed width has to survive
+    # (`_ROW_FLOOR_MARGIN_PX`'s own docstring), plus `margin_ems` of extra
+    # slack for this particular combination, on top of the row's real,
+    # em-scaled requirement.
+    return ems * font_size + _ROW_FLOOR_MARGIN_PX + margin_ems * font_size
+
+
 _KEYFRAME_ROW_COMBOS = tuple(
     (width, font_scale)
-    for width in (1280.0, 1100.0, 960.0)
-    for font_scale in (1.0, 1.5, 2.0)
+    for font_scale, font_size in zip((1.0, 1.5, 2.0), _KEYFRAME_ROW_FONT_SIZES)
+    for width in (
+        _row_floor(_ONE_LINE_EMS, 2.0, font_size),  # one-line mode, margin
+        _row_floor(_ONE_LINE_EMS, 0.0, font_size),  # one-line mode, at the floor
+        _row_floor(_TWO_LINE_EMS, 2.0, font_size),  # two-line mode, margin
+        _row_floor(_TWO_LINE_EMS, 0.0, font_size),  # two-line mode, at the floor
+    )
 )
 
 
@@ -1138,15 +1180,11 @@ def _click_only(monkeypatch, label: str) -> None:
     monkeypatch.setattr(imgui, "button", targeted)
 
 
-def test_add_keyframe_emits_the_next_count_and_nothing_else_touches_the_registry(
-    frame, monkeypatch
-):
-    """No count field left to drive a resize through: only Add keyframe does.
-
-    If a count field had survived the removal it would have had its own
-    write path to `/loop/keyframes` independent of this button, so this
-    also stands in for "the field is really gone" beyond the row count
-    `test_no_loop_panel_row_is_silently_dropped` already pins.
+def test_add_keyframe_appends_through_keyframe_set(frame, monkeypatch):
+    """No `keyframe_count` parameter left to resize through (item 13): Add
+    appends through `KEYFRAME_SET`, the same address every other keyframe
+    edit on the row already uses, so this is the one and only write path
+    into the list's length now.
     """
     submitted = []
 
@@ -1157,9 +1195,12 @@ def test_add_keyframe_emits_the_next_count_and_nothing_else_touches_the_registry
     _click_only(monkeypatch, "Add keyframe")
     panel = LoopPanel(RecordingRuntime(), mapping_popup=lambda name: None)
     panel.gui()
-    keyframe_writes = [e for e in submitted if e.address == "/loop/keyframes"]
-    # Six default keyframes, so Add asks for a seventh.
-    assert [event.value for event in keyframe_writes] == [7]
+    keyframe_sets = [e for e in submitted if e.address == "/keyframe/set"]
+    # Six default keyframes, so Add appends a seventh, at index 6.
+    assert len(keyframe_sets) == 1
+    appended = keyframe_sets[0].value
+    assert appended.index == 6
+    assert appended.keyframe == default_keyframe(6)
 
 
 def test_the_final_keyframes_remove_is_greyed_rather_than_live(frame):

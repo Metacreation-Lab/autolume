@@ -30,11 +30,11 @@ from autolume.live.core.noiseloop import estimated_build_seconds
 from autolume.live.core.params import (
     KEYFRAME_REMOVE,
     KEYFRAME_SET,
-    REGISTRY,
     ControlState,
     Keyframe,
     RemoveKeyframe,
     SetKeyframe,
+    default_keyframe,
 )
 from autolume.live.errors import describe
 from autolume.live.ui.controls import ControlBinder
@@ -50,6 +50,28 @@ logger = logging.getLogger(__name__)
 # against.
 _SEED_WIDTH_EMS = 5.5
 _VECTOR_FILTER = ["Vector files", "*.npy *.pt"]
+# The row's own floor, in font-relative units rather than a fixed pixel
+# count, so it shrinks with the UI font size preference the way every other
+# width in this row already does (`_SEED_WIDTH_EMS`, `_fit`). Measured
+# directly (see the test suite's own probe) at three font sizes and rounded
+# up from the largest observed ratio: needed px divided by font size gets a
+# little smaller as the font grows, since padding and spacing do not scale
+# in perfect lockstep with glyph width, so the ratio from the smallest size
+# is the one safe margin at every size, not just the one it was measured on.
+# Remeasured after item 14 replaced the "Vec" checkbox with a Seed/Vector
+# radio pair and item 15 spelled Project out in full: both widened the
+# identity portion of the row, on both layouts, so the two constants below
+# are wider than an earlier pass measured before either change landed.
+_ONE_LINE_EMS = 50.0
+_TWO_LINE_EMS = 31.0
+# A vertical scrollbar, 15px in this theme, appears once the panel's full
+# content (every row, not just this one) no longer fits the docked height,
+# and eats into the width this row has left to draw in. Its own width does
+# not scale with the font, so it is a flat pixel margin on top of the
+# em-based threshold above rather than another em folded into it; caught by
+# the test suite's own probe overflowing by 10px at a width the em-only
+# formula alone claimed was exactly enough.
+_ROW_FLOOR_MARGIN_PX = 20.0
 _PROJECT_NOTE = (
     "Project in Perform also applies to this loop. "
     "Off, each step is read as a raw W row instead of a latent."
@@ -75,6 +97,18 @@ def noise_table_pending(
 ) -> bool:
     """Whether the published table is stale against what the state now asks for."""
     return desired is not None and desired != built
+
+
+def keyframe_row_fits_one_line(font_size: float, available: float) -> bool:
+    """Whether `available` is wide enough for the keyframe row's one-line layout.
+
+    A deliberate, width-driven reflow: this is the one thing allowed to
+    change the row's height, unlike the kind switch, which must never
+    (`_keyframe_row`'s own docstring). It is checked once per row, before
+    anything is drawn, so the whole row commits to one layout rather than
+    part of it drawing wide and part narrow.
+    """
+    return available >= _ONE_LINE_EMS * font_size + _ROW_FLOOR_MARGIN_PX
 
 
 def _pending_note(radius: float) -> str:
@@ -166,10 +200,17 @@ class LoopPanel:
         A header Remove was ambiguous about which keyframe it would take;
         per-row Remove (`_keyframe_actions`) is the only one now.
 
-        `keyframe_count` itself is untouched: still a registry parameter,
-        still bindable and OSC-addressable at `/loop/keyframes`, still kept
-        in sync with the tuple length by `mapping.py`. Only its UI control
-        is gone. Add still writes it, the same as every other resize.
+        There is no `keyframe_count` parameter behind any of this any more
+        either (item 13): the registry no longer carries one at all, so
+        `len(state.keyframes)` is the only count there ever is, and Add
+        appends through `KEYFRAME_SET` (`_set_keyframe`) exactly like every
+        other keyframe edit, the same address `_keyframe_row` itself uses
+        for Snap, a kind change, or a seed edit. There is no separate
+        resize address left to disagree with the tuple, which is what made
+        the count and the tuple able to drift apart in the first place (a
+        preset could set one to 3 while the tuple stayed at 6, a bug the
+        final review of the previous pass reproduced): with one write path
+        into the list, that class of bug cannot happen again.
 
         Add sits at the bottom, after the rows, the usual place for the one
         control that appends to a list rather than at its head where a
@@ -185,21 +226,30 @@ class LoopPanel:
             imgui.text_wrapped(self._vector_error)
             imgui.pop_style_color()
         if imgui.button("Add keyframe"):
-            self._emit(REGISTRY["keyframe_count"].address, count + 1)
+            self._set_keyframe(count, default_keyframe(count))
 
     def _keyframe_row(
         self, index: int, keyframe: Keyframe, state: ControlState, count: int
     ) -> None:
-        """One keyframe, on one line: identity, content, Snap, Remove.
+        """One keyframe: one line where it fits, two where it does not.
 
-        A two line layout shipped for one review cycle to fit a 280px panel
-        (task 9 review, finding 1), the same bar the perform panel's rows
-        are held to. That bar fit those rows because each one carries a
-        single control; a keyframe entry carries seven, and squeezing a
+        A two line layout shipped once already, to fit a 280px panel (task 9
+        review, finding 1), the same bar the perform panel's rows are held
+        to. That bar fit those rows because each one carries a single
+        control; a keyframe entry carries up to ten, and squeezing a
         compound row into a floor calibrated for a simple one is what made
-        the seed fields unreadably narrow and forced the split in the first
-        place. This entry now sets its own floor instead
-        (`_KEYFRAME_ROW_COMBOS`), and one line is what that floor buys back.
+        the seed fields unreadably narrow and forced the split that time.
+        This entry sets its own floor instead (`_KEYFRAME_ROW_COMBOS`), in
+        font-relative units so it does not overstate the requirement at the
+        UI font size most performers actually run at
+        (`keyframe_row_fits_one_line`).
+
+        Below that floor the row still has to go somewhere: rather than
+        silently overflowing the panel the way it did before task 9's
+        review caught it, it degrades to the same two line shape that
+        shipped once already, cramped rather than broken. This is the one
+        thing allowed to change the row's height: the kind switch below is
+        still never allowed to, on either layout.
 
         The seed fields and the vector controls (Load, Randomize) are both
         always drawn, one pair greyed, the same rule the perform panel's
@@ -208,6 +258,17 @@ class LoopPanel:
         row takes.
         """
         imgui.push_id(index)
+        font_size = imgui.get_font_size()
+        available = imgui.get_content_region_avail().x
+        if keyframe_row_fits_one_line(font_size, available):
+            self._keyframe_row_one_line(index, keyframe, state, count)
+        else:
+            self._keyframe_row_two_line(index, keyframe, state, count)
+        imgui.pop_id()
+
+    def _keyframe_row_one_line(
+        self, index: int, keyframe: Keyframe, state: ControlState, count: int
+    ) -> None:
         is_vector = self._keyframe_identity(index, keyframe)
         imgui.same_line()
         self._keyframe_seed_fields(index, keyframe, is_vector)
@@ -215,24 +276,72 @@ class LoopPanel:
         self._keyframe_vector_controls(index, keyframe, is_vector)
         imgui.same_line()
         self._keyframe_actions(index, keyframe, state, count)
-        imgui.pop_id()
+
+    def _keyframe_row_two_line(
+        self, index: int, keyframe: Keyframe, state: ControlState, count: int
+    ) -> None:
+        """The narrow fallback: identity and the seed fields, then, indented,
+        the vector controls and the destructive actions. Split there rather
+        than at the old kind/content boundary, because Load and Randomize
+        are what item 8 restored and are the reason the row got wide enough
+        to need this fallback at all: keeping them with Snap and Remove
+        puts every button on its own line and every value field on the
+        other, which is what actually buys back the most width per line
+        (measured; see `_TWO_LINE_EMS`).
+        """
+        is_vector = self._keyframe_identity(index, keyframe)
+        imgui.same_line()
+        self._keyframe_seed_fields(index, keyframe, is_vector)
+        imgui.new_line()
+        imgui.indent()
+        self._keyframe_vector_controls(index, keyframe, is_vector)
+        imgui.same_line()
+        self._keyframe_actions(index, keyframe, state, count)
+        imgui.unindent()
 
     def _keyframe_identity(self, index: int, keyframe: Keyframe) -> bool:
+        """The row's index, its kind, and Project. Returns whether it is vector kind.
+
+        Kind is a radio pair, Seed or Vector, full words: a checkbox read as
+        "add some vector-ness" the same way `vector_mode` did in the perform
+        panel (item 1), and once the row had the width for whole words
+        there was no reason left to abbreviate the one control that picks
+        the mode every other control on the row keys off.
+
+        Project is greyed on a seed row. `generator.py`'s `_keyframe_to_w`
+        reads `keyframe.project` only for a vector keyframe
+        (`_vec_to_w`); a seed keyframe goes through `_blended_w`, which
+        never looks at it. Live on a seed row it looked like the other half
+        of the mode switch and did nothing, which is what the maintainer
+        actually caught. Greyed rather than hidden, the same stable
+        footprint rule as the seed fields and the vector controls, so the
+        row's width does not change out from under the kind switch either.
+        Every other per-row control was checked against the same question:
+        Snap and Remove act on whichever kind the row already is, and the
+        seed fields and Load/Randomize were already greyed by kind, so
+        Project was the only one left drawn live with no effect.
+        """
         imgui.text(str(index))
         imgui.same_line()
         is_vector = keyframe.kind == "vec"
-        # "Vec" and "Proj" rather than "Vector" and "Project": short enough
-        # that they never became part of what this row had to buy width
-        # back from.
-        changed_kind, checked = imgui.checkbox("Vec", is_vector)
-        if changed_kind:
-            new_kind = "vec" if checked else "seed"
-            self._set_keyframe(index, dataclasses.replace(keyframe, kind=new_kind))
-            is_vector = checked
+        changed_kind = False
+        new_kind = keyframe.kind
+        if imgui.radio_button("Seed", not is_vector):
+            changed_kind, new_kind = True, "seed"
         imgui.same_line()
-        changed_project, project = imgui.checkbox("Proj", keyframe.project)
+        if imgui.radio_button("Vector", is_vector):
+            changed_kind, new_kind = True, "vec"
+        if changed_kind:
+            self._set_keyframe(index, dataclasses.replace(keyframe, kind=new_kind))
+            is_vector = new_kind == "vec"
+        imgui.same_line()
+        if not is_vector:
+            imgui.begin_disabled()
+        changed_project, project = imgui.checkbox("Project", keyframe.project)
         if changed_project:
             self._set_keyframe(index, dataclasses.replace(keyframe, project=project))
+        if not is_vector:
+            imgui.end_disabled()
         return is_vector
 
     def _keyframe_seed_fields(
