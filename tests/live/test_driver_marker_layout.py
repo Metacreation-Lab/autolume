@@ -36,6 +36,7 @@ from autolume.live.ui.controls import (
     ControlBinder,
     Marker,
     idle_color,
+    label_reserve,
 )
 from autolume.live.ui.panels import preview as preview_module
 from autolume.live.ui.panels.loop import LoopPanel
@@ -516,44 +517,168 @@ def keyframe_row_edges(width: float, font_scale: float) -> list[float]:
     return edges
 
 
-# The panel's two documented floors, both in font-relative units
-# (`keyframe_row_fits_one_line`, `_ONE_LINE_EMS`, `_TWO_LINE_EMS`), computed
-# at the three font sizes this theme actually renders at the font scales
-# this suite checks (13, 20, 26pt): one-line needs up to ~50 ems, two-line's
-# own worst line up to ~30 ems, both remeasured after item 14 (the kind
-# radio) and item 15 (Project spelled out) widened the row on both layouts.
-# `_row_floor` below is what turns that into a pixel width per combination,
-# so the combinations this test runs are exactly "one line, with a little
-# margin" and "two lines, with a little margin" at every font scale, rather
-# than fixed pixel literals that would silently stop meaning what they say
-# the day the font or the row's contents change again.
+# The panel's two documented floors. Two-line stays a single em ratio
+# (`_TWO_LINE_EMS`): nothing in production branches on it, only this test's
+# own "two-line, at the floor" combinations, so its small imprecision has no
+# behavioural consequence (`_TWO_LINE_EMS`'s own docstring in loop.py). One
+# line is the formula `keyframe_row_fits_one_line` itself uses
+# (`_ONE_LINE_SLOPE_PX_PER_PT`, `_ONE_LINE_INTERCEPT_PX`,
+# `_ONE_LINE_FIT_MARGIN_PX`), fit to the row's real, measured need, which
+# does not scale as a clean multiple of the font size the way the rest of
+# this row does (see that constant's own docstring for why, and for the
+# earlier, too-conservative constant this replaced). `_row_floor` below
+# turns either into a pixel width per combination, so the combinations this
+# test runs are exactly "one line, with a little margin" and "two lines,
+# with a little margin" at every font scale, rather than fixed pixel
+# literals that would silently stop meaning what they say the day the font
+# or the row's contents change again.
+import autolume.live.ui.panels.loop as loop_module  # noqa: E402
 from autolume.live.ui.panels.loop import (  # noqa: E402
-    _ONE_LINE_EMS,
+    _ONE_LINE_FIT_MARGIN_PX,
+    _ONE_LINE_INTERCEPT_PX,
+    _ONE_LINE_SLOPE_PX_PER_PT,
     _ROW_FLOOR_MARGIN_PX,
     _TWO_LINE_EMS,
+    keyframe_row_fits_one_line,
 )
 
 _KEYFRAME_ROW_FONT_SIZES = (13.0, 20.0, 26.0)  # font_scale_main 1.0, 1.5, 2.0
 
 
-def _row_floor(ems: float, margin_ems: float, font_size: float) -> float:
-    # The fixed scrollbar margin every claimed width has to survive
-    # (`_ROW_FLOOR_MARGIN_PX`'s own docstring), plus `margin_ems` of extra
-    # slack for this particular combination, on top of the row's real,
-    # em-scaled requirement.
-    return ems * font_size + _ROW_FLOOR_MARGIN_PX + margin_ems * font_size
+def _one_line_floor(margin_px: float, font_size: float) -> float:
+    fit = _ONE_LINE_SLOPE_PX_PER_PT * font_size + _ONE_LINE_INTERCEPT_PX
+    return fit + _ONE_LINE_FIT_MARGIN_PX + _ROW_FLOOR_MARGIN_PX + margin_px
+
+
+def _two_line_floor(margin_ems: float, font_size: float) -> float:
+    return _TWO_LINE_EMS * font_size + _ROW_FLOOR_MARGIN_PX + margin_ems * font_size
 
 
 _KEYFRAME_ROW_COMBOS = tuple(
     (width, font_scale)
     for font_scale, font_size in zip((1.0, 1.5, 2.0), _KEYFRAME_ROW_FONT_SIZES)
     for width in (
-        _row_floor(_ONE_LINE_EMS, 2.0, font_size),  # one-line mode, margin
-        _row_floor(_ONE_LINE_EMS, 0.0, font_size),  # one-line mode, at the floor
-        _row_floor(_TWO_LINE_EMS, 2.0, font_size),  # two-line mode, margin
-        _row_floor(_TWO_LINE_EMS, 0.0, font_size),  # two-line mode, at the floor
+        _one_line_floor(40.0, font_size),  # one-line mode, margin
+        _one_line_floor(0.0, font_size),  # one-line mode, at the floor
+        _two_line_floor(2.0, font_size),  # two-line mode, margin
+        _two_line_floor(0.0, font_size),  # two-line mode, at the floor
     )
 )
+
+
+def _isolated_keyframe_row(
+    font_scale: float, available_width: float, force: bool | None
+):
+    """Draw keyframe 0 alone in a window sized so its content region is
+    exactly `available_width`, and report what the row actually used.
+
+    Isolated to one row rather than the whole panel, and window size chosen
+    from the *content region*, not the raw window width: `content_region_avail`
+    is what `keyframe_row_fits_one_line` itself compares against, and a
+    literal window width first has to cross window padding (and, in the
+    full panel, a possible scrollbar) to become that, which is exactly what
+    made an earlier version of this measurement compare the wrong two
+    numbers. One row is also enough to never trigger a scrollbar of its
+    own, so the only translation left is padding, read back from the style
+    rather than assumed.
+
+    `force`, given, overrides `keyframe_row_fits_one_line` for the draw, so
+    the one-line and two-line layouts can each be measured on their own
+    regardless of what the real threshold would pick at this width. `None`
+    draws through the real, unforced dispatch, which is what the app
+    actually runs.
+
+    Returns `(right_margin, height)`: `right_margin` is how much of
+    `available_width` was left unused (negative means it overflowed), and
+    `height` is the row's own vertical extent.
+    """
+    context = imgui.create_context()
+    original = loop_module.keyframe_row_fits_one_line
+    if force is not None:
+        loop_module.keyframe_row_fits_one_line = lambda font_size, available: force
+    try:
+        io = imgui.get_io()
+        io.set_ini_filename(None)
+        io.display_size = imgui.ImVec2(3000.0, 800.0)
+        io.delta_time = 1.0 / 60.0
+        io.backend_flags |= imgui.BackendFlags_.renderer_has_textures
+        theme.apply_theme()
+        imgui.get_style().font_scale_main = font_scale
+        window_width = available_width + 2.0 * imgui.get_style().window_padding.x
+        imgui.new_frame()
+        imgui.set_next_window_pos(imgui.ImVec2(0.0, 0.0))
+        imgui.set_next_window_size(imgui.ImVec2(window_width, 400.0))
+        imgui.begin("Loop")
+        panel = LoopPanel(PanelRuntime(), mapping_popup=lambda name: None)
+        state = ControlState()
+        keyframe = state.keyframes[0]
+        right = imgui.get_cursor_screen_pos().x + imgui.get_content_region_avail().x
+        start_y = imgui.get_cursor_pos_y()
+        imgui.push_id(0)
+        panel._keyframe_row(0, keyframe, state, len(state.keyframes))
+        imgui.pop_id()
+        margin = right - imgui.get_item_rect_max().x
+        height = imgui.get_cursor_pos_y() - start_y
+        imgui.end()
+        imgui.render()
+    finally:
+        loop_module.keyframe_row_fits_one_line = original
+        imgui.destroy_context(context)
+    return margin, height
+
+
+def _true_one_line_need(font_scale: float) -> float:
+    """The one-line layout's real available-width need, bypassing the
+    threshold: forced past it (`keyframe_row_fits_one_line` stubbed True),
+    then read back how much of a generous allowance it actually used. This
+    is the measurement the one-line formula in `loop.py` was itself fit
+    from, and the same one a screenshot review repeated by hand to find the
+    previous constant, `_ONE_LINE_EMS = 50.0`, reflowing up to 508px earlier
+    than the row actually needed.
+    """
+    allowance = 3000.0
+    margin, _ = _isolated_keyframe_row(font_scale, allowance, force=True)
+    return allowance - margin
+
+
+@pytest.mark.parametrize(
+    "font_scale, font_size", tuple(zip((1.0, 1.5, 2.0), _KEYFRAME_ROW_FONT_SIZES))
+)
+def test_keyframe_row_actually_uses_one_line_once_it_truly_fits(font_scale, font_size):
+    """The direction `test_no_keyframe_row_runs_past_the_panel_it_is_drawn_in`
+    cannot check: that guard only ever asks "does the row overflow?", so a
+    threshold far more conservative than the row's real need still passes it
+    every time. That is exactly how the previous constant shipped: 50 ems
+    against a real need of 43 to 49, up to 508px too conservative at the
+    top font scale, caught only by a screenshot of a row reflowed to two
+    lines with hundreds of empty pixels beside it. This asks the other
+    direction directly: at a width the row demonstrably needs no more than,
+    does it actually draw one line, not two.
+    """
+    true_need = _true_one_line_need(font_scale)
+    # The formula's own two margins, plus enough on top to cover the fit's
+    # own overshoot above the true measured need at another font size (up
+    # to 13px, at 26pt, per the fit's own docstring in loop.py): the fit is
+    # one line through all three font sizes, so it does not equal the true
+    # need at every one of them, only bound it, and `true_need` here is one
+    # specific font size's real measurement while `keyframe_row_fits_one_line`
+    # compares against the fit's prediction for it.
+    available = true_need + _ONE_LINE_FIT_MARGIN_PX + _ROW_FLOOR_MARGIN_PX + 15.0
+    assert keyframe_row_fits_one_line(font_size, available) is True
+    one_line_margin, one_line_height = _isolated_keyframe_row(
+        font_scale, available, force=True
+    )
+    two_line_margin, two_line_height = _isolated_keyframe_row(
+        font_scale, available, force=False
+    )
+    _, natural_height = _isolated_keyframe_row(font_scale, available, force=None)
+    # Sanity: the two layouts really do differ in height and both actually
+    # fit the width this test claims for them, or the comparison below
+    # would pass no matter which one the real dispatch picked.
+    assert two_line_height > one_line_height
+    assert one_line_margin >= 0.0
+    assert two_line_margin >= 0.0
+    assert natural_height == pytest.approx(one_line_height)
 
 
 @pytest.mark.parametrize("width, font_scale", _KEYFRAME_ROW_COMBOS)
@@ -615,14 +740,123 @@ def test_no_loop_panel_row_is_silently_dropped(frame):
     with `max(edges) <= 0.0` unbothered, since fewer rows is not a wider one;
     only a count pinned to what the panel actually draws catches that, which
     is what task 9's review found missing here too.
+
+    Default state selects Keyframes mode (`noise_loop=False`), so the Noise
+    loop section is hidden rather than drawn (item E): Control (6, the mode
+    radio counted with it) + scrub (2) + pulse (3, all text fields). No
+    keyframe count row (item 10-12 of the manual review): the count has no
+    UI control left, only Add keyframe, a plain button. The six default
+    keyframe rows themselves are plain widgets too, not `ControlBinder`
+    rows, and were never part of this count.
     """
     panel = LoopPanel(PanelRuntime(), mapping_popup=lambda name: None)
-    # Transport (5) + scrub (2) + noise loop (3) + pulse (3, all text
-    # fields). No keyframe count row any more (item 10-12 of the manual
-    # review): the count has no UI control left, only Add keyframe, a plain
-    # button. The six default keyframe rows themselves are plain widgets
-    # too, not `ControlBinder` rows, and were never part of this count.
+    assert bound_rows(panel.gui) == 11
+
+
+def test_the_hidden_section_draws_no_rows_of_its_own(frame):
+    """The other half of the count above: Noise loop mode hides Keyframes.
+
+    Keyframes never draws a `ControlBinder` row regardless (structured
+    state, not registry parameters), so the count moving to 13 here is
+    entirely the Noise loop section's own two rows (Seed, Radius) appearing
+    now that its mode is selected, not any change to the Keyframes side.
+    """
+    panel = LoopPanel(
+        PanelRuntime(ControlState(noise_loop=True)), mapping_popup=lambda name: None
+    )
     assert bound_rows(panel.gui) == 13
+
+
+def separator_texts(panel: LoopPanel) -> list[str]:
+    """Every section heading one `panel.gui()` pass draws, in order.
+
+    What proves a section is hidden rather than merely empty: a section with
+    nothing in it would still draw its own `separator_text`, so absence here
+    is the row-count guards above cannot show on their own (a zero-row
+    section and a hidden one both draw zero `ControlBinder` rows).
+    """
+    seen: list[str] = []
+    original = imgui.separator_text
+
+    def spy(text: str) -> None:
+        seen.append(text)
+        original(text)
+
+    imgui.separator_text = spy
+    try:
+        panel.gui()
+    finally:
+        imgui.separator_text = original
+    return seen
+
+
+def test_keyframes_mode_hides_the_noise_loop_section_and_shows_its_own(frame):
+    panel = LoopPanel(
+        PanelRuntime(ControlState(noise_loop=False)), mapping_popup=lambda name: None
+    )
+    headings = separator_texts(panel)
+    assert "Keyframes" in headings
+    assert "Noise loop" not in headings
+
+
+def test_noise_loop_mode_hides_the_keyframes_section_and_shows_its_own(frame):
+    panel = LoopPanel(
+        PanelRuntime(ControlState(noise_loop=True)), mapping_popup=lambda name: None
+    )
+    headings = separator_texts(panel)
+    assert "Noise loop" in headings
+    assert "Keyframes" not in headings
+
+
+def widget_enabled_flags(panel: LoopPanel) -> dict[str, bool]:
+    """The `enabled` argument every `ControlBinder._widget` call received.
+
+    Keyed by parameter name, so a specific row's greying can be asked about
+    directly rather than inferred from whether `imgui.begin_disabled` fired
+    at all (which every other greyed row on the panel also triggers).
+    """
+    seen: dict[str, bool] = {}
+    original = ControlBinder._widget
+
+    def spy(self, spec, label, draw, enabled, **kwargs):
+        seen[spec.name] = enabled
+        return original(self, spec, label, draw, enabled, **kwargs)
+
+    ControlBinder._widget = spy
+    try:
+        panel.gui()
+    finally:
+        ControlBinder._widget = original
+    return seen
+
+
+def test_index_greys_in_noise_mode_and_alpha_stays_live_in_both(frame):
+    """Item E's live-but-inert case: `loop_index` outside Keyframes mode.
+
+    `_loop_w`, the only reader of `RenderParams.loop_index` (`generator.py`),
+    runs only in `"loop"` mode, which `derive_mode` never returns while
+    `noise_loop` is selected, so Index is a live control that cannot affect
+    a noise loop's frames. Alpha is read by both (`control.py`'s
+    `_noise_latent_vector` samples the noise table at it), so it never greys.
+    """
+    keyframes_mode = widget_enabled_flags(
+        LoopPanel(
+            PanelRuntime(ControlState(noise_loop=False)),
+            mapping_popup=lambda name: None,
+        )
+    )
+    assert keyframes_mode["loop_index"] is True
+    assert keyframes_mode["loop_alpha"] is True
+
+    imgui.new_line()
+    noise_mode = widget_enabled_flags(
+        LoopPanel(
+            PanelRuntime(ControlState(noise_loop=True)),
+            mapping_popup=lambda name: None,
+        )
+    )
+    assert noise_mode["loop_index"] is False
+    assert noise_mode["loop_alpha"] is True
 
 
 def test_the_model_row_uses_the_width_it_is_given_and_no_more():
@@ -634,6 +868,97 @@ def test_the_model_row_uses_the_width_it_is_given_and_no_more():
     """
     for width in (448.0, 360.0, 280.0):
         assert row_edges(width, 1.0)[0] == pytest.approx(0.0, abs=1.0)
+
+
+def _pulse_field_widths(
+    panel_width: float,
+) -> tuple[dict[str, float], float, dict[str, float]]:
+    """Every Pulse field's on-screen width, drawn alone in a `panel_width` panel.
+
+    Isolated to `_pulse_rows` rather than the whole panel, the same reasoning
+    `_isolated_keyframe_row` (above) gives for isolating the keyframe row: one
+    section is enough, and it keeps a wide window from also changing what the
+    rest of the panel measures.
+
+    Also returns each field's `label_reserve`, measured inside the same
+    context rather than after it is destroyed: `calc_text_size` needs a live
+    font, which does not survive `destroy_context`.
+    """
+    context = imgui.create_context()
+    seen: dict[str, float] = {}
+    original_widget = ControlBinder._widget
+    original_text = ControlBinder._text_widget
+
+    def widget(self, spec, label, draw, enabled, **kwargs):
+        original_widget(self, spec, label, draw, enabled, **kwargs)
+        seen[spec.name] = imgui.get_item_rect_size().x
+
+    def text_widget(self, spec, draw, enabled):
+        original_text(self, spec, draw, enabled)
+        seen[spec.name] = imgui.get_item_rect_size().x
+
+    ControlBinder._widget = widget
+    ControlBinder._text_widget = text_widget
+    try:
+        io = imgui.get_io()
+        io.set_ini_filename(None)
+        io.display_size = imgui.ImVec2(panel_width + 200.0, 800.0)
+        io.delta_time = 1.0 / 60.0
+        io.backend_flags |= imgui.BackendFlags_.renderer_has_textures
+        theme.apply_theme()
+        imgui.new_frame()
+        imgui.set_next_window_pos(imgui.ImVec2(0.0, 0.0))
+        imgui.set_next_window_size(imgui.ImVec2(panel_width, 400.0))
+        imgui.begin("Loop")
+        font_size = imgui.get_font_size()
+        reserves = {
+            label: label_reserve(label) for label in ("Address", "IP", "Port")
+        }
+        panel = LoopPanel(PanelRuntime(), mapping_popup=lambda name: None)
+        panel._pulse_rows()
+        imgui.end()
+        imgui.render()
+    finally:
+        ControlBinder._widget = original_widget
+        ControlBinder._text_widget = original_text
+        imgui.destroy_context(context)
+    return seen, font_size, reserves
+
+
+def test_a_typed_field_stops_at_its_natural_width_in_a_wide_panel():
+    """Item C: a fixed-format field does not fill a wide panel's spare room.
+
+    2000px is hundreds of pixels past anything these three fields could ever
+    need. Before the natural-width cap this was exactly the bug the
+    maintainer photographed: `pulse_ip` drawn at nearly the full panel width
+    to hold "127.0.0.1". Pinned against `ControlBinder`'s own natural widths
+    (`_pulse_rows`' comment) rather than a literal pixel count, so this stays
+    meaningful if the font size preference changes what a comfortable width
+    is in pixels.
+
+    `imgui.get_item_rect_size()` covers the box plus its trailing label, not
+    the box alone (`row_edges`, above, relies on the same fact for the model
+    row), so the expected width adds `label_reserve` back on top of the cap
+    rather than comparing the cap in isolation.
+    """
+    widths, font_size, reserves = _pulse_field_widths(2000.0)
+    assert widths["pulse_address"] == pytest.approx(
+        24.0 * font_size + reserves["Address"]
+    )
+    assert widths["pulse_ip"] == pytest.approx(16.0 * font_size + reserves["IP"])
+    assert widths["pulse_port"] == pytest.approx(7.0 * font_size + reserves["Port"])
+    # The direction a performer actually looks at: nowhere near the ~2000px
+    # of room the panel has, whatever the exact cap resolves to in pixels.
+    assert widths["pulse_ip"] < 0.25 * 2000.0
+
+
+def test_a_typed_field_still_shrinks_below_its_natural_width():
+    """The cap is a ceiling, not a fixed size: the existing floor still wins
+    in a panel too narrow to give a field its natural width at all.
+    """
+    narrow, _, _ = _pulse_field_widths(200.0)
+    wide, _, _ = _pulse_field_widths(2000.0)
+    assert narrow["pulse_ip"] < wide["pulse_ip"]
 
 
 def dimmed_white(alpha):
@@ -1035,6 +1360,56 @@ def test_the_perform_panel_draws_in_vector_mode_without_raising(frame):
     state = ControlState(vector_mode=True, latent_vec=(1.0, 2.0, 3.0))
     panel = PerformPanel(PanelRuntime(state=state), mapping_popup=lambda name: None)
     panel.gui()
+
+
+def perform_widget_enabled_flags(state: ControlState) -> dict[str, bool]:
+    """`widget_enabled_flags` (above), for `PerformPanel` instead of `LoopPanel`."""
+    seen: dict[str, bool] = {}
+    original = ControlBinder._widget
+
+    def spy(self, spec, label, draw, enabled, **kwargs):
+        seen[spec.name] = enabled
+        return original(self, spec, label, draw, enabled, **kwargs)
+
+    ControlBinder._widget = spy
+    try:
+        PerformPanel(PanelRuntime(state=state), mapping_popup=lambda name: None).gui()
+    finally:
+        ControlBinder._widget = original
+    return seen
+
+
+def test_latent_xy_grey_whenever_a_loop_has_taken_the_frame(frame):
+    """The Latent-section counterpart to Project's own greying (item A).
+
+    `_blended_w` (`generator.py`), the only reader of `latent_x`/`latent_y`,
+    runs exclusively in `derive_mode`'s `"seed"` branch. `drives()`
+    (`motion.py`) already stood motion down for these two while a loop
+    plays, so the marker read undriven, but the widgets themselves stayed
+    live and editable regardless of which kind of loop, or whether
+    `vector_mode` was also on: the same live-but-inert shape Project shipped
+    with twice, on the two controls this sweep found it hiding a third time.
+    """
+    seed_mode = perform_widget_enabled_flags(ControlState())
+    assert seed_mode["latent_x"] is True
+    assert seed_mode["latent_y"] is True
+
+    imgui.new_line()
+    vector_mode = perform_widget_enabled_flags(ControlState(vector_mode=True))
+    assert vector_mode["latent_x"] is False
+    assert vector_mode["latent_y"] is False
+
+    imgui.new_line()
+    keyframe_loop = perform_widget_enabled_flags(ControlState(loop_active=True))
+    assert keyframe_loop["latent_x"] is False
+    assert keyframe_loop["latent_y"] is False
+
+    imgui.new_line()
+    noise_loop = perform_widget_enabled_flags(
+        ControlState(loop_active=True, noise_loop=True)
+    )
+    assert noise_loop["latent_x"] is False
+    assert noise_loop["latent_y"] is False
 
 
 def loop_panel_height(panel: LoopPanel) -> float:
