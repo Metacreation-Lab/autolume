@@ -5,6 +5,7 @@ import asyncio
 from imgui_bundle import hello_imgui, imgui, immvision
 
 from autolume.live.ui import theme
+from autolume.live.ui.output_window import OutputWindow
 from autolume.live.ui.panels import (
     AudioPanel,
     LoopPanel,
@@ -83,6 +84,11 @@ def _build_runner_params(runtime) -> hello_imgui.RunnerParams:
     preview = PreviewPanel(runtime)
     audio = AudioPanel(runtime)
     presets = PresetsPanel(runtime)
+    # Not a dockable panel: it has no form of its own, only a GLFW window it
+    # opens and drives on the side. `show_gui` runs every frame regardless of
+    # which dock tab is focused, which a dockable window's own gui function
+    # does not guarantee.
+    output = OutputWindow(runtime.submit)
 
     params = hello_imgui.RunnerParams()
     params.app_window_params.window_title = "Autolume Live"
@@ -95,6 +101,9 @@ def _build_runner_params(runtime) -> hello_imgui.RunnerParams:
 
     params.callbacks.setup_imgui_style = theme.apply_theme
     params.callbacks.load_additional_fonts = theme.load_fonts
+    params.callbacks.show_gui = lambda: output.poll(
+        runtime.control_store.snapshot().fullscreen, runtime.preview
+    )
 
     params.imgui_window_params.default_imgui_window_type = (
         hello_imgui.DefaultImGuiWindowType.provide_full_screen_dock_space
