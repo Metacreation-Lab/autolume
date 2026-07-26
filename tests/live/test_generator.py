@@ -328,6 +328,134 @@ def test_model_host_releases_the_outgoing_model_on_a_plain_reload():
     host.stop()
 
 
+def test_model_host_a_later_plain_load_keeps_the_selected_device():
+    """Regression: `_load_default` used to ignore any earlier device switch
+    and let the loader's own default (pick_device()) choose again, so the
+    state kept saying "cpu" while a brand new model quietly loaded
+    elsewhere."""
+    import torch
+
+    calls = []
+
+    def loader(path, device=None):
+        calls.append((path, device))
+        return _DeviceAwareModel(path, device)
+
+    host = ModelHost(loader=loader)
+    host.request_load("/tmp/a.pkl")
+    deadline = time.monotonic() + 2.0
+    while host.current() is None and time.monotonic() < deadline:
+        time.sleep(0.005)
+
+    host.request_device("cpu")
+    deadline = time.monotonic() + 2.0
+    while (
+        host.current().device != torch.device("cpu")
+        and time.monotonic() < deadline
+    ):
+        time.sleep(0.005)
+    assert host.current().device == torch.device("cpu")
+
+    host.request_load("/tmp/b.pkl")
+
+    def loaded_b():
+        current = host.current()
+        return current is not None and current.pkl_path == "/tmp/b.pkl"
+
+    deadline = time.monotonic() + 2.0
+    while not loaded_b() and time.monotonic() < deadline:
+        time.sleep(0.005)
+
+    assert loaded_b()
+    assert host.current().device == torch.device("cpu")
+    assert calls[-1] == ("/tmp/b.pkl", torch.device("cpu"))
+    assert host.device_store.snapshot() == DeviceStatus(
+        active="cpu", requested="cpu", error=None
+    )
+    host.stop()
+
+
+def test_model_host_a_device_request_before_any_model_is_honored_on_first_load():
+    """Regression: request_device used to be a pure no-op with nothing
+    loaded, so a device picked before the first pkl was silently dropped
+    the instant that pkl actually loaded."""
+    import torch
+
+    calls = []
+
+    def loader(path, device=None):
+        calls.append((path, device))
+        return _DeviceAwareModel(path, device)
+
+    host = ModelHost(loader=loader)
+    host.request_device("cpu")
+    assert host.current() is None
+    time.sleep(0.05)
+    assert calls == []
+
+    host.request_load("/tmp/a.pkl")
+    deadline = time.monotonic() + 2.0
+    while host.current() is None and time.monotonic() < deadline:
+        time.sleep(0.005)
+
+    assert calls == [("/tmp/a.pkl", torch.device("cpu"))]
+    assert host.current().device == torch.device("cpu")
+    assert host.device_store.snapshot() == DeviceStatus(
+        active="cpu", requested="cpu", error=None
+    )
+    host.stop()
+
+
+def test_model_host_a_device_request_during_an_in_flight_pkl_load_does_not_strand_it():
+    """Regression: request_device used to overwrite `_pending` with
+    whatever was already `current()`, so a pkl load already in flight lost
+    the coalescing race to a reload of the *old* model. The new pkl never
+    won, and re-picking it did nothing because the control side already
+    believed it was current."""
+    import torch
+
+    release = threading.Event()
+    seen = []
+
+    def loader(path, device=None):
+        seen.append((path, device))
+        if path == "/tmp/b.pkl" and device is None:
+            # Only the first, device-less attempt at b.pkl blocks; the
+            # device-redirected retry (once request_device fires) sails
+            # through immediately, the way a fast reload would.
+            release.wait(timeout=2.0)
+        return _DeviceAwareModel(path, device)
+
+    host = ModelHost(loader=loader)
+    host.request_load("/tmp/a.pkl")
+    deadline = time.monotonic() + 2.0
+    while host.current() is None and time.monotonic() < deadline:
+        time.sleep(0.005)
+
+    host.request_load("/tmp/b.pkl")
+    deadline = time.monotonic() + 2.0
+    while ("/tmp/b.pkl", None) not in seen and time.monotonic() < deadline:
+        time.sleep(0.005)
+
+    host.request_device("cpu")
+    release.set()
+
+    def loaded_b_on_cpu():
+        current = host.current()
+        return (
+            current is not None
+            and current.pkl_path == "/tmp/b.pkl"
+            and current.device == torch.device("cpu")
+        )
+
+    deadline = time.monotonic() + 2.0
+    while not loaded_b_on_cpu() and time.monotonic() < deadline:
+        time.sleep(0.005)
+
+    assert loaded_b_on_cpu()
+    host.stop()
+
+
 class _FakeMapping:
     def __init__(self, w_avg, num_ws):
         self.w_avg = w_avg
@@ -1812,7 +1940,10 @@ def test_release_removes_hook_handles_and_leaves_the_module_clean():
     """The reference cycle this task's brief flags: `G ->
     module._forward_hooks -> closure -> LoadedModel -> G`. Removing the
     handles is what breaks it, so this checks the module's own hook table,
-    not just `LoadedModel`'s bookkeeping list."""
+    not just `LoadedModel`'s bookkeeping list. Single threaded: it verifies
+    the cycle is broken structurally, nothing about the render/loader
+    thread interleaving around a real retirement, which is a separate
+    question this test does not answer."""
     model = _bendable_model()
     params = render_params(
         transforms=(Transform("ablate", "conv1", (1.0,), _ALL_CHANNELS),)

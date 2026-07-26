@@ -373,6 +373,7 @@ class LoadedModel:
         self._hook_handles: list = []
         self._manipulation = None
         self._manipulation_failed = False
+        self._released = False
         # What the hooks act on for the frame being rendered right now, and
         # where the capture hook leaves what it grabbed. Empty between frames.
         self._frame_transforms: tuple[Transform, ...] = ()
@@ -589,12 +590,23 @@ class LoadedModel:
         """Drop this model's forward hooks so `G` is freed by refcount.
 
         The hooks form a cycle, `G -> module._forward_hooks -> closure ->
-        LoadedModel -> G`, that keeps a retired model's VRAM alive until a
-        generational GC pass instead of the instant the last reference
-        drops. `ModelHost` calls this the moment a model stops being
-        `current()`, which on a device switch is exactly when the incoming
-        model needs that VRAM back. Safe to call more than once.
+        LoadedModel -> G`, that would otherwise keep this retired model's
+        VRAM alive until a generational GC pass runs instead of the instant
+        the last reference to it drops. `ModelHost` calls this the moment a
+        model stops being `current()`. This runs after the incoming model
+        has already been allocated, so it does nothing for that
+        allocation's peak; what it buys is not holding this model's memory
+        any longer than the runtime needs to, so it is already gone well
+        before the *next* reload needs the room.
+
+        `_released` also gates `_sync_hooks`: without it, a frame still in
+        flight on this retired model would re-register hooks nobody holds
+        the handles for, recreating the exact cycle this method exists to
+        break. Idempotent either way.
         """
+        if self._released:
+            return
+        self._released = True
         for handle in self._hook_handles:
             handle.remove()
         self._hook_handles = []
@@ -608,6 +620,8 @@ class LoadedModel:
         a transform's parameters, or the whole chain's values, costs no hook
         traffic at all. An empty key means the network carries no hooks.
         """
+        if self._released:
+            return
         # Loaded before the key compare, not after: a capture layer and a
         # transform on that same layer fold into one key, so the first
         # transform of a session can arrive without the key moving at all.
@@ -869,10 +883,17 @@ class ModelHost:
         self._current: LoadedModel | None = None
         self._error: str | None = None
         self._pending: str | None = None
-        # None means "no device switch in flight", the ordinary pkl-change
-        # path: the loader is called with one argument, exactly as before
-        # this ever existed. Set only by request_device.
+        # None means "this load, whatever it is, uses whatever device is
+        # currently selected" (see `_device_name` below); the loader thread
+        # decides at load time, not here. Set to a name only while a
+        # request_device-triggered reload is actually in flight.
         self._pending_device: str | None = None
+        # The device every load, not only a switch, resolves against:
+        # "auto" reproduces the original pre-device-switching behavior
+        # (the loader picks, one argument, no explicit device), so a plain
+        # `request_load` after a device has been chosen does not silently
+        # abandon it and go back to `pick_device()`.
+        self._device_name: str = "auto"
         self.info_store: LatestValueStore[ModelInfo | None] = LatestValueStore(None)
         self.device_store: LatestValueStore[DeviceStatus] = LatestValueStore(
             DeviceStatus()
@@ -891,19 +912,28 @@ class ModelHost:
         self._wakeup.set()
 
     def request_device(self, name: str) -> None:
-        """Reload the currently loaded model onto `name` on the loader thread.
+        """Point the host at `name` for this and every future load.
 
-        A no-op when nothing is loaded yet: there is no current pkl to
-        reload, and nothing is rendering on the wrong device to begin with.
-        `name` is resolved and validated on the loader thread, never here, so
-        this never blocks and never raises.
+        Never clobbers a pkl request already in flight: if one is loading,
+        the device applies to that same incoming model instead of reloading
+        whatever is already `current()`, which would otherwise strand the
+        pkl on its way in behind a model nobody asked for anymore. If
+        nothing is in flight, this reloads whatever is currently loaded. If
+        nothing is loaded and nothing is loading, `name` is only
+        remembered: the very first `request_load` resolves and uses it, so
+        a device picked before any model exists is never silently dropped.
+        `name` is resolved and validated on the loader thread, never here,
+        so this never blocks and never raises.
         """
         with self._lock:
-            current = self._current
-            if current is None:
+            self._device_name = str(name)
+            if self._pending is not None:
+                self._pending_device = self._device_name
+            elif self._current is not None:
+                self._pending = self._current.pkl_path
+                self._pending_device = self._device_name
+            else:
                 return
-            self._pending = current.pkl_path
-            self._pending_device = str(name)
         self._wakeup.set()
 
     def current(self) -> LoadedModel | None:
@@ -941,24 +971,56 @@ class ModelHost:
                 return
             with self._lock:
                 path = self._pending
-                device_name = self._pending_device
+                pending_device = self._pending_device
+                sticky_device = self._device_name
             if path is None:
                 continue
-            if device_name is None:
-                self._load_default(path)
+            if pending_device is None:
+                self._load_default(path, sticky_device)
             else:
-                self._load_on_device(path, device_name)
+                self._load_on_device(path, pending_device)
             if self.loading():
                 self._wakeup.set()
 
-    def _load_default(self, path: str) -> None:
-        """The ordinary pkl load: whatever device the loader itself picks.
+    def _load_default(self, path: str, device_name: str) -> None:
+        """The ordinary pkl load, resolved against `device_name` (the
+        host's current device selection, "auto" unless request_device has
+        ever been called) rather than whatever the loader itself would pick.
 
-        Unchanged behavior from before device switching existed, so a loader
-        test double taking a single `path` argument keeps working.
+        "auto" still calls the loader with a single argument, exactly as
+        before device switching existed, so a loader test double taking
+        just `path` keeps working; any other device name requires a loader
+        that accepts `device=`. Resolution failure (an unavailable device
+        remembered from an earlier switch) is reported the same way a
+        switch failure is, through `device_store`, so the control loop's
+        revert logic handles it uniformly; any other load failure
+        (a broken pkl, say) still only reports through the plain
+        `error()`/`info_store` channel, since the device was never at fault.
         """
         try:
-            model = self._loader(path)
+            device = None if device_name == "auto" else resolve_device(device_name)
+        except DeviceUnavailable as exc:
+            logger.warning("Could not load %s on device %s: %s", path, device_name, exc)
+            with self._lock:
+                won = self._pending == path and self._pending_device is None
+                if won:
+                    self._pending = None
+                active = getattr(self._current, "device", None)
+            if won:
+                self.device_store.set(
+                    DeviceStatus(
+                        active=str(active) if active is not None else None,
+                        requested=device_name,
+                        error=str(exc),
+                    )
+                )
+            return
+        try:
+            model = (
+                self._loader(path)
+                if device is None
+                else self._loader(path, device=device)
+            )
             # Enumerated before publishing: the layer catalog's dry
             # synthesis pass attaches and removes hooks on this model's
             # submodules, and that must be finished before the render
@@ -975,6 +1037,15 @@ class ModelHost:
             if won:
                 _release_quietly(previous)
                 self.info_store.set(info)
+                self.device_store.set(
+                    DeviceStatus(
+                        active=str(getattr(model, "device", None))
+                        if getattr(model, "device", None) is not None
+                        else None,
+                        requested=device_name,
+                        error=None,
+                    )
+                )
         except Exception as exc:
             logger.exception("Failed to load model %s", path)
             with self._lock:
