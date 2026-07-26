@@ -448,6 +448,78 @@ def test_no_row_runs_past_the_panel_it_is_drawn_in(width, font_scale):
     assert len(edges) == 14
 
 
+def keyframe_row_edges(width: float, font_scale: float) -> list[float]:
+    """Every keyframe row's right edge in the loop panel, against the content edge.
+
+    The same measurement `row_edges` takes for the perform panel, aimed at
+    the loop panel's own widest row instead: a keyframe row is not a
+    `ControlBinder` widget (design.md: keyframes are structured state, not
+    registry parameters), so it is measured by wrapping
+    `LoopPanel._keyframe_row` directly rather than `ControlBinder._widget`.
+    """
+    context = imgui.create_context()
+    edges: list[float] = []
+    right = [0.0]
+    original_row = LoopPanel._keyframe_row
+    try:
+        io = imgui.get_io()
+        io.set_ini_filename(None)
+        io.display_size = imgui.ImVec2(1280.0, 800.0)
+        io.delta_time = 1.0 / 60.0
+        io.backend_flags |= imgui.BackendFlags_.renderer_has_textures
+        theme.apply_theme()
+        imgui.get_style().font_scale_main = font_scale
+
+        def measure_row(self, index, keyframe, state, count):
+            original_row(self, index, keyframe, state, count)
+            edges.append(imgui.get_item_rect_max().x - right[0])
+
+        LoopPanel._keyframe_row = measure_row
+        panel = LoopPanel(PanelRuntime(), mapping_popup=lambda name: None)
+        for _ in range(3):
+            imgui.new_frame()
+            imgui.set_next_window_pos(imgui.ImVec2(0.0, 0.0))
+            imgui.set_next_window_size(imgui.ImVec2(width, 300.0))
+            imgui.begin("Loop")
+            edges.clear()
+            right[0] = (
+                imgui.get_cursor_screen_pos().x + imgui.get_content_region_avail().x
+            )
+            panel.gui()
+            imgui.end()
+            imgui.render()
+    finally:
+        LoopPanel._keyframe_row = original_row
+        imgui.destroy_context(context)
+    return edges
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "The keyframe row genuinely overflows every docked width this suite "
+        "checks (measured 2026-07-25, font scale 1.0: 51px over at 448, "
+        "139px over at 360, 219px over at 280, and it only gets worse at "
+        "1.5x/2.0x). Restructuring the row is the maintainer's call (task 9 "
+        "review, finding 1), not this guard's to hide by loosening its "
+        "tolerance. strict=True: the day a restructured row actually fits, "
+        "this starts failing until the marker is removed, so the fix cannot "
+        "go unnoticed either."
+    ),
+)
+@pytest.mark.parametrize("font_scale", (1.0, 1.5, 2.0))
+@pytest.mark.parametrize("width", (448.0, 360.0, 280.0))
+def test_no_keyframe_row_runs_past_the_panel_it_is_drawn_in(width, font_scale):
+    """The keyframe row is the widest row in the new UI, and the one row
+    `perform.py`'s equivalent guard cannot reach, since it draws a different
+    panel. A guard whose entire purpose is catching silent overflow should
+    not have its widest row exempt from it, which is why this exists even
+    though it does not currently pass.
+    """
+    edges = keyframe_row_edges(width, font_scale)
+    assert max(edges) <= 0.0
+
+
 def bound_rows(gui: Callable[[], None]) -> int:
     """How many `ControlBinder` rows one call to `gui` draws.
 
