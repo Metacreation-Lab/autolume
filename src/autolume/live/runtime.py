@@ -284,6 +284,13 @@ class _ModelWatchingControlLoop(ControlLoop):
         self._last_recording: bool = initial.recording
         self._last_ndi_enabled: bool = initial.ndi_enabled
         self._last_ndi_name: str = initial.ndi_name
+        # The three halves of mixing, seeded eagerly for the same reason as
+        # `_last_device`: every host call behind them is safe at any moment, and
+        # a lazy sentinel would swallow the very first transition, which for a
+        # preset restored at startup is the only one there is.
+        self._last_pkl2: str | None = initial.pkl2
+        self._last_combined_layers: tuple[str, ...] = initial.combined_layers
+        self._last_mixing_enabled: bool = initial.mixing_enabled
 
     def tick(self):
         result = super().tick()
@@ -293,6 +300,7 @@ class _ModelWatchingControlLoop(ControlLoop):
                 self._model_host.request_load(result.pkl_path)
         self._watch_device()
         self._watch_osc_port()
+        self._watch_mixing()
         self._watch_ndi()
         self._watch_recording()
         return result
@@ -453,6 +461,42 @@ class _ModelWatchingControlLoop(ControlLoop):
             # `ControlLoop._accepts_direct`). It is not a stand-in for a real
             # click; it is the one source that means "trusted, apply it".
             self.submit(ControlEvent("/render/device", reverted, source="ui"))
+
+    def _watch_mixing(self) -> None:
+        """Drive the second model slot and the mix from state.
+
+        The three that make a mix, `pkl2`, `combined_layers` and
+        `mixing_enabled`, all reach `ModelHost` from here rather than from the
+        panel that edits them, for the same reason `pkl_path` always has. A
+        panel is a dockable window and its gui function does not run while its
+        tab is hidden, so a panel-driven host would mean `/mix/model` and
+        `/mix/enabled` over OSC waiting for somebody to click a tab, and a
+        preset restored while another tab was showing quietly doing nothing.
+
+        The order is the order the loader thread wants them in. Slot B first, so
+        a mix queued in the same tick assembles against a model that is either
+        already there or arriving in the same wakeup (`ModelHost._run` takes
+        slot A, then slot B, then the mix). The selection next.
+        `mixing_enabled` last, so a build that reaches the loader before slot B
+        does returns on its own `if not enabled` check rather than publishing
+        "Load a model in both slots to mix them." at a performer who is doing
+        nothing wrong; turning it on afterwards queues the build again.
+
+        Edge triggered like every watcher here, and each `_last_*` moves the
+        instant the request is made rather than when it completes, so nothing is
+        re-issued on the next tick.
+        """
+        state = self._control_store.snapshot()
+        if state.pkl2 != self._last_pkl2:
+            self._last_pkl2 = state.pkl2
+            if state.pkl2:
+                self._model_host.request_load_b(str(state.pkl2))
+        if state.combined_layers != self._last_combined_layers:
+            self._last_combined_layers = state.combined_layers
+            self._model_host.request_mix(state.combined_layers)
+        if state.mixing_enabled != self._last_mixing_enabled:
+            self._last_mixing_enabled = state.mixing_enabled
+            self._model_host.set_mixing_enabled(state.mixing_enabled)
 
     def _watch_osc_port(self) -> None:
         if self._on_osc_port_change is None:

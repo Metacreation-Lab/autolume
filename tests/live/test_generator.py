@@ -2467,6 +2467,44 @@ def test_model_host_toggling_mixing_back_on_reuses_the_built_mix():
     host.stop()
 
 
+def test_current_a_is_slot_a_even_while_the_mix_is_what_renders():
+    """`current()` answers what is on screen; `current_a()` answers which model
+    the mixing selection applies to. While a mix renders they are different
+    networks, and a caller that wants model A's layer names has to have a way to
+    say so.
+    """
+    a, b = tiny_generator(seed=1), tiny_generator(seed=2)
+    host = mixing_host(a, b, split_at_resolution(a, 8))
+    assert wait_for(lambda: host.current().G is not a)
+
+    assert host.current().G is not a
+    assert host.current_a().G is a
+    host.stop()
+
+
+def test_retiring_a_mix_leaves_mixing_enabled_set():
+    """Pins the fact that made a `mixing_enabled()` gate the wrong test.
+
+    A model A swap retires the mix, so `current()` goes back to model A, but
+    `_mixing_enabled` is deliberately left on: the flag is the performer's
+    intent, not a statement about what is built. Anything gating a slot A read
+    on it therefore stays shut for good after the first mix, which is exactly
+    what `current_a()` exists to avoid.
+    """
+    a, b = tiny_generator(seed=1), tiny_generator(seed=2)
+    host = mixing_host(a, b, split_at_resolution(a, 8))
+    assert wait_for(lambda: host.current().G is not a)
+
+    replacement = tiny_generator(seed=3)
+    host._loader = generator_loader({"/tmp/c.pkl": replacement})
+    host.request_load("/tmp/c.pkl")
+    assert wait_for(lambda: host.current_a().G is replacement)
+
+    assert host.mixing_enabled() is True
+    assert host.current_a().G is replacement
+    host.stop()
+
+
 def test_model_host_a_failed_mix_keeps_rendering_a_and_reports_it():
     # Different block widths split at a boundary: the pair cannot assemble.
     a = tiny_generator(seed=1, channel_max=8)

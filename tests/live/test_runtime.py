@@ -9,8 +9,10 @@ from autolume.live.core.events import ControlEvent
 from autolume.live.core.generator import DeviceStatus, ModelHost, ModelInfo
 from autolume.live.core.params import (
     BINDING_SET,
+    MIX_LAYERS,
     Binding,
     ControlState,
+    SetCombinedLayers,
     to_render_params,
 )
 from autolume.live.core.presets import PRESET_APPLY
@@ -907,3 +909,155 @@ def test_a_sink_never_starts_once_the_runtime_has_stopped(
     assert ndilib.senders == []
     assert runtime.recorder.status().recording is False
     assert runtime.ndi.status().sending is False
+
+
+class FakeMixingHost:
+    """Enough of `ModelHost`'s surface for `_watch_mixing` to drive.
+
+    Records the calls in order, because the order is part of the contract: slot
+    B has to be asked for before the mix that will be assembled from it, and
+    mixing has to be enabled after both so a build that reaches the loader early
+    returns on its own instead of publishing "Load a model in both slots to mix
+    them." at a performer who did nothing wrong.
+    """
+
+    def __init__(self):
+        self.calls = []
+        self.device_store = LatestValueStore(DeviceStatus())
+
+    def request_load(self, path):
+        pass
+
+    def request_device(self, name):
+        pass
+
+    def request_load_b(self, path):
+        self.calls.append(("load_b", path))
+
+    def request_mix(self, entries):
+        self.calls.append(("mix", tuple(entries)))
+
+    def set_mixing_enabled(self, enabled):
+        self.calls.append(("enable", bool(enabled)))
+
+
+def mixing_loop(state=None):
+    """A control loop over a fake host, with no threads running."""
+    control_store = LatestValueStore(state or ControlState())
+    render_store = LatestValueStore(to_render_params(state or ControlState()))
+    host = FakeMixingHost()
+    loop = _ModelWatchingControlLoop(
+        control_store, render_store, LatestValueStore(SourceTable()), host
+    )
+    return loop, host, control_store
+
+
+def test_a_restored_preset_builds_the_mix_it_describes(tmp_path):
+    """The defect this watcher exists to close.
+
+    A preset saved from a mixing session restores `pkl2`, `combined_layers` and
+    `mixing_enabled` in one step. All three used to reach `ModelHost` only from
+    `MixingPanel.gui()`, and the panel only ever called `request_mix` in the
+    branch that *replaces* a selection which does not fit the pair. A restored
+    selection fits by construction, so that branch never ran, the host's
+    `_combined_layers` stayed empty, and `set_mixing_enabled(True)` then queued
+    nothing because it needs a selection to queue against. The checkbox read on,
+    the rows read correct, and model A kept rendering with no error anywhere.
+
+    Driven through a real preset payload rather than three hand-made events, so
+    what is under test is the path a performer actually takes.
+    """
+    state = ControlState(
+        pkl_path=str(tmp_path / "a.pkl"),
+        pkl2=str(tmp_path / "b.pkl"),
+        mixing_enabled=True,
+        combined_layers=("A", "A", "B"),
+    )
+    for name in ("a.pkl", "b.pkl"):
+        (tmp_path / name).write_bytes(b"")
+    path = tmp_path / "look.json"
+    presets.save(state, path)
+
+    loop, host, control_store = mixing_loop()
+    loop.submit(ControlEvent(PRESET_APPLY, presets.load(path), source="ui"))
+    loop.tick()
+
+    assert control_store.snapshot().mixing_enabled is True
+    assert host.calls == [
+        ("load_b", str(tmp_path / "b.pkl")),
+        ("mix", ("A", "A", "B")),
+        ("enable", True),
+    ]
+
+
+def test_the_second_model_is_loaded_when_its_path_changes():
+    loop, host, _ = mixing_loop()
+    loop.submit(ControlEvent("/mix/model", "/models/b.pkl", source="ui"))
+    loop.tick()
+    assert host.calls == [("load_b", "/models/b.pkl")]
+
+
+def test_a_selection_reaches_the_host_without_any_panel_being_drawn():
+    """`/mix/layers` is structured state, and this is its only forwarder.
+
+    The panel is a dockable window whose gui function does not run while its tab
+    is hidden, so nothing here may depend on it having been drawn.
+    """
+    loop, host, _ = mixing_loop()
+    loop.submit(
+        ControlEvent(MIX_LAYERS, SetCombinedLayers(("A", "B", "X")), source="ui")
+    )
+    loop.tick()
+    assert host.calls == [("mix", ("A", "B", "X"))]
+
+
+def test_enabling_mixing_over_osc_reaches_the_host():
+    loop, host, _ = mixing_loop(
+        ControlState(bindings=(Binding("mixing_enabled", "", enabled=True),))
+    )
+    loop.submit(ControlEvent("/mix/enabled", 1.0, source="/mix/enabled"))
+    loop.tick()
+    assert host.calls == [("enable", True)]
+
+
+def test_each_half_of_mixing_is_forwarded_once_per_change():
+    """Edge triggered, like every watcher here.
+
+    `request_mix` assembles a whole generator on the loader thread, so a watcher
+    that re-issued it every tick would rebuild the network 125 times a second.
+    """
+    loop, host, _ = mixing_loop()
+    loop.submit(ControlEvent("/mix/model", "/models/b.pkl", source="ui"))
+    loop.submit(
+        ControlEvent(MIX_LAYERS, SetCombinedLayers(("A", "B")), source="ui")
+    )
+    loop.tick()
+    for _ in range(5):
+        loop.tick()
+    assert host.calls == [("load_b", "/models/b.pkl"), ("mix", ("A", "B"))]
+
+
+def test_nothing_is_forwarded_for_a_session_that_never_mixes():
+    loop, host, _ = mixing_loop()
+    for _ in range(5):
+        loop.tick()
+    assert host.calls == []
+
+
+def test_clearing_the_second_model_path_asks_for_no_load():
+    """An empty `pkl2` is "no second model", not a file called nothing.
+
+    `request_load_b("")` would send the loader after a path it cannot open and
+    put its failure on the error channel the preview overlay reads.
+    """
+    loop, host, _ = mixing_loop(ControlState(pkl2="/models/b.pkl"))
+    loop.submit(ControlEvent("/mix/model", "", source="ui"))
+    loop.tick()
+    assert host.calls == []
+
+
+def test_turning_mixing_off_reaches_the_host_too():
+    loop, host, _ = mixing_loop(ControlState(mixing_enabled=True))
+    loop.submit(ControlEvent("/mix/enabled", 0.0, source="ui"))
+    loop.tick()
+    assert host.calls == [("enable", False)]

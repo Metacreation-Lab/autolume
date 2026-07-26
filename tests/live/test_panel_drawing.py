@@ -17,6 +17,8 @@ What is still not covered, and cannot be here: whether the result looks right,
 and every GL upload. Those stay manual.
 """
 
+import dataclasses
+
 import pytest
 from imgui_bundle import imgui
 
@@ -27,6 +29,7 @@ from autolume.live.core.generator import (
     ModelInfo,
 )
 from autolume.live.core.mapping import apply_event
+from autolume.live.core.mixing import conv_names
 from autolume.live.core.params import BY_ADDRESS, ControlState, Transform
 from autolume.live.core.sources import SourceTable
 from autolume.live.core.store import LatestValueStore
@@ -90,16 +93,26 @@ def block_names(resolutions, per_block=2):
 
 
 class Host:
-    def __init__(self, current=None, current_b=None, error=None, mixing=False):
+    def __init__(
+        self, current=None, current_b=None, error=None, mixing=False, mixed=None
+    ):
         self._current = current
         self._current_b = current_b
         self._error = error
         self._mixing = mixing
+        self._mixed = mixed
         self.device_store = LatestValueStore(DeviceStatus(active="cpu"))
         self.mix_save_store = LatestValueStore(MixSaveStatus())
         self.calls = []
 
     def current(self):
+        # The mix while one is on, exactly like the real host, so a panel that
+        # reads this where it wants model A is caught here rather than by hand.
+        if self._mixing and self._mixed is not None:
+            return self._mixed
+        return self._current
+
+    def current_a(self):
         return self._current
 
     def current_b(self):
@@ -435,14 +448,15 @@ def test_a_panel_draws_without_raising(name, build):
     widest_overflow(build, 448.0, 1.0)
 
 
-def test_a_pair_with_no_selection_yet_is_given_the_default_and_asks_for_it():
+def test_a_pair_with_no_selection_yet_is_given_the_default_once():
     """The one thing the mixing panel does without being clicked.
 
     A pair whose selection does not fit them cannot be drawn against, so the
-    panel adopts the default. Adopting it has to reach both the state and the
-    host, or a performer's first click lands on a selection the host has never
-    heard of. It also has to happen once rather than every frame, since
-    `request_mix` builds a whole generator on the loader thread.
+    panel adopts the default. It writes that to state and nothing else: the host
+    is driven from `_watch_mixing` on the control thread, so a selection reaches
+    the loader whether or not this tab is the one showing. Once rather than every
+    frame, because the store only catches up a tick later and each submission
+    would cost another whole-generator build.
     """
     host = Host(
         current=Model("/models/a.pkl", PARAMS_A),
@@ -450,36 +464,82 @@ def test_a_pair_with_no_selection_yet_is_given_the_default_and_asks_for_it():
     )
     runtime = Runtime(PAIRED, host)
     widest_overflow(lambda: MixingPanel(runtime), 448.0, 1.0)
-    requests = [entries for name, entries in host.calls if name == "mix"]
-    assert len(requests) == 1
-    assert set(requests[0]) == {"A", "B"}
+    sent = [
+        event.value.entries
+        for event in runtime.submitted
+        if event.address == "/mix/layers"
+    ]
+    assert len(sent) == 1
+    assert set(sent[0]) == {"A", "B"}
     # One entry per synthesis parameter: the mapping network is not part of a
     # selection, so the single mapping entry in each fake is not counted.
-    assert len(requests[0]) == max(len(PARAMS_A), len(PARAMS_B)) - 1
-    addresses = [event.address for event in runtime.submitted]
-    assert addresses.count("/mix/layers") == 1
+    assert len(sent[0]) == max(len(PARAMS_A), len(PARAMS_B)) - 1
 
 
-def test_a_second_model_path_is_turned_into_a_load_exactly_once():
-    """Nothing else does this.
+def test_the_panel_never_reaches_past_state_into_the_host():
+    """The whole of the tab-gating fix, as one assertion.
 
-    `pkl_path` has a watcher on the control thread that calls `request_load`;
-    `pkl2` has none, so slot B is only ever loaded because this panel asks. Once
-    per change, because the loader coalesces but a request per frame would still
-    be a request per frame.
+    Every host call the panel used to make (`request_load_b`, `request_mix`,
+    `set_mixing_enabled`) is now the control loop's, because a dockable window's
+    gui function does not run while its tab is hidden and a host driven from
+    here left `/mix/enabled`, `/mix/model` and a restored preset waiting on a
+    click. The panel may still *read* the host, and does.
     """
-    host = Host()
-    runtime = Runtime(ControlState(pkl2="/models/b.pkl"), host)
+    host = Host(
+        current=Model("/models/a.pkl", PARAMS_A),
+        current_b=Model("/models/b.pkl", PARAMS_B),
+    )
+    state = dataclasses.replace(
+        PAIRED, mixing_enabled=True, combined_layers=("A",) * 9 + ("B",) * 18
+    )
+    widest_overflow(lambda: MixingPanel(Runtime(state, host)), 448.0, 1.0)
+    assert host.calls == []
+
+
+def test_a_restored_preset_still_reaches_the_host():
+    """Important 1, from the panel's side.
+
+    A preset saved from this same pair restores a selection that already fits,
+    so the panel's own "adopt the default" branch never runs and it submits
+    nothing at all. That used to mean no build was ever queued. It is correct
+    now precisely *because* the panel is not the thing that queues one: the
+    state it was restored into is, through `_watch_mixing`, which
+    `test_runtime.py` covers.
+    """
+    host = Host(
+        current=Model("/models/a.pkl", PARAMS_A),
+        current_b=Model("/models/b.pkl", PARAMS_B),
+    )
+    state = dataclasses.replace(
+        PAIRED, mixing_enabled=True, combined_layers=("A",) * 9 + ("B",) * 18
+    )
+    runtime = Runtime(state, host)
     widest_overflow(lambda: MixingPanel(runtime), 448.0, 1.0)
-    assert [call for call in host.calls if call[0] == "load_b"] == [
-        ("load_b", "/models/b.pkl")
-    ]
+    assert [event for event in runtime.submitted if event.address == "/mix/layers"] == []
 
 
-def test_no_second_model_asks_for_no_load():
-    host = Host()
-    widest_overflow(lambda: MixingPanel(Runtime(LOADED, host)), 448.0, 1.0)
-    assert not [call for call in host.calls if call[0] == "load_b"]
+def test_the_rows_come_from_model_a_even_while_a_mix_is_rendering():
+    """Important 3.
+
+    `current()` returns the mix once one is built, and its layer names are the
+    ones the selection *produced*, not the ones it applies to. Gating the read
+    on `mixing_enabled()` instead does not work: retiring a mix leaves that flag
+    set. A mix here is deliberately given a name list of a different length, so
+    reading the wrong slot changes the row count visibly.
+    """
+    truncated = Model("/models/a.pkl", block_names((4, 8)))
+    host = Host(
+        current=Model("/models/a.pkl", PARAMS_A),
+        current_b=Model("/models/b.pkl", PARAMS_B),
+        mixing=True,
+        mixed=truncated,
+    )
+    panel = MixingPanel(Runtime(PAIRED, host))
+    widest_overflow(lambda: panel, 448.0, 1.0)
+    names_a, _ = panel._names()
+    assert len(names_a) == len(conv_names(Network(PARAMS_A)))
+
+
 
 
 def hostile_states(count: int, seed: int = 0):

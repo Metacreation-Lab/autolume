@@ -1078,6 +1078,25 @@ class ModelHost:
                 return self._mixed
             return self._current
 
+    def current_a(self) -> LoadedModel | None:
+        """Slot A itself, never the mix built from it.
+
+        `current()` deliberately answers "what is on screen", which is the mix
+        whenever one is built and mixing is on. A caller that needs model A as a
+        *mixing source* cannot use it: the mixing panel derives its rows,
+        its selection length and its cascades from model A's own layer names,
+        and reading them off the mix gives the names of the network the
+        selection produced rather than the one it applies to.
+
+        Gating such a read on `mixing_enabled()` instead does not work and is
+        the bug this exists to close: `_retire_mix_locked` clears `_mixed` but
+        leaves `_mixing_enabled` set, so a model A swap while mixing is on
+        leaves the gate shut and the caller holding names from a model that is
+        no longer loaded.
+        """
+        with self._lock:
+            return self._current
+
     def current_b(self) -> LoadedModel | None:
         with self._lock:
             return self._current_b

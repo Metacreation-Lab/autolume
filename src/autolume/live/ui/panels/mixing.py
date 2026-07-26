@@ -37,8 +37,12 @@ from autolume.live.core.mixing import (
 )
 from autolume.live.core.params import MIX_LAYERS, SetCombinedLayers
 from autolume.live.ui.controls import ControlBinder
-from autolume.live.ui.panels.perform import fit_item, trailing_width
-from autolume.live.ui.theme import ERROR_COLOR
+from autolume.live.ui.panels.perform import (
+    draw_error,
+    fit_item,
+    draw_note,
+    trailing_width,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -298,16 +302,11 @@ class MixingPanel:
         # generator on the loader thread, so a panel that sent one every frame
         # while the store caught up would queue a build per frame.
         self._requested: tuple[str, ...] | None = None
-        # The second model most recently sent to the loader. `pkl2` has no
-        # watcher on the control thread the way `pkl_path` does, so this panel
-        # is what turns the parameter into a load.
-        self._last_pkl2: str | None = None
 
     def gui(self) -> None:
         state = self._binder.state()
         names_a, names_b = self._names()
         self._model_row()
-        self._watch_model2(state)
         self._enable_row(names_a, names_b)
         self._layer_rows(state, names_a, names_b)
         self._save_row(names_a, names_b)
@@ -320,33 +319,37 @@ class MixingPanel:
     def _names(self) -> tuple[tuple[str, ...], tuple[str, ...]]:
         """The parameter names of both slots, cached per network.
 
-        Slot A is read through `current()`, which returns the **mix** while
-        mixing is on and one is built, so it is only re-read while mixing is
-        off. That is sound rather than lucky: a mix exists only after this panel
-        asked for one, which it cannot do without having read the names first,
-        and every event that replaces model A retires the mix, which puts
-        `current()` back on model A and lets this refresh. Only this thread
-        toggles mixing, so the two reads below cannot straddle a change.
+        Slot A comes from `current_a()`, never `current()`. `current()` answers
+        "what is on screen", which is the mix whenever one is built, and these
+        names are what the selection *applies to* rather than what it produced.
+
+        An earlier version read `current()` and skipped the read while
+        `mixing_enabled()`, arguing that a model A swap retires the mix and
+        reopens the gate. It does retire the mix, but it leaves `mixing_enabled`
+        set, so the gate stayed shut and the panel went on deriving rows,
+        `fits_pair` and cascades from a model that was no longer loaded, until
+        somebody happened to toggle Enable off and on.
+
+        Cached against the generator object itself rather than the path, since
+        the path is unchanged by a device switch that rebuilds the model.
         """
         host = self._runtime.model_host
-        if not host.mixing_enabled():
-            model = host.current()
-            network = getattr(model, "G", None)
-            if network is not None and network is not self._names_a_source:
-                self._names_a_source = network
-                self._names_a = self._conv_names(network)
-            elif model is None:
-                self._names_a_source = None
-                self._names_a = ()
-        model_b = host.current_b()
-        network_b = getattr(model_b, "G", None)
-        if network_b is not None and network_b is not self._names_b_source:
-            self._names_b_source = network_b
-            self._names_b = self._conv_names(network_b)
-        elif model_b is None:
-            self._names_b_source = None
-            self._names_b = ()
+        self._names_a, self._names_a_source = self._slot_names(
+            host.current_a(), self._names_a, self._names_a_source
+        )
+        self._names_b, self._names_b_source = self._slot_names(
+            host.current_b(), self._names_b, self._names_b_source
+        )
         return self._names_a, self._names_b
+
+    def _slot_names(self, model, held: tuple[str, ...], source):
+        """One slot's names, re-read only when its generator has changed."""
+        network = getattr(model, "G", None)
+        if network is None:
+            return (), None
+        if network is source:
+            return held, source
+        return self._conv_names(network), network
 
     def _conv_names(self, network) -> tuple[str, ...]:
         """`conv_names`, wrapped. A generator that cannot be walked is not worth
@@ -381,7 +384,7 @@ class MixingPanel:
         if not live:
             imgui.end_disabled()
         if self._runtime.model_host.pending_b():
-            self._note(_LOADING_B)
+            draw_note(_LOADING_B)
 
     def _take_dialog_result(self) -> None:
         if self._open_dialog is None or not self._open_dialog.ready():
@@ -391,43 +394,17 @@ class MixingPanel:
         if result:
             self._emit("/mix/model", str(result[0]))
 
-    def _watch_model2(self, state) -> None:
-        """Turn a change of `pkl2` into a slot B load.
-
-        Edge triggered, exactly like the control loop's own `pkl_path` watcher:
-        the path moves to the new value the moment the load is requested, not
-        when it lands, so an in-flight load is never re-issued every frame.
-
-        Here rather than on the control thread because there is no `pkl2`
-        watcher there, and adding one means editing `runtime.py`. The cost is
-        recorded in the task 10 report: this runs only while the Mixing tab is
-        the selected one, so an OSC message on `/mix/model` sent while another
-        tab is showing does not load until the tab is shown. The same limit
-        applies to `mixing_enabled` below, and one watcher on the control thread
-        would close both.
-        """
-        wanted = state.pkl2 or None
-        if wanted == self._last_pkl2:
-            return
-        self._last_pkl2 = wanted
-        if wanted:
-            self._runtime.model_host.request_load_b(str(wanted))
-
     def _enable_row(self, names_a, names_b) -> None:
-        """Enable mixing, and keep the host in step with the parameter.
+        """Enable mixing, as an ordinary bound checkbox and nothing else.
 
-        `mixing_enabled` is a registry parameter so a controller can flip it,
-        which means the host cannot be driven from the click: it is driven from
-        the difference between the parameter and what the host reports, which
-        covers the click, an OSC message and a preset alike. Both host calls are
-        edge triggered by contract, so this only ever fires on a change.
+        The host is driven from `_ModelWatchingControlLoop._watch_mixing`, not
+        from here. A panel is a dockable window and its gui function does not
+        run while its tab is hidden, so a panel that drove the host would leave
+        `/mix/enabled` over OSC, and a preset restored while another tab was
+        showing, waiting on somebody to click this tab.
         """
-        host = self._runtime.model_host
         ready = bool(names_a) and bool(names_b)
         self._binder.checkbox("mixing_enabled", "Enable mixing", enabled=ready)
-        wanted = bool(self._binder.value("mixing_enabled"))
-        if wanted != host.mixing_enabled():
-            host.set_mixing_enabled(wanted)
 
     def _layer_rows(self, state, names_a, names_b) -> None:
         """One row per resolution: A, B, the cut, and the heading above them.
@@ -438,16 +415,22 @@ class MixingPanel:
         """
         imgui.separator_text("Layers")
         if not names_a or not names_b:
-            self._note(_NO_PAIR)
+            draw_note(_NO_PAIR)
             return
         entries = tuple(state.combined_layers)
         if not fits_pair(entries, names_a, names_b):
             entries = default_selection(names_a, names_b)
-            self._cached = entries
             self._apply(entries)
+        # A cache of the wrong length belongs to a pair that is no longer
+        # loaded, and restoring from it would put another model's origins back.
+        # A fitting selection reaches this without ever going through the branch
+        # above, which is exactly the preset-restore case, so the seeding cannot
+        # live in there.
+        if len(self._cached) != len(entries):
+            self._cached = entries
         rows = resolution_rows(names_a, names_b)
-        self._note(f"A is {model_label(state.pkl_path)}")
-        self._note(f"B is {model_label(state.pkl2)}")
+        draw_note(f"A is {model_label(state.pkl_path)}")
+        draw_note(f"B is {model_label(state.pkl2)}")
         for row_index, row in enumerate(rows):
             self._layer_row(entries, rows, row_index, row)
 
@@ -487,7 +470,14 @@ class MixingPanel:
         self, entries, rows, row_index: int, row: MixRow, cut_here: bool
     ) -> None:
         """X to remove this resolution and everything deeper, Recover to put it
-        back. One button in two states, so the row keeps its width either way.
+        back.
+
+        One button, two labels, and they are not the same width: the row does
+        change width when a resolution is cut. That is accepted rather than
+        overlooked. It is the last item on the row, so nothing shifts under a
+        hand reaching for something else, and the alternative is padding X out
+        to Recover's width, which makes a one-character button look like a
+        misdrawn one.
         """
         if cut_here:
             if imgui.button(_RECOVER):
@@ -506,24 +496,22 @@ class MixingPanel:
             imgui.end_disabled()
 
     def _apply(self, entries: tuple[str, ...]) -> None:
-        """Store the selection and ask for the network it describes.
+        """Store the selection. The build follows from the state change.
 
-        Both, always. `combined_layers` is what a preset saves and the host's
-        own copy is what a build reads, and letting them drift is how a
-        performer's saved mix comes back as a different one.
+        One write, to state, and `_watch_mixing` on the control thread turns it
+        into `request_mix`. The panel used to call the host itself alongside the
+        event, which made the host's copy of the selection reachable only while
+        this tab was showing.
 
-        Edge triggered against what was last sent rather than against the store:
-        the store only catches up on the next control tick, and until it does,
-        the frames in between would each queue another whole-generator build.
-        Re-sending an unchanged selection is not needed for anything, since every
-        event that replaces either model retires the mix and requeues a build
-        from the host's own copy.
+        Edge triggered against what was last sent rather than against the store,
+        which only catches up on the next control tick: the frames in between
+        would each submit the same selection again, and each one costs a whole
+        generator build on the loader thread.
         """
         if entries == self._requested:
             return
         self._requested = entries
         self._emit(MIX_LAYERS, SetCombinedLayers(entries))
-        self._runtime.model_host.request_mix(entries)
 
     def _save_row(self, names_a, names_b) -> None:
         """A name and Save. The write happens on the loader thread.
@@ -546,9 +534,9 @@ class MixingPanel:
         status = self._runtime.model_host.mix_save_store.snapshot()
         note = save_note(status)
         if status.error:
-            self._error(note)
+            draw_error(note)
         else:
-            self._note(note)
+            draw_note(note)
 
     def _status_row(self) -> None:
         """Why a mix is not showing, when there is a reason.
@@ -559,20 +547,4 @@ class MixingPanel:
         """
         error = self._runtime.model_host.error()
         if error:
-            self._error(error)
-
-    def _note(self, text: str | None) -> None:
-        if not text:
-            return
-        imgui.push_style_color(
-            imgui.Col_.text, imgui.get_style_color_vec4(imgui.Col_.text_disabled)
-        )
-        imgui.text_wrapped(text)
-        imgui.pop_style_color()
-
-    def _error(self, text: str | None) -> None:
-        if not text:
-            return
-        imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(*ERROR_COLOR))
-        imgui.text_wrapped(text)
-        imgui.pop_style_color()
+            draw_error(error)
