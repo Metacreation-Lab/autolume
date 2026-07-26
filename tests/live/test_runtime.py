@@ -5,11 +5,18 @@ import pytest
 
 from autolume.live.core import presets
 from autolume.live.core.events import ControlEvent
-from autolume.live.core.generator import ModelHost, ModelInfo
-from autolume.live.core.params import BINDING_SET, Binding
+from autolume.live.core.generator import DeviceStatus, ModelHost, ModelInfo
+from autolume.live.core.params import (
+    BINDING_SET,
+    Binding,
+    ControlState,
+    to_render_params,
+)
 from autolume.live.core.presets import PRESET_APPLY
+from autolume.live.core.sources import SourceTable
+from autolume.live.core.store import LatestValueStore
 from autolume.live.io.osc import OscEmitter
-from autolume.live.runtime import OscStatus, build_runtime
+from autolume.live.runtime import OscStatus, _ModelWatchingControlLoop, build_runtime
 
 
 class DeviceAwareFakeModel:
@@ -355,6 +362,71 @@ def test_device_change_to_an_unavailable_device_reverts_to_the_previous_value():
         assert host.current() is running
     finally:
         runtime.stop()
+
+
+class FakeDeviceHost:
+    """Enough of ModelHost's surface for `_ModelWatchingControlLoop` to
+    drive, with `device_store` publishable by hand so a test can control
+    the interleaving deterministically instead of racing real threads."""
+
+    def __init__(self):
+        self.device_store = LatestValueStore(DeviceStatus())
+        self.requests = []
+
+    def request_device(self, name):
+        self.requests.append(name)
+
+    def request_load(self, path):
+        pass
+
+
+def test_two_rapid_device_changes_revert_to_the_last_confirmed_value():
+    """Regression: the fallback used to be whatever the previous *request*
+    was, not a value a status had actually confirmed working. Two switches
+    close enough together that the first request's status never lands
+    (superseded before the loader thread gets to it, the way the reviewer's
+    "cuda" then "tpu" repro triggered it 7 times in 12) used to make that
+    unvalidated first request the permanent revert target instead of the
+    device that was actually running.
+
+    Driven directly through `_ModelWatchingControlLoop.tick()` with a fake
+    host, so the interleaving is exact rather than left to real thread
+    timing.
+    """
+    control_store = LatestValueStore(ControlState())
+    render_store = LatestValueStore(to_render_params(ControlState()))
+    source_store = LatestValueStore(SourceTable())
+    host = FakeDeviceHost()
+    loop = _ModelWatchingControlLoop(control_store, render_store, source_store, host)
+    # A tick with nothing queued, standing in for however many ticks a real
+    # session runs before anyone ever touches /render/device (a model is
+    # already loaded and settled long before a performer reaches for this
+    # control). Isolates this test from the separate first-tick-adoption
+    # fix: what is under test here is the fallback value a *later* failure
+    # reverts to, not whether the very first tick forwards a change.
+    loop.tick()
+
+    loop.submit(ControlEvent("/render/device", "cuda", source="ui"))
+    loop.tick()
+    assert host.requests == ["cuda"]
+    # "cuda"'s status never arrives: it is superseded before the (fake)
+    # loader thread would ever get to it, exactly as the flaky real-thread
+    # repro sometimes did.
+
+    loop.submit(ControlEvent("/render/device", "tpu", source="ui"))
+    loop.tick()
+    assert host.requests == ["cuda", "tpu"]
+
+    host.device_store.set(
+        DeviceStatus(active=None, requested="tpu", error="no such device")
+    )
+    # One tick to notice the failure and queue the revert control event,
+    # one more to actually apply it: `submit` only queues, `tick` drains
+    # the queue at its own start, before `_watch_device` runs.
+    loop.tick()
+    loop.tick()
+
+    assert control_store.snapshot().device == "auto"
 
 
 # --- OSC port restart --------------------------------------------------

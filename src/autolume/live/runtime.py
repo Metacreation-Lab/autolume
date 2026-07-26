@@ -131,8 +131,17 @@ class Runtime:
         losing OSC mid-performance over a taken port would be a serious
         regression. Never raises; a failure is logged and left on
         `osc_status_store` for the panel instead.
+
+        Guarded by `_started` both before and after the (possibly slow)
+        `candidate.start()` call: `stop()` sets `_started = False` as its
+        very first action, before it ever touches `self.osc`, so a rebind
+        racing a shutdown either bails before opening a socket at all, or
+        notices right after and stops the candidate itself rather than
+        swapping it in behind `stop()`'s back and leaving a live,
+        unstoppable transport (and a concurrent double `.stop()` on the one
+        `stop()` is already tearing down).
         """
-        if not self._start_osc:
+        if not self._start_osc or not self._started:
             return
         try:
             candidate = self._osc_factory(new_port)
@@ -141,6 +150,12 @@ class Runtime:
             logger.warning("Could not rebind OSC to port %s: %s", new_port, exc)
             previous = self.osc_status_store.snapshot()
             self.osc_status_store.set(dataclasses.replace(previous, error=str(exc)))
+            return
+        if not self._started:
+            try:
+                candidate.stop()
+            except Exception:
+                logger.exception("Failed stopping an orphaned OSC transport")
             return
         previous_osc = self.osc
         self.osc = candidate
@@ -172,14 +187,24 @@ class _ModelWatchingControlLoop(ControlLoop):
         self._model_host = model_host
         self._on_osc_port_change = on_osc_port_change
         self._last_pkl_path: str | None = None
-        # None means "not yet initialized"; the first tick adopts whatever
-        # the state already holds without acting on it, since that value is
-        # already what is running (the initial model load, the initial OSC
-        # bind). Only a later change is a transition worth forwarding.
-        self._last_device: str | None = None
-        self._device_fallback: str = "auto"
+        # Seeded from the store directly, at construction, rather than
+        # lazily adopted on the first tick: nothing can have submitted an
+        # event yet (this object's own `submit` does not exist until this
+        # constructor returns), so this is guaranteed to be the pristine
+        # value nothing has requested changing. A lazy "adopt on first
+        # tick" sentinel would silently skip forwarding a device or
+        # osc_port change that happened to already be applied to state by
+        # the very first tick this loop ever runs.
+        initial = control_store.snapshot()
+        self._last_device: str = initial.device
+        # The last device a status actually confirmed working, never merely
+        # requested. A failed switch reverts to this, not to whatever the
+        # previous request happened to be: two switches close together
+        # (the second fired before the first's status lands) must not let
+        # an unvalidated intermediate value become the fallback.
+        self._confirmed_device: str = initial.device
         self._seen_device_status = None
-        self._last_osc_port: int | None = None
+        self._last_osc_port: int = initial.osc_port
 
     def tick(self):
         result = super().tick()
@@ -198,14 +223,13 @@ class _ModelWatchingControlLoop(ControlLoop):
         Edge triggered exactly like `pkl_path` above: `_last_device` moves to
         the new value the instant the switch is requested, not once it
         completes, so a request in flight is never re-issued every tick.
-        `_device_fallback` is what a failed switch reverts to, the value
-        that was actually working before this request.
+        A failed switch reverts to `_confirmed_device`, the last value a
+        status actually confirmed working, not to `_last_device`'s previous
+        value: that previous value could itself have been an unvalidated,
+        still in-flight request.
         """
         state = self._control_store.snapshot()
-        if self._last_device is None:
-            self._last_device = state.device
-        elif state.device != self._last_device:
-            self._device_fallback = self._last_device
+        if state.device != self._last_device:
             self._last_device = state.device
             self._model_host.request_device(state.device)
 
@@ -216,7 +240,7 @@ class _ModelWatchingControlLoop(ControlLoop):
         if status.requested != self._last_device:
             return
         if status.error:
-            reverted = self._device_fallback
+            reverted = self._confirmed_device
             self._last_device = reverted
             # source="ui": this correction must always land, whatever the
             # mapping panel has bound to /render/device, and "ui" is the one
@@ -224,14 +248,13 @@ class _ModelWatchingControlLoop(ControlLoop):
             # `ControlLoop._accepts_direct`). It is not a stand-in for a real
             # click; it is the one source that means "trusted, apply it".
             self.submit(ControlEvent("/render/device", reverted, source="ui"))
+        else:
+            self._confirmed_device = self._last_device
 
     def _watch_osc_port(self) -> None:
         if self._on_osc_port_change is None:
             return
         port = self._control_store.snapshot().osc_port
-        if self._last_osc_port is None:
-            self._last_osc_port = port
-            return
         if port != self._last_osc_port:
             self._last_osc_port = port
             self._on_osc_port_change(port)
