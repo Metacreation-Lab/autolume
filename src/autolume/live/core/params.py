@@ -110,9 +110,10 @@ _SPECS = (
     ParamSpec("adjust_w6", ParamKind.FLOAT, 0.0, "/adjust/6", -5.0, 5.0),
     ParamSpec("adjust_w7", ParamKind.FLOAT, 0.0, "/adjust/7", -5.0, 5.0),
     ParamSpec("adjust_w8", ParamKind.FLOAT, 0.0, "/adjust/8", -5.0, 5.0),
-    # Second network for mixing. STR kind but a None default, matching
-    # pkl_path: unset means no second model loaded yet.
-    ParamSpec("pkl2", ParamKind.STR, None, "/mix/model"),
+    # Persisted separately as the preset's `model2` key, not as a plain param,
+    # the same as pkl_path above: it needs path resolution a scalar value
+    # cannot express. See presets.py (Task 11).
+    ParamSpec("pkl2", ParamKind.STR, None, "/mix/model", preset=False),
     ParamSpec("mixing_enabled", ParamKind.BOOL, False, "/mix/enabled"),
     # Machine settings below, not persisted: each describes the hardware or
     # network a performance runs on, not the look itself. A preset saved on
@@ -464,6 +465,14 @@ class RenderParams:
     pkl2: str | None
     mixing_enabled: bool
     combined_layers: tuple[str, ...]
+    # Render-side machine settings that the frame itself depends on: super-res
+    # is applied to the float image before uint8 conversion (Task 6),
+    # force_fp32 flows into the synthesis call (Task 9). Every other
+    # machine-level registry row (device, ports, NDI, recording, fullscreen)
+    # configures a sink or the window, never the frame, and stays off this
+    # snapshot.
+    use_superres: bool
+    force_fp32: bool
 
 
 def derive_mode(state: ControlState) -> str:
@@ -532,6 +541,8 @@ def to_render_params(state: ControlState) -> RenderParams:
         pkl2=state.pkl2,
         mixing_enabled=state.mixing_enabled,
         combined_layers=state.combined_layers,
+        use_superres=state.use_superres,
+        force_fp32=state.force_fp32,
     )
 
 

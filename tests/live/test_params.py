@@ -105,6 +105,18 @@ def test_addresses_avoid_reserved_namespaces():
         assert address not in params.BY_ADDRESS
 
 
+def test_bend_adjust_and_mix_structured_addresses_are_pinned_literals():
+    # Every test elsewhere compares against these same constants, so a typo
+    # in one of them (e.g. BEND_SET = "/bend/st") would pass the whole suite
+    # silently. Pin the literal wire strings here.
+    assert params.BEND_SET == "/bend/set"
+    assert params.BEND_REMOVE == "/bend/remove"
+    assert params.BEND_NOISE == "/bend/noise"
+    assert params.BEND_RATIO == "/bend/ratio"
+    assert params.ADJUST_DIRECTIONS == "/adjust/directions"
+    assert params.MIX_LAYERS == "/mix/layers"
+
+
 def test_namespace_shared_structured_addresses_are_never_registered():
     # /adjust/directions and /mix/layers live in namespaces that also carry
     # registry rows (/adjust/1..8, /mix/model, /mix/enabled), so they cannot
@@ -397,9 +409,12 @@ def test_adjuster_weight_specs_declare_the_eight_fixed_slots():
 
 
 def test_mixing_specs_declare_expected_addresses_kinds_and_defaults():
+    # pkl2 is preset=False like pkl_path: it needs path resolution a plain
+    # param cannot express, and is persisted separately as the preset's
+    # `model2` key (Task 11), never through the generic params dict.
     pkl2 = params.REGISTRY["pkl2"]
     assert (pkl2.address, pkl2.kind, pkl2.default) == ("/mix/model", params.ParamKind.STR, None)
-    assert pkl2.preset is True
+    assert pkl2.preset is False
 
     mixing_enabled = params.REGISTRY["mixing_enabled"]
     assert (mixing_enabled.address, mixing_enabled.kind, mixing_enabled.default) == (
@@ -527,3 +542,14 @@ def test_to_render_params_default_mixing_and_image_fields():
     assert rp.capture_layer == ""
     assert rp.directions == ()
     assert all(getattr(rp, f"adjust_w{i}") == 0.0 for i in range(1, 9))
+
+
+def test_to_render_params_carries_use_superres_and_force_fp32():
+    state = params.ControlState(use_superres=True, force_fp32=True)
+    rp = params.to_render_params(state)
+    assert rp.use_superres is True
+    assert rp.force_fp32 is True
+
+    rp_default = params.to_render_params(params.ControlState())
+    assert rp_default.use_superres is False
+    assert rp_default.force_fp32 is False

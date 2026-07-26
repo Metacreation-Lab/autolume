@@ -65,11 +65,12 @@ SAMPLE = ControlState(
     adjust_w6=-3.0,
     adjust_w7=4.0,
     adjust_w8=-4.0,
-    pkl2="/tmp/second.pkl",
     mixing_enabled=True,
-    # use_superres/device/force_fp32/osc_port/ndi_enabled/ndi_name/recording/
-    # fullscreen are left at their defaults, like fps_cap above: they are
-    # preset=False, machine settings rather than part of the look.
+    # pkl2/use_superres/device/force_fp32/osc_port/ndi_enabled/ndi_name/
+    # recording/fullscreen are left at their defaults, like fps_cap above:
+    # they are preset=False. pkl2 needs path resolution a plain param cannot
+    # express (same reasoning as pkl_path); the rest are machine settings
+    # rather than part of the look.
     latent_vec=SAMPLE_LATENT_VEC,
     keyframes=(
         Keyframe("seed", 0.0, 0.0, (), True),
