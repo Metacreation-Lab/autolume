@@ -9,7 +9,7 @@ from autolume.live.core.control import ControlLoop
 from autolume.live.core.events import ControlEvent
 from autolume.live.core.expr import compile_expression
 from autolume.live.core.generator import ModelInfo
-from autolume.live.core.noiseloop import NoiseLoop
+from autolume.live.core.noiseloop import NoiseLoopTable, NoiseLoopTableBuilder
 from autolume.live.core.params import (
     BINDING_SET,
     VECTOR_RANDOMIZE,
@@ -69,21 +69,6 @@ def make_loop_with_state(clock, state):
     render_store = LatestValueStore(to_render_params(ControlState()))
     source_store = LatestValueStore(SourceTable())
     loop = ControlLoop(control_store, render_store, source_store, clock=clock)
-    return loop, control_store, render_store, source_store
-
-
-def make_loop_with_state_and_model(clock, state, info):
-    control_store = LatestValueStore(state)
-    render_store = LatestValueStore(to_render_params(ControlState()))
-    source_store = LatestValueStore(SourceTable())
-    model_info_store = LatestValueStore(info)
-    loop = ControlLoop(
-        control_store,
-        render_store,
-        source_store,
-        clock=clock,
-        model_info_store=model_info_store,
-    )
     return loop, control_store, render_store, source_store
 
 
@@ -1016,6 +1001,55 @@ def test_wrapped_flag_is_exposed_on_a_completed_cycle():
 
 
 # --- noise loop vector (Task 5) ----------------------------------------------
+#
+# The control loop never builds a table itself (that runs off thread, see
+# test_noiseloop.py); it only requests one and reads whatever is currently
+# published. `FakeNoiseTableBuilder` stands in for `NoiseLoopTableBuilder`
+# here so these tests stay deterministic and do not pay for a real simplex
+# build: it records every requested key and lets the test decide when (or
+# whether) a table appears in `store`, exactly the two things `ControlLoop`
+# depends on.
+
+
+class FakeNoiseTableBuilder:
+    def __init__(self):
+        self.store = LatestValueStore(None)
+        self.requests = []
+
+    def request_build(self, key):
+        self.requests.append(key)
+
+    def stop(self):
+        pass
+
+
+def make_table(key, alpha_zero_value):
+    """A table that returns `alpha_zero_value` for every alpha.
+
+    Good enough to prove `ControlLoop` reads the table it was given rather
+    than computing anything itself: these tests are about the wiring, not
+    about interpolation, which `test_noiseloop.py` covers directly.
+    """
+    dim = key[2]
+    values = np.full((4, dim), alpha_zero_value, dtype=np.float32)
+    return NoiseLoopTable(key=key, values=values)
+
+
+def make_loop_with_fake_table_builder(clock, state, info):
+    control_store = LatestValueStore(state)
+    render_store = LatestValueStore(to_render_params(ControlState()))
+    source_store = LatestValueStore(SourceTable())
+    model_info_store = LatestValueStore(info)
+    builder = FakeNoiseTableBuilder()
+    loop = ControlLoop(
+        control_store,
+        render_store,
+        source_store,
+        clock=clock,
+        model_info_store=model_info_store,
+        noise_table_builder=builder,
+    )
+    return loop, control_store, render_store, builder
 
 
 def test_noise_loop_vector_is_published_as_the_render_latent_vec():
@@ -1024,10 +1058,13 @@ def test_noise_loop_vector_is_published_as_the_render_latent_vec():
     state = ControlState(
         loop_active=True, noise_loop=True, noise_loop_seed=3, noise_radius=2.0
     )
-    loop, control_store, _, _ = make_loop_with_state_and_model(clock, state, info)
+    loop, control_store, _, builder = make_loop_with_fake_table_builder(
+        clock, state, info
+    )
+    key = (3, 2.0, 4)
+    builder.store.set(make_table(key, 0.5))
     result = loop.tick()
-    expected = NoiseLoop(3, 2.0, 4).vector(0.0)
-    assert result.latent_vec == expected
+    assert result.latent_vec == (0.5, 0.5, 0.5, 0.5)
     assert result.mode == "vec"
     # The user's own vector, untouched by the noise loop.
     assert control_store.snapshot().latent_vec == ()
@@ -1044,72 +1081,71 @@ def test_noise_loop_never_overwrites_the_users_own_latent_vec():
         noise_radius=1.0,
         latent_vec=users_vector,
     )
-    loop, control_store, render_store, _ = make_loop_with_state_and_model(
+    loop, control_store, render_store, builder = make_loop_with_fake_table_builder(
         clock, state, info
     )
+    builder.store.set(make_table((0, 1.0, 4), 0.25))
     loop.tick()
     assert control_store.snapshot().latent_vec == users_vector
     assert render_store.snapshot().latent_vec != users_vector
 
 
-def test_noise_loop_rebuilds_only_when_seed_radius_or_z_dim_changes(monkeypatch):
-    builds = []
-
-    class CountingNoiseLoop(NoiseLoop):
-        def __init__(self, seed, radius, dim):
-            builds.append((seed, radius, dim))
-            super().__init__(seed, radius, dim)
-
-    monkeypatch.setattr(control_module, "NoiseLoop", CountingNoiseLoop)
+def test_noise_loop_requests_a_build_only_when_the_key_changes():
     clock = FakeClock()
     info = ModelInfo(pkl_path="model.pkl", z_dim=4, num_ws=8)
     state = ControlState(
         loop_active=True, noise_loop=True, noise_loop_seed=1, noise_radius=1.0
     )
-    loop, _, _, _ = make_loop_with_state_and_model(clock, state, info)
+    loop, _, _, builder = make_loop_with_fake_table_builder(clock, state, info)
     for _ in range(5):
         clock.now += 0.01
         loop.tick()
-    assert len(builds) == 1
+    assert builder.requests == [(1, 1.0, 4)]
 
     loop.submit(ControlEvent("/loop/seed", 2, source="ui"))
     clock.now += 0.01
     loop.tick()
-    assert len(builds) == 2
+    assert builder.requests == [(1, 1.0, 4), (2, 1.0, 4)]
 
     loop.submit(ControlEvent("/loop/radius", 5.0, source="ui"))
     clock.now += 0.01
     loop.tick()
-    assert len(builds) == 3
+    assert builder.requests[-1] == (2, 5.0, 4)
 
     loop._model_info_store.set(ModelInfo(pkl_path="model.pkl", z_dim=6, num_ws=8))
     clock.now += 0.01
     loop.tick()
-    assert len(builds) == 4
+    assert builder.requests[-1] == (2, 5.0, 6)
+    assert len(builder.requests) == 4
 
 
-def test_noise_vector_is_resampled_only_when_alpha_moves(monkeypatch):
-    calls = []
+def test_noise_loop_keeps_using_the_previous_table_while_a_build_is_pending():
+    """A radius change requests a rebuild but must not stall or blank motion.
 
-    class CountingNoiseLoop(NoiseLoop):
-        def vector(self, alpha):
-            calls.append(alpha)
-            return super().vector(alpha)
-
-    monkeypatch.setattr(control_module, "NoiseLoop", CountingNoiseLoop)
+    Nothing in `FakeNoiseTableBuilder.request_build` touches `store`, which
+    is exactly what "still building" looks like from `ControlLoop`'s side:
+    it must keep reading the table already published under the old key
+    rather than waiting, blocking, or falling back to nothing.
+    """
     clock = FakeClock()
     info = ModelInfo(pkl_path="model.pkl", z_dim=4, num_ws=8)
     state = ControlState(
-        loop_active=True, noise_loop=True, noise_loop_seed=0, noise_radius=1.0
+        loop_active=True, noise_loop=True, noise_loop_seed=1, noise_radius=1.0
     )
-    loop, _, _, _ = make_loop_with_state_and_model(clock, state, info)
-    loop.tick()  # dt == 0, alpha stays at 0.0
-    loop.tick()  # dt == 0 again, alpha still 0.0: no resample
-    assert len(calls) == 1
+    loop, _, render_store, builder = make_loop_with_fake_table_builder(
+        clock, state, info
+    )
+    builder.store.set(make_table((1, 1.0, 4), 0.5))
+    loop.tick()
+    assert render_store.snapshot().latent_vec == (0.5, 0.5, 0.5, 0.5)
 
-    clock.now += 1.0
-    loop.tick()  # alpha moved: resamples once
-    assert len(calls) == 2
+    loop.submit(ControlEvent("/loop/radius", 9.0, source="ui"))
+    clock.now += 0.01
+    loop.tick()
+    assert builder.requests[-1] == (1, 9.0, 4)
+    # The build for the new key has not "finished" (the fake never sets a new
+    # table), so the old one keeps serving.
+    assert render_store.snapshot().latent_vec == (0.5, 0.5, 0.5, 0.5)
 
 
 def test_noise_loop_without_a_model_does_not_raise_and_keeps_latent_vec():
@@ -1128,6 +1164,46 @@ def test_noise_loop_with_a_non_positive_radius_does_not_raise():
     state = ControlState(
         loop_active=True, noise_loop=True, noise_loop_seed=0, noise_radius=0.0
     )
-    loop, _, render_store, _ = make_loop_with_state_and_model(clock, state, info)
+    loop, _, render_store, _ = make_loop_with_fake_table_builder(clock, state, info)
     result = loop.tick()
     assert result.latent_vec == ()
+
+
+def test_noise_loop_with_a_real_builder_publishes_a_table_and_a_vector():
+    """One end to end check with the real background builder, not the fake.
+
+    A tiny `steps` keeps this fast: the builder still runs on its own
+    thread, still paces itself with the real yielding build (see
+    `noiseloop.py`), just over a short enough cycle that waiting for it is
+    not a real cost in the suite.
+    """
+    clock = FakeClock()
+    info = ModelInfo(pkl_path="model.pkl", z_dim=4, num_ws=8)
+    state = ControlState(
+        loop_active=True, noise_loop=True, noise_loop_seed=7, noise_radius=1.0
+    )
+    control_store = LatestValueStore(state)
+    render_store = LatestValueStore(to_render_params(ControlState()))
+    source_store = LatestValueStore(SourceTable())
+    model_info_store = LatestValueStore(info)
+    builder = NoiseLoopTableBuilder(steps=32)
+    loop = ControlLoop(
+        control_store,
+        render_store,
+        source_store,
+        clock=clock,
+        model_info_store=model_info_store,
+        noise_table_builder=builder,
+    )
+    loop.tick()
+    deadline = time.monotonic() + 2.0
+    while builder.store.snapshot() is None and time.monotonic() < deadline:
+        time.sleep(0.005)
+    assert builder.store.snapshot() is not None
+
+    clock.now += 0.01
+    result = loop.tick()
+    expected = NoiseLoopTable(key=(7, 1.0, 4), values=builder.store.snapshot().values)
+    assert result.latent_vec == expected.vector(result.loop_alpha)
+    assert len(result.latent_vec) == 4
+    builder.stop()

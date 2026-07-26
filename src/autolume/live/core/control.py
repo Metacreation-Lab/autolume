@@ -26,7 +26,7 @@ from autolume.live.core.loop import LoopStep, advance
 from autolume.live.core.mapping import apply_event
 from autolume.live.core.models import ModelFolder
 from autolume.live.core.motion import WalkState, integrate
-from autolume.live.core.noiseloop import NoiseLoop
+from autolume.live.core.noiseloop import NoiseLoopTableBuilder
 from autolume.live.core.params import (
     BY_ADDRESS,
     REGISTRY,
@@ -64,6 +64,7 @@ class ControlLoop:
         models: ModelFolder | None = None,
         model_info_store: LatestValueStore[ModelInfo | None] | None = None,
         walk_rng: np.random.RandomState | None = None,
+        noise_table_builder: NoiseLoopTableBuilder | None = None,
     ) -> None:
         self._control_store = control_store
         self._render_store = render_store
@@ -89,15 +90,12 @@ class ControlLoop:
         self._last_loop_step = LoopStep(
             alpha=0.0, index=0, wrapped=False, started=False
         )
-        # At most one noise loop sampler, rebuilt only when the key it was
-        # built from changes. `_noise_vector_alpha` guards against resampling
-        # 512 dimensions every tick: measured ~5 ms on the dev machine, well
-        # past the tick budget, and unnecessary while alpha is stationary
-        # (the loop paused, or simply between plays).
-        self._noise_loop: NoiseLoop | None = None
-        self._noise_loop_key: tuple[int, float, int] | None = None
-        self._noise_vector_alpha: float | None = None
-        self._noise_vector_cache: tuple[float, ...] | None = None
+        # The noise loop's table is (re)built off this thread by the builder
+        # (noiseloop.py); requested only when the key it was built from
+        # changes. While a build is in flight the previously published table
+        # keeps serving, so a radius change never stalls or freezes motion.
+        self._noise_table_builder = noise_table_builder or NoiseLoopTableBuilder()
+        self._noise_table_key: tuple[int, float, int] | None = None
         self._queue: collections.deque[ControlEvent] = collections.deque(
             maxlen=_QUEUE_LIMIT
         )
@@ -212,9 +210,12 @@ class ControlLoop:
     def _noise_latent_vector(self, state: ControlState) -> tuple[float, ...] | None:
         """The noise loop's vector for this tick, or None if it cannot be built.
 
-        None means "no model yet" or "a non positive radius"; either way
-        `render_params.latent_vec` is left at `state.latent_vec` rather than
-        raising, since a live show cannot stop for either condition.
+        Reads whatever table `_noise_table_builder` currently has published;
+        never builds one itself and never waits on the builder's thread. None
+        means "no model yet", "a non positive radius", or "no table has
+        finished building yet" — in every case `render_params.latent_vec` is
+        left at `state.latent_vec` rather than raising, since a live show
+        cannot stop for any of them.
         """
         info = self._model_info
         if info is None:
@@ -223,15 +224,13 @@ class ControlLoop:
         if not math.isfinite(radius) or radius <= 0.0:
             return None
         key = (state.noise_loop_seed, radius, info.z_dim)
-        if self._noise_loop is None or key != self._noise_loop_key:
-            self._noise_loop = NoiseLoop(state.noise_loop_seed, radius, info.z_dim)
-            self._noise_loop_key = key
-            self._noise_vector_alpha = None
-        alpha = state.loop_alpha
-        if self._noise_vector_cache is None or alpha != self._noise_vector_alpha:
-            self._noise_vector_cache = self._noise_loop.vector(alpha)
-            self._noise_vector_alpha = alpha
-        return self._noise_vector_cache
+        if key != self._noise_table_key:
+            self._noise_table_key = key
+            self._noise_table_builder.request_build(key)
+        table = self._noise_table_builder.store.snapshot()
+        if table is None:
+            return None
+        return table.vector(state.loop_alpha)
 
     def start(self) -> None:
         self._running.set()
@@ -243,6 +242,7 @@ class ControlLoop:
         if self._thread is not None:
             self._thread.join(timeout=2.0)
             self._thread = None
+        self._noise_table_builder.stop()
 
     def _run(self) -> None:
         deadline = time.monotonic() + self._period
