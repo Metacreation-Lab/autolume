@@ -1685,13 +1685,13 @@ def test_the_project_note_only_draws_while_the_loop_is_playing(frame):
 def test_loop_index_is_shown_one_based_and_bounded_to_the_keyframe_count(
     frame, monkeypatch
 ):
-    """`drag_int_mapped`'s whole reason to exist.
+    """`slider_int_mapped`'s whole reason to exist.
 
     The old app showed `self.params.index + 1` and stored `(idx - 1) %
     num_keyframes` (`widgets/looping_widget.py`); this is the same
     translation at the new architecture's UI edge, with `ControlState` and
-    OSC staying zero-based throughout. `imgui.drag_int` is stubbed rather
-    than clicked, since simulating a real drag is what `test_controls.py`'s
+    OSC staying zero-based throughout. `imgui.slider_int` is stubbed rather
+    than dragged, since simulating a real drag is what `test_controls.py`'s
     own comment on the null backend says not to try; the stub is what
     proves the widget was asked to show 3 (stored 2, one-based) ranged 1..6
     (six keyframes) and reports a submitted display value of 5 back as the
@@ -1704,17 +1704,17 @@ def test_loop_index_is_shown_one_based_and_bounded_to_the_keyframe_count(
         def submit(self, event):
             submitted.append(event)
 
-    def fake_drag_int(label, value, speed, minimum, maximum):
+    def fake_slider_int(label, value, minimum, maximum):
         seen["value"] = value
         seen["bounds"] = (minimum, maximum)
         return True, 5
 
-    monkeypatch.setattr(imgui, "drag_int", fake_drag_int)
+    monkeypatch.setattr(imgui, "slider_int", fake_slider_int)
     state = ControlState(loop_index=2)
     binder = ControlBinder(
         RecordingRuntime(state, SILENT), mapping_popup=lambda name: None, clock=lambda: NOW
     )
-    binder.drag_int_mapped(
+    binder.slider_int_mapped(
         "loop_index",
         "Index",
         minimum=1,
@@ -1726,6 +1726,42 @@ def test_loop_index_is_shown_one_based_and_bounded_to_the_keyframe_count(
     assert seen["bounds"] == (1, 6)
     assert submitted[-1].address == "/loop/index"
     assert submitted[-1].value == 4
+
+
+def test_loop_index_slider_range_follows_the_live_keyframe_count(frame, monkeypatch):
+    """The dynamic half of the same guarantee, driven through the real
+    `LoopPanel._scrub_rows` rather than the raw binder call above: the
+    slider's upper bound is the loop's current keyframe count, not the
+    registry's static maximum, so it moves the instant a keyframe is added
+    or removed rather than staying pinned to whatever count the loop
+    started with.
+    """
+    seen_bounds = []
+
+    def fake_slider_int(label, value, minimum, maximum):
+        if label == "Index":
+            seen_bounds.append((minimum, maximum))
+        return False, value
+
+    monkeypatch.setattr(imgui, "slider_int", fake_slider_int)
+
+    six_keyframes = ControlState()
+    LoopPanel(PanelRuntime(state=six_keyframes), mapping_popup=lambda name: None).gui()
+    assert seen_bounds[-1] == (1, 6)
+
+    imgui.new_line()
+    fewer_keyframes = ControlState(keyframes=six_keyframes.keyframes[:3])
+    LoopPanel(
+        PanelRuntime(state=fewer_keyframes), mapping_popup=lambda name: None
+    ).gui()
+    assert seen_bounds[-1] == (1, 3)
+
+    imgui.new_line()
+    more_keyframes = ControlState(
+        keyframes=six_keyframes.keyframes + (default_keyframe(6),)
+    )
+    LoopPanel(PanelRuntime(state=more_keyframes), mapping_popup=lambda name: None).gui()
+    assert seen_bounds[-1] == (1, 7)
 
 
 # --- items 10-12: no count field, Add keyframe at the bottom --------------

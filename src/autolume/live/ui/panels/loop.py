@@ -586,14 +586,21 @@ class LoopPanel:
         dragging this slider hold the loop still for the length of the drag.
 
         Index is ranged to the current keyframe count and shown one-based,
-        through `drag_int_mapped`, while `ControlState` and OSC keep the
+        through `slider_int_mapped`, while `ControlState` and OSC keep the
         zero-based, registry-bounded value: the old app did the same
         translation at its own edge (`widgets/looping_widget.py`,
         `self.params.index + 1` in and `(idx - 1) % num_keyframes` out).
-        Bounding the drag to the count rather than the registry's 2**31 - 1
-        is what stops it from scrubbing to a keyframe that does not exist;
-        it stays a drag, not a typed field, because unlike the count this is
-        a position the performer scrubs through and watches take effect.
+        Bounding it to the count rather than the registry's 2**31 - 1 is
+        what stops it from scrubbing to a keyframe that does not exist. A
+        slider, not a drag: index is a position within a bounded list, the
+        case a slider's handle exists to show, and a drag has no handle at
+        all, so nothing on screen said where in the loop the current index
+        actually sat (a performer's own report). It stays neither a typed
+        field nor a plain `slider_int`, because unlike the count this is a
+        position the performer scrubs through and watches take effect, in a
+        range that moves with the keyframe count rather than the registry's
+        static bound, which `slider_int_mapped` carries and `slider_int`
+        does not.
 
         `noise_mode` greys Index rather than hiding it, unlike the section
         swap in `gui`: it is a control, not a section, and the same rule
@@ -610,7 +617,7 @@ class LoopPanel:
         imgui.separator_text("Scrub")
         self._binder.slider_float("loop_alpha", "Alpha")
         count = max(1, len(state.keyframes))
-        self._binder.drag_int_mapped(
+        self._binder.slider_int_mapped(
             "loop_index",
             "Index",
             minimum=1,

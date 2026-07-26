@@ -852,7 +852,7 @@ class ControlBinder:
 
         self._widget(spec, f"{false_label}/{true_label}", draw, enabled)
 
-    def drag_int_mapped(
+    def slider_int_mapped(
         self,
         name: str,
         label: str,
@@ -861,25 +861,59 @@ class ControlBinder:
         maximum: int,
         to_display: Callable[[int], int],
         to_stored: Callable[[int], int],
-        speed: float = 1.0,
         enabled: bool = True,
     ) -> None:
-        """`drag_int`, but shown in a different domain than `name` is stored in.
+        """`slider_int`, but shown in a different domain than `name` is stored in.
 
         `loop_index` is the one caller: displayed one-based while
         `ControlState` and OSC stay zero-based, and ranged to the loop's
         current keyframe count rather than the registry's static bound,
         since the registry bound only exists to give OSC something to
         clamp against and the keyframe count is what actually limits a
-        valid index. The translation happens inside `draw`, so everything
-        outside it, the override, the touch events, the driver marker,
-        keeps working in the stored domain and cannot drift from it.
+        valid index. A slider, not a drag, because index is a position
+        within a bounded list, precisely the case a slider's handle exists
+        to show: a drag has no handle at all, so nothing on screen said
+        where in the loop the current index actually sat. The mapping
+        happens inside `_mapped_int`'s `draw`, so everything outside it, the
+        override, the touch events, the driver marker, keeps working in the
+        stored domain and cannot drift from it.
+        """
+        self._mapped_int(
+            name,
+            label,
+            minimum=minimum,
+            maximum=maximum,
+            to_display=to_display,
+            to_stored=to_stored,
+            enabled=enabled,
+            draw_mapped=lambda value, lo, hi: imgui.slider_int(label, value, lo, hi),
+        )
+
+    def _mapped_int(
+        self,
+        name: str,
+        label: str,
+        *,
+        minimum: int,
+        maximum: int,
+        to_display: Callable[[int], int],
+        to_stored: Callable[[int], int],
+        enabled: bool,
+        draw_mapped: Callable[[int, int, int], tuple[bool, int]],
+    ) -> None:
+        """Shared plumbing behind every `*_mapped` INT control.
+
+        `draw_mapped` is the one thing that differs between a slider and a
+        drag: the imgui call itself. The mapping between the stored and
+        displayed domains, and the routing through `_widget` that keeps the
+        override, touch events and driver marker all working in the stored
+        domain, live here once rather than duplicated per widget kind.
         """
         spec = require_spec(name, ParamKind.INT)
 
         def draw(shown: object) -> tuple[bool, int]:
-            changed, displayed = imgui.drag_int(
-                label, to_display(int(shown)), speed, minimum, maximum
+            changed, displayed = draw_mapped(
+                to_display(int(shown)), minimum, maximum
             )
             return changed, to_stored(displayed)
 
