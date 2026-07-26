@@ -311,7 +311,7 @@ class Recorder:
             )
         else:
             logger.warning(
-                "Recording of %s ended: %s. %d frames written, %d dropped",
+                "Recording of %s ended. %s %d frames written, %d dropped",
                 self._path,
                 reason,
                 written,

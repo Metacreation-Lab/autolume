@@ -1,5 +1,6 @@
 import time
 
+import cv2
 import numpy as np
 import pytest
 
@@ -15,8 +16,12 @@ from autolume.live.core.params import (
 from autolume.live.core.presets import PRESET_APPLY
 from autolume.live.core.sources import SourceTable
 from autolume.live.core.store import LatestValueStore
+from autolume.live.io import ndi as ndi_module
 from autolume.live.io.osc import OscEmitter
+from autolume.live.io.recorder import DEFAULT_FPS, SCREENSHOT_ADDRESS
 from autolume.live.runtime import OscStatus, _ModelWatchingControlLoop, build_runtime
+from tests.live.test_ndi import FakeNDIlib
+from tests.live.test_recorder import FakeWriter
 
 
 class DeviceAwareFakeModel:
@@ -601,3 +606,240 @@ def test_restart_osc_stops_a_candidate_orphaned_by_a_concurrent_stop():
 
     runtime._started = True
     runtime.stop()
+
+
+# --- output sinks: NDI, recording and screenshots -------------------------
+#
+# The sinks are real here, with only `NDIlib` and `cv2.VideoWriter` faked, so
+# these exercise the whole path: a parameter change on the control thread, a
+# frame off the render fan-out, and the sink's own thread in between.
+
+
+def use_data_root(monkeypatch, root):
+    from utils import user_data
+
+    monkeypatch.setattr(user_data, "_prefs", {"version": 1, "data_root": str(root)})
+    monkeypatch.setattr(user_data, "_data_root", str(root))
+
+
+@pytest.fixture
+def ndilib(monkeypatch):
+    fake = FakeNDIlib()
+    monkeypatch.setattr(ndi_module, "NDIlib", fake)
+    yield fake
+    if fake.send_gate is not None:
+        fake.send_gate.set()
+
+
+@pytest.fixture
+def writers(monkeypatch):
+    FakeWriter.created = []
+    FakeWriter.open_gate = None
+    FakeWriter.write_gate = None
+    FakeWriter.opened = True
+    FakeWriter.write_error = None
+    monkeypatch.setattr(cv2, "VideoWriter", FakeWriter)
+    yield FakeWriter.created
+    for gate in (FakeWriter.open_gate, FakeWriter.write_gate):
+        if gate is not None:
+            gate.set()
+
+
+def running_runtime(**kwargs):
+    runtime = make_runtime(**kwargs)
+    runtime.start()
+    runtime.submit(ControlEvent("/model/path", "/tmp/fake.pkl", source="ui"))
+    assert wait_for(lambda: runtime.preview.latest()[1] is not None)
+    return runtime
+
+
+def test_ndi_follows_the_enabled_parameter(ndilib):
+    runtime = running_runtime()
+    try:
+        runtime.submit(ControlEvent("/ndi/enabled", 1.0, source="ui"))
+        assert wait_for(lambda: ndilib.senders and ndilib.senders[0].sent)
+        assert ndilib.senders[0].name == "Autolume Live"
+        assert runtime.ndi.status().sending is True
+
+        runtime.submit(ControlEvent("/ndi/enabled", 0.0, source="ui"))
+        assert wait_for(lambda: ndilib.senders[0].destroyed)
+        assert wait_for(lambda: runtime.ndi.status().sending is False)
+    finally:
+        runtime.stop()
+
+
+def test_an_ndi_name_change_recreates_the_sender(ndilib):
+    runtime = running_runtime()
+    try:
+        runtime.submit(ControlEvent("/ndi/enabled", 1.0, source="ui"))
+        assert wait_for(lambda: ndilib.senders and ndilib.senders[0].sent)
+
+        runtime.submit(ControlEvent("/ndi/name", "Second Stage", source="ui"))
+        assert wait_for(lambda: len(ndilib.senders) == 2 and ndilib.senders[1].sent)
+        assert ndilib.senders[1].name == "Second Stage"
+        assert ndilib.senders[0].destroyed is True
+    finally:
+        runtime.stop()
+
+
+def test_a_failed_ndi_session_puts_the_parameter_back(ndilib):
+    """The checkbox cannot stay on while nothing is being sent."""
+    ndilib.send_errors = [RuntimeError("ndi send exploded")]
+    runtime = running_runtime()
+    try:
+        runtime.submit(ControlEvent("/ndi/enabled", 1.0, source="ui"))
+        # The failure first, so that the parameter check below cannot pass on
+        # the value it started at.
+        assert wait_for(lambda: runtime.ndi.status().error is not None)
+        assert "ndi send exploded" in runtime.ndi.status().error
+        assert ndilib.senders[0].destroyed is True
+        assert wait_for(lambda: runtime.control_store.snapshot().ndi_enabled is False)
+        time.sleep(0.1)
+        assert runtime.control_store.snapshot().ndi_enabled is False
+        assert len(ndilib.senders) == 1
+    finally:
+        runtime.stop()
+
+
+def test_recording_follows_the_parameter(writers, monkeypatch, tmp_path):
+    use_data_root(monkeypatch, tmp_path)
+    runtime = running_runtime()
+    try:
+        runtime.submit(ControlEvent("/render/fps", 24.0, source="ui"))
+        runtime.submit(ControlEvent("/record", 1.0, source="ui"))
+        assert wait_for(lambda: writers and writers[0].frames)
+        assert runtime.recorder.status().recording is True
+
+        runtime.submit(ControlEvent("/record", 0.0, source="ui"))
+        assert wait_for(lambda: writers[0].released)
+    finally:
+        runtime.stop()
+
+    writer = writers[0]
+    assert writer.fps == 24
+    assert writer.size == (8, 8)
+    assert str(tmp_path) in writer.path
+    assert "captures" in writer.path
+    assert writer.path.endswith(".mp4")
+    assert "fake_" in writer.path
+    assert runtime.recorder.status().frames_written == len(writer.frames)
+
+
+def test_an_uncapped_render_rate_records_at_the_default_fps(
+    writers, monkeypatch, tmp_path
+):
+    use_data_root(monkeypatch, tmp_path)
+    runtime = running_runtime()
+    try:
+        runtime.submit(ControlEvent("/render/fps", 0.0, source="ui"))
+        runtime.submit(ControlEvent("/record", 1.0, source="ui"))
+        assert wait_for(lambda: writers and writers[0].frames)
+    finally:
+        runtime.stop()
+    assert writers[0].fps == DEFAULT_FPS
+
+
+def test_a_take_that_ends_itself_puts_the_parameter_back(
+    writers, monkeypatch, tmp_path
+):
+    use_data_root(monkeypatch, tmp_path)
+    FakeWriter.opened = False
+    runtime = running_runtime()
+    try:
+        runtime.submit(ControlEvent("/record", 1.0, source="ui"))
+        # The failure first, so that the parameter check below cannot pass on
+        # the value it started at.
+        assert wait_for(lambda: runtime.recorder.status().error is not None)
+        assert wait_for(lambda: runtime.control_store.snapshot().recording is False)
+        time.sleep(0.1)
+        assert runtime.control_store.snapshot().recording is False
+        assert len(writers) == 1
+        assert writers[0].released is True
+    finally:
+        runtime.stop()
+
+
+def test_a_screenshot_event_saves_one_png(monkeypatch, tmp_path):
+    use_data_root(monkeypatch, tmp_path)
+    runtime = running_runtime()
+    captures = tmp_path / "captures"
+    try:
+        runtime.submit(ControlEvent(SCREENSHOT_ADDRESS, 1.0, source="ui"))
+        assert wait_for(lambda: captures.exists() and list(captures.glob("*.png")))
+    finally:
+        runtime.stop()
+    shots = list(captures.glob("*.png"))
+    assert len(shots) == 1
+    assert shots[0].name.startswith("fake_")
+
+
+def test_a_screenshot_is_the_one_structured_address_osc_can_reach(
+    monkeypatch, tmp_path
+):
+    """Deliberate: a performer's foot switch takes a picture.
+
+    The address carries no path, whatever a message puts in it. It is
+    reachable from the network, and a path from the network would be a
+    write-anywhere primitive rather than a screenshot button.
+    """
+    use_data_root(monkeypatch, tmp_path)
+    runtime = running_runtime()
+    captures = tmp_path / "captures"
+    try:
+        runtime.submit(
+            ControlEvent(SCREENSHOT_ADDRESS, "/etc/passwd.png", source="osc")
+        )
+        assert wait_for(lambda: captures.exists() and list(captures.glob("*.png")))
+    finally:
+        runtime.stop()
+    assert [path.parent for path in captures.glob("*.png")] == [captures]
+
+
+def test_the_sinks_stop_before_the_render_loop(monkeypatch, ndilib):
+    order = []
+
+    def track(owner, name):
+        original = owner.stop
+
+        def wrapped(*args, **kwargs):
+            order.append(name)
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(owner, "stop", wrapped)
+
+    runtime = make_runtime()
+    for owner, name in (
+        (runtime.ndi, "ndi"),
+        (runtime.recorder, "recorder"),
+        (runtime.render_loop, "render"),
+        (runtime.screenshots, "screenshots"),
+        (runtime.control_loop, "control"),
+    ):
+        track(owner, name)
+    runtime.start()
+    runtime.stop()
+
+    assert order.index("ndi") < order.index("render")
+    assert order.index("recorder") < order.index("render")
+    assert order.index("screenshots") > order.index("render")
+    assert order.index("control") > order.index("render")
+
+
+def test_a_frame_after_the_sinks_stopped_is_harmless(ndilib, writers, monkeypatch, tmp_path):
+    """The render loop outlives its sinks by design, so it may still fan out."""
+    use_data_root(monkeypatch, tmp_path)
+    runtime = running_runtime()
+    runtime.submit(ControlEvent("/ndi/enabled", 1.0, source="ui"))
+    runtime.submit(ControlEvent("/record", 1.0, source="ui"))
+    assert wait_for(lambda: writers and writers[0].frames)
+    assert wait_for(lambda: ndilib.senders and ndilib.senders[0].sent)
+
+    runtime.ndi.stop()
+    runtime.recorder.stop()
+    sent = len(ndilib.senders[0].sent)
+    written = len(writers[0].frames)
+    time.sleep(0.1)
+    runtime.stop()
+
+    assert len(ndilib.senders[0].sent) == sent
+    assert len(writers[0].frames) == written

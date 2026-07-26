@@ -15,10 +15,17 @@ from autolume.live.core.generator import ModelHost
 from autolume.live.core.engine import RenderLoop
 from autolume.live.core.params import ControlState, to_render_params
 from autolume.live.core.sinks import PreviewMailbox
-from autolume.live.core.sources import SourceTable
+from autolume.live.core.sources import SourceTable, canonical_address
 from autolume.live.core.store import LatestValueStore
 from autolume.live.io.audio import AudioEngineLike, AudioInput
+from autolume.live.io.ndi import NdiSink
 from autolume.live.io.osc import OscEmitter, OscInput
+from autolume.live.io.recorder import (
+    SCREENSHOT_ADDRESS,
+    Recorder,
+    ScreenshotWorker,
+    capture_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +62,12 @@ class Runtime:
         self.model_host = model_host
         self.model_info_store = model_host.info_store
         self.preview = PreviewMailbox()
+        # Output sinks. Both are registered with the fan-out for the whole
+        # session and are inert until their parameter turns them on, so the
+        # render thread never sees the sink list change under it.
+        self.ndi = NdiSink()
+        self.recorder = Recorder()
+        self.screenshots = ScreenshotWorker()
         # `emit` defaults to a real `OscEmitter`'s send, the outbound half of
         # the OSC transport. A test may inject a fake here, the same way
         # `audio_engine` lets a test stand in for the audio device, so no test
@@ -67,9 +80,15 @@ class Runtime:
             model_info_store=self.model_info_store,
             emit=emit or OscEmitter().send,
             on_osc_port_change=self._restart_osc,
+            ndi=self.ndi,
+            recorder=self.recorder,
+            on_screenshot=self._request_screenshot,
         )
         self.render_loop = RenderLoop(
-            self.render_store, self.model_host, [self.preview]
+            self.render_store,
+            self.model_host,
+            [self.preview, self.ndi, self.recorder],
+            screenshot=self.screenshots.save_png,
         )
         self.submit = self.control_loop.submit
         self._start_osc = start_osc
@@ -118,9 +137,26 @@ class Runtime:
         self._started = False
         self.osc.stop()
         self.audio.stop()
+        # Sinks before the render loop: each one stops accepting frames the
+        # moment it is told to, so the frames the loop is still fanning out
+        # while it winds down go nowhere, and the sender and the writer are
+        # provably released before the process ends. The screenshot worker
+        # goes after the loop instead, so a request latched on the last frame
+        # is still written rather than dropped on the doorstep.
+        self.ndi.stop()
+        self.recorder.stop()
         self.render_loop.stop()
+        self.screenshots.stop()
         self.control_loop.stop()
         self.model_host.stop()
+
+    def _request_screenshot(self, path: str) -> None:
+        """Latch a screenshot on the render loop, from the control thread.
+
+        A method rather than the render loop's own bound method, because the
+        control loop is built before the render loop exists.
+        """
+        self.render_loop.request_screenshot(path)
 
     def _restart_osc(self, new_port: int) -> None:
         """Rebind the OSC transport to `new_port`, called from the control
@@ -167,10 +203,11 @@ class Runtime:
 
 
 class _ModelWatchingControlLoop(ControlLoop):
-    """Control loop that forwards pkl_path, device and osc_port changes to
-    the model host, the render device, and the OSC transport respectively.
+    """Control loop that turns state changes into the side effects that live
+    outside state: model loads, device switches, the OSC transport's port, and
+    the output sinks' lifecycles.
 
-    All three are side effects of a state change, so they trigger on the
+    All of them are side effects of a state change, so they trigger on the
     control tick where every state change already flows.
     """
 
@@ -181,11 +218,17 @@ class _ModelWatchingControlLoop(ControlLoop):
         source_store,
         model_host,
         on_osc_port_change: Callable[[int], None] | None = None,
+        ndi=None,
+        recorder=None,
+        on_screenshot: Callable[[str], None] | None = None,
         **kwargs,
     ) -> None:
         super().__init__(control_store, render_store, source_store, **kwargs)
         self._model_host = model_host
         self._on_osc_port_change = on_osc_port_change
+        self._ndi = ndi
+        self._recorder = recorder
+        self._on_screenshot = on_screenshot
         self._last_pkl_path: str | None = None
         # Seeded from the store directly, at construction, rather than
         # lazily adopted on the first tick: nothing can have submitted an
@@ -209,6 +252,13 @@ class _ModelWatchingControlLoop(ControlLoop):
         # create. Nothing needs osc_port forwarded before the transport
         # this loop would be restarting has even started once.
         self._last_osc_port: int | None = None
+        # Seeded eagerly, like `_last_device` and for the same reason: both
+        # sinks are safe to start or stop at any moment, so there is no
+        # first-tick hazard, and a lazy sentinel could swallow the very
+        # transition it exists to notice.
+        self._last_recording: bool = initial.recording
+        self._last_ndi_enabled: bool = initial.ndi_enabled
+        self._last_ndi_name: str = initial.ndi_name
 
     def tick(self):
         result = super().tick()
@@ -218,7 +268,110 @@ class _ModelWatchingControlLoop(ControlLoop):
                 self._model_host.request_load(result.pkl_path)
         self._watch_device()
         self._watch_osc_port()
+        self._watch_ndi()
+        self._watch_recording()
         return result
+
+    def _apply(self, state, sources, event, now):
+        """Intercept the one structured address that is an action, not a value.
+
+        `/capture/screenshot` asks for a file and changes nothing about the
+        show, so it never reaches the mapping. It is also deliberately
+        reachable from raw OSC, which is why the message's value is ignored
+        entirely: the file name is derived here, under the captures folder,
+        and a path arriving from the network would be a write-anywhere
+        primitive rather than a screenshot button.
+        """
+        if canonical_address(event.address) == SCREENSHOT_ADDRESS:
+            self._capture_screenshot(state)
+            return state, sources
+        return super()._apply(state, sources, event, now)
+
+    def _capture_screenshot(self, state: ControlState) -> None:
+        if self._on_screenshot is None:
+            return
+        path = self._capture_path(state, ".png")
+        if path is not None:
+            self._on_screenshot(path)
+
+    def _watch_ndi(self) -> None:
+        """Drive the NDI sink from `ndi_enabled` and `ndi_name`.
+
+        Edge triggered like every other watcher here. `stop` is called with
+        no wait at all: a send that has gone slow must never hold the control
+        thread, and the sink destroys its own sender either way.
+
+        The last branch is the sink reporting back. A session that failed (no
+        library, a sender that would not open, a send that raised) is over
+        whatever the parameter says, so the parameter goes back rather than
+        leaving a checkbox on with nothing behind it. The reason stays on the
+        sink's status for the panel to show.
+        """
+        if self._ndi is None:
+            return
+        state = self._control_store.snapshot()
+        if state.ndi_enabled != self._last_ndi_enabled:
+            self._last_ndi_enabled = state.ndi_enabled
+            self._last_ndi_name = state.ndi_name
+            if state.ndi_enabled:
+                self._ndi.start(state.ndi_name)
+            else:
+                self._ndi.stop(timeout=0.0)
+            return
+        if state.ndi_name != self._last_ndi_name:
+            self._last_ndi_name = state.ndi_name
+            if state.ndi_enabled:
+                self._ndi.set_name(state.ndi_name)
+            return
+        if state.ndi_enabled and not self._ndi.status().sending:
+            self._last_ndi_enabled = False
+            self._ndi.stop(timeout=0.0)
+            self.submit(ControlEvent("/ndi/enabled", False, source="ui"))
+
+    def _watch_recording(self) -> None:
+        """Drive the recorder from `recording`.
+
+        The take's frame rate is the fps cap as it stands when Record is
+        pressed, because a `VideoWriter` names its rate once. `stop` waits
+        for nothing: the tail of a take is the encoder thread's work, not the
+        control thread's, which is the whole of legacy bug 3.
+
+        The last branch mirrors `_watch_ndi`'s: a take that ended itself (the
+        frame size changed, the file would not open) puts the parameter back,
+        so Record does not stay lit over a recording that is not happening.
+        """
+        if self._recorder is None:
+            return
+        state = self._control_store.snapshot()
+        if state.recording != self._last_recording:
+            self._last_recording = state.recording
+            if state.recording:
+                path = self._capture_path(state, ".mp4")
+                if path is None:
+                    self._last_recording = False
+                    self.submit(ControlEvent("/record", False, source="ui"))
+                    return
+                self._recorder.start(path, state.fps_cap)
+            else:
+                self._recorder.stop(timeout=0.0)
+            return
+        if state.recording and not self._recorder.status().recording:
+            self._last_recording = False
+            self._recorder.stop(timeout=0.0)
+            self.submit(ControlEvent("/record", False, source="ui"))
+
+    def _capture_path(self, state: ControlState, extension: str) -> str | None:
+        """Where this capture goes, or None if that cannot be worked out.
+
+        Resolving the data root reads the preferences file, so it is wrapped:
+        the control thread does not raise, and a capture nobody can name is
+        not worth stopping a show over.
+        """
+        try:
+            return capture_path(state.pkl_path, extension)
+        except Exception:
+            logger.exception("Could not work out where to save a capture")
+            return None
 
     def _watch_device(self) -> None:
         """Forward a `device` transition to the host, and revert it if the
