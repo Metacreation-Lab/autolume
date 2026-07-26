@@ -166,3 +166,46 @@ def test_noise_loop_does_not_wrap_mid_cycle():
     assert step.index == 0
     assert abs(step.alpha - 0.25) < 1e-9
     assert step.wrapped is False
+
+
+# --- stale entry index -------------------------------------------------------
+
+
+def test_a_stale_out_of_range_entry_index_does_not_report_a_spurious_wrap():
+    """A `loop_index` left over from a shrunk keyframe count self heals after
+    one tick, which is exactly why nothing caught it: with zero crossings this
+    tick, the entry index alone used to decide `wrapped`, reporting a
+    completed cycle on the very first tick of playback. Both cases are the
+    reviewer's hand-traced reproduction.
+    """
+    three = ControlState(
+        loop_active=True,
+        loop_uses_time=True,
+        loop_time=4.0,
+        loop_index=4,
+        keyframes=(Keyframe("seed"), Keyframe("seed"), Keyframe("seed")),
+    )
+    step = advance(three, 0.008)
+    assert step.wrapped is False
+    assert step.index == 1
+
+    six = ControlState(
+        loop_active=True, loop_uses_time=True, loop_time=4.0, loop_index=20
+    )
+    step = advance(six, 0.008)
+    assert step.wrapped is False
+    assert step.index == 2
+
+
+def test_non_finite_dt_is_identity():
+    state = ControlState(loop_active=True, loop_speed=1.0, loop_uses_time=False)
+    assert advance(state, float("nan")) == LoopStep(0.0, 0, False, False)
+
+
+def test_empty_keyframes_does_not_raise_and_is_one_segment():
+    state = ControlState(
+        loop_active=True, loop_uses_time=True, loop_time=4.0, keyframes=()
+    )
+    step = advance(state, 0.1)
+    assert step.index == 0
+    assert step.wrapped is False

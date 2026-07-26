@@ -307,10 +307,10 @@ def test_to_render_params_derives_mode(flags, expected_mode):
     assert params.to_render_params(state).mode == expected_mode
 
 
-def test_to_render_params_clamps_loop_index_to_keyframe_count():
+def test_to_render_params_wraps_loop_index_to_keyframe_count():
     keyframes = tuple(params.default_keyframe(i) for i in range(3))
     state = params.ControlState(keyframes=keyframes, loop_index=99)
-    assert params.to_render_params(state).loop_index == 2
+    assert params.to_render_params(state).loop_index == 0  # 99 % 3, matching loop.advance
 
 
 def test_to_render_params_loop_index_within_bounds_is_unchanged():

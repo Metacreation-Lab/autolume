@@ -227,13 +227,32 @@ def _resize_keyframes(state: ControlState, value: object, address: str) -> Contr
     return dataclasses.replace(resized, keyframes=tuple(current))
 
 
+def _wrap_loop_index(state: ControlState) -> ControlState:
+    """Keep `loop_index` inside `[0, len(keyframes))`, wherever it drifted from.
+
+    Plan 3 Task 2 specifies this: `loop_index` writes are wrapped modulo the
+    keyframe count at application time. Called from every path that can move
+    `loop_index` out of step with `keyframes`: a direct write to it, a
+    keyframe removal, a `keyframe_count` resize, and a preset load, which can
+    apply a stale `loop_index` against a keyframe list that decoded shorter
+    than it was saved with. Guarded against a zero-length tuple even though a
+    loop is supposed to always keep at least one keyframe: this runs on the
+    control thread and must not raise.
+    """
+    count = len(state.keyframes)
+    wrapped = state.loop_index % count if count else 0
+    if wrapped == state.loop_index:
+        return state
+    return dataclasses.replace(state, loop_index=wrapped)
+
+
 def apply_event(state: ControlState, event: ControlEvent) -> ControlState:
     if event.address == BINDING_SET:
         return _set_binding(state, event.value)
     if event.address == BINDING_CLEAR:
         return _clear_binding(state, event.value)
     if event.address == PRESET_APPLY:
-        return _apply_preset(state, event.value)
+        return _wrap_loop_index(_apply_preset(state, event.value))
     if event.address == VECTOR_SET:
         return _set_vector(state, event.value)
     if event.address == VECTOR_RANDOMIZE:
@@ -245,11 +264,13 @@ def apply_event(state: ControlState, event: ControlEvent) -> ControlState:
     if event.address == KEYFRAME_SET:
         return _set_keyframe(state, event.value)
     if event.address == KEYFRAME_REMOVE:
-        return _remove_keyframe(state, event.value)
+        return _wrap_loop_index(_remove_keyframe(state, event.value))
     spec = BY_ADDRESS.get(event.address)
     if spec is None:
         logger.debug("Ignoring event for unknown address %s", event.address)
         return state
     if spec.name == "keyframe_count":
-        return _resize_keyframes(state, event.value, event.address)
+        return _wrap_loop_index(_resize_keyframes(state, event.value, event.address))
+    if spec.name == "loop_index":
+        return _wrap_loop_index(apply_value(state, spec.name, event.value, event.address))
     return apply_value(state, spec.name, event.value, event.address)

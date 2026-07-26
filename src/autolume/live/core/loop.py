@@ -72,13 +72,22 @@ def advance(state: ControlState, dt: float) -> LoopStep:
     the index and wrapping to the last segment, mirroring the forward case.
     The noise loop is a single segment, so every wrap of its one segment is a
     full cycle and `index` never leaves 0.
+
+    `state.loop_index` is wrapped modulo `segments` right here rather than
+    trusted from the caller: a stale index left over from a shrunk keyframe
+    list (or a preset that decoded fewer keyframes than it was saved with)
+    must not read as a completed cycle on the very first tick, before any
+    crossing has happened. `mapping.py` also keeps writes in range going
+    forward, but this function has no way to know every caller went through
+    it, so it normalises its own input. `segments` is never 0
+    (`_segment_count` floors it at 1), so the modulo cannot raise.
     """
+    segments = _segment_count(state)
     alpha = state.loop_alpha
-    index = 0 if state.noise_loop else state.loop_index
+    index = 0 if state.noise_loop else state.loop_index % segments
     identity = LoopStep(alpha=alpha, index=index, wrapped=False, started=False)
     if not state.loop_active or not math.isfinite(dt) or dt <= 0.0:
         return identity
-    segments = _segment_count(state)
     rate = _alpha_rate(state, dt, segments)
     if not rate:  # None (refused above) or exactly 0.0: nothing to step
         return identity

@@ -475,3 +475,54 @@ def test_keyframe_count_uncoercible_value_ignored(caplog):
     with caplog.at_level(logging.WARNING):
         after = apply_event(before, ControlEvent("/loop/keyframes", "nope"))
     assert after == before
+
+
+# --- loop_index normalisation -------------------------------------------
+#
+# Plan 3 Task 2: loop_index writes are wrapped modulo the keyframe count at
+# application time. Pinned at every entry point that can move loop_index out
+# of step with keyframes (task-9 review, finding "important 1").
+
+
+def test_loop_index_write_wraps_to_the_keyframe_count():
+    before = ControlState(keyframes=tuple(default_keyframe(i) for i in range(3)))
+    state = apply_event(before, ControlEvent("/loop/index", 4))
+    assert state.loop_index == 1
+
+
+def test_loop_index_write_within_bounds_is_unchanged():
+    before = ControlState(keyframes=tuple(default_keyframe(i) for i in range(3)))
+    state = apply_event(before, ControlEvent("/loop/index", 2))
+    assert state.loop_index == 2
+
+
+def test_keyframe_remove_wraps_a_stale_loop_index():
+    before = ControlState(loop_index=5)  # last of the default 6 keyframes
+    state = remove_keyframe(before, 0)
+    assert len(state.keyframes) == 5
+    assert state.loop_index == 0  # 5 % 5
+
+
+def test_keyframe_remove_leaves_an_in_range_loop_index_untouched():
+    before = ControlState(loop_index=2)
+    state = remove_keyframe(before, 5)
+    assert state.loop_index == 2
+
+
+def test_keyframe_count_shrink_wraps_a_stale_loop_index():
+    before = ControlState(loop_index=5)  # last of the default 6 keyframes
+    state = apply_event(before, ControlEvent("/loop/keyframes", 3))
+    assert state.keyframe_count == 3
+    assert state.loop_index == 2  # 5 % 3
+
+
+def test_preset_apply_wraps_a_stale_loop_index_against_decoded_keyframes():
+    payload = preset_payload({"loop_index": 99})
+    payload["keyframes"] = [
+        {"kind": "seed", "seed_x": 0.0, "seed_y": 0.0, "project": True},
+        {"kind": "seed", "seed_x": 1.0, "seed_y": 0.0, "project": True},
+        {"kind": "seed", "seed_x": 2.0, "seed_y": 0.0, "project": True},
+    ]
+    state = apply_preset(ControlState(), payload)
+    assert len(state.keyframes) == 3
+    assert state.loop_index == 0  # 99 % 3

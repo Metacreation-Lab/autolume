@@ -310,9 +310,14 @@ def to_render_params(state: ControlState) -> RenderParams:
         latent_project=state.latent_project,
         keyframes=state.keyframes,
         loop_alpha=state.loop_alpha,
-        # Clamped here, not in the spec: the bound is the keyframe count,
-        # which is dynamic.
-        loop_index=min(state.loop_index, max(keyframe_count - 1, 0)),
+        # Wrapped here, not in the spec, and by the same modulo `loop.advance`
+        # steps the index with: the bound is the keyframe count, which is
+        # dynamic, and a `min` clamp used to disagree with `advance`'s `%` on
+        # an out-of-range index (index 20 of 6 rendered keyframe 5 while the
+        # integrator landed on keyframe 2). `mapping.py` normalises writes the
+        # same way, so this rarely has anything to do; it stays because a
+        # `ControlState` can still be built directly with a stale index.
+        loop_index=state.loop_index % keyframe_count if keyframe_count else 0,
         mode=_derive_mode(state),
     )
 
