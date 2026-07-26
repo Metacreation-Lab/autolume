@@ -667,12 +667,52 @@ def test_bend_set_rejects_negative_indices(caplog, indices):
     assert any("invalid transform" in m for m in warnings_from(caplog, MAPPING_LOGGER))
 
 
+@pytest.mark.parametrize("op", ["erode", "dilate"])
+def test_bend_set_rejects_a_float_kernel_size(caplog, op):
+    # transform_layers.py builds torch.ones((k, k)) from params[0]; a
+    # non-integral k raises there.
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = set_transform(before, 0, Transform(op, "L1", (3.5,), (0,)))
+    assert after == before
+    assert any("invalid transform" in m for m in warnings_from(caplog, MAPPING_LOGGER))
+
+
+@pytest.mark.parametrize("op", ["erode", "dilate"])
+@pytest.mark.parametrize("kernel", [0.0, -1.0, -3.0])
+def test_bend_set_rejects_a_non_positive_kernel_size(caplog, op, kernel):
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = set_transform(before, 0, Transform(op, "L1", (kernel,), (0,)))
+    assert after == before
+    assert any("invalid transform" in m for m in warnings_from(caplog, MAPPING_LOGGER))
+
+
+@pytest.mark.parametrize("op", ["erode", "dilate"])
+def test_bend_set_accepts_a_valid_integral_kernel_size(op):
+    transform = Transform(op, "L1", (5.0,), (0,))
+    state = set_transform(ControlState(), 0, transform)
+    assert state.transforms == (transform,)
+
+
 def test_bend_set_out_of_range_index_ignored(caplog):
     before = ControlState()
     with caplog.at_level(logging.WARNING):
         after = set_transform(before, 5, Transform("ablate", "L1", (1.0,), (0,)))
     assert after == before
     assert any("out of range" in m for m in warnings_from(caplog, MAPPING_LOGGER))
+
+
+@pytest.mark.parametrize("bad_index", [True, False, "0", 1.5, None])
+def test_bend_set_rejects_non_int_index(caplog, bad_index):
+    before = ControlState()
+    transform = Transform("ablate", "L1", (1.0,), (0,))
+    with caplog.at_level(logging.WARNING):
+        after = apply_event(before, ControlEvent(BEND_SET, SetTransform(bad_index, transform)))
+    assert after == before
+    assert any(
+        "malformed transform index" in m for m in warnings_from(caplog, MAPPING_LOGGER)
+    )
 
 
 def test_bend_set_with_non_transform_value_ignored(caplog):
@@ -730,6 +770,17 @@ def test_bend_remove_out_of_range_ignored(caplog):
     assert any("out of range" in m for m in warnings_from(caplog, MAPPING_LOGGER))
 
 
+@pytest.mark.parametrize("bad_index", [True, False, "0", 1.5, None])
+def test_bend_remove_rejects_non_int_index(caplog, bad_index):
+    before = ControlState(transforms=(Transform("ablate", "L1", (1.0,), (0,)),))
+    with caplog.at_level(logging.WARNING):
+        after = apply_event(before, ControlEvent(BEND_REMOVE, RemoveTransform(bad_index)))
+    assert after == before
+    assert any(
+        "malformed transform index" in m for m in warnings_from(caplog, MAPPING_LOGGER)
+    )
+
+
 def test_bend_remove_with_non_transform_value_ignored(caplog):
     before = ControlState()
     with caplog.at_level(logging.WARNING):
@@ -776,7 +827,21 @@ def test_bend_noise_rejects_non_finite_strength(caplog, bad):
     with caplog.at_level(logging.WARNING):
         after = set_layer_noise(before, "L1", bad)
     assert after == before
-    assert warnings_from(caplog, MAPPING_LOGGER)
+    assert any(
+        "non finite layer noise strength" in m
+        for m in warnings_from(caplog, MAPPING_LOGGER)
+    )
+
+
+def test_bend_noise_rejects_uncoercible_strength(caplog):
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = set_layer_noise(before, "L1", "nope")
+    assert after == before
+    assert any(
+        "uncoercible layer noise strength" in m
+        for m in warnings_from(caplog, MAPPING_LOGGER)
+    )
 
 
 def test_bend_noise_rejects_empty_layer(caplog):
@@ -829,13 +894,35 @@ def test_bend_ratio_neutral_on_absent_layer_is_a_noop():
     assert state == before
 
 
-@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
-def test_bend_ratio_rejects_non_finite(caplog, bad):
+@pytest.mark.parametrize(
+    "rx,ry",
+    [
+        (float("nan"), 1.0),
+        (float("inf"), 1.0),
+        (float("-inf"), 1.0),
+        (1.0, float("nan")),
+        (1.0, float("inf")),
+        (1.0, float("-inf")),
+    ],
+)
+def test_bend_ratio_rejects_non_finite(caplog, rx, ry):
     before = ControlState()
     with caplog.at_level(logging.WARNING):
-        after = set_layer_ratio(before, "L1", bad, 1.0)
+        after = set_layer_ratio(before, "L1", rx, ry)
     assert after == before
-    assert warnings_from(caplog, MAPPING_LOGGER)
+    assert any(
+        "non finite layer ratio" in m for m in warnings_from(caplog, MAPPING_LOGGER)
+    )
+
+
+def test_bend_ratio_rejects_uncoercible_values(caplog):
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = set_layer_ratio(before, "L1", "nope", 1.0)
+    assert after == before
+    assert any(
+        "uncoercible layer ratio" in m for m in warnings_from(caplog, MAPPING_LOGGER)
+    )
 
 
 def test_bend_ratio_with_non_layer_ratio_value_ignored(caplog):
@@ -895,6 +982,16 @@ def test_adjust_directions_rejects_mismatched_lengths(caplog):
     before = ControlState()
     with caplog.at_level(logging.WARNING):
         after = set_directions(before, ((1.0, 2.0), (3.0,)))
+    assert after == before
+    assert any("malformed directions" in m for m in warnings_from(caplog, MAPPING_LOGGER))
+
+
+def test_adjust_directions_rejects_zero_length_vectors(caplog):
+    # Distinct from loading zero directions (`()`, covered above): here two
+    # vectors are present but each is empty, a meaningless adjuster state.
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = set_directions(before, ((), ()))
     assert after == before
     assert any("malformed directions" in m for m in warnings_from(caplog, MAPPING_LOGGER))
 

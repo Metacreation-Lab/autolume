@@ -253,11 +253,8 @@ def _wrap_loop_index(state: ControlState) -> ControlState:
 def _validate_transform(transform: Transform) -> Transform | None:
     """Normalise and validate `transform`, or None if it cannot be applied.
 
-    `op` must be one of the eleven exposed operators, `params` must coerce to
-    finite floats matching that operator's arity, `indices` must be
-    non-negative ints, and `layer` must be a non-empty string. Returns a
-    `Transform` with `params`/`indices` normalised to tuples so downstream
-    code never has to re-check their shape.
+    Returns a `Transform` with `params`/`indices` normalised to tuples so
+    downstream code never has to re-check their shape.
     """
     arity = _OPERATOR_ARITY.get(transform.op)
     if arity is None:
@@ -270,6 +267,14 @@ def _validate_transform(transform: Transform) -> Transform | None:
         return None
     if len(params_values) != arity or not all(math.isfinite(p) for p in params_values):
         return None
+    # erode/dilate build a torch.ones((k, k)) kernel from params[0]
+    # (transform_layers.py:39/50): a non-integral or non-positive k raises
+    # there. "Finite floats of the op's arity" is a floor, not a ceiling, so
+    # these two operators get an extra check the other nine do not need.
+    if transform.op in ("erode", "dilate"):
+        kernel = params_values[0]
+        if not kernel.is_integer() or kernel < 1:
+            return None
     try:
         indices_values = tuple(transform.indices)
     except TypeError:
@@ -418,7 +423,9 @@ def _coerce_directions(raw: object) -> tuple[tuple[float, ...], ...] | None:
 
     Every vector goes through `_coerce_vector`, so a non-finite or non-numeric
     entry rejects that vector's whole event, same as `/vector/set`. More than
-    eight vectors, or vectors of differing lengths, are also rejected.
+    eight vectors, vectors of differing lengths, or (once at least one vector
+    is present) zero-length vectors are also rejected: a zero-length direction
+    is a meaningless adjuster state, not just an unusual one.
     """
     try:
         vectors = list(raw)
@@ -432,7 +439,10 @@ def _coerce_directions(raw: object) -> tuple[tuple[float, ...], ...] | None:
         if one is None:
             return None
         coerced.append(one)
-    if len({len(v) for v in coerced}) > 1:
+    lengths = {len(v) for v in coerced}
+    if len(lengths) > 1:
+        return None
+    if lengths and next(iter(lengths)) == 0:
         return None
     return tuple(coerced)
 
