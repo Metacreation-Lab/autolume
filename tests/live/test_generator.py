@@ -1233,9 +1233,9 @@ def test_a_transform_applies_at_the_layer_it_names(layer, expected):
 )
 def test_transforms_apply_in_chain_order(chain, expected):
     model = _bendable_model()
-    params = {"scalar-multiply": (2.0,), "invert": (1.0,)}
+    by_op = {"scalar-multiply": (2.0,), "invert": (1.0,)}
     transforms = tuple(
-        Transform(op, "conv1", params[op], _ALL_CHANNELS) for op in chain
+        Transform(op, "conv1", by_op[op], _ALL_CHANNELS) for op in chain
     )
     assert _pixel(model.render_frame(render_params(transforms=transforms), 0)) == expected
 
