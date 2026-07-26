@@ -8,6 +8,9 @@ stacking on the cap (pacing strategy ported from balagan engine.py).
 import logging
 import threading
 import time
+from typing import Callable
+
+import numpy as np
 
 from autolume.live.core.params import RenderParams
 from autolume.live.core.sinks import FrameSink
@@ -24,10 +27,17 @@ class RenderLoop:
         render_store: LatestValueStore[RenderParams],
         model_host,
         sinks: list[FrameSink],
+        screenshot: Callable[[str, np.ndarray], None] | None = None,
     ) -> None:
         self._render_store = render_store
         self._model_host = model_host
         self._sinks = sinks
+        # Where a latched screenshot goes. The writer owns a thread of its
+        # own (io/recorder.py's ScreenshotWorker), so this call hands a frame
+        # over and returns; the render thread never touches disk.
+        self._screenshot = screenshot
+        self._screenshot_path: str | None = None
+        self._screenshot_lock = threading.Lock()
         self._seq = 0
         self._thread: threading.Thread | None = None
         self._running = threading.Event()
@@ -68,9 +78,42 @@ class RenderLoop:
                 sink.on_frame(frame, seq)
             except Exception:
                 logger.exception("Frame sink %r failed", sink)
+        self._serve_screenshot(frame)
         self._track_fps()
         self._limit_framerate(params.fps_cap)
         return True
+
+    def request_screenshot(self, path: str) -> None:
+        """Latch a screenshot for the next frame this loop fans out.
+
+        Called from the control thread, on `/capture/screenshot`. One slot,
+        latest wins: a second request before a frame has been rendered
+        replaces the first rather than queuing, the same way the preview
+        mailbox holds one frame. A request made while nothing is rendering
+        keeps waiting until a model produces one.
+        """
+        with self._screenshot_lock:
+            self._screenshot_path = str(path)
+
+    def _serve_screenshot(self, frame: np.ndarray) -> None:
+        """Hand `frame` to the writer if a screenshot is latched.
+
+        Runs on the render thread after the fan-out, so the screenshot is the
+        same array the show and the recording just got, and the writer is
+        expected to return immediately.
+        """
+        with self._screenshot_lock:
+            path = self._screenshot_path
+            self._screenshot_path = None
+        if path is None:
+            return
+        if self._screenshot is None:
+            logger.warning("Ignoring a screenshot request, nothing is wired to save it")
+            return
+        try:
+            self._screenshot(path, frame)
+        except Exception:
+            logger.exception("Handing over the screenshot %s failed", path)
 
     def fps(self) -> float:
         return self._fps

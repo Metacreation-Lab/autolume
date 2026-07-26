@@ -187,6 +187,113 @@ def test_render_error_does_not_kill_loop():
     assert mailbox.latest()[1] is not None
 
 
+# --- screenshots ----------------------------------------------------------
+#
+# The loop latches a request and hands the next frame it fans out to a writer
+# that is somebody else's thread. Nothing here touches disk.
+
+
+def test_a_screenshot_request_latches_exactly_one_frame():
+    shots = []
+    loop = RenderLoop(
+        make_store(fps_cap=0),
+        FakeHost(FakeModel()),
+        [],
+        screenshot=lambda path, frame: shots.append((path, frame)),
+    )
+    loop.request_screenshot("/captures/one.png")
+    loop.render_one()
+    loop.render_one()
+    loop.render_one()
+    assert len(shots) == 1
+    path, frame = shots[0]
+    assert path == "/captures/one.png"
+    assert frame.shape == (4, 4, 3)
+
+
+def test_a_screenshot_takes_the_frame_that_came_after_the_request():
+    shots = []
+    loop = RenderLoop(
+        make_store(fps_cap=0),
+        FakeHost(FakeModel()),
+        [],
+        screenshot=lambda path, frame: shots.append((path, frame)),
+    )
+    loop.render_one()
+    loop.request_screenshot("/captures/one.png")
+    loop.render_one()
+    # FakeModel paints each frame with its call count, so this names the frame.
+    assert shots[0][1][0, 0, 0] == 2
+
+
+def test_a_request_with_nothing_rendering_waits_for_a_frame():
+    """No model means no frame, and the request keeps rather than loses it."""
+    shots = []
+    host = FakeHost(None)
+    loop = RenderLoop(
+        make_store(fps_cap=0),
+        host,
+        [],
+        screenshot=lambda path, frame: shots.append((path, frame)),
+    )
+    loop.request_screenshot("/captures/one.png")
+    assert loop.render_one() is False
+    assert shots == []
+    host.model = FakeModel()
+    loop.render_one()
+    assert len(shots) == 1
+
+
+def test_a_second_request_replaces_one_that_has_not_been_served():
+    shots = []
+    loop = RenderLoop(
+        make_store(fps_cap=0),
+        FakeHost(FakeModel()),
+        [],
+        screenshot=lambda path, frame: shots.append((path, frame)),
+    )
+    loop.request_screenshot("/captures/one.png")
+    loop.request_screenshot("/captures/two.png")
+    loop.render_one()
+    loop.render_one()
+    assert [path for path, _ in shots] == ["/captures/two.png"]
+
+
+def test_a_screenshot_writer_that_fails_does_not_stop_the_loop():
+    def explode(path, frame):
+        raise RuntimeError("no disk")
+
+    mailbox = PreviewMailbox()
+    loop = RenderLoop(
+        make_store(fps_cap=0), FakeHost(FakeModel()), [mailbox], screenshot=explode
+    )
+    loop.request_screenshot("/captures/one.png")
+    assert loop.render_one() is True
+    assert loop.render_one() is True
+    assert mailbox.latest()[1] is not None
+
+
+def test_a_request_with_no_writer_wired_is_dropped():
+    loop = RenderLoop(make_store(fps_cap=0), FakeHost(FakeModel()), [])
+    loop.request_screenshot("/captures/one.png")
+    assert loop.render_one() is True
+
+
+def test_a_screenshot_gets_the_same_read_only_frame_the_sinks_got():
+    shots = []
+    mailbox = PreviewMailbox()
+    loop = RenderLoop(
+        make_store(fps_cap=0),
+        FakeHost(FakeModel()),
+        [mailbox],
+        screenshot=lambda path, frame: shots.append((path, frame)),
+    )
+    loop.request_screenshot("/captures/one.png")
+    loop.render_one()
+    assert shots[0][1] is mailbox.latest()[1]
+    assert shots[0][1].flags.writeable is False
+
+
 def test_thread_start_stop_produces_frames():
     mailbox = PreviewMailbox()
     loop = RenderLoop(make_store(fps_cap=0), FakeHost(FakeModel()), [mailbox])
