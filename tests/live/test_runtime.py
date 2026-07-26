@@ -382,12 +382,15 @@ class FakeDeviceHost:
 
 def test_two_rapid_device_changes_revert_to_the_last_confirmed_value():
     """Regression: the fallback used to be whatever the previous *request*
-    was, not a value a status had actually confirmed working. Two switches
-    close enough together that the first request's status never lands
+    was, not a value known to be actually running. Two switches close
+    enough together that the first request's status never lands
     (superseded before the loader thread gets to it, the way the reviewer's
     "cuda" then "tpu" repro triggered it 7 times in 12) used to make that
     unvalidated first request the permanent revert target instead of the
-    device that was actually running.
+    device that was actually running. The revert now reads `status.active`
+    off the failure itself rather than tracking a "last confirmed" value in
+    this loop, so there is nothing here for a second rapid change to race
+    ahead of.
 
     Driven directly through `_ModelWatchingControlLoop.tick()` with a fake
     host, so the interleaving is exact rather than left to real thread
@@ -427,6 +430,32 @@ def test_two_rapid_device_changes_revert_to_the_last_confirmed_value():
     loop.tick()
 
     assert control_store.snapshot().device == "auto"
+
+
+def test_a_failed_switch_reverts_to_the_status_reported_active_device():
+    """The core of the fix above: the revert target is whatever the
+    failure's own `status.active` says is actually running, not this
+    loop's own bookkeeping. A model is already running on "mps" here
+    (never touched by the failed attempt), and that is where the revert
+    must land even though "mps" was never itself requested through this
+    loop."""
+    control_store = LatestValueStore(ControlState())
+    render_store = LatestValueStore(to_render_params(ControlState()))
+    source_store = LatestValueStore(SourceTable())
+    host = FakeDeviceHost()
+    loop = _ModelWatchingControlLoop(control_store, render_store, source_store, host)
+    loop.tick()
+
+    loop.submit(ControlEvent("/render/device", "cuda", source="ui"))
+    loop.tick()
+
+    host.device_store.set(
+        DeviceStatus(active="mps", requested="cuda", error="CUDA is not available")
+    )
+    loop.tick()
+    loop.tick()
+
+    assert control_store.snapshot().device == "mps"
 
 
 # --- OSC port restart --------------------------------------------------

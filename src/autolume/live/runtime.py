@@ -197,12 +197,6 @@ class _ModelWatchingControlLoop(ControlLoop):
         # the very first tick this loop ever runs.
         initial = control_store.snapshot()
         self._last_device: str = initial.device
-        # The last device a status actually confirmed working, never merely
-        # requested. A failed switch reverts to this, not to whatever the
-        # previous request happened to be: two switches close together
-        # (the second fired before the first's status lands) must not let
-        # an unvalidated intermediate value become the fallback.
-        self._confirmed_device: str = initial.device
         self._seen_device_status = None
         self._last_osc_port: int = initial.osc_port
 
@@ -223,10 +217,19 @@ class _ModelWatchingControlLoop(ControlLoop):
         Edge triggered exactly like `pkl_path` above: `_last_device` moves to
         the new value the instant the switch is requested, not once it
         completes, so a request in flight is never re-issued every tick.
-        A failed switch reverts to `_confirmed_device`, the last value a
-        status actually confirmed working, not to `_last_device`'s previous
-        value: that previous value could itself have been an unvalidated,
-        still in-flight request.
+
+        A failed switch reverts to `status.active`, the device string
+        `ModelHost` read straight off the still-current model at the moment
+        it recorded the failure, by definition where rendering is actually
+        happening right now. Deliberately not a value this loop tracks
+        itself (an earlier version kept "the last device a status
+        confirmed", updated only once a tick had actually observed that
+        status): that bookkeeping lags one tick behind the loader thread,
+        so a second switch fired before this loop ever ticked past the
+        first one's success would revert past it, to whatever was
+        confirmed before *that* one. `status.active` carries no such lag,
+        since `ModelHost` reads it fresh from the model at failure time,
+        not from anything this loop reported earlier.
         """
         state = self._control_store.snapshot()
         if state.device != self._last_device:
@@ -240,7 +243,7 @@ class _ModelWatchingControlLoop(ControlLoop):
         if status.requested != self._last_device:
             return
         if status.error:
-            reverted = self._confirmed_device
+            reverted = status.active if status.active is not None else "auto"
             self._last_device = reverted
             # source="ui": this correction must always land, whatever the
             # mapping panel has bound to /render/device, and "ui" is the one
@@ -248,8 +251,6 @@ class _ModelWatchingControlLoop(ControlLoop):
             # `ControlLoop._accepts_direct`). It is not a stand-in for a real
             # click; it is the one source that means "trusted, apply it".
             self.submit(ControlEvent("/render/device", reverted, source="ui"))
-        else:
-            self._confirmed_device = self._last_device
 
     def _watch_osc_port(self) -> None:
         if self._on_osc_port_change is None:
