@@ -1793,3 +1793,57 @@ def test_randomizing_a_keyframe_submits_a_vector_of_the_models_z_dim(frame, monk
     assert randomized.kind == "vec"
     assert len(randomized.vec) == 5
     assert all(v != 0.0 for v in randomized.vec)
+
+
+class _ReadyVectorDialog:
+    """A `portable_file_dialogs.open_file` double that is ready immediately,
+    for the drain path tests below: no headless way exists to drive the real
+    native picker, only to stand in for what it hands back once a performer
+    has picked a file.
+    """
+
+    def __init__(self, path: str) -> None:
+        self._path = path
+
+    def ready(self) -> bool:
+        return True
+
+    def result(self) -> list[str]:
+        return [self._path]
+
+
+def test_a_pending_keyframe_load_drains_while_noise_loop_mode_is_selected(
+    frame, monkeypatch
+):
+    """Important 1: the drop path. `portable_file_dialogs` windows are not
+    app-modal, so a performer can open a keyframe's Load, then switch the
+    Keyframes/Noise loop radio to Noise loop before picking a file. Before
+    this fix, `_take_vector_load` was only ever called from `_keyframe_rows`,
+    which `gui()` skips entirely in Noise loop mode, so the result sat stuck
+    in `self._vector_dialog` for as long as Noise loop stayed selected, then
+    applied to whatever keyframe happened to be at the stored index the
+    moment Keyframes was reselected, not necessarily the one Load was opened
+    for. This proves the result is drained, and lands on the right keyframe,
+    the very first frame it is ready on, with the Keyframes section not even
+    drawn.
+    """
+    monkeypatch.setattr(loop_module, "load_vector_file", lambda path: [1.0, 2.0, 3.0])
+    submitted = []
+
+    class RecordingRuntime(PanelRuntime):
+        def submit(self, event):
+            submitted.append(event)
+
+    state = ControlState(noise_loop=True)
+    runtime = RecordingRuntime(state=state)
+    panel = LoopPanel(runtime, mapping_popup=lambda name: None)
+    panel._vector_dialog = (2, _ReadyVectorDialog("vector.npy"))
+
+    panel.gui()
+
+    assert panel._vector_dialog is None, "the dialog result should be drained"
+    keyframe_sets = [e for e in submitted if e.address == "/keyframe/set"]
+    assert keyframe_sets, "the picked vector should have been applied, not dropped"
+    applied = keyframe_sets[-1].value
+    assert applied.index == 2
+    assert applied.keyframe.vec == (1.0, 2.0, 3.0)

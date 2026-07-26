@@ -242,6 +242,22 @@ class LoopPanel:
         # frame after the click.
         noise_mode = bool(self._binder.value("noise_loop"))
         self._scrub_rows(state, noise_mode)
+        # Drained here, unconditionally, rather than from inside
+        # `_keyframe_rows`: `portable_file_dialogs` windows are not
+        # app-modal, so a performer can switch to Noise loop mode, which
+        # hides the Keyframes section entirely (`_keyframe_rows` is not even
+        # called below), while a Load dialog opened before the switch is
+        # still open. Draining only from `_keyframe_rows` would leave the
+        # result stuck in `self._vector_dialog` for as long as Noise loop
+        # stays selected, then apply it the instant Keyframes is reselected,
+        # to whatever keyframe now sits at the stored index, which may no
+        # longer be the one Load was opened for. Applying it here, the
+        # first frame it is ready on regardless of which section is showing,
+        # closes that window: the result still lands on the exact keyframe
+        # Load was opened for (`_take_vector_load`'s own index re-check),
+        # the same as it always has, just without waiting on the section
+        # that keyframe happens to live in being visible.
+        self._take_vector_load(state)
         # Hiding a whole section, not greying it: this is the one exception
         # to the stable-footprint rule in this panel, and it is a deliberate
         # one, not an oversight. That rule exists so a control does not shift
@@ -324,7 +340,6 @@ class LoopPanel:
         count = len(state.keyframes)
         for index, keyframe in enumerate(state.keyframes):
             self._keyframe_row(index, keyframe, state, count)
-        self._take_vector_load(state)
         if self._vector_error:
             imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(*ERROR_COLOR))
             imgui.text_wrapped(self._vector_error)
@@ -525,11 +540,15 @@ class LoopPanel:
         """Apply a keyframe Load dialog's result, once it has one.
 
         Drained once per `gui()` pass rather than per row, matching
-        `perform.py`'s own vector dialog: it is opened from inside a
-        possibly-disabled row, but resolves on whatever later frame the
-        performer picks a file on, by which time the row it was opened for
-        may have moved or been removed, so the index is re-checked against
-        the keyframes actually on hand right now rather than trusted blind.
+        `perform.py`'s own vector dialog, and called from `gui()` itself
+        rather than from `_keyframe_rows`: it is opened from inside a
+        possibly-disabled row, in a section that may not even be drawn by
+        the time the dialog resolves (`gui`'s own comment on why), so it has
+        to run regardless of which section is showing. The dialog resolves
+        on whatever later frame the performer picks a file on, by which time
+        the row it was opened for may have moved or been removed, so the
+        index is re-checked against the keyframes actually on hand right now
+        rather than trusted blind.
         """
         if self._vector_dialog is None:
             return
