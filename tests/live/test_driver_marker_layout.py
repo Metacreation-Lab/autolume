@@ -655,65 +655,44 @@ def _isolated_keyframe_row(
     return margin, height
 
 
-def _one_line_floor(margin_px: float, font_scale: float) -> float:
-    """The *window* width `keyframe_row_edges` needs to give the row's
-    one-line layout `margin_px` of slack in its content region.
+def _true_layout_need(font_scale: float, *, force_one_line: bool) -> float:
+    """The real, full-panel *window* width a forced layout needs: the same
+    panel and window shape `test_no_keyframe_row_runs_past_the_panel_it_is_
+    drawn_in` itself checks against (`keyframe_row_edges`: the whole
+    `LoopPanel`, not an isolated row, in a 300px tall window), not an
+    isolated single row.
 
-    `keyframe_row_edges` sets the window's own width directly
-    (`imgui.set_next_window_size`), not its content region, unlike
-    `_isolated_keyframe_row` and `_true_two_line_need` above, which both
-    already convert. Window padding comes off a window's width before it
-    becomes `content_region_avail`, the number `keyframe_row_fits_one_line`
-    actually compares against, so feeding `_required_width_at`'s raw content
-    number straight in as a window width left every "one-line, at the
-    floor" combination silently drawing two lines instead: 16px of padding
-    was enough to push `content_region_avail` under the threshold at all
-    four font sizes, caught by instrumenting the dispatch directly rather
-    than trusting the overflow guard alone, which cannot tell the
-    difference (two-line mode fits comfortably inside that same width, so
-    the guard kept passing for the wrong reason).
-    """
-    context = imgui.create_context()
-    try:
-        io = imgui.get_io()
-        io.set_ini_filename(None)
-        io.display_size = imgui.ImVec2(900.0, 700.0)
-        io.delta_time = 1.0 / 60.0
-        io.backend_flags |= imgui.BackendFlags_.renderer_has_textures
-        theme.apply_theme()
-        imgui.get_style().font_scale_main = font_scale
-        imgui.new_frame()
-        imgui.begin("W")
-        required = keyframe_row_required_width(0) + margin_px
-        window_width = required + 2.0 * imgui.get_style().window_padding.x
-        imgui.end()
-        imgui.render()
-        return window_width
-    finally:
-        imgui.destroy_context(context)
+    Both layouts can push the panel's full vertical content past 300px,
+    triggering a real scrollbar that eats further into every row's
+    available width. Two-line rows are tall enough on their own to do this;
+    the same is true of one-line rows, less obviously, since it takes all
+    six default keyframes plus Control, Scrub and Pulse together to push
+    past 300px, not any one row alone (an isolated single row never
+    triggers it, understating the floor: confirmed once already for the
+    two-line case, and confirmed a second time for the one-line case, where
+    a fix that checked only an isolated row believed there was no scrollbar
+    to account for, then failed the moment it was checked through this
+    function's own harness instead: `content_region_avail` for row 0 came
+    back 31px under the window width at every font scale, 16px of padding
+    plus a real 15px scrollbar, not the 16px alone an isolated row would
+    have shown).
 
+    Whether either layout actually triggers the scrollbar depends on how
+    many keyframes the state carries, not a constant this function assumes:
+    measured live, against whatever `PanelRuntime()`'s own default state
+    actually is, rather than a formula tuned to today's count of six, so a
+    keyframe count change moves this measurement (and the floors derived
+    from it) automatically instead of leaving them to drift out from under
+    a stale number.
 
-def _true_two_line_need(font_scale: float) -> float:
-    """The two-line fallback's real width need, in the same panel and
-    window shape `test_no_keyframe_row_runs_past_the_panel_it_is_drawn_in`
-    itself checks against, not an isolated single row.
-
-    This matters because the two-line layout is tall enough that, with all
-    six default keyframes forced onto it, the panel's full content genuinely
-    no longer fits the 300px window height `keyframe_row_edges` draws into,
-    so a real vertical scrollbar appears and eats into the width every row
-    has left, the same live deduction `keyframe_row_fits_one_line` reads
-    off `content_region_avail` at draw time. An isolated single row never
-    triggers that scrollbar (six rows of vertical content do not fit in
-    one), so measuring against one alone understates the floor this
-    combination is actually checked at: caught by
-    `test_no_keyframe_row_runs_past_the_panel_it_is_drawn_in` failing by
-    exactly the scrollbar's own width the one time this was tried.
+    `force_one_line` picks which layout `keyframe_row_fits_one_line` is
+    stubbed to report for the whole draw; the return value is a *window*
+    width, ready to feed straight into `keyframe_row_edges` as `width`.
     """
     allowance = 3000.0
     context = imgui.create_context()
     original_dispatch = loop_module.keyframe_row_fits_one_line
-    loop_module.keyframe_row_fits_one_line = lambda index, available: False
+    loop_module.keyframe_row_fits_one_line = lambda index, available: force_one_line
     original_row = LoopPanel._keyframe_row
     original_seed_fields = LoopPanel._keyframe_seed_fields
     edges: list[float] = []
@@ -758,8 +737,68 @@ def _true_two_line_need(font_scale: float) -> float:
     return allowance - min(edges)
 
 
+def _full_panel_padding_and_scrollbar(font_scale: float, *, force_one_line: bool) -> float:
+    """How much of the window's own width is lost to window padding and,
+    if it appears, a real vertical scrollbar, in the same full-panel,
+    six-keyframe, 300px-tall window `keyframe_row_edges` itself draws
+    into: `window_width - content_region_avail`, the deduction that has to
+    be added back to turn a *content* width target into a *window* one.
+
+    Isolated from the row's own content requirement, unlike
+    `_true_layout_need` above (which mixes both together, fine for the
+    two-line floor: two-line mode has no independent formula the real
+    dispatch checks it against, only "not one-line"). The one-line floor
+    needs the two kept separate: `keyframe_row_fits_one_line` decides
+    against `keyframe_row_required_width`'s *formula* prediction, not
+    against however much a forced draw happens to actually consume, and
+    the two are not always equal (the formula is a deliberate upper bound,
+    off by up to a rounding pixel at the smallest font size tested; see
+    `keyframe_row_required_width`'s own docstring). Composing
+    `keyframe_row_required_width` with this function's own, separately
+    measured deduction is what makes the one-line floor agree with the
+    real, unforced dispatch at every font size, including the one where
+    `_true_layout_need`'s combined measurement (this function's approach,
+    mixed with the row's own content need) came out 1px short of what the
+    formula demands and the real dispatch chose two lines anyway.
+    """
+    allowance = 3000.0
+    context = imgui.create_context()
+    original_dispatch = loop_module.keyframe_row_fits_one_line
+    loop_module.keyframe_row_fits_one_line = lambda index, available: force_one_line
+    content_avail = 0.0
+    try:
+        io = imgui.get_io()
+        io.set_ini_filename(None)
+        io.display_size = imgui.ImVec2(allowance + 500.0, 800.0)
+        io.delta_time = 1.0 / 60.0
+        io.backend_flags |= imgui.BackendFlags_.renderer_has_textures
+        theme.apply_theme()
+        imgui.get_style().font_scale_main = font_scale
+        panel = LoopPanel(PanelRuntime(), mapping_popup=lambda name: None)
+        for _ in range(3):
+            imgui.new_frame()
+            imgui.set_next_window_pos(imgui.ImVec2(0.0, 0.0))
+            imgui.set_next_window_size(imgui.ImVec2(allowance, 300.0))
+            imgui.begin("Loop")
+            content_avail = imgui.get_content_region_avail().x
+            panel.gui()
+            imgui.end()
+            imgui.render()
+    finally:
+        loop_module.keyframe_row_fits_one_line = original_dispatch
+        imgui.destroy_context(context)
+    return allowance - content_avail
+
+
+def _one_line_floor(margin_px: float, font_scale: float) -> float:
+    padding_and_scrollbar = _full_panel_padding_and_scrollbar(
+        font_scale, force_one_line=True
+    )
+    return _required_width_at(font_scale) + margin_px + padding_and_scrollbar
+
+
 def _two_line_floor(margin_px: float, font_scale: float) -> float:
-    return _true_two_line_need(font_scale) + margin_px
+    return _true_layout_need(font_scale, force_one_line=False) + margin_px
 
 
 _KEYFRAME_ROW_COMBOS = tuple(
