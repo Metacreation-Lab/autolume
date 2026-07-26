@@ -21,7 +21,7 @@ import matplotlib.cm
 import dnnlib
 from utils import device_utils
 from utils.resource_paths import resource_path
-from bending.transform_layers import ManipulationLayer
+from autolume.bending.transform_layers import ManipulationLayer
 from torch_utils.ops import upfirdn2d
 from torch_utils import legacy
 from architectures import custom_stylegan2
