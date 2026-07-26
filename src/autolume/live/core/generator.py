@@ -894,6 +894,12 @@ class ModelHost:
         # `request_load` after a device has been chosen does not silently
         # abandon it and go back to `pick_device()`.
         self._device_name: str = "auto"
+        # Bounds `_load_default`'s device-resolution retry to one extra
+        # attempt per path: the restored `_device_name` is expected to
+        # always resolve, but that is an assumption about `.device`, not an
+        # enforced property, and a model reporting a device string
+        # `resolve_device` never matches would otherwise retry forever.
+        self._retry_attempted_path: str | None = None
         self.info_store: LatestValueStore[ModelInfo | None] = LatestValueStore(None)
         self.device_store: LatestValueStore[DeviceStatus] = LatestValueStore(
             DeviceStatus()
@@ -909,6 +915,11 @@ class ModelHost:
         with self._lock:
             self._pending = str(path)
             self._pending_device = None
+            # A fresh, explicit load intent gets its own bounded retry
+            # budget, regardless of whatever an earlier, unrelated cycle
+            # (for this path or a different one, abandoned mid-retry by a
+            # request that superseded it) left behind.
+            self._retry_attempted_path = None
         self._wakeup.set()
 
     def request_device(self, name: str) -> None:
@@ -929,9 +940,11 @@ class ModelHost:
             self._device_name = str(name)
             if self._pending is not None:
                 self._pending_device = self._device_name
+                self._retry_attempted_path = None
             elif self._current is not None:
                 self._pending = self._current.pkl_path
                 self._pending_device = self._device_name
+                self._retry_attempted_path = None
             else:
                 return
         self._wakeup.set()
@@ -993,37 +1006,62 @@ class ModelHost:
         that accepts `device=`. Resolution failure (a device remembered
         from an earlier switch that no longer resolves) reports through
         `device_store` only, the same channel a switch failure uses, and
-        retries `path` immediately with the device name restored to
-        whatever is actually running: never a terminal, `error()`-and-
-        `info_store`-clearing failure, since the retry is expected to
-        succeed. Any other load failure (a broken pkl, say) still reports
-        through the plain `error()`/`info_store` channel, since the device
-        was never at fault there.
+        retries `path` once with the device name restored to whatever is
+        actually running: not a terminal, `error()`-and-`info_store`-
+        clearing failure on that first attempt, since the retry is
+        expected to succeed. A path already sitting in `_current` short
+        circuits instead of retrying at all, matching `_load_on_device`'s
+        own `already_current` case: there is nothing to reload. If the
+        restored name fails to resolve too, this stops rather than
+        retrying again — `.device` always resolving is an assumption, not
+        an enforced property, and one this method does not trust past a
+        single retry. Any other load failure (a broken pkl, say) still
+        reports through the plain `error()`/`info_store` channel, since
+        the device was never at fault there.
         """
         try:
             device = None if device_name == "auto" else resolve_device(device_name)
         except DeviceUnavailable as exc:
             logger.warning("Could not load %s on device %s: %s", path, device_name, exc)
+            gave_up = False
             with self._lock:
                 won = self._pending == path and self._pending_device is None
                 active = getattr(self._current, "device", None)
+                already_current = (
+                    self._current is not None and self._current.pkl_path == path
+                )
                 if won:
                     # Never keep a device name that just failed to resolve:
                     # fall back to whatever is actually running (or "auto"
                     # if nothing is), so this host's own state stays
                     # self-consistent no matter whether anything
                     # downstream ever notices and re-requests a good
-                    # value. `_pending` stays put rather than clearing, so
-                    # `_run`'s own re-wake retries the same pkl through
-                    # this same method next, now with a device name that
-                    # always resolves: one retry, never a spin, and this
-                    # pkl is never silently dropped just because the
-                    # device selected before it was requested turned out
-                    # to be unavailable. Not reported through `error()`/
-                    # `info_store` for exactly that reason, matching
-                    # `_load_on_device`'s own failure below: this is a
-                    # transient, self-correcting step, not a terminal one.
+                    # value.
                     self._device_name = str(active) if active is not None else "auto"
+                    if already_current:
+                        # `path` is already loaded and rendering fine, the
+                        # same as `_load_on_device`'s own already_current
+                        # case: only the sticky selection was bad, nothing
+                        # to retry.
+                        self._pending = None
+                        self._retry_attempted_path = None
+                    elif self._retry_attempted_path == path:
+                        # The retry itself failed too, on a name that was
+                        # supposed to always resolve. Stop rather than
+                        # spin: a `.device` this never anticipated
+                        # degrades to one reported failure, not a hot
+                        # loop taking the lock and re-waking every
+                        # iteration.
+                        gave_up = True
+                        self._pending = None
+                        self._error = str(exc)
+                        self._retry_attempted_path = None
+                    else:
+                        # First failure for this path: `_pending` stays
+                        # put, so `_run`'s own re-wake retries it through
+                        # this same method next, now with the device name
+                        # just restored above.
+                        self._retry_attempted_path = path
             if won:
                 self.device_store.set(
                     DeviceStatus(
@@ -1032,6 +1070,8 @@ class ModelHost:
                         error=str(exc),
                     )
                 )
+                if gave_up:
+                    self.info_store.set(None)
             return
         try:
             model = (
@@ -1051,6 +1091,7 @@ class ModelHost:
                     self._current = model
                     self._error = None
                     self._pending = None
+                    self._retry_attempted_path = None
                 # else: a newer request arrived while loading; loop again
             if won:
                 _release_quietly(previous)
@@ -1071,6 +1112,7 @@ class ModelHost:
                 if won:
                     self._error = str(exc)
                     self._pending = None
+                    self._retry_attempted_path = None
             if won:
                 self.info_store.set(None)
 
@@ -1138,6 +1180,11 @@ class ModelHost:
                 self._error = None
                 self._pending = None
                 self._pending_device = None
+                # Hygiene, not correctness: this method never reads the
+                # marker itself, but a stale one left over from an
+                # earlier _load_default retry cycle for this same path
+                # must not survive to confuse a later one.
+                self._retry_attempted_path = None
         if won:
             _release_quietly(previous)
             self.info_store.set(info)

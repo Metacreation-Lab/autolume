@@ -438,6 +438,104 @@ def test_model_host_an_unavailable_device_picked_before_any_model_still_loads_it
     host.stop()
 
 
+def test_model_host_a_device_that_never_resolves_does_not_spin(monkeypatch):
+    """Regression: the retry `_load_default` performs after a device
+    resolution failure trusted an unstated invariant, that the device
+    name restored from `_current.device` always resolves. A `.device`
+    whose string form `resolve_device` never matches broke that
+    invariant and spun the loader thread forever: every iteration took
+    the lock, called `resolve_device`, logged a warning and re-set the
+    wakeup, with no backoff, before this fix bounded it to one retry per
+    path. An iteration count on `resolve_device`, not a timing
+    measurement, is the honest way to pin "does not spin"."""
+    import autolume.live.core.generator as generator_module
+
+    class _UnresolvableDevice:
+        def __str__(self):
+            return "quantum"
+
+    real_resolve_device = generator_module.resolve_device
+    resolve_calls = []
+
+    def counting_resolve_device(name):
+        resolve_calls.append(name)
+        return real_resolve_device(name)
+
+    monkeypatch.setattr(generator_module, "resolve_device", counting_resolve_device)
+
+    def loader(path, device=None):
+        model = _DeviceAwareModel(path, device)
+        model.device = _UnresolvableDevice()
+        return model
+
+    host = ModelHost(loader=loader)
+    host.request_load("/tmp/a.pkl")
+    deadline = time.monotonic() + 2.0
+    while host.current() is None and time.monotonic() < deadline:
+        time.sleep(0.005)
+    assert host.current() is not None
+
+    # This machine never has CUDA, so this genuinely fails. a.pkl is
+    # already current, so _load_on_device's own already_current
+    # shortcut takes it (no retry there); it still restores the sticky
+    # device name to the unresolvable value read off a.pkl's `.device`.
+    host.request_device("cuda")
+    deadline = time.monotonic() + 2.0
+    while host.device_store.snapshot().error is None and time.monotonic() < deadline:
+        time.sleep(0.005)
+
+    resolve_calls.clear()
+    host.request_load("/tmp/b.pkl")
+    deadline = time.monotonic() + 2.0
+    while host.error() is None and time.monotonic() < deadline:
+        time.sleep(0.005)
+
+    assert host.error() is not None
+    assert host.current().pkl_path == "/tmp/a.pkl"  # b.pkl never loaded
+    assert host.info_store.snapshot() is None
+    # Bounded: one attempt, one retry, then stop. Never unbounded.
+    assert resolve_calls.count("quantum") == 2
+    host.stop()
+
+
+def test_model_host_a_plain_load_for_the_already_current_pkl_is_a_no_op_on_device_failure():
+    """Regression: `_load_on_device` short circuits when the path being
+    redirected is already `_current` (nothing to reload). `_load_default`
+    had no equivalent, so a plain `request_load` for the pkl already
+    loaded, hitting a transiently bad sticky device, triggered a full
+    redundant reload and swap instead of doing nothing, unlike the
+    sibling branch.
+
+    `_device_name` is set directly here rather than through
+    `request_device`: going through it would route through
+    `_load_on_device`'s own `already_current` shortcut first and correct
+    `_device_name` before `_load_default` ever saw a bad one, which is
+    exactly why this needs its own fix rather than inheriting that one.
+    """
+
+    def loader(path, device=None):
+        calls.append((path, device))
+        return _DeviceAwareModel(path, device)
+
+    calls = []
+    host = ModelHost(loader=loader)
+    host.request_load("/tmp/a.pkl")
+    deadline = time.monotonic() + 2.0
+    while host.current() is None and time.monotonic() < deadline:
+        time.sleep(0.005)
+    first = host.current()
+
+    calls.clear()
+    # This machine never has CUDA, so this genuinely fails.
+    host._device_name = "cuda"
+    host.request_load("/tmp/a.pkl")
+    time.sleep(0.1)
+
+    assert calls == []
+    assert host.current() is first
+    host.stop()
+
+
 def test_model_host_a_device_request_during_an_in_flight_pkl_load_does_not_strand_it():
     """Regression: request_device used to overwrite `_pending` with
     whatever was already `current()`, so a pkl load already in flight lost
