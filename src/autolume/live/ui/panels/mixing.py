@@ -290,11 +290,16 @@ class MixingPanel:
         # generator on the loader thread, so a panel that sent one every frame
         # while the store caught up would queue a build per frame.
         self._requested: tuple[str, ...] | None = None
+        # The second model most recently sent to the loader. `pkl2` has no
+        # watcher on the control thread the way `pkl_path` does, so this panel
+        # is what turns the parameter into a load.
+        self._last_pkl2: str | None = None
 
     def gui(self) -> None:
         state = self._binder.state()
         names_a, names_b = self._names()
         self._model_row()
+        self._watch_model2(state)
         self._enable_row(names_a, names_b)
         self._layer_rows(state, names_a, names_b)
         self._save_row(names_a, names_b)
@@ -377,6 +382,28 @@ class MixingPanel:
         self._open_dialog = None
         if result:
             self._emit("/mix/model", str(result[0]))
+
+    def _watch_model2(self, state) -> None:
+        """Turn a change of `pkl2` into a slot B load.
+
+        Edge triggered, exactly like the control loop's own `pkl_path` watcher:
+        the path moves to the new value the moment the load is requested, not
+        when it lands, so an in-flight load is never re-issued every frame.
+
+        Here rather than on the control thread because there is no `pkl2`
+        watcher there, and adding one means editing `runtime.py`. The cost is
+        recorded in the task 10 report: this runs only while the Mixing tab is
+        the selected one, so an OSC message on `/mix/model` sent while another
+        tab is showing does not load until the tab is shown. The same limit
+        applies to `mixing_enabled` below, and one watcher on the control thread
+        would close both.
+        """
+        wanted = state.pkl2 or None
+        if wanted == self._last_pkl2:
+            return
+        self._last_pkl2 = wanted
+        if wanted:
+            self._runtime.model_host.request_load_b(str(wanted))
 
     def _enable_row(self, names_a, names_b) -> None:
         """Enable mixing, and keep the host in step with the parameter.

@@ -21,7 +21,7 @@ from autolume.live.core.generator import (
     MixSaveStatus,
     ModelInfo,
 )
-from autolume.live.core.params import ControlState, Transform
+from autolume.live.core.params import BY_ADDRESS, ControlState, Transform
 from autolume.live.core.sources import SourceTable
 from autolume.live.core.store import LatestValueStore
 from autolume.live.io.ndi import NdiStatus
@@ -110,6 +110,9 @@ class Host:
 
     def mixing_enabled(self):
         return self._mixing
+
+    def request_load_b(self, path):
+        self.calls.append(("load_b", path))
 
     def request_mix(self, entries):
         self.calls.append(("mix", tuple(entries)))
@@ -370,6 +373,41 @@ def test_a_pair_with_no_selection_yet_is_given_the_default_and_asks_for_it():
     assert len(requests[0]) == max(len(PARAMS_A), len(PARAMS_B)) - 1
     addresses = [event.address for event in runtime.submitted]
     assert addresses.count("/mix/layers") == 1
+
+
+def test_a_second_model_path_is_turned_into_a_load_exactly_once():
+    """Nothing else does this.
+
+    `pkl_path` has a watcher on the control thread that calls `request_load`;
+    `pkl2` has none, so slot B is only ever loaded because this panel asks. Once
+    per change, because the loader coalesces but a request per frame would still
+    be a request per frame.
+    """
+    host = Host()
+    runtime = Runtime(ControlState(pkl2="/models/b.pkl"), host)
+    widest_overflow(lambda: MixingPanel(runtime), 448.0, 1.0)
+    assert [call for call in host.calls if call[0] == "load_b"] == [
+        ("load_b", "/models/b.pkl")
+    ]
+
+
+def test_no_second_model_asks_for_no_load():
+    host = Host()
+    widest_overflow(lambda: MixingPanel(Runtime(LOADED, host)), 448.0, 1.0)
+    assert not [call for call in host.calls if call[0] == "load_b"]
+
+
+def test_every_address_these_panels_write_by_hand_is_a_real_one():
+    """The three addresses the new panels emit as literals.
+
+    Every other control goes through `ControlBinder`, which looks its address up
+    in the registry and cannot get one wrong. These three sit beside a combo or
+    a file dialog, which `ControlBinder` has no version of, so the panel writes
+    the address itself. A typo there would submit an event the control loop logs
+    and drops, and nothing else would say so.
+    """
+    for address in ("/render/device", "/mix/model", "/image/layer"):
+        assert address in BY_ADDRESS, address
 
 
 def test_a_wrapped_note_measures_one_pixel_past_its_own_wrap_width():
