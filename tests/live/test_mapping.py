@@ -695,6 +695,33 @@ def test_bend_set_accepts_a_valid_integral_kernel_size(op):
     assert state.transforms == (transform,)
 
 
+@pytest.mark.parametrize("scale", [0.0, 1e-9, -1e-9, 1e-7, -1e-7])
+def test_bend_set_rejects_a_scale_factor_below_the_safety_minimum(caplog, scale):
+    # Scale inverts params[0] into an affine coefficient that reaches
+    # kornia's grid_sample; below _MIN_SCALE_MAGNITUDE that coefficient gets
+    # large enough to crash the process with a native signal (measured in
+    # scale-guard-report.md). Covers zero and both signs of the danger band.
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = set_transform(before, 0, Transform("scale", "L1", (scale,), (0,)))
+    assert after == before
+    assert any("invalid transform" in m for m in warnings_from(caplog, MAPPING_LOGGER))
+
+
+@pytest.mark.parametrize("scale", [1e-6, -1e-6, 1e-3, -1e-3])
+def test_bend_set_accepts_a_scale_factor_at_or_above_the_safety_minimum(scale):
+    transform = Transform("scale", "L1", (scale,), (0,))
+    state = set_transform(ControlState(), 0, transform)
+    assert state.transforms == (transform,)
+
+
+@pytest.mark.parametrize("scale", [0.5, 2.0, -0.5, -2.0])
+def test_bend_set_accepts_a_normal_scale_factor(scale):
+    transform = Transform("scale", "L1", (scale,), (0,))
+    state = set_transform(ControlState(), 0, transform)
+    assert state.transforms == (transform,)
+
+
 def test_bend_set_rejects_a_bool_kernel_size(caplog):
     # bool is an int subclass: float(True) == 1.0, which is integral and >= 1,
     # so without an explicit guard a stray True would sail through as a

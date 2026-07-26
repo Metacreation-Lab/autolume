@@ -62,6 +62,16 @@ _OPERATOR_ARITY: dict[str, int] = {
 
 _VALID_LAYER_ORIGINS = ("A", "B", "X")
 
+# `Scale` inverts params[0] into the affine matrix kornia's grid_sample uses
+# to build sample coordinates (transform_layers.py:76-80): the closer the
+# factor sits to zero, the larger that inverted coefficient gets, and past a
+# certain magnitude grid_sample stops raising and instead takes the process
+# down with a native SIGBUS that no try/except can contain. Measured
+# empirically (see .superpowers/sdd/plan-4/scale-guard-report.md): on this
+# machine the crash boundary sits at |factor| ~= 3.3e-9, symmetric in sign.
+# This minimum sits roughly 300x above that measured boundary.
+_MIN_SCALE_MAGNITUDE = 1e-6
+
 
 def _set_binding(state: ControlState, value: object) -> ControlState:
     if not isinstance(value, Binding):
@@ -290,6 +300,10 @@ def _validate_transform(transform: Transform) -> Transform | None:
         kernel = params_values[0]
         if not kernel.is_integer() or kernel < 1:
             return None
+    # scale's factor is invertible to a coefficient that reaches kornia's
+    # grid_sample, see `_MIN_SCALE_MAGNITUDE` above.
+    if transform.op == "scale" and abs(params_values[0]) < _MIN_SCALE_MAGNITUDE:
+        return None
     try:
         indices_values = tuple(transform.indices)
     except TypeError:
