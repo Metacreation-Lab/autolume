@@ -168,9 +168,15 @@ def _origin_by_module(
 ) -> dict[str, str]:
     """Which model each synthesis submodule's weights came from.
 
-    Keyed by every ancestor module path of every chosen parameter, first
-    match in network order winning, so a lookup can walk up from a buffer's
-    own module until it finds the weights that buffer serves.
+    Keyed by every ancestor module path of every chosen parameter, so a
+    lookup can walk up from a buffer's own module until it finds the weights
+    that buffer serves.
+
+    A module's parameters can be split across the two models, since the
+    selection is per parameter and not per module. `setdefault` resolves
+    that: the module goes to its **first parameter in network order**, which
+    for a synthesis layer is its `weight`, the one a `noise_const` is
+    actually added alongside.
     """
     origins: dict[str, str] = {}
     for index, entry in enumerate(entries):
@@ -194,9 +200,10 @@ def _buffer_origin(
 
     A buffer belongs with the weights it serves. `mapping.w_avg` is a
     statistic of one mapping network's own W distribution, so it follows
-    whichever model provided the mapping; a synthesis buffer follows its
-    own block's weights. Anything that cannot be placed keeps the value it
-    was constructed with.
+    whichever model provided the mapping; a synthesis buffer follows the
+    weights of the nearest enclosing module that has any, which for a split
+    module is decided by `_origin_by_module`'s first-parameter rule.
+    Anything that cannot be placed keeps the value it was constructed with.
     """
     if key.startswith("mapping"):
         return mapping_origin
@@ -240,49 +247,55 @@ def combine(G_a, G_b, combined_layers):
     # model's whole mapping the mix inherits, its build arguments included.
     mapping_origin = entries[0] if entries and entries[0] in (ORIGIN_A, ORIGIN_B) else None
     mapping_source = G_b if mapping_origin == ORIGIN_B else G_a
-    mixed = custom_stylegan2.Generator(
-        z_dim=G_a.z_dim,
-        c_dim=G_a.c_dim,
-        w_dim=G_a.w_dim,
-        img_channels=G_a.img_channels,
-        img_resolution=img_resolution,
-        mapping_kwargs=_mapping_kwargs(mapping_source),
-        # Passed explicitly because Generator declares this as a mutable
-        # default and then updates it in place.
-        synthesis_kwargs={"channels_dict": channels},
-    )
-    destination = mixed.state_dict()
-    state_a = G_a.state_dict()
-    state_b = G_b.state_dict()
-    state_by_origin = {ORIGIN_A: state_a, ORIGIN_B: state_b}
-    if mapping_origin is not None:
-        for name in mapping_names(mapping_source):
-            destination[name] = state_by_origin[mapping_origin][name]
-    for index, entry in enumerate(entries):
-        if entry == ORIGIN_A:
-            name = names_a[index]
-            destination[name] = state_a[name]
-        elif entry == ORIGIN_B:
-            name = names_b[index]
-            destination[name] = state_b[name]
-    # Buffers are not parameters, so nothing above has touched them, and a
-    # mixed model left with its own freshly constructed ones is not the model
-    # it was assembled from: `w_avg` would be zero, which moves every frame
-    # rendered below truncation 1, and each `noise_const` would be a fresh
-    # draw, which changes the picture outright wherever noise strength is not
-    # zero. Routed by the weights they serve, so all-A is bit identical to A.
-    module_origins = _origin_by_module(entries, names_a, names_b)
-    parameter_names = {name for name, _ in mixed.named_parameters()}
-    for key in destination:
-        if key in parameter_names:
-            continue
-        origin = _buffer_origin(key, module_origins, mapping_origin)
-        if origin is None:
-            continue
-        source = state_by_origin[origin]
-        if key in source:
-            destination[key] = source[key]
+    # Construction is inside the guard, not just the load: the mapping
+    # arguments come out of a user's pkl and go straight into a constructor
+    # with no `**kwargs`, so an unexpected key there is a way for a source
+    # file to reach this module. Everything from here on reports as one
+    # documented sentence rather than a raw Python error.
     try:
+        mixed = custom_stylegan2.Generator(
+            z_dim=G_a.z_dim,
+            c_dim=G_a.c_dim,
+            w_dim=G_a.w_dim,
+            img_channels=G_a.img_channels,
+            img_resolution=img_resolution,
+            mapping_kwargs=_mapping_kwargs(mapping_source),
+            # Passed explicitly because Generator declares this as a mutable
+            # default and then updates it in place.
+            synthesis_kwargs={"channels_dict": channels},
+        )
+        destination = mixed.state_dict()
+        state_a = G_a.state_dict()
+        state_b = G_b.state_dict()
+        state_by_origin = {ORIGIN_A: state_a, ORIGIN_B: state_b}
+        if mapping_origin is not None:
+            for name in mapping_names(mapping_source):
+                destination[name] = state_by_origin[mapping_origin][name]
+        for index, entry in enumerate(entries):
+            if entry == ORIGIN_A:
+                name = names_a[index]
+                destination[name] = state_a[name]
+            elif entry == ORIGIN_B:
+                name = names_b[index]
+                destination[name] = state_b[name]
+        # Buffers are not parameters, so nothing above has touched them, and
+        # a mixed model left with its own freshly constructed ones is not the
+        # model it was assembled from: `w_avg` would be zero, which moves
+        # every frame rendered below truncation 1, and each `noise_const`
+        # would be a fresh draw, which changes the picture outright wherever
+        # noise strength is not zero. Routed by the weights they serve, so
+        # all-A is bit identical to A.
+        module_origins = _origin_by_module(entries, names_a, names_b)
+        parameter_names = {name for name, _ in mixed.named_parameters()}
+        for key in destination:
+            if key in parameter_names:
+                continue
+            origin = _buffer_origin(key, module_origins, mapping_origin)
+            if origin is None:
+                continue
+            source = state_by_origin[origin]
+            if key in source:
+                destination[key] = source[key]
         mixed.load_state_dict(destination)
     except Exception as exc:
         logger.warning("Could not assemble the mixed model: %s", exc)

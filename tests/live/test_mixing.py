@@ -363,6 +363,45 @@ def test_the_mapping_buffer_follows_the_mapping_network_not_model_a():
     assert same(mixed.state_dict()["mapping.w_avg"], b.state_dict()["mapping.w_avg"])
 
 
+def test_an_unusable_mapping_argument_from_a_source_raises_the_documented_message():
+    """`mapping_kwargs` comes out of a user's pkl and goes into a
+    constructor with no `**kwargs`, so it is a way a source file can reach
+    this module. It must still come back as the one documented sentence,
+    not as a raw `TypeError` about a keyword argument.
+    """
+    a = generator(seed=1)
+    b = generator(seed=2)
+    # What an unpickled model restores verbatim. The public `init_kwargs` is
+    # a deep copying property, so writing through it would not stick.
+    a._init_kwargs = dict(a._init_kwargs, mapping_kwargs={"not_a_real_argument": 1})
+    with pytest.raises(ValueError) as caught:
+        combine(a, b, ["A"] * selection_length(a, b))
+    assert str(caught.value) == INCOMPATIBLE_MODELS
+
+
+def test_a_split_module_gives_its_buffers_to_its_first_parameter():
+    """The selection is per parameter, so one module's weights can be split
+    across both models. The buffer follows the module's first parameter in
+    network order, which for a synthesis layer is the `weight` a
+    `noise_const` is added alongside.
+    """
+    a = generator(seed=1)
+    b = generator(seed=2)
+    names = conv_names(a)
+    weight = names.index("synthesis.b8.conv0.weight")
+    bias = names.index("synthesis.b8.conv0.bias")
+    assert weight < bias
+    noise = "synthesis.b8.conv0.noise_const"
+
+    entries = ["A"] * selection_length(a, b)
+    entries[bias] = "B"
+    assert same(combine(a, b, entries).state_dict()[noise], a.state_dict()[noise])
+
+    entries = ["A"] * selection_length(a, b)
+    entries[weight] = "B"
+    assert same(combine(a, b, entries).state_dict()[noise], b.state_dict()[noise])
+
+
 def test_a_source_mapping_depth_is_carried_into_the_mix():
     """A model trained with a non default mapping depth contributes its
     whole mapping, not its first eight layers with the rest left random."""
