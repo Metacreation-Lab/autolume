@@ -251,9 +251,8 @@ class PerformPanel:
         clickable, so it is still the way back.
         """
         imgui.separator_text("Model")
-        reserve = button_width(_BROWSE) + imgui.get_style().item_spacing.x
         live = self._binder.input_text(
-            "pkl_path", "##model", hint=_NO_MODEL, reserve=reserve
+            "pkl_path", "##model", hint=_NO_MODEL, reserve=trailing_width(_BROWSE)
         )
         imgui.same_line()
         if not live:
