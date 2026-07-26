@@ -330,7 +330,10 @@ class _ModelWatchingControlLoop(ControlLoop):
             if state.ndi_enabled:
                 self._ndi.set_name(state.ndi_name)
             return
-        if state.ndi_enabled and not self._ndi.status().sending:
+        # `_is_running` again: during shutdown the sinks are stopped before
+        # this loop, so "enabled but not sending" is true of every tick left,
+        # and there is no panel left to correct anyway.
+        if state.ndi_enabled and not self._ndi.status().sending and self._is_running():
             self._last_ndi_enabled = False
             self._ndi.stop(timeout=0.0)
             self.submit(ControlEvent("/ndi/enabled", False, source="ui"))
@@ -363,7 +366,11 @@ class _ModelWatchingControlLoop(ControlLoop):
             else:
                 self._recorder.stop(timeout=0.0)
             return
-        if state.recording and not self._recorder.status().recording:
+        if (
+            state.recording
+            and not self._recorder.status().recording
+            and self._is_running()
+        ):
             self._last_recording = False
             self._recorder.stop(timeout=0.0)
             self.submit(ControlEvent("/record", False, source="ui"))

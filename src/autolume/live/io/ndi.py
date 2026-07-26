@@ -171,6 +171,12 @@ class NdiSink:
                 logger.warning(reason)
                 return
             video = ndi.VideoFrameV2()
+            # The SDK's send is asynchronous and reads the buffer after it
+            # returns, and the frame object holds the array rather than
+            # copying it, so the one sent last stays referenced for one more
+            # iteration instead of being freed the moment the next assignment
+            # replaces it.
+            previous_data = None
             while self._running.is_set():
                 # Cleared before the mailbox is read, so a frame posted while
                 # this thread is busy sending is never mistaken for one that
@@ -193,9 +199,11 @@ class NdiSink:
                     self._wake.wait(_IDLE_WAIT)
                     continue
                 try:
-                    video.data = cv2.cvtColor(frame, cv2.COLOR_RGB2BGRA)
+                    data = cv2.cvtColor(frame, cv2.COLOR_RGB2BGRA)
+                    video.data = data
                     video.FourCC = ndi.FOURCC_VIDEO_TYPE_BGRX
                     ndi.send_send_video_v2(sender, video)
+                    previous_data = data
                 except Exception as exc:
                     reason = self._record_failure("Sending an NDI frame failed", exc)
                     return
