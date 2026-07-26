@@ -124,6 +124,60 @@ class UniqueCauseEachCallModel(torch.nn.Module):
         raise RuntimeError(f"cause-{chr(ord('a') + self.calls)}")
 
 
+class PathologicalStrError(RuntimeError):
+    """An exception whose own ``__str__`` raises, like a badly written one might."""
+
+    def __str__(self):
+        raise ValueError("str() itself blew up")
+
+
+class EmptyStrError(RuntimeError):
+    """An exception that stringifies to nothing."""
+
+    def __str__(self):
+        return ""
+
+
+class HugeStrError(RuntimeError):
+    """An exception with an absurdly long message."""
+
+    def __str__(self):
+        return "x" * 10_000
+
+
+class RaisesPathologicalStrModel(torch.nn.Module):
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+
+    def load_state_dict(self, state_dict, *args, **kwargs):
+        return None
+
+    def forward(self, x):
+        raise PathologicalStrError("this text is never seen")
+
+
+class RaisesEmptyStrModel(torch.nn.Module):
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+
+    def load_state_dict(self, state_dict, *args, **kwargs):
+        return None
+
+    def forward(self, x):
+        raise EmptyStrError()
+
+
+class RaisesHugeStrModel(torch.nn.Module):
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+
+    def load_state_dict(self, state_dict, *args, **kwargs):
+        return None
+
+    def forward(self, x):
+        raise HugeStrError()
+
+
 @pytest.fixture
 def install_model(monkeypatch, tmp_path):
     """Factory fixture: install_model(cls) makes a real weight file exist and
@@ -338,6 +392,47 @@ def test_forward_failure_log_cap_stops_growing_and_warns_once(install_model, cap
     # One warning per distinct cause up to the cap, plus exactly one
     # "cap reached" warning, then silence for the remaining distinct causes.
     assert len(warnings) == _LOG_ONCE_CAP + 1
+
+
+def test_forward_failure_with_broken_str_does_not_propagate(install_model, caplog):
+    """The point of this round: a __str__ that itself raises must not escape apply()."""
+    install_model(RaisesPathologicalStrModel)
+    sr = SuperRes()
+    image = torch.zeros(3, 8, 8)
+
+    with caplog.at_level(logging.WARNING):
+        output = sr.apply(image, "cpu")
+
+    assert output is image
+    assert not sr.disabled
+    assert sr.last_error is not None
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+
+
+def test_forward_failure_with_empty_str_falls_back_to_class_name(install_model):
+    install_model(RaisesEmptyStrModel)
+    sr = SuperRes()
+    image = torch.zeros(3, 8, 8)
+
+    output = sr.apply(image, "cpu")
+
+    assert output is image
+    assert sr.last_error is not None
+    assert "EmptyStrError" in sr.last_error
+
+
+def test_forward_failure_with_enormous_message_is_truncated(install_model):
+    install_model(RaisesHugeStrModel)
+    sr = SuperRes()
+    image = torch.zeros(3, 8, 8)
+
+    output = sr.apply(image, "cpu")
+
+    assert output is image
+    assert sr.last_error is not None
+    assert len(sr.last_error) < 1000
+    assert sr.last_error.endswith("...(truncated)")
 
 
 _REAL_WEIGHTS = resource_paths.resource_path("sr_models", "Fast.pt")

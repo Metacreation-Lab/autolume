@@ -25,19 +25,25 @@ MAX_SHORT_SIDE = 1024
 # falling silent).
 _LOG_ONCE_CAP = 64
 _DIGIT_RUN = re.compile(r"\d+")
+_MAX_ERROR_TEXT = 200
 
 
-def _failure_key(exc: Exception) -> str:
-    """Collapse a recurring failure to one key regardless of embedded numbers.
-
-    A CUDA OOM message embeds the live byte counts it tried to allocate,
-    which differ call to call, so a literal string match never dedups the
-    case it exists for. Digit runs are normalised out of the message; the
-    exception type name stays part of the key so an unrelated failure (a
-    TypeError from a bad call, say) still logs on its own.
+def _safe_error_text(exc: Exception) -> str:
+    """`str(exc)`, defensively: this goes into a log line and a dedup key, so
+    it must never itself raise (an exception subclass with a broken
+    ``__str__`` would otherwise escape ``apply()`` uncaught) and must never
+    be unbounded (a pathological or enormous message would be its own
+    problem in both places).
     """
-    normalized = _DIGIT_RUN.sub("N", str(exc))
-    return f"{type(exc).__name__}:{normalized}"
+    try:
+        text = str(exc)
+    except Exception:
+        text = ""
+    if not text:
+        text = type(exc).__name__
+    if len(text) > _MAX_ERROR_TEXT:
+        text = text[:_MAX_ERROR_TEXT] + "...(truncated)"
+    return text
 
 
 class SuperRes:
@@ -96,7 +102,7 @@ class SuperRes:
             try:
                 self._model = self._model.to(device)
             except Exception as exc:
-                self._record_forward_failure(f"Super-res failed to move to {device}: {exc}", exc)
+                self._record_forward_failure(f"Super-res failed to move to {device}", exc)
                 return image
             self._device = device
         try:
@@ -104,21 +110,26 @@ class SuperRes:
                 batch = image.unsqueeze(0).to(device)
                 output = self._model(batch).float()
         except Exception as exc:
-            self._record_forward_failure(f"Super-res forward pass failed: {exc}", exc)
+            self._record_forward_failure("Super-res forward pass failed", exc)
             return image
         self.last_error = None
         return output[0]
 
-    def _record_forward_failure(self, message: str, exc: Exception) -> None:
+    def _record_forward_failure(self, context: str, exc: Exception) -> None:
         """Note a transient (input- or memory-dependent) failure, logged once per cause.
 
         Unlike `_load`'s permanent sentinel, this never sets `disabled`: the
         very next frame, at a smaller size or with memory freed up, may work.
         `last_error` itself is set unconditionally (it is the current status,
-        not a log), only the warning line is deduplicated by cause.
+        not a log), only the warning line is deduplicated by cause. `exc` is
+        stringified exactly once here, defensively, and that text is used for
+        both the message and the dedup key rather than formatting `exc`
+        directly at each call site.
         """
+        text = _safe_error_text(exc)
+        message = f"{context}: {text}"
         self.last_error = message
-        key = _failure_key(exc)
+        key = f"{type(exc).__name__}:{_DIGIT_RUN.sub('N', text)}"
         if key in self._logged_errors:
             return
         if len(self._logged_errors) >= _LOG_ONCE_CAP:
