@@ -147,6 +147,22 @@ def _merged_channels(
     return channels
 
 
+def _mapping_kwargs(G) -> dict:
+    """The mapping network arguments `G` was built with.
+
+    Forwarded to the mixed model so a source trained with a non-default
+    mapping depth contributes its whole mapping rather than its first eight
+    layers with the rest left freshly random. `init_kwargs` is what the
+    persistence decorator records at construction; a generator without one
+    falls back to the defaults, which is what the legacy merge always used.
+    """
+    init_kwargs = getattr(G, "init_kwargs", None)
+    if not isinstance(init_kwargs, dict):
+        return {}
+    mapping_kwargs = init_kwargs.get("mapping_kwargs")
+    return dict(mapping_kwargs) if isinstance(mapping_kwargs, dict) else {}
+
+
 def _origin_by_module(
     entries: tuple[str, ...], names_a: tuple[str, ...], names_b: tuple[str, ...]
 ) -> dict[str, str]:
@@ -230,6 +246,7 @@ def combine(G_a, G_b, combined_layers):
         w_dim=G_a.w_dim,
         img_channels=G_a.img_channels,
         img_resolution=img_resolution,
+        mapping_kwargs=_mapping_kwargs(mapping_source),
         # Passed explicitly because Generator declares this as a mutable
         # default and then updates it in place.
         synthesis_kwargs={"channels_dict": channels},

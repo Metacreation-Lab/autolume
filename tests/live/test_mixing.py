@@ -63,7 +63,9 @@ def randomize(model, seed):
     return model
 
 
-def generator(seed=0, img_resolution=16, channel_max=8, w_dim=8, z_dim=8):
+def generator(
+    seed=0, img_resolution=16, channel_max=8, w_dim=8, z_dim=8, mapping_layers=None
+):
     """A tiny but genuine custom stylegan2 generator, fully randomised.
 
     `synthesis_kwargs` is always passed explicitly: `Generator.__init__`
@@ -73,6 +75,7 @@ def generator(seed=0, img_resolution=16, channel_max=8, w_dim=8, z_dim=8):
     """
     from architectures import custom_stylegan2
 
+    mapping_kwargs = {} if mapping_layers is None else {"num_layers": mapping_layers}
     torch.manual_seed(seed)
     return randomize(
         custom_stylegan2.Generator(
@@ -81,6 +84,7 @@ def generator(seed=0, img_resolution=16, channel_max=8, w_dim=8, z_dim=8):
             w_dim=w_dim,
             img_channels=3,
             img_resolution=img_resolution,
+            mapping_kwargs=mapping_kwargs,
             synthesis_kwargs={"channel_base": 64, "channel_max": channel_max},
         ),
         seed,
@@ -357,6 +361,17 @@ def test_the_mapping_buffer_follows_the_mapping_network_not_model_a():
     entries = ["B"] + ["A"] * (len(names) - 1)
     mixed = combine(a, b, entries)
     assert same(mixed.state_dict()["mapping.w_avg"], b.state_dict()["mapping.w_avg"])
+
+
+def test_a_source_mapping_depth_is_carried_into_the_mix():
+    """A model trained with a non default mapping depth contributes its
+    whole mapping, not its first eight layers with the rest left random."""
+    a = generator(seed=1, mapping_layers=2)
+    b = generator(seed=2, mapping_layers=2)
+    mixed = combine(a, b, ["A"] * selection_length(a, b))
+    assert set(mapping_names(mixed)) == set(mapping_names(a))
+    for name in mapping_names(a):
+        assert same(mixed.state_dict()[name], a.state_dict()[name]), name
 
 
 def test_a_mix_repeated_from_the_same_pair_is_reproducible():
