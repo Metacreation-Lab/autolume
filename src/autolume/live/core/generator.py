@@ -512,7 +512,10 @@ class LoadedModel:
 
     def _make_hook(self, name: str):
         def _hook(_module, _inputs, output):
-            tensor = output[0] if isinstance(output, tuple) else output
+            if isinstance(output, tuple):
+                tensor = output[0] if output else None
+            else:
+                tensor = output
             if getattr(tensor, "ndim", 0) not in (4, 5):
                 return None
             bent, applied = self._apply_transforms(name, tensor)

@@ -1420,3 +1420,28 @@ def test_the_frame_slot_is_cleared_even_when_synthesis_raises():
         model.render_frame(params, 0)
     loose = model.G.synthesis(None)
     assert float(loose.reshape(-1)[0]) == 0.25
+
+
+def test_a_layer_with_nothing_to_bend_is_left_alone():
+    import torch
+    import torch.nn as nn
+
+    class _Empty(nn.Module):
+        def forward(self, x):
+            return ()
+
+    class _Synthesis(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv1 = _Empty()
+
+        def forward(self, ws, noise_mode="const"):
+            self.conv1(ws)
+            return torch.full([1, 3, 1, 2], 0.25)
+
+    model = _fake_model(_Synthesis())
+    params = render_params(
+        capture_layer="conv1",
+        transforms=(Transform("ablate", "conv1", (1.0,), _ALL_CHANNELS),),
+    )
+    assert _pixel(model.render_frame(params, 0)) == [159, 159, 159]
