@@ -4,7 +4,12 @@ import time
 
 import numpy as np
 
-from autolume.live.core.noiseloop import NoiseLoop, NoiseLoopTable, NoiseLoopTableBuilder
+from autolume.live.core.noiseloop import (
+    NoiseLoop,
+    NoiseLoopTable,
+    NoiseLoopTableBuilder,
+    table_steps,
+)
 
 
 def test_vector_length_matches_dim():
@@ -95,9 +100,9 @@ def test_table_vector_is_exactly_periodic():
 # --- NoiseLoopTableBuilder: background build, coalescing, immutable publish -
 
 
-def _fake_table(key, steps):
+def _fake_table(key):
     dim = key[2]
-    return NoiseLoopTable(key=key, values=np.zeros((steps, dim), dtype=np.float32))
+    return NoiseLoopTable(key=key, values=np.zeros((4, dim), dtype=np.float32))
 
 
 def _wait_for(predicate, timeout=2.0):
@@ -126,10 +131,10 @@ def test_table_builder_coalesces_to_the_newest_key():
     release = threading.Event()
     built = []
 
-    def slow_build(key, steps):
+    def slow_build(key):
         release.wait(timeout=2.0)
         built.append(key)
-        return _fake_table(key, steps)
+        return _fake_table(key)
 
     builder = NoiseLoopTableBuilder(build=slow_build)
     builder.request_build((1, 1.0, 4))
@@ -145,7 +150,7 @@ def test_table_builder_coalesces_to_the_newest_key():
 
 
 def test_table_builder_swallows_a_failing_build_without_raising():
-    def failing(key, steps):
+    def failing(key):
         raise RuntimeError("boom")
 
     builder = NoiseLoopTableBuilder(build=failing)
@@ -162,9 +167,10 @@ def test_table_builder_swallows_a_failing_build_without_raising():
 
 
 def test_table_builder_end_to_end_matches_direct_sampling_closely():
-    """The real build path (real yielding, real NoiseLoop), just over a
-    short enough cycle that waiting for it costs nothing in the suite."""
-    builder = NoiseLoopTableBuilder(steps=64)
+    """The real build path (real yielding, real NoiseLoop, real adaptive
+    step count), just at a radius whose step count is cheap enough that
+    waiting for it costs nothing in the suite."""
+    builder = NoiseLoopTableBuilder()
     builder.request_build((9, 1.0, 5))
     assert _wait_for(lambda: builder.store.snapshot() is not None, timeout=5.0)
     table = builder.store.snapshot()
@@ -178,39 +184,60 @@ def test_table_builder_end_to_end_matches_direct_sampling_closely():
     builder.stop()
 
 
+# --- table_steps: adaptive step count -----------------------------------
+
+
+def test_table_steps_floors_small_radii():
+    assert table_steps(0.01) == 128
+    assert table_steps(1.0) == 128
+
+
+def test_table_steps_scales_linearly_above_the_floor():
+    assert table_steps(10.0) == 420
+    assert table_steps(50.0) == 2100
+
+
+def test_table_steps_caps_at_the_maximum_allowed_radius():
+    assert table_steps(100.0) == 4096
+    assert table_steps(1000.0) == 4096  # still capped past the registry's bound
+
+
 # --- fidelity: table-plus-interpolation vs direct sampling -------------------
 #
 # Required measurement (task-5-report.md has the full numbers): the table
-# must not visibly degrade the loop. The large radius extreme is the
-# expensive, meaningful case (the circle covers much more of the noise field
-# per step there), so it alone is checked at the real production step count;
-# the other two are already accurate at far fewer steps and are kept cheap.
+# must not visibly degrade the loop, at the actual adaptive step count each
+# radius gets (`table_steps`), not a hand picked one. Sampled at the
+# midpoint of every table segment: guaranteed off the table's own grid
+# (unlike, say, an evenly spaced sample count that happens to divide the
+# step count, which silently reads back exact grid points and reports zero
+# error — a real bug caught while first measuring this).
 
 
-def _max_and_mean_error(seed, radius, dim, steps, samples=300):
+def _max_and_mean_error(seed, radius, dim):
+    steps = table_steps(radius)
     table = _table_of(seed, radius, dim, steps)
     direct = NoiseLoop(seed, radius, dim)
     diffs = [
         abs(a - b)
-        for alpha in (i / samples for i in range(samples))
+        for alpha in ((i + 0.5) / steps for i in range(steps))
         for a, b in zip(table.vector(alpha), direct.vector(alpha))
     ]
     return max(diffs), sum(diffs) / len(diffs)
 
 
 def test_fidelity_at_the_default_radius_is_negligible():
-    worst, mean = _max_and_mean_error(seed=3, radius=1.0, dim=6, steps=512)
+    worst, mean = _max_and_mean_error(seed=3, radius=1.0, dim=6)
     assert worst < 0.001
     assert mean < 0.0005
 
 
 def test_fidelity_at_the_small_radius_extreme_is_negligible():
-    worst, mean = _max_and_mean_error(seed=3, radius=0.01, dim=6, steps=512)
+    worst, mean = _max_and_mean_error(seed=3, radius=0.01, dim=6)
     assert worst < 0.0001
     assert mean < 0.00005
 
 
-def test_fidelity_at_the_large_radius_extreme_at_the_production_step_count():
-    worst, mean = _max_and_mean_error(seed=3, radius=100.0, dim=4, steps=4096)
+def test_fidelity_at_the_large_radius_extreme_matches_the_original_bound():
+    worst, mean = _max_and_mean_error(seed=3, radius=100.0, dim=4)
     assert worst < 0.01
     assert mean < 0.005

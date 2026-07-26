@@ -1172,8 +1172,9 @@ def test_noise_loop_with_a_non_positive_radius_does_not_raise():
 def test_noise_loop_with_a_real_builder_publishes_a_table_and_a_vector():
     """One end to end check with the real background builder, not the fake.
 
-    A tiny `steps` keeps this fast: the builder still runs on its own
-    thread, still paces itself with the real yielding build (see
+    Radius 1.0 (the default) keeps this fast under the real adaptive step
+    count (`noiseloop.table_steps`): the builder still runs on its own
+    thread and still paces itself with the real yielding build (see
     `noiseloop.py`), just over a short enough cycle that waiting for it is
     not a real cost in the suite.
     """
@@ -1186,7 +1187,7 @@ def test_noise_loop_with_a_real_builder_publishes_a_table_and_a_vector():
     render_store = LatestValueStore(to_render_params(ControlState()))
     source_store = LatestValueStore(SourceTable())
     model_info_store = LatestValueStore(info)
-    builder = NoiseLoopTableBuilder(steps=32)
+    builder = NoiseLoopTableBuilder()
     loop = ControlLoop(
         control_store,
         render_store,

@@ -14,6 +14,15 @@ cycle can be precomputed once into a table and looked up with linear
 interpolation at a few microseconds per tick; `NoiseLoopTable` and
 `NoiseLoopTableBuilder` below do that, off the control thread. See
 `task-5-report.md` for the measurements this design was chosen from.
+
+The step count is not fixed: `sample()` walks a circle of radius `radius /
+2` (see below), so the circle's circumference scales linearly with
+`radius`, and a bigger radius crosses proportionally more of the noise field
+per cycle and needs proportionally more samples to resolve it. A fixed step
+count sized for the largest allowed radius massively oversamples the common,
+small-radius case, which is what made the first version of this table take
+~35 s to build even at the default radius. `table_steps()` scales the count
+to the radius instead, see its docstring and `task-5-report.md`.
 """
 
 import logging
@@ -30,29 +39,55 @@ from autolume.live.core.store import LatestValueStore
 
 logger = logging.getLogger(__name__)
 
-# One full cycle's worth of samples. Chosen from the measured interpolation
-# error against direct sampling (see task-5-report.md): at the default
-# radius (1.0) and the small extreme (0.01) the error is already at float
-# noise floor by N=512; the large extreme (100.0, where the circle covers
-# more of the noise field per step) needs the most steps, and 4096 brings its
-# worst case error to ~0.006 (mean ~0.001) out of a [-1, 1] range, which does
+# Samples per unit of radius. Fit from the measured minimal step count that
+# holds max interpolation error at or under ~0.0064 (see task-5-report.md):
+# that minimum scales linearly with radius at ~40 samples/unit once radius is
+# a few units or more (e.g. minimal N was 120 at radius 3, 407 at radius 10,
+# 4070 at radius 100 — all ~40x their radius); 42 keeps a small margin above
+# that observed minimum.
+_STEPS_PER_RADIUS_UNIT = 42
+# Floor: below here the numeric error is already negligible regardless (a
+# small radius barely moves through the noise field at all), but a table
+# needs enough temporal samples to read as a smoothly varying loop rather
+# than a handful of straight-line segments.
+_TABLE_STEPS_MIN = 128
+# Ceiling: the largest allowed radius (100.0, the top of `noise_radius`'s
+# registry bounds) lands here; this is the previously validated worst case
+# step count, error ~0.006 (mean ~0.001) out of a [-1, 1] range, which does
 # not read as a visible degradation of the loop.
-_TABLE_STEPS = 4096
+_TABLE_STEPS_MAX = 4096
 
-# A build samples `_TABLE_STEPS * dim` points with a pure Python library, so
-# it must give the GIL back regularly or it starves the control thread for
-# its whole duration. A real `time.sleep()` between small chunks measured far
-# better than `sleep(0)` here: `sleep(0)` is a scheduling hint with no
-# guaranteed OS timeslice, and calling it at high frequency under contention
-# measured *worse* than not yielding at all (observed: p95 tick lateness in
-# the hundreds of ms). An actual sleep forces this thread off the CPU for a
-# real interval, which is what gives the control thread's tick a reliable
-# window to run in. Tuned on the dev machine at dim 512 (the worst case,
-# z_dim=512): with a build in flight, the 125 Hz tick's p95 lateness measured
-# ~5.8-6.3 ms against a ~2.7/3.6 ms idle median/p95, comfortably inside the
-# 8 ms tick budget; a finer chunk (more, shorter sleeps) pushed the same
-# build from ~35 s to ~57 s wall clock for a p95 that was already met, so it
-# bought nothing. See task-5-report.md for the full measurements.
+
+def table_steps(radius: float) -> int:
+    """How many samples one full cycle needs at `radius`, clamped to a sane range.
+
+    Public (not `_`-prefixed) because Task 9's radius slider UI may want to
+    know the step count a given radius will build, e.g. to estimate wait
+    time; `ControlLoop` and `_build_table` are not the only reasonable
+    callers.
+    """
+    return min(
+        _TABLE_STEPS_MAX,
+        max(_TABLE_STEPS_MIN, math.ceil(_STEPS_PER_RADIUS_UNIT * radius)),
+    )
+
+
+# A build samples up to `table_steps(radius) * dim` points with a pure
+# Python library, so it must give the GIL back regularly or it starves the
+# control thread for its whole duration. A real `time.sleep()` between small
+# chunks measured far better than `sleep(0)` here: `sleep(0)` is a
+# scheduling hint with no guaranteed OS timeslice, and calling it at high
+# frequency under contention measured *worse* than not yielding at all
+# (observed: p95 tick lateness in the hundreds of ms). An actual sleep
+# forces this thread off the CPU for a real interval, which is what gives
+# the control thread's tick a reliable window to run in. Tuned on the dev
+# machine at dim 512 (the worst case, z_dim=512, at the top of the allowed
+# radius range where the step count is largest): with a build in flight,
+# the 125 Hz tick's p95 lateness measured ~5.8-6.3 ms against a ~2.7/3.6 ms
+# idle median/p95, comfortably inside the 8 ms tick budget; a finer chunk
+# (more, shorter sleeps) pushed the same build from ~35 s to ~57 s wall
+# clock for a p95 that was already met, so it bought nothing. See
+# task-5-report.md for the full measurements.
 _YIELD_CHUNK_DIMS = 256
 _YIELD_SLEEP_SECONDS = 0.001
 
@@ -110,9 +145,10 @@ class NoiseLoopTable:
         return tuple(row.tolist())
 
 
-def _build_table(key: tuple[int, float, int], steps: int) -> NoiseLoopTable:
+def _build_table(key: tuple[int, float, int]) -> NoiseLoopTable:
     """Sample a full cycle, timesharing the GIL as it goes (see module docstring)."""
     seed, radius, dim = key
+    steps = table_steps(radius)
     loop = NoiseLoop(seed, radius, dim)
     values = np.empty((steps, dim), dtype=np.float32)
     for step in range(steps):
@@ -139,10 +175,8 @@ class NoiseLoopTableBuilder:
 
     def __init__(
         self,
-        steps: int = _TABLE_STEPS,
-        build: Callable[[tuple[int, float, int], int], NoiseLoopTable] = _build_table,
+        build: Callable[[tuple[int, float, int]], NoiseLoopTable] = _build_table,
     ) -> None:
-        self._steps = steps
         self._build = build
         self._lock = threading.Lock()
         self._pending_key: tuple[int, float, int] | None = None
@@ -182,7 +216,7 @@ class NoiseLoopTableBuilder:
             if key is None:
                 continue
             try:
-                table = self._build(key, self._steps)
+                table = self._build(key)
             except Exception:
                 logger.exception("Noise loop table build failed for %r", key)
                 with self._lock:
