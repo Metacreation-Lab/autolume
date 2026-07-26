@@ -15,6 +15,13 @@ correct and would otherwise look broken: nothing on screen says a rebuild is
 under way. `_noise_pending_row` is the whole of what says so, read off the
 same published snapshot the control loop itself reads rather than a new
 channel of its own, and `_pending_note` is what puts a rough ETA on it.
+
+Keyframes and the noise loop are mutually exclusive, not two independent
+features: `derive_mode` plays one or the other, never both, off the same
+`noise_loop` flag this panel now exposes as a mode radio in Control rather
+than a checkbox buried in the Noise loop section. Only the section matching
+the selected mode is drawn; see `gui`'s own comment for why that is the one
+place in this panel allowed to hide rather than grey.
 """
 
 import dataclasses
@@ -50,32 +57,54 @@ logger = logging.getLogger(__name__)
 # against.
 _SEED_WIDTH_EMS = 5.5
 _VECTOR_FILTER = ["Vector files", "*.npy *.pt"]
-# The row's own floor, in font-relative units rather than a fixed pixel
-# count, so it shrinks with the UI font size preference the way every other
-# width in this row already does (`_SEED_WIDTH_EMS`, `_fit`). Measured
-# directly (see the test suite's own probe) at three font sizes and rounded
-# up from the largest observed ratio: needed px divided by font size gets a
-# little smaller as the font grows, since padding and spacing do not scale
-# in perfect lockstep with glyph width, so the ratio from the smallest size
-# is the one safe margin at every size, not just the one it was measured on.
-# Remeasured after item 14 replaced the "Vec" checkbox with a Seed/Vector
-# radio pair and item 15 spelled Project out in full: both widened the
-# identity portion of the row, on both layouts, so the two constants below
-# are wider than an earlier pass measured before either change landed.
-_ONE_LINE_EMS = 50.0
+# The two-line fallback's own floor stays a single em ratio (rounded up from
+# the largest of three measured ratios, the same reasoning `_ONE_LINE_EMS`
+# used to follow): nothing in production branches on it, it only sizes the
+# test suite's own "two-line, at the floor" combinations, so the small
+# imprecision an em ratio carries (see the one-line threshold below for why
+# it is not exact) has no behavioural consequence.
 _TWO_LINE_EMS = 31.0
+# The one-line layout's real width need does NOT scale cleanly with the font
+# size: measured directly at the three font sizes the UI font size
+# preference renders (13, 20, 26pt; the test suite's own probe, isolated to
+# one row with no scrollbar to confound it, in the same `content_region_avail`
+# terms this function compares `available` against), it needs 611, 874 and
+# 1081px. Divided by font size that is 47.0, 43.7 and 41.6 ems, a ratio that
+# keeps falling as the font grows, so a single em multiplier is structurally
+# unable to fit all three without badly overstating the small end: the
+# previous constant here, `_ONE_LINE_EMS = 50.0`, was exactly the largest of
+# an earlier pass's ratios rounded up (from before this was refit against
+# the correct, padding-and-scrollbar-free measurement above; it predates
+# items 14 and 15 reshaping the row, and was never revisited after either
+# landed), and put the 1.0x threshold around 820px against this real need of
+# 611, 209px too conservative, enough to reflow the row a full font size
+# scale early (caught from a screenshot: the reflowed row sitting in a panel
+# with roughly 400px of empty space beside it). A straight line through the
+# three measurements, `a * font_size + b`, fits the actual shape instead:
+# least squares over (13, 611), (20, 874), (26, 1081) gives slope ~36.2,
+# intercept ~143.5; rounded up to 36.5 and 145 so the fit itself is already
+# an upper bound at all three (over by 8.5, 1 and 13px) rather than only on
+# average.
+_ONE_LINE_SLOPE_PX_PER_PT = 36.5
+_ONE_LINE_INTERCEPT_PX = 145.0
+# On top of the fit itself: it is not exact at every font size (see above),
+# so this covers that, a modest margin rather than another multiple folded
+# into the slope.
+_ONE_LINE_FIT_MARGIN_PX = 15.0
 # A vertical scrollbar, 15px in this theme, appears once the panel's full
 # content (every row, not just this one) no longer fits the docked height,
-# and eats into the width this row has left to draw in. Its own width does
-# not scale with the font, so it is a flat pixel margin on top of the
-# em-based threshold above rather than another em folded into it; caught by
-# the test suite's own probe overflowing by 10px at a width the em-only
-# formula alone claimed was exactly enough.
+# and eats into the width this row has left to draw in. The fit above is
+# measured with no scrollbar in play (one isolated row never needs one), so
+# this is where that gets added back, as a flat pixel margin since the
+# scrollbar's own width does not scale with the font.
 _ROW_FLOOR_MARGIN_PX = 20.0
-_PROJECT_NOTE = (
-    "Project in Perform also applies to this loop. "
-    "Off, each step is read as a raw W row instead of a latent."
-)
+# Trimmed from an earlier version that also said "Project in Perform also
+# applies to this loop": that half is now redundant, since item A greys
+# Project on `derive_mode` and a running noise loop is exactly what puts the
+# generator in `"vec"` mode, so starting one visibly ungreys the checkbox in
+# Perform on its own. What is left is the one thing the greying cannot say by
+# itself, what the checkbox actually changes about a noise loop's frames.
+_PROJECT_NOTE = "Off, each step is read as a raw W row instead of a latent."
 _IP_NOTE = "This must be an IP address. A host name will not work."
 
 
@@ -108,7 +137,8 @@ def keyframe_row_fits_one_line(font_size: float, available: float) -> bool:
     anything is drawn, so the whole row commits to one layout rather than
     part of it drawing wide and part narrow.
     """
-    return available >= _ONE_LINE_EMS * font_size + _ROW_FLOOR_MARGIN_PX
+    needed = _ONE_LINE_SLOPE_PX_PER_PT * font_size + _ONE_LINE_INTERCEPT_PX
+    return available >= needed + _ONE_LINE_FIT_MARGIN_PX + _ROW_FLOOR_MARGIN_PX
 
 
 def _pending_note(radius: float) -> str:
@@ -157,17 +187,35 @@ class LoopPanel:
 
     def gui(self) -> None:
         state = self._binder.state()
-        self._transport_rows()
-        self._keyframe_rows(state)
-        self._scrub_rows(state)
-        self._noise_rows(state)
+        self._control_rows()
+        # The displayed value, not `state.noise_loop`: the radio drawn just
+        # above holds its own local override for the frame it is clicked on,
+        # the same reason `perform.py` reads `vector_mode` the same way, and
+        # reading the raw snapshot here would show the old section for one
+        # frame after the click.
+        noise_mode = bool(self._binder.value("noise_loop"))
+        self._scrub_rows(state, noise_mode)
+        # Hiding a whole section, not greying it: this is the one exception
+        # to the stable-footprint rule in this panel, and it is a deliberate
+        # one, not an oversight. That rule exists so a control does not shift
+        # out from under a hand reaching for it mid-drag; a section swap here
+        # follows the mode radio the performer just clicked, settles inside
+        # the same frame, and only ever removes the section the design
+        # (`derive_mode`) already made inert, since Keyframes and Noise loop
+        # never both play at once. Every per-control case in this panel
+        # (Project on a keyframe row, the seed fields, the vector controls,
+        # the index scrub below) still greys and never hides.
+        if noise_mode:
+            self._noise_rows(state)
+        else:
+            self._keyframe_rows(state)
         self._pulse_rows()
 
     def _emit(self, address: str, value) -> None:
         self._runtime.submit(ControlEvent(address, value, source="ui"))
 
-    def _transport_rows(self) -> None:
-        """Play, the time or speed switch, and Stop at cycle end.
+    def _control_rows(self) -> None:
+        """Play, the time or speed switch, Stop at cycle end, and the loop mode.
 
         Both the seconds and the speed control are always drawn, one of them
         greyed, the same no-reflow rule the latent section follows: a mode
@@ -175,8 +223,16 @@ class LoopPanel:
         can reach them. Seconds is a typed field rather than a slider: a
         loop's length is a quantity a performer sets, not a position worth
         sweeping through and watching change frame by frame the way alpha is.
+
+        The mode radio at the bottom, Keyframes or Noise loop, is `noise_loop`
+        itself, the same BOOL `derive_mode` already reads to choose which kind
+        of loop plays while `loop_active`: this panel used to draw it as a
+        checkbox buried in the Noise loop section, which read as an
+        independent feature rather than the other half of a choice this
+        section makes for the whole panel (`gui`'s own comment on what that
+        choice then hides).
         """
-        imgui.separator_text("Transport")
+        imgui.separator_text("Control")
         self._binder.checkbox("loop_active", "Play")
         self._binder.bool_radio("loop_uses_time", "Speed", "Time")
         uses_time = bool(self._binder.value("loop_uses_time"))
@@ -187,6 +243,7 @@ class LoopPanel:
         # Label only: the registry name and the OSC address (/loop/perfect)
         # are unchanged, and so is a preset's key for it.
         self._binder.checkbox("perfect_loop", "Stop at cycle end")
+        self._binder.bool_radio("noise_loop", "Keyframes", "Noise loop")
 
     def _keyframe_rows(self, state: ControlState) -> None:
         """Every entry, then Add keyframe.
@@ -292,7 +349,14 @@ class LoopPanel:
         is_vector = self._keyframe_identity(index, keyframe)
         imgui.same_line()
         self._keyframe_seed_fields(index, keyframe, is_vector)
-        imgui.new_line()
+        # No `imgui.new_line()` here: the seed fields end the line without a
+        # trailing `same_line()`, which is already enough for the next item
+        # to start a fresh one. An explicit `new_line()` on top of that
+        # closes the current line a second time, inserting a whole blank
+        # line's height between the two (confirmed by measurement: the
+        # entry was rendering three line-heights tall for two lines of
+        # content, the maintainer's screenshot of a reflowed row with far
+        # more space below the first line than a single row's height).
         imgui.indent()
         self._keyframe_vector_controls(index, keyframe, is_vector)
         imgui.same_line()
@@ -444,7 +508,7 @@ class LoopPanel:
     def _set_keyframe(self, index: int, keyframe: Keyframe) -> None:
         self._emit(KEYFRAME_SET, SetKeyframe(index, keyframe))
 
-    def _scrub_rows(self, state: ControlState) -> None:
+    def _scrub_rows(self, state: ControlState, noise_mode: bool) -> None:
         """Alpha and index, both ordinary bound controls.
 
         Touch grace already makes scrubbing and integration coexist for
@@ -461,6 +525,18 @@ class LoopPanel:
         is what stops it from scrubbing to a keyframe that does not exist;
         it stays a drag, not a typed field, because unlike the count this is
         a position the performer scrubs through and watches take effect.
+
+        `noise_mode` greys Index rather than hiding it, unlike the section
+        swap in `gui`: it is a control, not a section, and the same rule
+        every other conditional control in this panel already follows. The
+        noise loop is a single segment (`core/control.py`'s
+        `_noise_latent_vector`), so `_loop_w`, the only reader of
+        `RenderParams.loop_index` (`generator.py`), never runs while it plays
+        (`derive_mode` returns `"vec"`, not `"loop"`), which makes Index live
+        but inert exactly the way Project once was on a seed keyframe row.
+        Alpha stays live in both modes: it is what the noise table is sampled
+        at (`control.py`'s `_noise_latent_vector`), the loop's phase either
+        way.
         """
         imgui.separator_text("Scrub")
         self._binder.slider_float("loop_alpha", "Alpha")
@@ -472,22 +548,25 @@ class LoopPanel:
             maximum=count,
             to_display=lambda stored: stored + 1,
             to_stored=lambda shown: shown - 1,
+            enabled=not noise_mode,
         )
 
     def _noise_rows(self, state: ControlState) -> None:
+        """Seed and Radius, and the rebuild note. Drawn only in Noise loop mode.
+
+        The mode checkbox that used to live here moved to Control's radio
+        (`_control_rows`), so both fields are unconditionally live now: this
+        section only ever appears while `noise_loop` is selected, and neither
+        field has a further reason to grey once it does.
+        """
         imgui.separator_text("Noise loop")
-        self._binder.checkbox("noise_loop", "Noise loop")
-        live = bool(self._binder.value("noise_loop"))
         # Typed fields, not drags: a seed's neighbours are unrelated noise
         # patterns, and every distinct radius costs a table build (up to
         # ~4s at the top of its range now, see `params.py`), so nothing
         # about either is a position worth sweeping through mid-drag.
-        self._binder.input_int("noise_loop_seed", "Seed", enabled=live)
-        self._binder.input_float(
-            "noise_radius", "Radius", enabled=live, format="%.2f"
-        )
-        if live:
-            self._note(_PROJECT_NOTE)
+        self._binder.input_int("noise_loop_seed", "Seed")
+        self._binder.input_float("noise_radius", "Radius", format="%.2f")
+        self._note(_PROJECT_NOTE)
         self._noise_pending_row(state)
 
     def _noise_pending_row(self, state: ControlState) -> None:
@@ -503,13 +582,21 @@ class LoopPanel:
             imgui.text_disabled(_pending_note(state.noise_radius))
 
     def _pulse_rows(self) -> None:
+        # Natural widths, not the panel's: an address, an IP and a port are
+        # all fixed-format values (`ControlBinder.input_text`'s own
+        # docstring), so none of them reads any better in the hundreds of
+        # spare pixels a docked panel leaves lying around. 24 ems comfortably
+        # holds an OSC path like "/pulse/aftertouch"; 16 an IPv4 address,
+        # written out in full; 7 a port, five digits at most.
         imgui.separator_text("Pulse")
-        self._binder.input_text("pulse_address", "Address", hint="/pulse")
-        self._binder.input_text("pulse_ip", "IP", hint="127.0.0.1")
+        self._binder.input_text(
+            "pulse_address", "Address", hint="/pulse", natural_ems=24.0
+        )
+        self._binder.input_text("pulse_ip", "IP", hint="127.0.0.1", natural_ems=16.0)
         self._note(_IP_NOTE)
         # A typed field: a port has no meaningful neighbour to scrub through
         # on the way to the one a performer actually wants.
-        self._binder.input_int("pulse_port", "Port")
+        self._binder.input_int("pulse_port", "Port", natural_ems=7.0)
 
     def _note(self, text: str) -> None:
         imgui.push_style_color(
