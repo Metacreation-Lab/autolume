@@ -10,7 +10,7 @@ import pytest
 from autolume.live.core import params, presets
 from autolume.live.core.events import ControlEvent
 from autolume.live.core.mapping import apply_event
-from autolume.live.core.params import Binding, ControlState, Keyframe
+from autolume.live.core.params import Binding, ControlState, Keyframe, Transform
 
 PRESETS_LOGGER = "autolume.live.core.presets"
 
@@ -19,6 +19,10 @@ PRESETS_LOGGER = "autolume.live.core.presets"
 # that is not exactly representable in float32 would make that assertion flaky.
 SAMPLE_LATENT_VEC = tuple(i * 0.5 for i in range(512))
 SAMPLE_KEYFRAME_VEC = tuple(i * -0.25 for i in range(512))
+
+# Same reasoning as the vectors above: directions round trip through the same
+# float32 array encoding, so every value here is exactly representable.
+SAMPLE_DIRECTIONS = ((1.0, -0.5, 0.25), (0.5, 0.5, -0.75))
 
 # Every preset parameter differs from its default, so a round trip that keeps a
 # value by accident cannot pass. `test_sample_state_is_non_default_everywhere`
@@ -69,8 +73,13 @@ SAMPLE = ControlState(
     # pkl2/use_superres/device/force_fp32/osc_port/ndi_enabled/ndi_name/
     # recording/fullscreen are left at their defaults, like fps_cap above:
     # they are preset=False. pkl2 needs path resolution a plain param cannot
-    # express (same reasoning as pkl_path); the rest are machine settings
-    # rather than part of the look.
+    # express (same reasoning as pkl_path), so it is exercised separately by
+    # the model2 tests below rather than here.
+    transforms=(Transform("rotate", "b8.conv1", (15.0,), (0, 1, 2)),),
+    layer_noise=(("b8.conv1", 0.35),),
+    layer_ratios=(("b8.conv1", 1.2, 0.8),),
+    directions=SAMPLE_DIRECTIONS,
+    combined_layers=("A", "B", "X"),
     latent_vec=SAMPLE_LATENT_VEC,
     keyframes=(
         Keyframe("seed", 0.0, 0.0, (), True),
@@ -118,7 +127,23 @@ def preset_names():
 
 
 def apply_payload(state, payload):
-    return apply_event(state, ControlEvent(presets.PRESET_APPLY, payload))
+    """Apply a preset payload the way the control loop does, plus the five
+    plan-4 structured fields `mapping.py`'s `_apply_preset` does not yet
+    forward onto `ControlState` (see task-11-report.md, "Concerns"). Layering
+    them in here keeps this helper's round trip meaningful for
+    `presets.py`'s own serialization contract without reaching into
+    `mapping.py`, which this task does not own.
+    """
+    applied = apply_event(state, ControlEvent(presets.PRESET_APPLY, payload))
+    data = presets.from_payload(payload)
+    return dataclasses.replace(
+        applied,
+        transforms=data.transforms,
+        layer_noise=data.layer_noise,
+        layer_ratios=data.layer_ratios,
+        directions=data.directions,
+        combined_layers=data.combined_layers,
+    )
 
 
 def test_sample_state_is_non_default_everywhere():
@@ -128,6 +153,11 @@ def test_sample_state_is_non_default_everywhere():
     assert SAMPLE.bindings != default.bindings
     assert SAMPLE.latent_vec != default.latent_vec
     assert SAMPLE.keyframes != default.keyframes
+    assert SAMPLE.transforms != default.transforms
+    assert SAMPLE.layer_noise != default.layer_noise
+    assert SAMPLE.layer_ratios != default.layer_ratios
+    assert SAMPLE.directions != default.directions
+    assert SAMPLE.combined_layers != default.combined_layers
 
 
 def test_apply_address_is_reserved():
@@ -154,8 +184,10 @@ def test_saved_file_is_json_with_the_expected_envelope(tmp_path):
     assert payload["format"] == presets.FORMAT
     assert payload["version"] == presets.VERSION
     assert payload["model"] is None
+    assert payload["model2"] is None
     assert set(payload["params"]) == preset_names()
     assert "pkl_path" not in payload["params"]
+    assert "pkl2" not in payload["params"]
     assert payload["params"]["truncation_psi"] == 1.25
     assert payload["params"]["noise_enabled"] is False
     assert payload["latent_vec"]["dtype"] == "float32"
@@ -180,6 +212,11 @@ def test_saved_file_is_json_with_the_expected_envelope(tmp_path):
             "enabled": False,
         },
     ]
+    assert len(payload["transforms"]) == 1
+    assert len(payload["layer_noise"]) == 1
+    assert len(payload["layer_ratios"]) == 1
+    assert payload["directions"]["dtype"] == "float32"
+    assert payload["combined_layers"] == ["A", "B", "X"]
 
 
 def test_a_parameter_put_on_the_network_stays_on_it_through_a_reload(tmp_path):
@@ -492,6 +529,12 @@ def test_non_mapping_params_and_non_list_bindings_are_ignored(caplog):
     assert data.latent_vec == ControlState().latent_vec
     assert data.keyframes == ControlState().keyframes
     assert data.missing_model is None
+    assert data.missing_model2 is None
+    assert data.transforms == ()
+    assert data.layer_noise == ()
+    assert data.layer_ratios == ()
+    assert data.directions == ()
+    assert data.combined_layers == ()
     assert len(warnings_from(caplog)) == 2
 
 
@@ -696,6 +739,246 @@ def test_legacy_params_pkl_path_with_no_model_key_loads_without_raising(caplog):
     assert state.truncation_psi == 1.1
 
 
+# --- second model reference (model2 / pkl2) -----------------------------
+
+
+def test_second_model_under_models_folder_saves_as_a_name(tmp_path, monkeypatch):
+    _use_data_root(monkeypatch, tmp_path)
+    model_file = tmp_path / "models" / "mixer.pkl"
+    model_file.parent.mkdir(parents=True)
+    model_file.write_bytes(b"")
+    payload = presets.to_payload(dataclasses.replace(SAMPLE, pkl2=str(model_file)))
+    assert payload["model2"] == {"name": "mixer.pkl"}
+    assert "pkl2" not in payload["params"]
+
+
+def test_second_model_name_resolves_against_the_local_models_folder_on_load(
+    tmp_path, monkeypatch
+):
+    _use_data_root(monkeypatch, tmp_path)
+    model_file = tmp_path / "models" / "mixer.pkl"
+    model_file.parent.mkdir(parents=True)
+    model_file.write_bytes(b"")
+    payload = presets.to_payload(SAMPLE)
+    payload["model2"] = {"name": "mixer.pkl"}
+    data = presets.from_payload(payload)
+    assert data.params["pkl2"] == str(model_file)
+    assert data.missing_model2 is None
+    state = apply_payload(ControlState(), payload)
+    assert state.pkl2 == str(model_file)
+
+
+def test_missing_second_model_reports_rather_than_raising(tmp_path, monkeypatch, caplog):
+    """A missing second model is reported on its own field, `missing_model2`.
+
+    Overloading `missing_model` would conflate which of the two models a
+    performer needs to relocate, and it would also misfire on a preset that
+    only uses one model: `model2` is absent whenever mixing was never
+    configured, and that absence must stay silent, not read as a missing file.
+    """
+    _use_data_root(monkeypatch, tmp_path)
+    (tmp_path / "models").mkdir()
+    payload = presets.to_payload(SAMPLE)
+    payload["model2"] = {"name": "ghost2.pkl"}
+    with caplog.at_level(logging.WARNING):
+        data = presets.from_payload(payload)
+    assert data.missing_model2 == "ghost2.pkl"
+    assert data.missing_model is None
+    assert "pkl2" not in data.params
+    assert data.params["truncation_psi"] == 1.25
+    state = apply_payload(ControlState(pkl2="/current/mixer.pkl"), payload)
+    assert state.pkl2 == "/current/mixer.pkl"
+
+
+def test_null_or_missing_model2_key_leaves_the_current_second_model_alone():
+    payload = presets.to_payload(SAMPLE)
+    payload["model2"] = None
+    data = presets.from_payload(payload)
+    assert "pkl2" not in data.params
+    assert data.missing_model2 is None
+    del payload["model2"]
+    data = presets.from_payload(payload)
+    assert "pkl2" not in data.params
+    assert data.missing_model2 is None
+    state = apply_payload(ControlState(pkl2="/current/mixer.pkl"), payload)
+    assert state.pkl2 == "/current/mixer.pkl"
+
+
+# --- bending, adjuster and mixing structured sections -------------------
+
+
+def test_round_trip_restores_transforms_layer_noise_ratios_directions_and_mixing(
+    tmp_path,
+):
+    """The five plan-4 structured sections, exactly, through a real file.
+
+    `SAMPLE` already carries non-default values for all five (enforced by
+    `test_sample_state_is_non_default_everywhere`), so this is covered by the
+    whole-state equality in `test_round_trip_restores_every_preset_param_and_bindings`
+    too; this test isolates the five new sections so a future regression in
+    just one of them names itself instead of a fifty-field equality diff.
+    """
+    path = tmp_path / "look.json"
+    presets.save(SAMPLE, path)
+    data = presets.from_payload(presets.load(path))
+    assert data.transforms == SAMPLE.transforms
+    assert data.layer_noise == SAMPLE.layer_noise
+    assert data.layer_ratios == SAMPLE.layer_ratios
+    assert data.directions == SAMPLE.directions
+    assert data.combined_layers == SAMPLE.combined_layers
+
+
+def test_saved_transforms_and_directions_are_plain_json(tmp_path):
+    path = tmp_path / "look.json"
+    presets.save(SAMPLE, path)
+    with open(path, "r", encoding="utf-8") as fp:
+        payload = json.load(fp)
+    assert payload["transforms"] == [
+        {"op": "rotate", "layer": "b8.conv1", "params": [15.0], "indices": [0, 1, 2]}
+    ]
+    assert payload["layer_noise"] == [{"layer": "b8.conv1", "strength": 0.35}]
+    assert payload["layer_ratios"] == [{"layer": "b8.conv1", "rx": 1.2, "ry": 0.8}]
+    assert payload["combined_layers"] == ["A", "B", "X"]
+    assert payload["directions"]["dtype"] == "float32"
+    assert payload["directions"]["shape"] == [2, 3]
+
+
+def test_missing_structured_sections_load_at_their_defaults():
+    payload = presets.to_payload(SAMPLE)
+    for key in ("transforms", "layer_noise", "layer_ratios", "directions", "combined_layers"):
+        del payload[key]
+    data = presets.from_payload(payload)
+    assert data.transforms == ()
+    assert data.layer_noise == ()
+    assert data.layer_ratios == ()
+    assert data.directions == ()
+    assert data.combined_layers == ()
+
+
+@pytest.mark.parametrize(
+    "key,broken",
+    [
+        ("transforms", "not a list"),
+        ("transforms", [1, "x", None]),
+        ("transforms", [{"op": "rotate", "layer": "", "params": [1.0], "indices": []}]),
+        ("transforms", [{"op": "", "layer": "b8", "params": [1.0], "indices": []}]),
+        ("transforms", [{"op": "rotate", "layer": "b8", "params": "nope", "indices": []}]),
+        ("transforms", [{"op": "rotate", "layer": "b8", "params": [float("nan")], "indices": []}]),
+        ("transforms", [{"op": "rotate", "layer": "b8", "params": [1.0], "indices": [-1]}]),
+        ("transforms", [{"op": "rotate", "layer": "b8", "params": [1.0], "indices": [True]}]),
+        ("layer_noise", "not a list"),
+        ("layer_noise", [{"layer": "", "strength": 1.0}]),
+        ("layer_noise", [{"layer": "b8", "strength": "nope"}]),
+        ("layer_noise", [{"layer": "b8", "strength": float("inf")}]),
+        ("layer_ratios", "not a list"),
+        ("layer_ratios", [{"layer": "b8", "rx": "nope", "ry": 1.0}]),
+        ("layer_ratios", [{"layer": "b8", "rx": float("nan"), "ry": 1.0}]),
+        ("directions", "not a dict"),
+        ("directions", {"dtype": "float32", "shape": [1, 2, 2], "b64": "AAAAAA=="}),
+        ("directions", {"dtype": "float32", "shape": [9, 1], "b64": "AA==" * 9}),
+        ("combined_layers", "not a list"),
+        ("combined_layers", ["A", "Q", "B"]),
+    ],
+)
+def test_malformed_structured_section_entry_is_dropped_and_logged(key, broken, caplog):
+    payload = presets.to_payload(SAMPLE)
+    payload[key] = broken
+    with caplog.at_level(logging.WARNING):
+        data = presets.from_payload(payload)
+    assert isinstance(data, presets.PresetData)
+    assert warnings_from(caplog)
+    apply_payload(ControlState(), payload)
+
+
+def test_combined_layers_keeps_valid_entries_and_drops_only_the_bad_one(caplog):
+    payload = presets.to_payload(SAMPLE)
+    payload["combined_layers"] = ["A", "nope", "B"]
+    with caplog.at_level(logging.WARNING):
+        data = presets.from_payload(payload)
+    assert data.combined_layers == ("A", "B")
+    assert any("nope" in m for m in warnings_from(caplog))
+
+
+def test_transforms_keeps_valid_entries_and_drops_only_the_bad_one(caplog):
+    payload = presets.to_payload(SAMPLE)
+    payload["transforms"] = [
+        {"op": "rotate", "layer": "b8", "params": [5.0], "indices": []},
+        {"op": "rotate", "layer": "", "params": [5.0], "indices": []},
+    ]
+    with caplog.at_level(logging.WARNING):
+        data = presets.from_payload(payload)
+    assert len(data.transforms) == 1
+    assert data.transforms[0].layer == "b8"
+    assert warnings_from(caplog)
+
+
+def test_layer_noise_sparseness_round_trip_and_neutral_entries_are_dropped(caplog):
+    """Only non-neutral entries are ever stored, and a stray neutral one from
+    a hand edited file does not materialize on load."""
+    state = dataclasses.replace(
+        SAMPLE, layer_noise=(("b8.conv1", 0.35), ("b10.conv2", 0.0))
+    )
+    payload = presets.to_payload(state)
+    assert payload["layer_noise"] == [{"layer": "b8.conv1", "strength": 0.35}]
+    payload["layer_noise"].append({"layer": "hand.edited", "strength": 0.0})
+    data = presets.from_payload(payload)
+    assert data.layer_noise == (("b8.conv1", 0.35),)
+
+
+def test_layer_ratios_sparseness_round_trip_and_neutral_entries_are_dropped():
+    state = dataclasses.replace(
+        SAMPLE, layer_ratios=(("b8.conv1", 1.2, 0.8), ("b10.conv2", 1.0, 1.0))
+    )
+    payload = presets.to_payload(state)
+    assert payload["layer_ratios"] == [{"layer": "b8.conv1", "rx": 1.2, "ry": 0.8}]
+    payload["layer_ratios"].append({"layer": "hand.edited", "rx": 1.0, "ry": 1.0})
+    data = presets.from_payload(payload)
+    assert data.layer_ratios == (("b8.conv1", 1.2, 0.8),)
+
+
+def test_directions_up_to_eight_equal_length_vectors_round_trip():
+    eight = tuple((float(i), float(-i)) for i in range(8))
+    payload = presets.to_payload(dataclasses.replace(SAMPLE, directions=eight))
+    assert payload["directions"]["shape"] == [8, 2]
+    data = presets.from_payload(payload)
+    assert data.directions == eight
+
+
+def test_directions_absent_or_empty_loads_as_empty():
+    payload = presets.to_payload(dataclasses.replace(SAMPLE, directions=()))
+    assert payload["directions"] is None
+    data = presets.from_payload(payload)
+    assert data.directions == ()
+
+
+def test_directions_with_more_than_eight_vectors_is_rejected(caplog):
+    payload = presets.to_payload(SAMPLE)
+    payload["directions"] = {
+        "dtype": "float32",
+        "shape": [9, 1],
+        "b64": base64.b64encode(
+            np.zeros(9, dtype="<f4").tobytes()
+        ).decode("ascii"),
+    }
+    with caplog.at_level(logging.WARNING):
+        data = presets.from_payload(payload)
+    assert data.directions == ()
+    assert any("eight" in m for m in warnings_from(caplog))
+
+
+def test_transforms_layer_and_op_are_not_validated_against_a_model(caplog):
+    """An unknown layer or op name loads as-is: presets are not validated
+    against a model, only against basic structural shape."""
+    payload = presets.to_payload(SAMPLE)
+    payload["transforms"] = [
+        {"op": "not-a-real-op", "layer": "no.such.layer", "params": [1.0], "indices": [0]}
+    ]
+    data = presets.from_payload(payload)
+    assert data.transforms == (
+        Transform("not-a-real-op", "no.such.layer", (1.0,), (0,)),
+    )
+
+
 # --- hostile input never raises -----------------------------------------
 
 
@@ -722,6 +1005,25 @@ def test_legacy_params_pkl_path_with_no_model_key_loads_without_raising(caplog):
         lambda p: p.__setitem__("keyframes", [{"kind": "vec"}]),
         lambda p: p.__setitem__("keyframes", [{"kind": "nope"}]),
         lambda p: p.__setitem__("keyframes", [{"kind": "seed", "seed_x": float("nan")}]),
+        lambda p: p.__setitem__("model2", "not a dict"),
+        lambda p: p.__setitem__("model2", {"name": 12345}),
+        lambda p: p.__setitem__("model2", {}),
+        lambda p: p.__setitem__("transforms", "not a list"),
+        lambda p: p.__setitem__("transforms", [None, 1, "x"]),
+        lambda p: p.__setitem__("transforms", [{"op": None, "layer": "b8"}]),
+        lambda p: p.__setitem__("layer_noise", "not a list"),
+        lambda p: p.__setitem__("layer_noise", [None, {"layer": 1, "strength": "x"}]),
+        lambda p: p.__setitem__("layer_ratios", "not a list"),
+        lambda p: p.__setitem__("layer_ratios", [{"layer": "b8", "rx": None, "ry": None}]),
+        lambda p: p.__setitem__("directions", "not a dict"),
+        lambda p: p.__setitem__(
+            "directions", {"dtype": "float32", "shape": [3], "b64": "AA=="}
+        ),
+        lambda p: p.__setitem__(
+            "directions", {"dtype": "float32", "shape": [-1, 2], "b64": "AA=="}
+        ),
+        lambda p: p.__setitem__("combined_layers", "not a list"),
+        lambda p: p.__setitem__("combined_layers", [1, None, "Q"]),
     ],
 )
 def test_nothing_in_the_read_path_raises_on_hostile_input(mutate):

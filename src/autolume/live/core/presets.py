@@ -19,7 +19,19 @@ scalar.
 
 The model is not a plain parameter: it is saved as its own `model` key, a bare
 filename when it lives under the local models folder and an absolute path
-otherwise, so a shared preset can resolve on the machine that opens it.
+otherwise, so a shared preset can resolve on the machine that opens it. The
+second model used for network mixing (`pkl2`) is saved the same way, under a
+sibling `model2` key, through the same resolution helpers, so a mixing look
+stays portable across machines too.
+
+The bending chain, per-layer noise and ratios, adjuster directions and
+mixing layer origins are sparse or small structured sections of their own
+(`transforms`, `layer_noise`, `layer_ratios`, `directions`,
+`combined_layers`). A preset is never validated against a model: an unknown
+layer or op name loads as-is, the render path is what logs and skips it.
+`directions` reuses the same array descriptor as `latent_vec`, reinterpreted
+as a 2D block of up to eight equal-length vectors rather than inventing a
+second encoding.
 """
 
 import base64
@@ -33,7 +45,7 @@ from pathlib import Path
 
 import numpy as np
 
-from autolume.live.core.params import REGISTRY, Binding, ControlState, Keyframe
+from autolume.live.core.params import REGISTRY, Binding, ControlState, Keyframe, Transform
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +84,12 @@ class PresetData:
     latent_vec: tuple[float, ...]
     keyframes: tuple[Keyframe, ...]
     missing_model: str | None
+    missing_model2: str | None
+    transforms: tuple[Transform, ...]
+    layer_noise: tuple[tuple[str, float], ...]
+    layer_ratios: tuple[tuple[str, float, float], ...]
+    directions: tuple[tuple[float, ...], ...]
+    combined_layers: tuple[str, ...]
 
 
 def _jsonable(value: object) -> object:
@@ -184,11 +202,227 @@ def _read_model(raw: object) -> tuple[str | None, str | None]:
     return None, None
 
 
+def _finite_or_none(value: object) -> float | None:
+    """`value` as a finite float, or None if it cannot be one.
+
+    Unlike `_finite_number`, there is no default to fall back to: the callers
+    below drop the whole entry it belongs to rather than substitute a value,
+    matching how `mapping.py` drops a whole layer noise/ratio event on an
+    uncoercible number.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if not math.isfinite(value):
+        return None
+    return float(value)
+
+
+def _encode_transform(transform: Transform) -> dict:
+    return {
+        "op": transform.op,
+        "layer": transform.layer,
+        "params": [float(p) for p in transform.params],
+        "indices": [int(i) for i in transform.indices],
+    }
+
+
+def _read_number_list(raw: object, what: str) -> tuple[float, ...] | None:
+    if not isinstance(raw, list):
+        logger.warning("Skipping %s, not a list", what)
+        return None
+    values = []
+    for value in raw:
+        number = _finite_or_none(value)
+        if number is None:
+            logger.warning("Skipping %s, %r is not a finite number", what, value)
+            return None
+        values.append(number)
+    return tuple(values)
+
+
+def _read_index_list(raw: object, what: str) -> tuple[int, ...] | None:
+    if not isinstance(raw, list):
+        logger.warning("Skipping %s, not a list", what)
+        return None
+    values = []
+    for value in raw:
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            logger.warning("Skipping %s, %r is not a valid index", what, value)
+            return None
+        values.append(value)
+    return tuple(values)
+
+
+def _read_transform(entry: object, index: int) -> Transform | None:
+    if not isinstance(entry, dict):
+        logger.warning("Skipping transform %d, not an object", index)
+        return None
+    op = entry.get("op")
+    layer = entry.get("layer")
+    if not isinstance(op, str) or not op:
+        logger.warning("Skipping transform %d, invalid op %r", index, op)
+        return None
+    if not isinstance(layer, str) or not layer:
+        logger.warning("Skipping transform %d, invalid layer %r", index, layer)
+        return None
+    params = _read_number_list(entry.get("params"), f"transform {index} params")
+    if params is None:
+        return None
+    indices = _read_index_list(entry.get("indices"), f"transform {index} indices")
+    if indices is None:
+        return None
+    return Transform(op=op, layer=layer, params=params, indices=indices)
+
+
+def _read_transforms(raw: object) -> tuple[Transform, ...]:
+    if raw is _ABSENT or raw is None:
+        return ()
+    if not isinstance(raw, list):
+        logger.warning("Ignoring preset transforms of type %s", type(raw).__name__)
+        return ()
+    return tuple(
+        transform
+        for index, entry in enumerate(raw)
+        if (transform := _read_transform(entry, index)) is not None
+    )
+
+
+def _encode_layer_noise(entries: tuple[tuple[str, float], ...]) -> list[dict]:
+    # Defends the sparse invariant even against a directly built ControlState
+    # that skipped mapping.py's own neutral-drop, not only against what a
+    # legitimate edit path would ever produce.
+    return [
+        {"layer": layer, "strength": strength}
+        for layer, strength in entries
+        if strength != 0.0
+    ]
+
+
+def _read_layer_noise(raw: object) -> tuple[tuple[str, float], ...]:
+    if raw is _ABSENT or raw is None:
+        return ()
+    if not isinstance(raw, list):
+        logger.warning("Ignoring preset layer_noise of type %s", type(raw).__name__)
+        return ()
+    entries: list[tuple[str, float]] = []
+    for index, entry in enumerate(raw):
+        if not isinstance(entry, dict):
+            logger.warning("Skipping layer_noise %d, not an object", index)
+            continue
+        layer = entry.get("layer")
+        if not isinstance(layer, str) or not layer:
+            logger.warning("Skipping layer_noise %d, invalid layer %r", index, layer)
+            continue
+        strength = _finite_or_none(entry.get("strength"))
+        if strength is None:
+            logger.warning(
+                "Skipping layer_noise %d, invalid strength %r",
+                index,
+                entry.get("strength"),
+            )
+            continue
+        # Neutral is stored as absence, matching the sparse invariant
+        # mapping.py keeps at apply time: a hand edited file that writes one
+        # anyway must not materialize it back.
+        if strength == 0.0:
+            continue
+        entries.append((layer, strength))
+    return tuple(entries)
+
+
+def _encode_layer_ratios(entries: tuple[tuple[str, float, float], ...]) -> list[dict]:
+    return [
+        {"layer": layer, "rx": rx, "ry": ry}
+        for layer, rx, ry in entries
+        if not (rx == 1.0 and ry == 1.0)
+    ]
+
+
+def _read_layer_ratios(raw: object) -> tuple[tuple[str, float, float], ...]:
+    if raw is _ABSENT or raw is None:
+        return ()
+    if not isinstance(raw, list):
+        logger.warning("Ignoring preset layer_ratios of type %s", type(raw).__name__)
+        return ()
+    entries: list[tuple[str, float, float]] = []
+    for index, entry in enumerate(raw):
+        if not isinstance(entry, dict):
+            logger.warning("Skipping layer_ratios %d, not an object", index)
+            continue
+        layer = entry.get("layer")
+        if not isinstance(layer, str) or not layer:
+            logger.warning("Skipping layer_ratios %d, invalid layer %r", index, layer)
+            continue
+        rx = _finite_or_none(entry.get("rx"))
+        ry = _finite_or_none(entry.get("ry"))
+        if rx is None or ry is None:
+            logger.warning("Skipping layer_ratios %d, invalid ratio %r", index, entry)
+            continue
+        if rx == 1.0 and ry == 1.0:
+            continue
+        entries.append((layer, rx, ry))
+    return tuple(entries)
+
+
+def _encode_directions(directions: tuple[tuple[float, ...], ...]) -> dict | None:
+    """Directions as a 2D array descriptor: up to eight equal-length rows.
+
+    Reuses `_encode_array`'s dtype/base64 machinery on the flattened values,
+    then overrides the shape it would have computed (1D) with the real
+    `[rows, cols]` shape, rather than inventing a second encoding.
+    """
+    if not directions:
+        return None
+    flat = tuple(value for vector in directions for value in vector)
+    encoded = _encode_array(flat)
+    if encoded is None:
+        return None
+    encoded["shape"] = [len(directions), len(directions[0])]
+    return encoded
+
+
+def _read_directions(raw: object) -> tuple[tuple[float, ...], ...]:
+    if raw is _ABSENT or raw is None:
+        return ()
+    flat = _decode_array(raw, "directions")
+    if flat is None:
+        return ()
+    shape = raw.get("shape") if isinstance(raw, dict) else None
+    if not (isinstance(shape, list) and len(shape) == 2):
+        logger.warning("Skipping directions, expected a 2D shape, got %r", shape)
+        return ()
+    rows, cols = shape
+    if rows > 8:
+        logger.warning("Skipping directions, more than eight vectors (%d)", rows)
+        return ()
+    return tuple(tuple(flat[i * cols : (i + 1) * cols]) for i in range(rows))
+
+
+def _encode_combined_layers(entries: tuple[str, ...]) -> list[str]:
+    return list(entries)
+
+
+def _read_combined_layers(raw: object) -> tuple[str, ...]:
+    if raw is _ABSENT or raw is None:
+        return ()
+    if not isinstance(raw, list):
+        logger.warning("Ignoring preset combined_layers of type %s", type(raw).__name__)
+        return ()
+    entries = []
+    for index, entry in enumerate(raw):
+        if entry not in ("A", "B", "X"):
+            logger.warning("Skipping combined_layers %d, invalid entry %r", index, entry)
+            continue
+        entries.append(entry)
+    return tuple(entries)
+
+
 def to_payload(state: ControlState) -> dict:
     return {
         "format": FORMAT,
         "version": VERSION,
         "model": _model_reference(state.pkl_path),
+        "model2": _model_reference(state.pkl2),
         "params": {
             name: _jsonable(getattr(state, name))
             for name, spec in REGISTRY.items()
@@ -214,6 +448,11 @@ def to_payload(state: ControlState) -> dict:
             }
             for keyframe in state.keyframes
         ],
+        "transforms": [_encode_transform(t) for t in state.transforms],
+        "layer_noise": _encode_layer_noise(state.layer_noise),
+        "layer_ratios": _encode_layer_ratios(state.layer_ratios),
+        "directions": _encode_directions(state.directions),
+        "combined_layers": _encode_combined_layers(state.combined_layers),
     }
 
 
@@ -376,19 +615,31 @@ def from_payload(payload: dict) -> PresetData:
     Raises `ValueError` if `payload` is not a preset. Values are returned
     uncoerced; clamping happens when they are applied to a state. The model,
     when it resolves, rides along in `params["pkl_path"]` so the caller applies
-    it through the same path as every other parameter.
+    it through the same path as every other parameter; the second mixing
+    model does the same in `params["pkl2"]`. Unresolved names are reported
+    separately as `missing_model`/`missing_model2` rather than raising, since
+    a preset with a model this machine does not have is not a broken preset.
     """
     _check_envelope(payload)
     params = _read_params(payload.get("params", _ABSENT))
     model_path, missing_model = _read_model(payload.get("model", _ABSENT))
     if model_path is not None:
         params["pkl_path"] = model_path
+    model2_path, missing_model2 = _read_model(payload.get("model2", _ABSENT))
+    if model2_path is not None:
+        params["pkl2"] = model2_path
     return PresetData(
         params=params,
         bindings=_read_bindings(payload.get("bindings", _ABSENT)),
         latent_vec=_read_latent_vec(payload.get("latent_vec", _ABSENT)),
         keyframes=_read_keyframes(payload.get("keyframes", _ABSENT)),
         missing_model=missing_model,
+        missing_model2=missing_model2,
+        transforms=_read_transforms(payload.get("transforms", _ABSENT)),
+        layer_noise=_read_layer_noise(payload.get("layer_noise", _ABSENT)),
+        layer_ratios=_read_layer_ratios(payload.get("layer_ratios", _ABSENT)),
+        directions=_read_directions(payload.get("directions", _ABSENT)),
+        combined_layers=_read_combined_layers(payload.get("combined_layers", _ABSENT)),
     )
 
 
