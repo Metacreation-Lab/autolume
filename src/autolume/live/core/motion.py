@@ -37,6 +37,15 @@ _VECTOR_PARAM = "latent_vec"
 
 MOTION_PARAMS = tuple(name for name, _ in _AXES) + (_VECTOR_PARAM,)
 
+# Continuously written by `ControlLoop._integrate_loop` (control.py) while a
+# loop plays, the same way `MOTION_PARAMS` is continuously written by
+# `integrate` below, but gated on `loop_active` rather than `anim_playing`, so
+# it cannot be folded into `MOTION_PARAMS` without also folding in a gate that
+# does not apply to it. Kept as its own tuple rather than added to
+# `MOTION_PARAMS`, whose membership several tests and the vector-walk gate
+# pin exactly.
+_LOOP_PARAMS = ("loop_alpha", "loop_index")
+
 # Old-app calibration (widgets/latent_widget.py), kept for parity: how fast the
 # walk closes on its target, and how close counts as "arrived".
 _VECTOR_WALK_GAIN = 10.0
@@ -75,17 +84,28 @@ def drives(
     parameter the integrator leaves alone would be worse than no marker, and
     the only way to be sure of that is to share the rule rather than restate
     it.
+
+    `loop_alpha` and `loop_index` are a second continuous writer with its own
+    play condition, `loop_active` rather than `anim_playing`
+    (`ControlLoop._integrate_loop`, control.py), so they get their own branch
+    here rather than joining `MOTION_PARAMS` under the `anim_playing` gate
+    that does not apply to them. Both branches converge on the same binding
+    and touch checks below, so a binding still wins over either kind of
+    continuous write, and a touch hold still wins over both.
     """
-    if not state.anim_playing or name not in MOTION_PARAMS:
+    if name in _LOOP_PARAMS:
+        if not state.loop_active:
+            return False
+    elif not state.anim_playing or name not in MOTION_PARAMS:
         return False
     # While a loop plays, it owns the latent, seed axes and vector alike; Task
     # 4 integrates the loop itself, but the ownership rule belongs here so the
     # marker and the integrator can never disagree about who is driving.
-    if state.loop_active:
+    elif state.loop_active:
         return False
     # The vector walk is additionally gated on vector mode: off, it is not the
     # writer nothing else is driving, it is simply not in play this frame.
-    if name == _VECTOR_PARAM and not state.vector_mode:
+    elif name == _VECTOR_PARAM and not state.vector_mode:
         return False
     # Only a row with a source of its own takes the parameter away from motion.
     # A row left sourceless is the parameter's own address, which writes when a

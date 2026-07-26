@@ -152,36 +152,80 @@ def test_the_predicate_answers_exactly_what_the_integrator_does():
 
     Every combination of the conditions either function looks at, checked as
     one question: did the integrator move this axis, and did the predicate say
-    it would.
+    it would. `vector_mode` is varied and a `walk` is always supplied, so the
+    `latent_vec` case genuinely exercises the vector branch rather than
+    trivially agreeing with `latent_vec` never being driven.
     """
     touch = TouchTracker()
     touch.begin("latent_x", 10.0)
+    touch.begin("latent_vec", 10.0)
+    walk = WalkState(np.random.RandomState(0))
     cases = []
     for playing in (True, False):
-        for binding in (
-            (),
-            (Binding("latent_x", "/a"),),
-            (Binding("latent_x", "/a", enabled=False),),
-            (Binding("latent_y", "/a"),),
-        ):
-            for tracker in (None, touch):
-                cases.append(
-                    (
-                        ControlState(
-                            anim_playing=playing,
-                            anim_speed_x=2.0,
-                            anim_speed_y=2.0,
-                            bindings=binding,
-                        ),
-                        tracker,
-                    )
-                )
+        for loop_active in (True, False):
+            for vector_mode in (True, False):
+                for binding in (
+                    (),
+                    (Binding("latent_x", "/a"),),
+                    (Binding("latent_x", "/a", enabled=False),),
+                    (Binding("latent_y", "/a"),),
+                    (Binding("latent_vec", "/a"),),
+                ):
+                    for tracker in (None, touch):
+                        cases.append(
+                            (
+                                ControlState(
+                                    anim_playing=playing,
+                                    loop_active=loop_active,
+                                    vector_mode=vector_mode,
+                                    anim_speed_x=2.0,
+                                    anim_speed_y=2.0,
+                                    latent_vec=(5.0, 5.0),
+                                    bindings=binding,
+                                ),
+                                tracker,
+                            )
+                        )
 
     for state, tracker in cases:
-        out = integrate(state, 0.5, tracker, 10.0)
+        walk.target = np.array([15.0, 5.0])  # distance 10, always above threshold
+        out = integrate(state, 0.5, tracker, 10.0, model_info=_INFO, walk=walk)
         for name in MOTION_PARAMS:
             moved = getattr(out, name) != getattr(state, name)
             assert drives(state, name, tracker, 10.0) is moved, (state, tracker, name)
+
+
+def test_the_loop_predicate_answers_exactly_what_it_claims_to():
+    """The loop branch of the same predicate, checked the same exhaustive way.
+
+    `motion.integrate` never touches `loop_alpha`/`loop_index` (that is
+    `ControlLoop._integrate_loop`, control.py), so there is no integrator call
+    here to compare against; instead this pins the truth table the docstring
+    promises: loop_active gates it on, a binding with a source wins, and a
+    touch hold wins over both, the same precedence `MOTION_PARAMS` gets.
+    """
+    touch = TouchTracker()
+    touch.begin("loop_alpha", 10.0)
+    for loop_active in (True, False):
+        for binding in (
+            (),
+            (Binding("loop_alpha", "/a"),),
+            (Binding("loop_alpha", "/a", enabled=False),),
+            (Binding("loop_index", "/a"),),
+        ):
+            for tracker in (None, touch):
+                state = ControlState(loop_active=loop_active, bindings=binding)
+                for name in ("loop_alpha", "loop_index"):
+                    sourced = any(
+                        b.target == name and b.enabled and b.source for b in binding
+                    )
+                    held = tracker is not None and tracker.is_held(name, 10.0)
+                    expected = loop_active and not sourced and not held
+                    assert drives(state, name, tracker, 10.0) is expected, (
+                        state,
+                        tracker,
+                        name,
+                    )
 
 
 # --- vector walk ---------------------------------------------------------

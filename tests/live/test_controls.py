@@ -187,6 +187,31 @@ def test_motion_takes_the_marker_back_from_a_binding_switched_off():
     assert gutter_for(state, "latent_x").marker is Marker.MOTION
 
 
+def test_a_playing_loop_marks_alpha_and_index_as_driven():
+    # ControlLoop._integrate_loop writes both every tick while a loop plays,
+    # with no anim_playing gate; the marker used to draw these grey, claiming
+    # nothing drove them (task-9 review, "important 2").
+    state = ControlState(loop_active=True)
+    assert gutter_for(state, "loop_alpha").marker is Marker.MOTION
+    assert gutter_for(state, "loop_index").marker is Marker.MOTION
+
+
+def test_a_stopped_loop_leaves_alpha_and_index_unmarked():
+    state = ControlState(loop_active=False)
+    assert gutter_for(state, "loop_alpha").marker is Marker.NONE
+    assert gutter_for(state, "loop_index").marker is Marker.NONE
+
+
+def test_a_binding_beats_the_loop_on_the_same_parameter():
+    state = ControlState(
+        loop_active=True, bindings=(Binding("loop_alpha", "/audio/level"),)
+    )
+    gutter = gutter_for(state, "loop_alpha")
+    assert gutter.marker is Marker.BINDING
+    assert gutter.read_only
+    assert gutter_for(state, "loop_index").marker is Marker.MOTION
+
+
 LISTENING = ControlState(bindings=(Binding("latent_x", ""),))
 
 
