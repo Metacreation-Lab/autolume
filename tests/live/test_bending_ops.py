@@ -101,6 +101,38 @@ def test_invert_twice_is_identity(base_tensor):
     assert torch.allclose(twice, base_tensor, atol=1e-6)
 
 
+def test_flip_h_flips_width_and_flip_v_flips_height():
+    """The axes the names promise, which both operators used to have backwards.
+
+    Asserted against an explicitly asymmetric pattern rather than a random
+    tensor: a flip on the wrong axis is still a flip, so it changes the tensor
+    and passes every test that only checks that something happened. The pattern
+    is different along each axis and is its own mirror on neither.
+    """
+    x = torch.tensor([[[[1.0, 2.0], [3.0, 4.0]]]])
+
+    flipped_h = FlipHorizontal().forward(x.clone(), [True], [0])
+    assert flipped_h.tolist() == [[[[2.0, 1.0], [4.0, 3.0]]]]
+
+    flipped_v = FlipVertical().forward(x.clone(), [True], [0])
+    assert flipped_v.tolist() == [[[[3.0, 4.0], [1.0, 2.0]]]]
+
+
+@pytest.mark.parametrize(
+    "op", [FlipHorizontal(), FlipVertical()], ids=["flip-h", "flip-v"]
+)
+def test_a_flip_is_its_own_inverse(base_tensor, op):
+    x = base_tensor.clone()
+    once = op.forward(x, [True], INDICES)
+    twice = op.forward(once.clone(), [True], INDICES)
+    assert torch.equal(twice, base_tensor)
+
+
+def test_a_flip_with_a_falsy_switch_is_identity(base_tensor):
+    for op in (FlipHorizontal(), FlipVertical()):
+        assert torch.equal(op.forward(base_tensor.clone(), [False], INDICES), base_tensor)
+
+
 def test_manipulation_layer_empty_indices_returns_input_untouched(base_tensor):
     x = base_tensor.clone()
     out = ManipulationLayer().forward(

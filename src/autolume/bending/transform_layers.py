@@ -95,7 +95,7 @@ class FlipHorizontal(nn.Module):
     
     def forward(self, x, params, indices):
         if params[0]:
-            x [:, indices] = x[:, indices].flip(2)
+            x[:, indices] = x[:, indices].flip(-1)
         return x
 
 class FlipVertical(nn.Module):
@@ -104,7 +104,7 @@ class FlipVertical(nn.Module):
 
     def forward(self, x, params, indices):
         if params[0]:
-            x[:, indices] = x[:, indices].flip(3)
+            x[:, indices] = x[:, indices].flip(-2)
         return x
 
 class Invert(nn.Module):

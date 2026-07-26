@@ -571,6 +571,15 @@ class LoadedModel:
         layers, stock StyleGAN networks do not, and we never invent them. A
         layer that has dropped out of either sparse mapping is written back
         to neutral, so removing an override actually removes its effect.
+
+        The ratio pair is swapped on its way onto the module, and only here.
+        `SynthesisLayer.forward` binds `in_w = x.shape[-2]`, which is the
+        activation's *height*, and then resizes to `(in_w * rx, in_h * ry)`,
+        so the layer's slot 0 scales height and slot 1 scales width. State,
+        presets, OSC and the panel all keep the x-then-y order their labels
+        promise, and this one write is where the two orders meet. Measured on
+        a real model rather than read off the source: without the swap, "Ratio
+        x" of 2 on a 1024 model renders a 2048 by 1024 frame.
         """
         state = (params.global_noise, params.layer_noise, params.layer_ratios)
         if state == self._applied_module_state:
@@ -581,7 +590,8 @@ class LoadedModel:
             if hasattr(module, "noise_regulator"):
                 module.noise_regulator = params.layer_noise.get(name, 0.0)
             if hasattr(module, "ratio"):
-                module.ratio = params.layer_ratios.get(name, (1.0, 1.0))
+                rx, ry = params.layer_ratios.get(name, (1.0, 1.0))
+                module.ratio = (ry, rx)
         # Copied, never aliased: the snapshot these came from is shared with
         # the control thread and must not be reachable from here.
         self._applied_module_state = (

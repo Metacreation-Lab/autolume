@@ -32,9 +32,14 @@ from autolume.live.core.mixing import (
     layer_resolution,
     selection_length,
 )
+from autolume.live.core import presets
+from autolume.live.core.events import ControlEvent
+from autolume.live.core.mapping import apply_event
 from autolume.live.core.params import (
+    BEND_RATIO,
     ControlState,
     Keyframe,
+    SetLayerRatio,
     Transform,
     to_render_params,
 )
@@ -1770,14 +1775,95 @@ def test_a_removed_noise_strength_returns_the_layer_to_neutral():
 
 
 def test_per_layer_ratio_reaches_its_layer_and_the_rest_stay_square():
+    """Note the swap: `(rx, ry)` in state arrives as `(ry, rx)` on the module.
+
+    `SynthesisLayer.forward` reads slot 0 as the height scale, so the push is
+    where the panel's x-then-y order is turned into the layer's own. Pinned
+    here as well as in the test below, because this is the assertion that
+    would go quietly wrong if the swap were ever moved outward into state.
+    """
     conv1 = _state_block(ratio=(1, 1))
     torgb = _state_block(ratio=(1, 1))
     model = _fake_model(_stateful_synthesis(conv1=conv1, torgb=torgb))
 
     model.render_frame(render_params(layer_ratios=(("conv1", 2.0, 3.0),)), 0)
 
-    assert conv1.writes == [("ratio", (2.0, 3.0))]
+    assert conv1.writes == [("ratio", (3.0, 2.0))]
     assert torgb.writes == [("ratio", (1.0, 1.0))]
+
+
+def test_the_ratio_push_swaps_the_pair_and_state_keeps_ui_order():
+    """"Ratio x" has to scale width, which means swapping at the push.
+
+    The layer resizes to `(in_w * rx, in_h * ry)` with `in_w` bound to
+    `x.shape[-2]`, the height, so slot 0 of the module's own pair is the
+    height scale. Measured on a real model: a "Ratio x" of 2 on a 1024 model
+    rendered a 2048 by 1024 frame before this swap, which is the y axis.
+
+    The other half of the fix is that nothing outside the push moved, so no
+    preset needs migrating: state and `RenderParams` are asserted to still
+    hold the pair the panel wrote, in the panel's order.
+    """
+    conv1 = _state_block(ratio=(1, 1))
+    model = _fake_model(_stateful_synthesis(conv1=conv1))
+    state = ControlState(layer_ratios=(("conv1", 2.0, 1.0),))
+    params = to_render_params(state)
+
+    model.render_frame(params, 0)
+
+    assert conv1.ratio == (1.0, 2.0)
+    assert state.layer_ratios == (("conv1", 2.0, 1.0),)
+    assert params.layer_ratios == {"conv1": (2.0, 1.0)}
+
+
+def test_a_removed_ratio_returns_the_layer_to_neutral_either_way_round():
+    """Neutral is its own mirror, so the swap cannot leave a layer stretched."""
+    conv1 = _state_block(ratio=(1, 1))
+    model = _fake_model(_stateful_synthesis(conv1=conv1))
+
+    model.render_frame(render_params(layer_ratios=(("conv1", 2.0, 0.5),)), 0)
+    model.render_frame(render_params(), 1)
+
+    assert conv1.writes == [("ratio", (0.5, 2.0)), ("ratio", (1.0, 1.0))]
+
+
+def test_the_ratio_swap_does_not_leak_past_the_push():
+    """Written through OSC, saved, reloaded, pushed: x stays first everywhere.
+
+    The pair is swapped at the module write and nowhere else, so no preset
+    needs migrating and an OSC sender never has to know about any of it.
+    """
+    state = apply_event(
+        ControlState(), ControlEvent(BEND_RATIO, SetLayerRatio("conv1", 2.0, 0.5))
+    )
+    assert state.layer_ratios == (("conv1", 2.0, 0.5),)
+
+    payload = presets.to_payload(state)
+    assert payload["layer_ratios"] == [{"layer": "conv1", "rx": 2.0, "ry": 0.5}]
+    reloaded = presets.from_payload(payload)
+    assert reloaded.layer_ratios == (("conv1", 2.0, 0.5),)
+
+    conv1 = _state_block(ratio=(1, 1))
+    model = _fake_model(_stateful_synthesis(conv1=conv1))
+    model.render_frame(render_params(layer_ratios=reloaded.layer_ratios), 0)
+    assert conv1.ratio == (0.5, 2.0)
+
+
+def test_the_ratio_push_still_only_walks_the_network_when_something_moved():
+    """The swap must not cost a walk per frame.
+
+    `_apply_module_state` is memoized on the snapshot's own values, and the
+    swap happens after that compare rather than by rewriting the mapping it
+    keys on, so a held ratio is still one walk.
+    """
+    conv1 = _state_block(ratio=(1, 1))
+    model = _fake_model(_stateful_synthesis(conv1=conv1))
+
+    model.render_frame(render_params(layer_ratios=(("conv1", 2.0, 0.5),)), 0)
+    after_first = list(conv1.writes)
+    model.render_frame(render_params(layer_ratios=(("conv1", 2.0, 0.5),)), 1)
+
+    assert conv1.writes == after_first
 
 
 # --- bending hooks, transforms and layer capture --------------------------
