@@ -52,6 +52,24 @@ SAMPLE = ControlState(
     # test_the_pulse_destination_is_a_property_of_the_machine_not_of_the_look
     # below), so a non-default value here would break the round trip test.
     pulse_address="/loop/pulse",
+    grayscale=True,
+    img_scale_db=6.0,
+    img_normalize=True,
+    base_channel=12,
+    capture_layer="L4",
+    adjust_w1=1.0,
+    adjust_w2=-1.0,
+    adjust_w3=2.0,
+    adjust_w4=-2.0,
+    adjust_w5=3.0,
+    adjust_w6=-3.0,
+    adjust_w7=4.0,
+    adjust_w8=-4.0,
+    pkl2="/tmp/second.pkl",
+    mixing_enabled=True,
+    # use_superres/device/force_fp32/osc_port/ndi_enabled/ndi_name/recording/
+    # fullscreen are left at their defaults, like fps_cap above: they are
+    # preset=False, machine settings rather than part of the look.
     latent_vec=SAMPLE_LATENT_VEC,
     keyframes=(
         Keyframe("seed", 0.0, 0.0, (), True),
