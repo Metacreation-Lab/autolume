@@ -444,9 +444,12 @@ def test_no_row_runs_past_the_panel_it_is_drawn_in(width, font_scale):
     edges = row_edges(width, font_scale)
     assert max(edges) <= 0.0
     # 8 latent rows (vector mode, project, latent x/y, animate, speed x/y,
-    # truncation) + 4 noise rows + 1 render row, drawn through `_widget`, plus
-    # the model row, measured separately since it is a text field.
-    assert len(edges) == 14
+    # truncation) + 4 noise rows, drawn through `_widget`, plus the model row,
+    # measured separately since it is a text field. The frame limit used to be
+    # a fourteenth: it moved to the Performance panel with the render and OSC
+    # status lines, which is what leaves this panel holding only parameters a
+    # performer plays.
+    assert len(edges) == 13
 
 
 def keyframe_row_edges(width: float, font_scale: float) -> list[float]:
@@ -1497,10 +1500,18 @@ def test_only_the_preview_opens_itself_and_every_form_keeps_its_padding():
         "Audio",
         "Mapping",
         "Presets",
+        "Performance",
         "Preview",
     }
     forms = {label for label, own in opens_itself.items() if own}
-    assert forms == {"Controls", "Loop", "Audio", "Mapping", "Presets"}
+    assert forms == {
+        "Controls",
+        "Loop",
+        "Audio",
+        "Mapping",
+        "Presets",
+        "Performance",
+    }
 
 
 def test_the_quad_is_drawn_at_the_size_the_mode_asked_for(frame):

@@ -1,5 +1,10 @@
 """Perform panel: the parameters played during a show.
 
+Only performable parameters. The frame limit, the render rate and the OSC
+port all used to end this panel and now live in the Performance panel: none
+of them is part of a look, none goes into a preset, and all three are about
+the machine rather than the picture.
+
 Every row is the same row: a driver marker saying what drives it, then the
 control. The model is one of them. It used to be a button and a label, drawn by
 hand, which was already the odd one out and became a wrong one once a mapping
@@ -23,7 +28,7 @@ import dataclasses
 import logging
 import random
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Sequence
 
 import numpy as np
 from imgui_bundle import imgui, portable_file_dialogs as pfd
@@ -31,7 +36,7 @@ from imgui_bundle import imgui, portable_file_dialogs as pfd
 from autolume.live.core.events import ControlEvent
 from autolume.live.core.params import VECTOR_RANDOMIZE, VECTOR_SET, derive_mode
 from autolume.live.errors import describe
-from autolume.live.ui.controls import ControlBinder
+from autolume.live.ui.controls import ControlBinder, fitted_width, label_reserve
 from autolume.live.ui.theme import ERROR_COLOR
 
 logger = logging.getLogger(__name__)
@@ -50,6 +55,66 @@ def button_width(label: str) -> float:
     display scale and in whatever the theme sets for padding.
     """
     return imgui.calc_text_size(label).x + imgui.get_style().frame_padding.x * 2.0
+
+
+def combo_index(current: str, values: Sequence[str]) -> int:
+    """Which entry of `values` a combo showing `current` is on, or -1.
+
+    -1 is imgui's own "nothing selected", which draws an empty preview. That
+    is the honest answer for a stored value the list does not contain, which a
+    text parameter can genuinely hold: `device` and `capture_layer` both reach
+    the state from OSC and from presets, so either can name something this
+    build or this model does not have. Snapping such a value to the first
+    entry would draw a selection nobody made and hide the mismatch, so the
+    panels pair a blank combo with a note naming the value instead.
+    """
+    values = list(values)
+    return values.index(current) if current in values else -1
+
+
+def string_combo(
+    label: str,
+    current: str,
+    values: Sequence[str],
+    labels: Sequence[str] | None = None,
+    *,
+    enabled: bool = True,
+) -> str | None:
+    """Draw a combo over `values` and return the newly picked one, or None.
+
+    Shared by the panels that have a text parameter with a fixed set of
+    values: the device, and the capture layer. It carries no driver marker,
+    unlike everything `ControlBinder` draws, because `ControlBinder` has no
+    combo. That is a real gap rather than a decision, recorded in the task 10
+    report: neither of these two parameters is one a performer plays, so it
+    costs nothing today, and adding a bound combo touches `ui/controls.py`,
+    which this task does not own.
+
+    `labels` are what the performer reads and default to the values
+    themselves. The caller emits, so the event stays with the panel that knows
+    which address it belongs to.
+    """
+    shown = list(labels) if labels is not None else list(values)
+    if not enabled:
+        imgui.begin_disabled()
+    # The same fit every `ControlBinder` widget gets (`ControlBinder._fit`):
+    # imgui's default item width is a fraction of the window and the label is
+    # drawn outside it, so an unfitted combo runs off a narrow dock or a
+    # scaled up font and takes the panel's separators with it.
+    imgui.set_next_item_width(
+        fitted_width(
+            imgui.calc_item_width(),
+            imgui.get_content_region_avail().x,
+            label_reserve(label),
+            imgui.get_font_size(),
+        )
+    )
+    changed, chosen = imgui.combo(label, combo_index(current, values), shown)
+    if not enabled:
+        imgui.end_disabled()
+    if not changed or not (0 <= chosen < len(values)):
+        return None
+    return values[chosen]
 
 
 def load_vector_file(path: str) -> list[float]:
@@ -98,8 +163,6 @@ class PerformPanel:
         self._model_row()
         self._latent_rows()
         self._noise_rows()
-        self._render_rows()
-        self._status_row()
 
     def _emit(self, address: str, value) -> None:
         self._runtime.submit(ControlEvent(address, value, source="ui"))
@@ -253,15 +316,3 @@ class PerformPanel:
         # meaningful to watch happen while dragging between them.
         self._binder.input_int("noise_seed", "Seed", enabled=live)
         self._binder.checkbox("noise_anim", "Animate noise", enabled=live)
-
-    def _render_rows(self) -> None:
-        imgui.separator_text("Render")
-        # A typed field: the frame limit is a setting the performer picks
-        # once, not a value worth sweeping through and watching change.
-        self._binder.input_int("fps_cap", "Frame limit")
-
-    def _status_row(self) -> None:
-        imgui.separator()
-        imgui.text(f"Render {self._runtime.render_loop.fps():.1f} fps")
-        if self._runtime.osc.port is not None:
-            imgui.text(f"OSC port {self._runtime.osc.port}")
