@@ -34,7 +34,7 @@ from autolume.live.core.params import (
 )
 from autolume.live.ui.controls import ControlBinder
 
-_SEED_WIDTH_EMS = 4.5
+_SEED_WIDTH_EMS = 1.4
 _PENDING_NOTE = (
     "Noise table is rebuilding. "
     "Motion stays on the previous table until it is ready."
@@ -123,38 +123,66 @@ class LoopPanel:
     def _keyframe_row(
         self, index: int, keyframe: Keyframe, state: ControlState, count: int
     ) -> None:
-        """One keyframe: kind, its content, Project, Remove.
+        """One keyframe, on two lines: kind and Project, then its content.
+
+        Two lines rather than one because one line does not fit the panel at
+        any docked width this suite checks (task 9 review, finding 1): the
+        old app had the same seven widgets on one line and simply had no
+        test to notice it did not fit either, which is parity with a broken
+        layout rather than a reason to keep it. The second line is indented
+        to read as a continuation of the first rather than a row of its own.
 
         The content half is two seed fields or nothing, never both, so a
         vector keyframe's row is not left with two live number fields for a
-        value it cannot hold. Set from current is offered either way: it is
-        the only way to put content into a vector keyframe at all, and a
-        shortcut for a seed one.
+        value it cannot hold. Snap is offered either way: it is the only way
+        to put content into a vector keyframe at all, and a shortcut for a
+        seed one.
         """
         imgui.push_id(index)
+        is_vector = self._keyframe_kind_row(index, keyframe)
+        self._keyframe_content_row(index, keyframe, state, is_vector, count)
+        imgui.pop_id()
+
+    def _keyframe_kind_row(self, index: int, keyframe: Keyframe) -> bool:
+        imgui.text(str(index))
+        imgui.same_line()
         is_vector = keyframe.kind == "vec"
-        changed_kind, checked = imgui.checkbox("Vector", is_vector)
+        # "Vec" and "Proj" rather than "Vector" and "Project": at the
+        # narrowest docked width and the largest font scale this suite
+        # checks, the full words alone overflow the panel before the
+        # content row even starts (task 9 review, finding 1, round 2).
+        changed_kind, checked = imgui.checkbox("Vec", is_vector)
         if changed_kind:
             new_kind = "vec" if checked else "seed"
             self._set_keyframe(index, dataclasses.replace(keyframe, kind=new_kind))
             is_vector = checked
         imgui.same_line()
-        self._keyframe_seed_fields(index, keyframe, is_vector)
-        imgui.same_line()
-        if imgui.button("Set from current"):
-            self._set_keyframe(index, captured_keyframe(keyframe, state))
-        imgui.same_line()
-        changed_project, project = imgui.checkbox("Project", keyframe.project)
+        changed_project, project = imgui.checkbox("Proj", keyframe.project)
         if changed_project:
             self._set_keyframe(index, dataclasses.replace(keyframe, project=project))
+        return is_vector
+
+    def _keyframe_content_row(
+        self,
+        index: int,
+        keyframe: Keyframe,
+        state: ControlState,
+        is_vector: bool,
+        count: int,
+    ) -> None:
+        imgui.indent()
+        self._keyframe_seed_fields(index, keyframe, is_vector)
+        imgui.same_line()
+        if imgui.button("Snap"):
+            self._set_keyframe(index, captured_keyframe(keyframe, state))
         imgui.same_line()
         if count <= 1:
             imgui.begin_disabled()
-        if imgui.button("Remove"):
+        if imgui.button("Del"):
             self._emit(KEYFRAME_REMOVE, RemoveKeyframe(index))
         if count <= 1:
             imgui.end_disabled()
-        imgui.pop_id()
+        imgui.unindent()
 
     def _keyframe_seed_fields(
         self, index: int, keyframe: Keyframe, is_vector: bool

@@ -449,18 +449,22 @@ def test_no_row_runs_past_the_panel_it_is_drawn_in(width, font_scale):
 
 
 def keyframe_row_edges(width: float, font_scale: float) -> list[float]:
-    """Every keyframe row's right edge in the loop panel, against the content edge.
+    """Every keyframe entry's two rows' right edges, against the content edge.
 
     The same measurement `row_edges` takes for the perform panel, aimed at
-    the loop panel's own widest row instead: a keyframe row is not a
+    the loop panel's own widest entry instead: a keyframe row is not a
     `ControlBinder` widget (design.md: keyframes are structured state, not
     registry parameters), so it is measured by wrapping
-    `LoopPanel._keyframe_row` directly rather than `ControlBinder._widget`.
+    `LoopPanel._keyframe_kind_row` and `LoopPanel._keyframe_content_row`
+    directly rather than `ControlBinder._widget`. Both are measured, not
+    just the second: an entry that fits on its content line but not its
+    kind line is still an entry that overflows.
     """
     context = imgui.create_context()
     edges: list[float] = []
     right = [0.0]
-    original_row = LoopPanel._keyframe_row
+    original_kind_row = LoopPanel._keyframe_kind_row
+    original_content_row = LoopPanel._keyframe_content_row
     try:
         io = imgui.get_io()
         io.set_ini_filename(None)
@@ -470,11 +474,17 @@ def keyframe_row_edges(width: float, font_scale: float) -> list[float]:
         theme.apply_theme()
         imgui.get_style().font_scale_main = font_scale
 
-        def measure_row(self, index, keyframe, state, count):
-            original_row(self, index, keyframe, state, count)
+        def measure_kind_row(self, index, keyframe):
+            result = original_kind_row(self, index, keyframe)
+            edges.append(imgui.get_item_rect_max().x - right[0])
+            return result
+
+        def measure_content_row(self, index, keyframe, state, is_vector, count):
+            original_content_row(self, index, keyframe, state, is_vector, count)
             edges.append(imgui.get_item_rect_max().x - right[0])
 
-        LoopPanel._keyframe_row = measure_row
+        LoopPanel._keyframe_kind_row = measure_kind_row
+        LoopPanel._keyframe_content_row = measure_content_row
         panel = LoopPanel(PanelRuntime(), mapping_popup=lambda name: None)
         for _ in range(3):
             imgui.new_frame()
@@ -489,32 +499,25 @@ def keyframe_row_edges(width: float, font_scale: float) -> list[float]:
             imgui.end()
             imgui.render()
     finally:
-        LoopPanel._keyframe_row = original_row
+        LoopPanel._keyframe_kind_row = original_kind_row
+        LoopPanel._keyframe_content_row = original_content_row
         imgui.destroy_context(context)
     return edges
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "The keyframe row genuinely overflows every docked width this suite "
-        "checks (measured 2026-07-25, font scale 1.0: 51px over at 448, "
-        "139px over at 360, 219px over at 280, and it only gets worse at "
-        "1.5x/2.0x). Restructuring the row is the maintainer's call (task 9 "
-        "review, finding 1), not this guard's to hide by loosening its "
-        "tolerance. strict=True: the day a restructured row actually fits, "
-        "this starts failing until the marker is removed, so the fix cannot "
-        "go unnoticed either."
-    ),
-)
 @pytest.mark.parametrize("font_scale", (1.0, 1.5, 2.0))
 @pytest.mark.parametrize("width", (448.0, 360.0, 280.0))
 def test_no_keyframe_row_runs_past_the_panel_it_is_drawn_in(width, font_scale):
-    """The keyframe row is the widest row in the new UI, and the one row
-    `perform.py`'s equivalent guard cannot reach, since it draws a different
-    panel. A guard whose entire purpose is catching silent overflow should
-    not have its widest row exempt from it, which is why this exists even
-    though it does not currently pass.
+    """The keyframe entry is the widest in the new UI, and the one the
+    perform panel's equivalent guard cannot reach, since it draws a
+    different panel. Restructured onto two lines after the review round
+    found the one-line version did not fit at any docked width (task 9
+    review, finding 1): row 1 is the index, the kind switch and Project, row
+    2 is indented under it and carries the seed fields or the vector state,
+    Snap and Del. Both lines are measured, and this includes the window's
+    own vertical scrollbar taking width once the panel's full content, not
+    just this entry, no longer fits the docked height either: the same
+    condition a performer would actually be looking at.
     """
     edges = keyframe_row_edges(width, font_scale)
     assert max(edges) <= 0.0
