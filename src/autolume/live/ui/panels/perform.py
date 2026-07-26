@@ -151,7 +151,7 @@ class PerformPanel:
         walk, is the one moving the frame.
         """
         imgui.separator_text("Latent")
-        self._binder.checkbox("vector_mode", "Vector mode")
+        self._binder.bool_radio("vector_mode", "Seed", "Vec")
         vector_mode = bool(self._binder.value("vector_mode"))
         self._binder.checkbox("latent_project", "Project")
         self._binder.drag_float("latent_x", "Latent x", enabled=not vector_mode)
@@ -231,12 +231,17 @@ class PerformPanel:
         # same frame as the click that greys them.
         live = bool(self._binder.value("noise_enabled"))
         self._binder.slider_float("global_noise", "Amount", enabled=live)
-        self._binder.drag_int("noise_seed", "Seed", enabled=live)
+        # A typed field, not a drag: neighbouring seeds are not a smooth
+        # sweep, each is an unrelated noise pattern, so there is nothing
+        # meaningful to watch happen while dragging between them.
+        self._binder.input_int("noise_seed", "Seed", enabled=live)
         self._binder.checkbox("noise_anim", "Animate noise", enabled=live)
 
     def _render_rows(self) -> None:
         imgui.separator_text("Render")
-        self._binder.slider_int("fps_cap", "Frame limit")
+        # A typed field: the frame limit is a setting the performer picks
+        # once, not a value worth sweeping through and watching change.
+        self._binder.input_int("fps_cap", "Frame limit")
 
     def _status_row(self) -> None:
         imgui.separator()
