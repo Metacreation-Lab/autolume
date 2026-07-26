@@ -9,6 +9,7 @@ from autolume.live.core.generator import (
     DeviceUnavailable,
     LayerInfo,
     LoadedModel,
+    MixSaveStatus,
     ModelHost,
     ModelInfo,
     adjust_weights,
@@ -2626,6 +2627,108 @@ def test_request_mix_ignores_a_value_that_is_not_a_sequence(caplog):
     with caplog.at_level(logging.WARNING):
         host.request_mix(7)
     assert any("not a sequence" in r.getMessage() for r in caplog.records)
+    host.stop()
+
+
+def use_data_root(monkeypatch, root):
+    from utils import user_data
+
+    monkeypatch.setattr(user_data, "_prefs", {"version": 1, "data_root": str(root)})
+    monkeypatch.setattr(user_data, "_data_root", str(root))
+
+
+def stub_discriminator(monkeypatch):
+    import torch
+
+    import autolume.live.core.generator as generator_module
+
+    discriminator = torch.nn.Linear(2, 2)
+    monkeypatch.setattr(
+        generator_module, "load_discriminator", lambda path: discriminator
+    )
+    return discriminator
+
+
+def test_model_host_saves_the_merged_model_next_to_the_users_models(
+    monkeypatch, tmp_path
+):
+    import pickle
+
+    use_data_root(monkeypatch, tmp_path)
+    stub_discriminator(monkeypatch)
+    a, b = tiny_generator(seed=1), tiny_generator(seed=2)
+    host = mixing_host(a, b, split_at_resolution(a, 8))
+    assert wait_for(lambda: host.current().G is not a)
+
+    host.request_save_mix("merged")
+    assert wait_for(lambda: host.mix_save_store.snapshot().path is not None)
+
+    status = host.mix_save_store.snapshot()
+    assert status.error is None
+    assert status.path == str(tmp_path / "models" / "merged.pkl")
+    with open(status.path, "rb") as handle:
+        data = pickle.load(handle)
+    assert set(data) == {"G", "G_ema", "D"}
+    assert data["G"] is data["G_ema"]
+    host.stop()
+
+
+def test_model_host_a_save_name_cannot_escape_the_models_folder(
+    monkeypatch, tmp_path
+):
+    use_data_root(monkeypatch, tmp_path)
+    stub_discriminator(monkeypatch)
+    a, b = tiny_generator(seed=1), tiny_generator(seed=2)
+    host = mixing_host(a, b, split_at_resolution(a, 8))
+    assert wait_for(lambda: host.current().G is not a)
+
+    host.request_save_mix("../../escaped.pkl")
+    assert wait_for(lambda: host.mix_save_store.snapshot().path is not None)
+
+    assert host.mix_save_store.snapshot().path == str(
+        tmp_path / "models" / "escaped.pkl"
+    )
+    host.stop()
+
+
+def test_model_host_a_save_without_a_second_model_reports_and_writes_nothing(
+    monkeypatch, tmp_path
+):
+    use_data_root(monkeypatch, tmp_path)
+    a = tiny_generator(seed=1)
+    host = ModelHost(loader=generator_loader({"/tmp/a.pkl": a}))
+    host.request_load("/tmp/a.pkl")
+    assert wait_for(lambda: host.current() is not None)
+
+    host.request_save_mix("merged")
+    assert wait_for(lambda: host.mix_save_store.snapshot().error is not None)
+
+    status = host.mix_save_store.snapshot()
+    assert status.path is None
+    assert "both slots" in status.error
+    # A save failure is the mixing panel's news, never the preview's.
+    assert host.error() is None
+    assert not (tmp_path / "models" / "merged.pkl").exists()
+    host.stop()
+
+
+def test_model_host_a_save_with_no_name_reports_rather_than_writing(
+    monkeypatch, tmp_path
+):
+    use_data_root(monkeypatch, tmp_path)
+    a, b = tiny_generator(seed=1), tiny_generator(seed=2)
+    host = mixing_host(a, b, split_at_resolution(a, 8))
+    assert wait_for(lambda: host.current().G is not a)
+
+    host.request_save_mix("   ")
+    assert wait_for(lambda: host.mix_save_store.snapshot().error is not None)
+    assert "file name" in host.mix_save_store.snapshot().error
+    host.stop()
+
+
+def test_mix_save_status_starts_empty():
+    host = ModelHost(loader=FakeModel)
+    assert host.mix_save_store.snapshot() == MixSaveStatus()
     host.stop()
 
 

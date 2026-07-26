@@ -9,6 +9,7 @@ Ported from balagan (latent_navigator.py).
 
 import logging
 import math
+import os
 import threading
 from dataclasses import dataclass
 from typing import Callable
@@ -296,6 +297,19 @@ class DeviceStatus:
 
     active: str | None = None
     requested: str = "auto"
+    error: str | None = None
+
+
+@dataclass(frozen=True)
+class MixSaveStatus:
+    """The outcome of the most recent save-merged-model job.
+
+    Kept off the `error()` channel the preview overlay reads: a save that
+    failed is news for the mixing panel that asked for it, not a reason to
+    tell the performer their model is broken while it renders perfectly.
+    """
+
+    path: str | None = None
     error: str | None = None
 
 
@@ -864,6 +878,22 @@ def load_model(path: str, device=None) -> LoadedModel:
     return LoadedModel(str(path), G, device)
 
 
+def load_discriminator(path: str):
+    """The discriminator out of a network pkl.
+
+    A merged model is written with the discriminator of the model it was
+    mixed with, matching the offline mixing tool, because
+    `legacy.load_network_pkl` asserts all three of G, D and G_ema are
+    modules and a file written without one could never be loaded back.
+    """
+    import dnnlib
+    from torch_utils import legacy
+
+    with dnnlib.util.open_url(str(path), verbose=False) as f:
+        data = legacy.load_network_pkl(f, custom=True)
+    return data["D"]
+
+
 def _release_quietly(model: object) -> None:
     """Call `model.release()` if it has one, never raising into the caller.
 
@@ -920,6 +950,7 @@ class ModelHost:
         self._mixing_enabled = False
         self._combined_layers: tuple[str, ...] = ()
         self._pending_mix: tuple[str, ...] | None = None
+        self._pending_save: str | None = None
         # The catalogs for A and for the mix are kept apart because
         # `info_store` publishes whichever one `current()` is rendering, and
         # a mix that truncates depth has different layers from its own
@@ -929,6 +960,9 @@ class ModelHost:
         self.info_store: LatestValueStore[ModelInfo | None] = LatestValueStore(None)
         self.device_store: LatestValueStore[DeviceStatus] = LatestValueStore(
             DeviceStatus()
+        )
+        self.mix_save_store: LatestValueStore[MixSaveStatus] = LatestValueStore(
+            MixSaveStatus()
         )
         self._wakeup = threading.Event()
         self._running = True
@@ -1029,6 +1063,14 @@ class ModelHost:
         if queue:
             self._wakeup.set()
 
+    def request_save_mix(self, output_name: str) -> None:
+        """Write the current selection to `<output_name>.pkl` in the models
+        folder. The outcome lands on `mix_save_store`.
+        """
+        with self._lock:
+            self._pending_save = str(output_name)
+        self._wakeup.set()
+
     def current(self) -> LoadedModel | None:
         """What the render loop draws: the mix while it is on, else model A."""
         with self._lock:
@@ -1083,6 +1125,7 @@ class ModelHost:
                 sticky_device = self._device_name
                 path_b = self._pending_b
                 entries = self._pending_mix
+                save_name = self._pending_save
             # Slot A first, so a mix queued in the same wakeup assembles
             # from the pair the requests actually meant.
             if path is not None:
@@ -1094,6 +1137,8 @@ class ModelHost:
                 self._load_b(path_b)
             if entries is not None:
                 self._build_mix(entries)
+            if save_name is not None:
+                self._save_mix(save_name)
             if self._has_work():
                 self._wakeup.set()
 
@@ -1103,6 +1148,7 @@ class ModelHost:
                 self._pending is not None
                 or self._pending_b is not None
                 or self._pending_mix is not None
+                or self._pending_save is not None
             )
 
     def _publish_info(self) -> None:
@@ -1230,6 +1276,49 @@ class ModelHost:
             return
         _release_quietly(previous)
         self._publish_info()
+
+    def _save_mix(self, output_name: str) -> None:
+        """Write the current selection to `<output_name>.pkl`.
+
+        Assembled fresh on the CPU rather than pickling the network on
+        screen: the file stays loadable on a machine with a different
+        device, and the rendering mix is never touched. The name is reduced
+        to a bare file name so a typed path can never write outside the
+        models folder.
+        """
+        import pickle
+
+        from utils.model_dir import ensure_models_dir
+
+        with self._lock:
+            self._pending_save = None
+            model_a = self._current
+            model_b = self._current_b
+            entries = self._combined_layers
+        name = os.path.basename(str(output_name)).strip()
+        if name.lower().endswith(".pkl"):
+            name = name[: -len(".pkl")]
+        try:
+            if not name:
+                raise ValueError("Give the merged model a file name.")
+            if model_a is None or model_b is None:
+                raise ValueError("Load a model in both slots to mix them.")
+            merged = combine(model_a.G, model_b.G, entries)
+            merged = merged.eval().requires_grad_(False)
+            data = {
+                "G": merged,
+                "G_ema": merged,
+                "D": load_discriminator(model_b.pkl_path),
+            }
+            path = str(os.path.join(ensure_models_dir(), f"{name}.pkl"))
+            with open(path, "wb") as handle:
+                pickle.dump(data, handle)
+        except Exception as exc:
+            logger.exception("Failed to save the merged model")
+            self.mix_save_store.set(MixSaveStatus(error=str(exc)))
+            return
+        logger.info("Saved the merged model to %s", path)
+        self.mix_save_store.set(MixSaveStatus(path=path))
 
     def _load_default(self, path: str, device_name: str) -> None:
         """The ordinary pkl load, resolved against `device_name` (the
