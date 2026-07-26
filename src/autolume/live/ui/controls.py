@@ -674,14 +674,17 @@ class ControlBinder:
         """Draw `name` as a slider.
 
         `commit_on_release` holds the control event until the drag ends
-        instead of sending one on every frame the handle moves. A parameter
-        whose write is expensive, `noise_radius`'s table rebuild is the one
-        that exists today, would otherwise queue one rebuild request per
-        tick of a continuous drag; the builder already coalesces to the
-        newest key, but nothing is served by generating that storm in the
-        first place. The widget still tracks the drag locally so it reads as
-        live under the hand, the same way a text field's buffer follows the
-        keystrokes and only its commit reaches the store.
+        instead of sending one on every frame the handle moves, for a
+        slider whose intermediate values are still meaningful to look at
+        while dragging, but whose write is expensive enough that a storm of
+        per-tick writes would be wasted work. No parameter uses this today
+        (`noise_radius`, the original case, is a typed input instead: every
+        distinct radius costs a table build, not just a continuous drag of
+        one, so nothing about it is actually a position to scrub). The
+        mechanism stays for a future slider that fits the narrower case. The
+        widget still tracks the drag locally so it reads as live under the
+        hand, the same way a text field's buffer follows the keystrokes and
+        only its commit reaches the store.
         """
         spec = require_spec(name, ParamKind.FLOAT)
         minimum, maximum = slider_bounds(spec)
@@ -739,6 +742,109 @@ class ControlBinder:
             spec, label, lambda shown: imgui.checkbox(label, bool(shown)), enabled
         )
 
+    def input_int(self, name: str, label: str, *, enabled: bool = True) -> None:
+        """Draw `name` as a typed integer field that commits on Enter.
+
+        For a quantity, not a position: `keyframe_count`, `noise_loop_seed`,
+        `pulse_port` and the rest of this module's docstring's own rule are
+        the parameters that use this rather than `drag_int`, because their
+        intermediate values while dragging would be destructive, expensive
+        or meaningless. The step buttons are switched off (`0, 0`), so Enter
+        is the only way to commit, matching the rule exactly: never a drag.
+        """
+        spec = require_spec(name, ParamKind.INT)
+        self._widget(
+            spec,
+            label,
+            lambda shown: imgui.input_int(label, int(shown), 0, 0, _ENTER),
+            enabled,
+        )
+
+    def input_float(
+        self, name: str, label: str, *, enabled: bool = True, format: str = "%.3f"
+    ) -> None:
+        """`input_int`'s sibling for a FLOAT parameter. See its docstring."""
+        spec = require_spec(name, ParamKind.FLOAT)
+        self._widget(
+            spec,
+            label,
+            lambda shown: imgui.input_float(
+                label, float(shown), 0.0, 0.0, format, _ENTER
+            ),
+            enabled,
+        )
+
+    def bool_radio(
+        self, name: str, false_label: str, true_label: str, *, enabled: bool = True
+    ) -> None:
+        """Draw `name`, a BOOL parameter, as a two option radio pair.
+
+        A checkbox reads as "add some of this"; a mode choice, `vector_mode`
+        and `loop_uses_time` are the two today, shows both alternatives so
+        picking one is picking between them rather than toggling a
+        quantity. `false_label` is the option shown selected when the
+        parameter is False, `true_label` when it is True. The parameter, its
+        bounds and its driver marker are untouched: this is presentation
+        only.
+
+        Routed through `_widget` like every other control, inside one imgui
+        group: `_widget` reads `is_item_activated`/`_deactivated`/`_active`
+        off the last item drawn, which on its own would only ever see the
+        second radio button. `EndGroup` forwards a child's activation state
+        onto the group's own synthetic item, so the group is what `_widget`
+        sees regardless of which of the two buttons the hand was actually
+        on.
+        """
+        spec = require_spec(name, ParamKind.BOOL)
+
+        def draw(shown: object) -> tuple[bool, bool]:
+            current = bool(shown)
+            changed = False
+            value = current
+            imgui.begin_group()
+            if imgui.radio_button(false_label, not current):
+                changed, value = True, False
+            imgui.same_line()
+            if imgui.radio_button(true_label, current):
+                changed, value = True, True
+            imgui.end_group()
+            return changed, value
+
+        self._widget(spec, f"{false_label}/{true_label}", draw, enabled)
+
+    def drag_int_mapped(
+        self,
+        name: str,
+        label: str,
+        *,
+        minimum: int,
+        maximum: int,
+        to_display: Callable[[int], int],
+        to_stored: Callable[[int], int],
+        speed: float = 1.0,
+        enabled: bool = True,
+    ) -> None:
+        """`drag_int`, but shown in a different domain than `name` is stored in.
+
+        `loop_index` is the one caller: displayed one-based while
+        `ControlState` and OSC stay zero-based, and ranged to the loop's
+        current keyframe count rather than the registry's static bound,
+        since the registry bound only exists to give OSC something to
+        clamp against and the keyframe count is what actually limits a
+        valid index. The translation happens inside `draw`, so everything
+        outside it, the override, the touch events, the driver marker,
+        keeps working in the stored domain and cannot drift from it.
+        """
+        spec = require_spec(name, ParamKind.INT)
+
+        def draw(shown: object) -> tuple[bool, int]:
+            changed, displayed = imgui.drag_int(
+                label, to_display(int(shown)), speed, minimum, maximum
+            )
+            return changed, to_stored(displayed)
+
+        self._widget(spec, label, draw, enabled)
+
     def input_text(
         self,
         name: str,
@@ -751,7 +857,14 @@ class ControlBinder:
         """Draw `name` as a text field, and say whether the hand may use it.
 
         `reserve` is the width the panel wants for whatever it puts after the
-        field on the same row, so the field can take the rest.
+        field on the same row, so the field can take the rest. The field's
+        own trailing label reserves its own width on top of that
+        automatically, the same as `_fit` already does for every other
+        widget kind: without it, a visible label (`pulse_address`,
+        `pulse_ip`, neither of which pass `reserve`) had nothing held back
+        for it and was pushed past the panel edge, since the field claimed
+        the whole row for itself. A hidden `##` label, the model row's, still
+        reserves nothing, so that row is unaffected.
 
         The returned flag is whether the field is live. A panel that draws a
         button beside it disables it on the same flag, because an explicit
@@ -765,7 +878,7 @@ class ControlBinder:
             imgui.set_next_item_width(
                 field_width(
                     imgui.get_content_region_avail().x,
-                    reserve,
+                    reserve + label_reserve(label),
                     imgui.get_font_size() * _FIELD_MIN_EMS,
                 )
             )
@@ -1032,9 +1145,16 @@ class ControlBinder:
             draw_list.add_rect(corner_min, corner_max, color, 0.0, stroke)
 
     def _mapping_menu(self, name: str) -> None:
+        # An explicit id rather than the last item's own, which `bool_radio`
+        # has none of: its two radio buttons sit inside one `begin_group`,
+        # and a group's synthetic closing item carries no id of its own,
+        # only the combined rect `is_item_hovered` still reads correctly for
+        # the right click this opens on. `push_id(name)` (the caller, both
+        # `_widget` and `_text_widget`) already scopes this uniquely per
+        # parameter, so a literal string here cannot collide across rows.
         if self._mapping_popup is None:
             return
-        if imgui.begin_popup_context_item():
+        if imgui.begin_popup_context_item("##mapping_menu"):
             self._mapping_popup(name)
             imgui.end_popup()
 
