@@ -2738,3 +2738,44 @@ def test_request_mix_ignores_a_bare_string(caplog):
         host.request_mix("ABX")
     assert any("not a sequence" in r.getMessage() for r in caplog.records)
     host.stop()
+
+
+def test_model_host_an_all_a_mix_renders_the_same_frame_as_model_a():
+    """The strongest form of "all A reproduces A": equal pixels through the
+    render path, not just equal tensors in a state dict.
+
+    Noise off and truncation at 1 because the merge copies parameters and
+    not buffers, so the mixed model has its own constant noise and a zero
+    `w_avg`. Those are the two places an all-A mix legitimately diverges
+    from A under the ported behavior, and this test is about the merge.
+    """
+    a, b = tiny_generator(seed=1), tiny_generator(seed=2)
+    host = mixing_host(a, b)
+    params = render_params(noise_enabled=False, truncation_psi=1.0)
+    plain = host.current().render_frame(params, 0)
+
+    host.set_mixing_enabled(True)
+    host.request_mix(["A"] * selection_length(a, b))
+    assert wait_for(lambda: host.current().G is not a)
+    mixed = host.current().render_frame(params, 0)
+
+    assert mixed.shape == plain.shape
+    assert (mixed == plain).all()
+    host.stop()
+
+
+def test_model_host_a_split_mix_renders_a_different_frame_from_model_a():
+    """Guards the test above from passing on a mix that is silently A."""
+    a, b = tiny_generator(seed=1), tiny_generator(seed=2)
+    host = mixing_host(a, b)
+    params = render_params(noise_enabled=False, truncation_psi=1.0)
+    plain = host.current().render_frame(params, 0)
+
+    host.set_mixing_enabled(True)
+    host.request_mix(split_at_resolution(a, 8))
+    assert wait_for(lambda: host.current().G is not a)
+    mixed = host.current().render_frame(params, 0)
+
+    assert mixed.shape == plain.shape
+    assert not (mixed == plain).all()
+    host.stop()

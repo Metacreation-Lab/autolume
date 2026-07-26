@@ -275,3 +275,24 @@ def test_combine_leaves_the_sources_on_their_own_device():
     mixed = combine(a, b, ["A"] * selection_length(a, b))
     assert next(mixed.parameters()).device == torch.device("cpu")
     assert next(a.parameters()).device == torch.device("cpu")
+
+
+def test_a_mix_does_not_inherit_the_sources_buffers():
+    """Ported behavior, pinned deliberately rather than left implicit.
+
+    The merge copies parameters and not buffers, because that is what the
+    two legacy paths do. A mixed model therefore starts with a zero `w_avg`
+    and its own freshly drawn constant noise, so an all-A mix diverges from
+    A exactly where those two are read: truncation below 1, and the "const"
+    noise mode. Flagged in the task report for the maintainer to decide on,
+    not changed here.
+    """
+    a = generator(seed=1)
+    b = generator(seed=2)
+    # A trained model's w_avg is whatever training left there, never zero.
+    with torch.no_grad():
+        a.mapping.w_avg.fill_(0.5)
+    mixed = combine(a, b, ["A"] * selection_length(a, b))
+    assert torch.equal(mixed.mapping.w_avg, torch.zeros_like(mixed.mapping.w_avg))
+    noise = "synthesis.b8.conv0.noise_const"
+    assert not torch.equal(mixed.state_dict()[noise], a.state_dict()[noise])
