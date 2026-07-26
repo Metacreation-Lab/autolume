@@ -200,6 +200,7 @@ def test_apply_value_keeps_unbounded_extremes_finite():
 
 
 def test_motion_specs_declare_expected_addresses_kinds_and_bounds():
+    # Preset defaults to True; only the params that opt out list it explicitly.
     expected = {
         "vector_mode": ("/latent/vector", params.ParamKind.BOOL, False, None, None),
         "latent_project": ("/latent/project", params.ParamKind.BOOL, True, None, None),
@@ -218,12 +219,13 @@ def test_motion_specs_declare_expected_addresses_kinds_and_bounds():
         "pulse_ip": ("/loop/pulse/ip", params.ParamKind.STR, "127.0.0.1", None, None),
         "pulse_port": ("/loop/pulse/port", params.ParamKind.INT, 5005, 1, 65535),
     }
+    non_preset = {"pulse_ip", "pulse_port"}
     assert set(expected) <= set(params.REGISTRY)
     for name, (address, kind, default, minimum, maximum) in expected.items():
         spec = params.REGISTRY[name]
         assert (spec.address, spec.kind, spec.default) == (address, kind, default)
         assert (spec.minimum, spec.maximum) == (minimum, maximum)
-        assert spec.preset is True
+        assert spec.preset is (name not in non_preset)
 
 
 def test_registry_has_sixteen_motion_rows():

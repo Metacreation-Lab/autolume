@@ -73,8 +73,14 @@ _SPECS = (
     # Loop pulse: one OSC message per loop-start or loop-complete event, sent
     # to a user configured address, separate from the control input port.
     ParamSpec("pulse_address", ParamKind.STR, "", "/loop/pulse/address"),
-    ParamSpec("pulse_ip", ParamKind.STR, "127.0.0.1", "/loop/pulse/ip"),
-    ParamSpec("pulse_port", ParamKind.INT, 5005, "/loop/pulse/port", 1, 65535),
+    # The IP and port are the machine's, not the look's: a preset saved on one
+    # LAN would silently misdirect pulses on another, the way an absolute
+    # model path once did. The address they carry names the message and stays
+    # part of the look, so it keeps preset=True.
+    ParamSpec("pulse_ip", ParamKind.STR, "127.0.0.1", "/loop/pulse/ip", preset=False),
+    ParamSpec(
+        "pulse_port", ParamKind.INT, 5005, "/loop/pulse/port", 1, 65535, preset=False
+    ),
 )
 
 REGISTRY: dict[str, ParamSpec] = {spec.name: spec for spec in _SPECS}

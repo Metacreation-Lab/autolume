@@ -51,9 +51,11 @@ SAMPLE = ControlState(
     noise_loop=True,
     noise_radius=5.0,
     noise_loop_seed=42,
+    # pulse_ip / pulse_port are left at their defaults, like fps_cap above:
+    # they are preset=False (see
+    # test_the_pulse_destination_is_a_property_of_the_machine_not_of_the_look
+    # below), so a non-default value here would break the round trip test.
     pulse_address="/loop/pulse",
-    pulse_ip="10.0.0.5",
-    pulse_port=9000,
     latent_vec=SAMPLE_LATENT_VEC,
     keyframes=(
         Keyframe("seed", 0.0, 0.0, (), True),
@@ -214,6 +216,32 @@ def test_the_frame_limit_is_a_property_of_the_machine_not_of_the_look(
     assert payload["model"] == {"name": "look.pkl"}
     assert apply_payload(ControlState(fps_cap=144), payload).fps_cap == 144
     assert presets.from_payload(payload).params["pkl_path"] == str(model_file)
+
+
+def test_the_pulse_destination_is_a_property_of_the_machine_not_of_the_look(
+    tmp_path,
+):
+    """A look saved on one LAN must not misdirect pulses on another.
+
+    The pulse address is the opposite case and stays persisted: it names the
+    message within the patch, which is what a receiving rig matches on and is
+    meaningfully part of the look, the same distinction `fps_cap` draws
+    between the machine and the look above.
+    """
+    state = dataclasses.replace(
+        SAMPLE, pulse_address="/loop/pulse", pulse_ip="10.0.0.5", pulse_port=9000
+    )
+    path = tmp_path / "look.json"
+    presets.save(state, path)
+    payload = presets.load(path)
+    assert "pulse_ip" not in payload["params"]
+    assert "pulse_port" not in payload["params"]
+    assert payload["params"]["pulse_address"] == "/loop/pulse"
+    current = ControlState(pulse_ip="192.168.1.1", pulse_port=6000)
+    loaded = apply_payload(current, payload)
+    assert loaded.pulse_ip == "192.168.1.1"
+    assert loaded.pulse_port == 6000
+    assert loaded.pulse_address == "/loop/pulse"
 
 
 def test_params_written_follow_the_registry_preset_flag(monkeypatch):
