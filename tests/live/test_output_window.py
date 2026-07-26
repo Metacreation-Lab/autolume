@@ -11,6 +11,7 @@ from autolume.live.ui.output_window import (
     Rect,
     decide_action,
     letterbox_rect,
+    pending_status,
     suppressed_fullscreen,
 )
 
@@ -201,4 +202,39 @@ def test_no_active_suppression_passes_true_through():
 def test_no_active_suppression_passes_false_through():
     fullscreen, deadline = suppressed_fullscreen(False, suppress_until=None, now=5.0)
     assert fullscreen is False
+    assert deadline is None
+
+
+# --- pending_status ---------------------------------------------------------
+
+
+def test_status_survives_a_poll_before_its_dwell_ends():
+    # Written at t=0 with a 5 second dwell (deadline 5.0); a poll partway
+    # through must still show it, unrelated to whatever fullscreen is doing.
+    status, deadline = pending_status(
+        "Fullscreen output is unavailable.", status_until=5.0, now=2.0
+    )
+    assert status == "Fullscreen output is unavailable."
+    assert deadline == 5.0
+
+
+def test_status_disappears_after_its_dwell():
+    status, deadline = pending_status(
+        "Fullscreen output is unavailable.", status_until=5.0, now=5.0
+    )
+    assert status is None
+    assert deadline is None
+
+
+def test_no_status_stays_empty():
+    status, deadline = pending_status(None, status_until=None, now=1.0)
+    assert status is None
+    assert deadline is None
+
+
+def test_status_with_no_deadline_clears_defensively():
+    # Should not happen in practice (every set carries a deadline), but a
+    # status with nothing to expire it must not read as permanent.
+    status, deadline = pending_status("stray", status_until=None, now=1.0)
+    assert status is None
     assert deadline is None

@@ -8,10 +8,10 @@ every platform. It is driven from `window.py`'s per-frame callback rather
 than a thread of its own because GLFW window creation has to happen on the
 main thread, and this app only has the one.
 
-`decide_action`, `letterbox_rect` and `suppressed_fullscreen` are the pure
-logic and are unit tested. Everything else here is GL and GLFW calls, which
-cannot be driven headless and stay manual-only (see
-`tests/live/test_output_window.py`).
+`decide_action`, `letterbox_rect`, `suppressed_fullscreen` and
+`pending_status` are the pure logic and are unit tested. Everything else here
+is GL and GLFW calls, which cannot be driven headless and stay manual-only
+(see `tests/live/test_output_window.py`).
 """
 
 import ctypes
@@ -51,6 +51,15 @@ _UNAVAILABLE_STATUS = "Fullscreen output is unavailable. Check the log for detai
 # with yet reliably clears, short enough that a performer re-enabling
 # fullscreen right after closing it never feels delayed.
 _SUPPRESS_SECONDS = 0.25
+# How long a status message stays on screen once written, regardless of what
+# `fullscreen` does in the meantime. The failure it reports and the param
+# going false are the same event (this window submits the false itself), and
+# that submit is only 8ms from being observed, so deriving the message's
+# lifetime from the param would erase it within a frame or two of it ever
+# being drawn. Five seconds is enough to actually read two short sentences,
+# and short enough that it is gone well before a performer would wonder why
+# an old failure is still on screen.
+_STATUS_DWELL_SECONDS = 5.0
 
 
 class Action(Enum):
@@ -113,6 +122,27 @@ def suppressed_fullscreen(
     if suppress_until is None or now >= suppress_until:
         return fullscreen, None
     return False, suppress_until
+
+
+def pending_status(
+    status: str | None, status_until: float | None, now: float
+) -> tuple[str | None, float | None]:
+    """The status to draw this poll, and the deadline to carry into the next.
+
+    Deliberately independent of `fullscreen`: a status reports something that
+    already happened, a create or a render that failed, not the param's
+    current value, and the two only look related because this window submits
+    `fullscreen=False` itself when it writes one. Tying the message's
+    lifetime to the param would erase it the moment that submit is observed,
+    which is one control loop tick, not a dwell a performer could read.
+
+    A missing deadline expires the message immediately rather than leaving it
+    stuck: there is no legitimate state where a status is set with nothing to
+    expire it.
+    """
+    if status is None or status_until is None or now >= status_until:
+        return None, None
+    return status, status_until
 
 
 @dataclass(frozen=True)
@@ -291,7 +321,10 @@ class OutputWindow:
         self._texture = 0
         self._frame_size = (0, 0)
         self._last_seq = -1
+        # See `pending_status`: a message and its own expiry, unrelated to
+        # `fullscreen`'s value.
         self._status: str | None = None
+        self._status_until: float | None = None
         # See `suppressed_fullscreen`: set whenever this window submits
         # `fullscreen=False` on its own initiative, cleared once that
         # suppression window elapses or the param is genuinely false again.
@@ -322,13 +355,10 @@ class OutputWindow:
             self._restore_main_context()
 
     def _poll(self, fullscreen: bool, preview) -> None:
-        if not fullscreen:
-            # Off is never itself a failure, whether it was always off or
-            # just settled there after one: there is nothing left to warn
-            # about, which is what keeps a status from an old failure stuck
-            # on screen for the rest of the session.
-            self._status = None
         now = self._clock()
+        self._status, self._status_until = pending_status(
+            self._status, self._status_until, now
+        )
         effective, self._suppress_until = suppressed_fullscreen(
             fullscreen, self._suppress_until, now
         )
@@ -355,7 +385,7 @@ class OutputWindow:
         except Exception:
             logger.exception("Fullscreen output failed while drawing, closing it")
             self._close(suppress=True)
-            self._status = _UNAVAILABLE_STATUS
+            self._set_status(_UNAVAILABLE_STATUS)
 
     def _try_create(self) -> None:
         try:
@@ -363,31 +393,44 @@ class OutputWindow:
         except Exception:
             logger.exception("Could not open the fullscreen output window")
             self._close(suppress=True)
-            self._status = _UNAVAILABLE_STATUS
+            self._set_status(_UNAVAILABLE_STATUS)
         else:
-            self._status = None
+            self._clear_status()
+
+    def _set_status(self, message: str) -> None:
+        self._status = message
+        self._status_until = self._clock() + _STATUS_DWELL_SECONDS
+
+    def _clear_status(self) -> None:
+        self._status = None
+        self._status_until = None
 
     def _create(self) -> None:
-        glfw.default_window_hints()
-        glfw.window_hint(glfw.DECORATED, False)
-        glfw.window_hint(glfw.RESIZABLE, False)
-        glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
-        glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 3)
-        glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
-        glfw.window_hint(glfw.OPENGL_FORWARD_COMPAT, True)
-        monitor = glfw.get_primary_monitor()
-        if monitor is None:
-            raise RuntimeError("No primary monitor reported by GLFW")
-        mode = glfw.get_video_mode(monitor)
-        if mode is None:
-            raise RuntimeError("No video mode reported for the primary monitor")
-        window = glfw.create_window(mode.size.width, mode.size.height, _TITLE, None, None)
-        # Hints are process-global and only consumed at creation, so they are
-        # put back to GLFW's own defaults immediately after, rather than left
-        # sitting there for whatever creates the next GLFW window, which
-        # would otherwise inherit undecorated, non-resizable and a pinned GL
-        # version meant only for this one.
-        glfw.default_window_hints()
+        # Hints are process-global and only consumed at creation, so the
+        # `finally` puts them back to GLFW's own defaults regardless of how
+        # this exits, including "no primary monitor" and "no video mode"
+        # raising before `create_window` is ever called. Left to only the
+        # line after a successful call, any of those raises (an unplugged
+        # projector, for instance) would skip it and leave undecorated,
+        # non-resizable and a pinned GL version sitting there for whatever
+        # creates the next GLFW window in the process.
+        try:
+            glfw.default_window_hints()
+            glfw.window_hint(glfw.DECORATED, False)
+            glfw.window_hint(glfw.RESIZABLE, False)
+            glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
+            glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 3)
+            glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
+            glfw.window_hint(glfw.OPENGL_FORWARD_COMPAT, True)
+            monitor = glfw.get_primary_monitor()
+            if monitor is None:
+                raise RuntimeError("No primary monitor reported by GLFW")
+            mode = glfw.get_video_mode(monitor)
+            if mode is None:
+                raise RuntimeError("No video mode reported for the primary monitor")
+            window = glfw.create_window(mode.size.width, mode.size.height, _TITLE, None, None)
+        finally:
+            glfw.default_window_hints()
         if window is None:
             raise RuntimeError("glfw.create_window returned no window")
         self._window = window
@@ -483,7 +526,7 @@ class OutputWindow:
         except Exception:
             logger.exception("Failed to close the fullscreen output cleanly")
             self._window = None
-        self._status = _UNAVAILABLE_STATUS
+        self._set_status(_UNAVAILABLE_STATUS)
 
     def _destroy_gl(self) -> None:
         window = self._window
