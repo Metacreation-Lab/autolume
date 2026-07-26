@@ -259,6 +259,25 @@ def test_render_frame_passes_noise_mode_to_synthesis():
     assert seen == ["random", "none"]
 
 
+def test_render_frame_passes_force_fp32_only_when_it_is_set():
+    """force_fp32 is legacy, CUDA-only semantics: a no-op wherever the real
+    network ignores it, so it is only ever passed through when True, and a
+    fake synthesis taking the plain (ws, noise_mode) shape everywhere else in
+    this file keeps working with the False (default) path."""
+    seen = []
+
+    def synthesis(ws, noise_mode, force_fp32=False):
+        import torch
+
+        seen.append(force_fp32)
+        return torch.zeros([1, 3, 8, 8])
+
+    model = _fake_model(synthesis)
+    model.render_frame(render_params(force_fp32=False), 0)
+    model.render_frame(render_params(force_fp32=True), 1)
+    assert seen == [False, True]
+
+
 def test_render_frame_seeds_torch_with_effective_seed(monkeypatch):
     import torch
 

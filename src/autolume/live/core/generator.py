@@ -734,8 +734,15 @@ class LoadedModel:
             self._frame_transforms = params.transforms
             self._frame_capture = params.capture_layer
             self._captured = None
+            # force_fp32 is legacy, CUDA-only semantics: passed through only
+            # when set, so a fake synthesis in a test that only accepts
+            # (ws, noise_mode) keeps working, and a real network's own
+            # default (False) governs whenever it is not.
+            synthesis_kwargs = {"noise_mode": mode}
+            if params.force_fp32:
+                synthesis_kwargs["force_fp32"] = True
             try:
-                output = self.G.synthesis(ws.unsqueeze(0), noise_mode=mode)
+                output = self.G.synthesis(ws.unsqueeze(0), **synthesis_kwargs)
             finally:
                 captured = self._captured
                 self._frame_transforms = ()
