@@ -5,6 +5,8 @@ import time
 import pytest
 
 from autolume.live.core.generator import (
+    DeviceStatus,
+    DeviceUnavailable,
     LayerInfo,
     ModelHost,
     ModelInfo,
@@ -16,6 +18,7 @@ from autolume.live.core.generator import (
     effective_noise_seed,
     manipulation_dict,
     noise_mode,
+    resolve_device,
     slerp,
     to_uint8_frame,
     usable_indices,
@@ -151,6 +154,177 @@ def test_model_host_clears_model_info_on_load_failure():
     while host.info_store.snapshot() is not None and time.monotonic() < deadline:
         time.sleep(0.005)
     assert host.info_store.snapshot() is None
+    host.stop()
+
+
+# --- device switching ----------------------------------------------------
+
+
+def test_resolve_device_auto_delegates_to_pick_device(monkeypatch):
+    import autolume.live.core.generator as generator_module
+
+    sentinel = object()
+    monkeypatch.setattr(generator_module, "pick_device", lambda: sentinel)
+    assert resolve_device("auto") is sentinel
+
+
+def test_resolve_device_cpu_is_always_available():
+    import torch
+
+    assert resolve_device("cpu") == torch.device("cpu")
+
+
+def test_resolve_device_cuda_unavailable_raises(monkeypatch):
+    import torch
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    with pytest.raises(DeviceUnavailable):
+        resolve_device("cuda")
+
+
+def test_resolve_device_mps_unavailable_raises(monkeypatch):
+    import torch
+
+    monkeypatch.setattr(torch.backends.mps, "is_available", lambda: False)
+    with pytest.raises(DeviceUnavailable):
+        resolve_device("mps")
+
+
+def test_resolve_device_unknown_name_raises():
+    with pytest.raises(DeviceUnavailable):
+        resolve_device("tpu")
+
+
+class _DeviceAwareModel:
+    """A loader double that records the device it was built with and can be
+    released, so tests can assert `ModelHost` retires it properly."""
+
+    def __init__(self, path, device=None):
+        self.pkl_path = path
+        self.z_dim = 4
+        self.num_ws = 2
+        self.device = device
+        self.released = 0
+
+    def release(self) -> None:
+        self.released += 1
+
+
+def test_model_host_request_device_is_a_noop_without_a_current_model():
+    calls = []
+
+    def loader(path, device=None):
+        calls.append((path, device))
+        return _DeviceAwareModel(path, device)
+
+    host = ModelHost(loader=loader)
+    host.request_device("cpu")
+    time.sleep(0.05)
+    assert host.current() is None
+    assert calls == []
+    host.stop()
+
+
+def test_model_host_reloads_the_current_pkl_onto_a_resolved_device():
+    import torch
+
+    calls = []
+
+    def loader(path, device=None):
+        calls.append((path, device))
+        return _DeviceAwareModel(path, device)
+
+    host = ModelHost(loader=loader)
+    host.request_load("/tmp/a.pkl")
+    deadline = time.monotonic() + 2.0
+    while host.current() is None and time.monotonic() < deadline:
+        time.sleep(0.005)
+    first = host.current()
+    assert calls == [("/tmp/a.pkl", None)]
+
+    host.request_device("cpu")
+    deadline = time.monotonic() + 2.0
+    while host.current() is first and time.monotonic() < deadline:
+        time.sleep(0.005)
+
+    assert calls[-1] == ("/tmp/a.pkl", torch.device("cpu"))
+    assert host.current().device == torch.device("cpu")
+    assert host.device_store.snapshot() == DeviceStatus(
+        active="cpu", requested="cpu", error=None
+    )
+    # The retired model is released the instant it stops being current, not
+    # whenever GC gets to it (see LoadedModel.release / the hook cycle note).
+    assert first.released == 1
+    host.stop()
+
+
+def test_model_host_reverts_status_and_keeps_the_model_on_an_unavailable_device():
+    def loader(path, device=None):
+        return _DeviceAwareModel(path, device)
+
+    host = ModelHost(loader=loader)
+    host.request_load("/tmp/a.pkl")
+    deadline = time.monotonic() + 2.0
+    while host.current() is None and time.monotonic() < deadline:
+        time.sleep(0.005)
+    running = host.current()
+
+    # This machine (the test runner) never has CUDA, so this is a genuine
+    # unavailable-device request, not a mocked one.
+    host.request_device("cuda")
+    deadline = time.monotonic() + 2.0
+    while host.device_store.snapshot().error is None and time.monotonic() < deadline:
+        time.sleep(0.005)
+
+    assert host.current() is running
+    status = host.device_store.snapshot()
+    assert status.requested == "cuda"
+    assert status.error is not None
+    assert running.released == 0
+    host.stop()
+
+
+def test_model_host_a_reload_failure_on_device_switch_also_reverts():
+    def loader(path, device=None):
+        if device is not None:
+            raise RuntimeError("out of memory")
+        return _DeviceAwareModel(path, device)
+
+    host = ModelHost(loader=loader)
+    host.request_load("/tmp/a.pkl")
+    deadline = time.monotonic() + 2.0
+    while host.current() is None and time.monotonic() < deadline:
+        time.sleep(0.005)
+    running = host.current()
+
+    host.request_device("cpu")
+    deadline = time.monotonic() + 2.0
+    while host.device_store.snapshot().error is None and time.monotonic() < deadline:
+        time.sleep(0.005)
+
+    assert host.current() is running
+    assert "out of memory" in host.device_store.snapshot().error
+    host.stop()
+
+
+def test_model_host_releases_the_outgoing_model_on_a_plain_reload():
+    def loader(path):
+        return _DeviceAwareModel(path)
+
+    host = ModelHost(loader=loader)
+    host.request_load("/tmp/a.pkl")
+    deadline = time.monotonic() + 2.0
+    while host.current() is None and time.monotonic() < deadline:
+        time.sleep(0.005)
+    first = host.current()
+
+    host.request_load("/tmp/b.pkl")
+    deadline = time.monotonic() + 2.0
+    while host.current() is first and time.monotonic() < deadline:
+        time.sleep(0.005)
+
+    assert host.current().pkl_path == "/tmp/b.pkl"
+    assert first.released == 1
     host.stop()
 
 
@@ -1632,3 +1806,27 @@ def test_a_layer_with_nothing_to_bend_is_left_alone():
         transforms=(Transform("ablate", "conv1", (1.0,), _ALL_CHANNELS),),
     )
     assert _pixel(model.render_frame(params, 0)) == [159, 159, 159]
+
+
+def test_release_removes_hook_handles_and_leaves_the_module_clean():
+    """The reference cycle this task's brief flags: `G ->
+    module._forward_hooks -> closure -> LoadedModel -> G`. Removing the
+    handles is what breaks it, so this checks the module's own hook table,
+    not just `LoadedModel`'s bookkeeping list."""
+    model = _bendable_model()
+    params = render_params(
+        transforms=(Transform("ablate", "conv1", (1.0,), _ALL_CHANNELS),)
+    )
+    model.render_frame(params, 0)
+    assert len(model._hook_handles) == 1
+    assert model.G.synthesis.conv1.hook_registrations == 1
+
+    model.release()
+
+    assert model._hook_handles == []
+    for module in model.G.synthesis.modules():
+        assert len(module._forward_hooks) == 0
+
+    # Idempotent: a second release on an already-released model is safe.
+    model.release()
+    assert model._hook_handles == []

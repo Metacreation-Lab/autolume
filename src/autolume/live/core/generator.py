@@ -244,6 +244,59 @@ def pick_device():
     return torch.device("cpu")
 
 
+class DeviceUnavailable(Exception):
+    """A requested device name this machine cannot actually provide.
+
+    Raised by `resolve_device`, on the loader thread, for `cuda`/`mps` when
+    that backend is not available, or for a name outside the registry's four
+    valid values. Kept distinct from a plain load failure so the caller can
+    tell "this pkl is broken" from "this device does not exist here" without
+    parsing an error string.
+    """
+
+
+def resolve_device(name: str):
+    """A `device` registry value (`auto`/`cuda`/`mps`/`cpu`) to a real device.
+
+    `auto` always resolves, through `pick_device`, the same as an initial
+    model load with no device requested. Every other name is validated
+    against what this machine actually has, so a switch to an unavailable
+    device fails here rather than partway through `.to(device)`.
+    """
+    import torch
+
+    if name == "auto":
+        return pick_device()
+    if name == "cuda":
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        raise DeviceUnavailable("CUDA is not available on this machine")
+    if name == "mps":
+        if torch.backends.mps.is_available():
+            return torch.device("mps")
+        raise DeviceUnavailable("MPS is not available on this machine")
+    if name == "cpu":
+        return torch.device("cpu")
+    raise DeviceUnavailable(f"Unknown device {name!r}")
+
+
+@dataclass(frozen=True)
+class DeviceStatus:
+    """What the render device is doing, published for the performance panel.
+
+    `active` is the device string the currently loaded model actually runs
+    on (None before anything has loaded), never what was merely asked for.
+    `requested` is the device name the most recent switch attempt was made
+    with, so a watcher can tell which attempt a given status answers.
+    `error` is set only when that attempt failed, and cleared by the next
+    one that succeeds.
+    """
+
+    active: str | None = None
+    requested: str = "auto"
+    error: str | None = None
+
+
 @dataclass(frozen=True)
 class LayerInfo:
     """One synthesis submodule's output shape, as seen by the layer catalog."""
@@ -532,6 +585,22 @@ class LoadedModel:
                 exc_info=True,
             )
 
+    def release(self) -> None:
+        """Drop this model's forward hooks so `G` is freed by refcount.
+
+        The hooks form a cycle, `G -> module._forward_hooks -> closure ->
+        LoadedModel -> G`, that keeps a retired model's VRAM alive until a
+        generational GC pass instead of the instant the last reference
+        drops. `ModelHost` calls this the moment a model stops being
+        `current()`, which on a device switch is exactly when the incoming
+        model needs that VRAM back. Safe to call more than once.
+        """
+        for handle in self._hook_handles:
+            handle.remove()
+        self._hook_handles = []
+        self._hook_key = None
+        self._manipulation = None
+
     def _sync_hooks(self, params: RenderParams) -> None:
         """Hold one forward hook on every layer this frame reads or edits.
 
@@ -770,6 +839,23 @@ def load_model(path: str, device=None) -> LoadedModel:
     return LoadedModel(str(path), G, device)
 
 
+def _release_quietly(model: object) -> None:
+    """Call `model.release()` if it has one, never raising into the caller.
+
+    Duck-typed and best-effort: a loader's test double is rarely a real
+    `LoadedModel` and need not implement `release`, and a real one failing to
+    remove a handle must not take the loader thread down over a model that is
+    being thrown away anyway.
+    """
+    release = getattr(model, "release", None)
+    if not callable(release):
+        return
+    try:
+        release()
+    except Exception:
+        logger.exception("Failed releasing a retired model")
+
+
 class ModelHost:
     """Owns the loaded model and a background loader thread.
 
@@ -783,7 +869,14 @@ class ModelHost:
         self._current: LoadedModel | None = None
         self._error: str | None = None
         self._pending: str | None = None
+        # None means "no device switch in flight", the ordinary pkl-change
+        # path: the loader is called with one argument, exactly as before
+        # this ever existed. Set only by request_device.
+        self._pending_device: str | None = None
         self.info_store: LatestValueStore[ModelInfo | None] = LatestValueStore(None)
+        self.device_store: LatestValueStore[DeviceStatus] = LatestValueStore(
+            DeviceStatus()
+        )
         self._wakeup = threading.Event()
         self._running = True
         self._thread = threading.Thread(
@@ -794,6 +887,23 @@ class ModelHost:
     def request_load(self, path: str) -> None:
         with self._lock:
             self._pending = str(path)
+            self._pending_device = None
+        self._wakeup.set()
+
+    def request_device(self, name: str) -> None:
+        """Reload the currently loaded model onto `name` on the loader thread.
+
+        A no-op when nothing is loaded yet: there is no current pkl to
+        reload, and nothing is rendering on the wrong device to begin with.
+        `name` is resolved and validated on the loader thread, never here, so
+        this never blocks and never raises.
+        """
+        with self._lock:
+            current = self._current
+            if current is None:
+                return
+            self._pending = current.pkl_path
+            self._pending_device = str(name)
         self._wakeup.set()
 
     def current(self) -> LoadedModel | None:
@@ -831,32 +941,96 @@ class ModelHost:
                 return
             with self._lock:
                 path = self._pending
+                device_name = self._pending_device
             if path is None:
                 continue
-            try:
-                model = self._loader(path)
-                # Enumerated before publishing: the layer catalog's dry
-                # synthesis pass attaches and removes hooks on this model's
-                # submodules, and that must be finished before the render
-                # thread can ever see this model through current().
-                info = _model_info(path, model)
-                with self._lock:
-                    won = self._pending == path
-                    if won:
-                        self._current = model
-                        self._error = None
-                        self._pending = None
-                    # else: a newer request arrived while loading; loop again
-                if won:
-                    self.info_store.set(info)
-            except Exception as exc:
-                logger.exception("Failed to load model %s", path)
-                with self._lock:
-                    won = self._pending == path
-                    if won:
-                        self._error = str(exc)
-                        self._pending = None
-                if won:
-                    self.info_store.set(None)
+            if device_name is None:
+                self._load_default(path)
+            else:
+                self._load_on_device(path, device_name)
             if self.loading():
                 self._wakeup.set()
+
+    def _load_default(self, path: str) -> None:
+        """The ordinary pkl load: whatever device the loader itself picks.
+
+        Unchanged behavior from before device switching existed, so a loader
+        test double taking a single `path` argument keeps working.
+        """
+        try:
+            model = self._loader(path)
+            # Enumerated before publishing: the layer catalog's dry
+            # synthesis pass attaches and removes hooks on this model's
+            # submodules, and that must be finished before the render
+            # thread can ever see this model through current().
+            info = _model_info(path, model)
+            with self._lock:
+                won = self._pending == path and self._pending_device is None
+                if won:
+                    previous = self._current
+                    self._current = model
+                    self._error = None
+                    self._pending = None
+                # else: a newer request arrived while loading; loop again
+            if won:
+                _release_quietly(previous)
+                self.info_store.set(info)
+        except Exception as exc:
+            logger.exception("Failed to load model %s", path)
+            with self._lock:
+                won = self._pending == path and self._pending_device is None
+                if won:
+                    self._error = str(exc)
+                    self._pending = None
+            if won:
+                self.info_store.set(None)
+
+    def _load_on_device(self, path: str, device_name: str) -> None:
+        """Reload `path` onto `device_name`, publishing the outcome.
+
+        Never touches `_current` on failure, whether the device name cannot
+        be resolved or the reload itself fails: the render loop keeps
+        showing the previous model on its previous device, and the control
+        loop reverts the registry value once it sees `device_store`'s error.
+        """
+        try:
+            device = resolve_device(device_name)
+            model = self._loader(path, device=device)
+        except Exception as exc:
+            logger.warning("Could not switch to device %s: %s", device_name, exc)
+            with self._lock:
+                won = (
+                    self._pending == path and self._pending_device == device_name
+                )
+                if won:
+                    self._pending = None
+                    self._pending_device = None
+                active = getattr(self._current, "device", None)
+            if won:
+                self.device_store.set(
+                    DeviceStatus(
+                        active=str(active) if active is not None else None,
+                        requested=device_name,
+                        error=str(exc),
+                    )
+                )
+            return
+        info = _model_info(path, model)
+        with self._lock:
+            won = self._pending == path and self._pending_device == device_name
+            if won:
+                previous = self._current
+                self._current = model
+                self._error = None
+                self._pending = None
+                self._pending_device = None
+        if won:
+            _release_quietly(previous)
+            self.info_store.set(info)
+            self.device_store.set(
+                DeviceStatus(
+                    active=str(getattr(model, "device", device)),
+                    requested=device_name,
+                    error=None,
+                )
+            )
