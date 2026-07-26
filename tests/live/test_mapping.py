@@ -343,7 +343,6 @@ def test_keyframe_set_replaces_at_index():
     state = set_keyframe(ControlState(), 0, Keyframe("seed", 9.0, 9.0))
     assert state.keyframes[0] == Keyframe("seed", 9.0, 9.0)
     assert len(state.keyframes) == 6
-    assert state.keyframe_count == 6
 
 
 def test_keyframe_set_at_len_appends():
@@ -352,7 +351,6 @@ def test_keyframe_set_at_len_appends():
     state = set_keyframe(before, len(before.keyframes), keyframe)
     assert len(state.keyframes) == 7
     assert state.keyframes[-1] == keyframe
-    assert state.keyframe_count == 7
 
 
 def test_keyframe_set_out_of_range_ignored(caplog):
@@ -408,7 +406,6 @@ def test_keyframe_remove_removes_at_index():
     before = ControlState()
     state = remove_keyframe(before, 1)
     assert len(state.keyframes) == 5
-    assert state.keyframe_count == 5
     assert state.keyframes == before.keyframes[:1] + before.keyframes[2:]
 
 
@@ -421,7 +418,7 @@ def test_keyframe_remove_out_of_range_ignored(caplog):
 
 
 def test_keyframe_remove_last_keyframe_guard(caplog):
-    one = ControlState(keyframes=(default_keyframe(0),), keyframe_count=1)
+    one = ControlState(keyframes=(default_keyframe(0),))
     with caplog.at_level(logging.WARNING):
         after = remove_keyframe(one, 0)
     assert after == one
@@ -438,43 +435,20 @@ def test_keyframe_remove_with_non_remove_keyframe_value_ignored(caplog):
     assert any("non keyframe value" in m for m in warnings_from(caplog, MAPPING_LOGGER))
 
 
-# --- keyframe_count resize --------------------------------------------------
+# --- keyframe_count removal (item 13) ---------------------------------------
+#
+# The registry carries no keyframe_count parameter, and /loop/keyframes
+# resizes nothing, any more: Add and per-row Remove, through
+# KEYFRAME_SET/KEYFRAME_REMOVE above, are the only ways the list changes.
+# The resize semantics this section used to cover (grow fills with seed
+# keyframes, shrink truncates the prefix, clamped to a bound) went with
+# _resize_keyframes, the code that implemented them.
 
 
-def test_keyframe_count_grows_preserving_prefix_with_seed_fill():
+def test_a_write_to_the_old_keyframes_address_is_silently_ignored():
     before = ControlState()
     state = apply_event(before, ControlEvent("/loop/keyframes", 9))
-    assert state.keyframe_count == 9
-    assert len(state.keyframes) == 9
-    assert state.keyframes[:6] == before.keyframes
-    assert state.keyframes[6] == default_keyframe(6)
-    assert state.keyframes[8] == default_keyframe(8)
-
-
-def test_keyframe_count_shrinks_preserving_prefix():
-    before = ControlState()
-    state = apply_event(before, ControlEvent("/loop/keyframes", 3))
-    assert state.keyframe_count == 3
-    assert state.keyframes == before.keyframes[:3]
-
-
-def test_keyframe_count_clamped_to_registry_bounds():
-    state = apply_event(ControlState(), ControlEvent("/loop/keyframes", 999))
-    assert state.keyframe_count == 256
-    assert len(state.keyframes) == 256
-
-
-def test_keyframe_count_unchanged_is_a_noop_on_keyframes():
-    before = ControlState()
-    state = apply_event(before, ControlEvent("/loop/keyframes", 6))
-    assert state.keyframes == before.keyframes
-
-
-def test_keyframe_count_uncoercible_value_ignored(caplog):
-    before = ControlState()
-    with caplog.at_level(logging.WARNING):
-        after = apply_event(before, ControlEvent("/loop/keyframes", "nope"))
-    assert after == before
+    assert state == before
 
 
 # --- loop_index normalisation -------------------------------------------
@@ -507,13 +481,6 @@ def test_keyframe_remove_leaves_an_in_range_loop_index_untouched():
     before = ControlState(loop_index=2)
     state = remove_keyframe(before, 5)
     assert state.loop_index == 2
-
-
-def test_keyframe_count_shrink_wraps_a_stale_loop_index():
-    before = ControlState(loop_index=5)  # last of the default 6 keyframes
-    state = apply_event(before, ControlEvent("/loop/keyframes", 3))
-    assert state.keyframe_count == 3
-    assert state.loop_index == 2  # 5 % 3
 
 
 def test_preset_apply_wraps_a_stale_loop_index_against_decoded_keyframes():

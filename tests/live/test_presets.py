@@ -22,10 +22,7 @@ SAMPLE_KEYFRAME_VEC = tuple(i * -0.25 for i in range(512))
 
 # Every preset parameter differs from its default, so a round trip that keeps a
 # value by accident cannot pass. `test_sample_state_is_non_default_everywhere`
-# holds this honest as the registry grows. `keyframe_count` and `keyframes`
-# agree on four stops on purpose: the two used to be able to disagree after a
-# preset load (see mapping.py's `_apply_preset`), and a fixture that itself
-# held them out of sync would hide a regression instead of catching one.
+# holds this honest as the registry grows.
 SAMPLE = ControlState(
     pkl_path=None,
     latent_x=1.5,
@@ -46,7 +43,6 @@ SAMPLE = ControlState(
     loop_speed=2.5,
     loop_alpha=0.75,
     loop_index=3,
-    keyframe_count=4,
     perfect_loop=True,
     noise_loop=True,
     noise_radius=5.0,
@@ -480,29 +476,28 @@ def test_non_mapping_params_and_non_list_bindings_are_ignored(caplog):
     assert len(warnings_from(caplog)) == 2
 
 
-# --- keyframe_count / keyframes divergence (bug fixed in mapping.py) -------
+# --- keyframe_count removal (item 13) --------------------------------------
+#
+# The registry carries no `keyframe_count` parameter any more: the list's
+# length is derived from `len(keyframes)` everywhere it is needed, so the two
+# can no longer disagree the way a preset used to be able to make them (the
+# bug the removed pair of tests here used to reproduce and guard against is
+# now structurally impossible, not merely fixed). What is left to cover is
+# that an old preset file's stray `keyframe_count` key does not break loading
+# the `keyframes` tuple it sits beside.
 
 
-def test_preset_apply_keeps_keyframe_count_and_keyframes_in_sync():
-    """Reproduces the bug: a preset used to be able to set one without the other.
-
-    `_apply_preset` (mapping.py) now derives `keyframe_count` from the loaded
-    `keyframes` tuple instead of applying the payload's scalar directly, so the
-    two can never disagree after a preset load.
-    """
+def test_preset_apply_ignores_a_stray_keyframe_count_key(caplog):
     payload = presets.to_payload(SAMPLE)
-    state = apply_payload(ControlState(), payload)
-    assert state.keyframe_count == len(state.keyframes) == 4
-
-
-def test_preset_apply_ignores_a_keyframe_count_that_disagrees_with_keyframes():
-    payload = presets.to_payload(SAMPLE)
-    # A hand edited or stale file: keyframe_count claims 3 but the keyframes
-    # list still holds 4 entries. The list wins.
+    # An old preset file: keyframe_count is not a parameter this build
+    # persists or reads any more, only an unknown key like any other retired
+    # parameter, and the keyframes list loads exactly as the payload states
+    # regardless of what it claims.
     payload["params"]["keyframe_count"] = 3
-    state = apply_payload(ControlState(), payload)
+    with caplog.at_level(logging.WARNING):
+        state = apply_payload(ControlState(), payload)
     assert len(state.keyframes) == 4
-    assert state.keyframe_count == 4
+    assert any("keyframe_count" in message for message in warnings_from(caplog))
 
 
 # --- latent_vec / keyframes defaults and array descriptor rejection -------
@@ -518,7 +513,6 @@ def test_missing_latent_vec_and_keyframes_load_at_their_defaults():
     state = apply_payload(ControlState(), payload)
     assert state.latent_vec == ()
     assert state.keyframes == ControlState().keyframes
-    assert state.keyframe_count == len(ControlState().keyframes)
 
 
 def test_array_wrong_dtype_is_rejected(caplog):

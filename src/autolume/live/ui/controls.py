@@ -745,9 +745,9 @@ class ControlBinder:
     def input_int(self, name: str, label: str, *, enabled: bool = True) -> None:
         """Draw `name` as a typed integer field that commits on Enter.
 
-        For a quantity, not a position: `keyframe_count`, `noise_loop_seed`,
-        `pulse_port` and the rest of this module's docstring's own rule are
-        the parameters that use this rather than `drag_int`, because their
+        For a quantity, not a position: `noise_loop_seed`, `pulse_port`,
+        `fps_cap` and the rest of this module's docstring's own rule are the
+        parameters that use this rather than `drag_int`, because their
         intermediate values while dragging would be destructive, expensive
         or meaningless. The step buttons are switched off (`0, 0`), so Enter
         is the only way to commit, matching the rule exactly: never a drag.

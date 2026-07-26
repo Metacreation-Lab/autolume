@@ -23,7 +23,6 @@ from autolume.live.core.params import (
     SetKeyframe,
     SetVector,
     apply_value,
-    default_keyframe,
 )
 from autolume.live.core.presets import PRESET_APPLY, from_payload
 
@@ -80,9 +79,10 @@ def _apply_preset(state: ControlState, value: object) -> ControlState:
     Every value goes through `apply_value`, so a hand edited file cannot push a
     parameter out of range, and the caller only ever sees the finished state.
 
-    `keyframe_count` is not applied from `params`: it is derived from the
-    loaded `keyframes` tuple instead, here, so the two can never disagree the
-    way they used to when a preset set one without the other.
+    No `keyframe_count` special case any more: the registry carries no such
+    parameter, so `from_payload`'s own unknown-parameter handling
+    (`presets.py` `_read_params`) already drops a stray one from an older
+    preset file, the same tolerance any other retired parameter gets.
     """
     if not isinstance(value, dict):
         logger.warning("Ignoring non preset value %r on %s", value, PRESET_APPLY)
@@ -94,15 +94,12 @@ def _apply_preset(state: ControlState, value: object) -> ControlState:
         return state
     applied = state
     for name, param_value in data.params.items():
-        if name == "keyframe_count":
-            continue
         applied = apply_value(applied, name, param_value)
     return dataclasses.replace(
         applied,
         bindings=data.bindings,
         latent_vec=data.latent_vec,
         keyframes=data.keyframes,
-        keyframe_count=len(data.keyframes),
     )
 
 
@@ -170,9 +167,7 @@ def _set_keyframe(state: ControlState, value: object) -> ControlState:
             "Ignoring keyframe set at out of range index %d on %s", index, KEYFRAME_SET
         )
         return state
-    return dataclasses.replace(
-        state, keyframes=tuple(keyframes), keyframe_count=len(keyframes)
-    )
+    return dataclasses.replace(state, keyframes=tuple(keyframes))
 
 
 def _remove_keyframe(state: ControlState, value: object) -> ControlState:
@@ -199,32 +194,7 @@ def _remove_keyframe(state: ControlState, value: object) -> ControlState:
         )
         return state
     remaining = keyframes[: value.index] + keyframes[value.index + 1 :]
-    return dataclasses.replace(
-        state, keyframes=remaining, keyframe_count=len(remaining)
-    )
-
-
-def _resize_keyframes(state: ControlState, value: object, address: str) -> ControlState:
-    """Apply a `keyframe_count` write, resizing `keyframes` to match.
-
-    Goes through `apply_value` for the coercion and clamping every other
-    parameter gets, then grows or shrinks the tuple to the clamped count,
-    preserving the prefix and filling new slots with seed keyframes.
-    """
-    resized = apply_value(state, "keyframe_count", value, address)
-    # apply_value returns the same object, unchanged, when the value could
-    # not be coerced. Nothing to resize in that case.
-    if resized is state:
-        return state
-    count = resized.keyframe_count
-    current = list(state.keyframes)
-    if count > len(current):
-        current.extend(default_keyframe(i) for i in range(len(current), count))
-    elif count < len(current):
-        current = current[:count]
-    else:
-        return resized
-    return dataclasses.replace(resized, keyframes=tuple(current))
+    return dataclasses.replace(state, keyframes=remaining)
 
 
 def _wrap_loop_index(state: ControlState) -> ControlState:
@@ -233,11 +203,11 @@ def _wrap_loop_index(state: ControlState) -> ControlState:
     Plan 3 Task 2 specifies this: `loop_index` writes are wrapped modulo the
     keyframe count at application time. Called from every path that can move
     `loop_index` out of step with `keyframes`: a direct write to it, a
-    keyframe removal, a `keyframe_count` resize, and a preset load, which can
-    apply a stale `loop_index` against a keyframe list that decoded shorter
-    than it was saved with. Guarded against a zero-length tuple even though a
-    loop is supposed to always keep at least one keyframe: this runs on the
-    control thread and must not raise.
+    keyframe removal, and a preset load, which can apply a stale `loop_index`
+    against a keyframe list that decoded shorter than it was saved with.
+    Guarded against a zero-length tuple even though a loop is supposed to
+    always keep at least one keyframe: this runs on the control thread and
+    must not raise.
     """
     count = len(state.keyframes)
     wrapped = state.loop_index % count if count else 0
@@ -269,8 +239,6 @@ def apply_event(state: ControlState, event: ControlEvent) -> ControlState:
     if spec is None:
         logger.debug("Ignoring event for unknown address %s", event.address)
         return state
-    if spec.name == "keyframe_count":
-        return _wrap_loop_index(_resize_keyframes(state, event.value, event.address))
     if spec.name == "loop_index":
         return _wrap_loop_index(apply_value(state, spec.name, event.value, event.address))
     return apply_value(state, spec.name, event.value, event.address)

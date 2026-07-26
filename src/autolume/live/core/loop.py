@@ -37,9 +37,10 @@ class LoopStep:
 def _segment_count(state: ControlState) -> int:
     """How many stops make one cycle: one for the noise loop, one per keyframe.
 
-    `len(state.keyframes)` rather than the `keyframe_count` registry field,
-    matching `to_render_params`: the tuple is the data that actually drives
-    playback, and the two are kept in sync by `mapping.py` in any case.
+    `len(state.keyframes)`, matching `to_render_params`: the tuple is the
+    data that actually drives playback, and, since the registry carries no
+    separate `keyframe_count` any more, its length is the only count there
+    is to derive this from.
     """
     if state.noise_loop:
         return 1

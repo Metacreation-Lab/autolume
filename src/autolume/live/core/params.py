@@ -65,7 +65,15 @@ _SPECS = (
     ParamSpec("loop_speed", ParamKind.FLOAT, 0.0, "/loop/speed", -5.0, 5.0),
     ParamSpec("loop_alpha", ParamKind.FLOAT, 0.0, "/loop/alpha", 0.0, 1.0),
     ParamSpec("loop_index", ParamKind.INT, 0, "/loop/index", 0, 2**31 - 1),
-    ParamSpec("keyframe_count", ParamKind.INT, 6, "/loop/keyframes", 1, 256),
+    # No keyframe_count: the list's length is derived from len(keyframes)
+    # everywhere it is needed (to_render_params below, _wrap_loop_index in
+    # mapping.py), rather than tracked as a second, separately writable
+    # number that could disagree with the tuple's own length. It used to be
+    # exactly that: a registry parameter a preset or a controller could set
+    # to a value the keyframes tuple never matched. Removed rather than kept
+    # read-only, since OSC has no legitimate reason to resize the list
+    # (Add and per-row Remove are the only ways it changes, both already
+    # structured edits through KEYFRAME_SET/KEYFRAME_REMOVE).
     ParamSpec("perfect_loop", ParamKind.BOOL, False, "/loop/perfect"),
     ParamSpec("noise_loop", ParamKind.BOOL, False, "/loop/noise"),
     # 10.0, not the table builder's own 100.0 ceiling: a table build is close
@@ -246,7 +254,6 @@ class ControlState:
     loop_speed: float = 0.0
     loop_alpha: float = 0.0
     loop_index: int = 0
-    keyframe_count: int = 6
     perfect_loop: bool = False
     noise_loop: bool = False
     noise_radius: float = 1.0

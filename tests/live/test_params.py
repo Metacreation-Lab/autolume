@@ -210,7 +210,6 @@ def test_motion_specs_declare_expected_addresses_kinds_and_bounds():
         "loop_speed": ("/loop/speed", params.ParamKind.FLOAT, 0.0, -5.0, 5.0),
         "loop_alpha": ("/loop/alpha", params.ParamKind.FLOAT, 0.0, 0.0, 1.0),
         "loop_index": ("/loop/index", params.ParamKind.INT, 0, 0, 2**31 - 1),
-        "keyframe_count": ("/loop/keyframes", params.ParamKind.INT, 6, 1, 256),
         "perfect_loop": ("/loop/perfect", params.ParamKind.BOOL, False, None, None),
         "noise_loop": ("/loop/noise", params.ParamKind.BOOL, False, None, None),
         "noise_radius": ("/loop/radius", params.ParamKind.FLOAT, 1.0, 0.01, 10.0),
@@ -228,7 +227,10 @@ def test_motion_specs_declare_expected_addresses_kinds_and_bounds():
         assert spec.preset is (name not in non_preset)
 
 
-def test_registry_has_sixteen_motion_rows():
+def test_registry_has_fifteen_motion_rows():
+    # keyframe_count is not one of them any more (item 13): the list's
+    # length is derived from len(keyframes) everywhere it is needed, not
+    # tracked as a second, separately writable number.
     motion_names = {
         "vector_mode",
         "latent_project",
@@ -238,7 +240,6 @@ def test_registry_has_sixteen_motion_rows():
         "loop_speed",
         "loop_alpha",
         "loop_index",
-        "keyframe_count",
         "perfect_loop",
         "noise_loop",
         "noise_radius",
@@ -247,7 +248,7 @@ def test_registry_has_sixteen_motion_rows():
         "pulse_ip",
         "pulse_port",
     }
-    assert len(motion_names) == 16
+    assert len(motion_names) == 15
     assert motion_names <= set(params.REGISTRY)
 
 
