@@ -517,59 +517,85 @@ def keyframe_row_edges(width: float, font_scale: float) -> list[float]:
     return edges
 
 
-# The panel's two documented floors. Two-line stays a single em ratio
-# (`_TWO_LINE_EMS`): nothing in production branches on it, only this test's
-# own "two-line, at the floor" combinations, so its small imprecision has no
-# behavioural consequence (`_TWO_LINE_EMS`'s own docstring in loop.py). One
-# line is the formula `keyframe_row_fits_one_line` itself uses
-# (`_ONE_LINE_SLOPE_PX_PER_PT`, `_ONE_LINE_INTERCEPT_PX`,
-# `_ONE_LINE_FIT_MARGIN_PX`), fit to the row's real, measured need, which
-# does not scale as a clean multiple of the font size the way the rest of
-# this row does (see that constant's own docstring for why, and for the
-# earlier, too-conservative constant this replaced). `_row_floor` below
-# turns either into a pixel width per combination, so the combinations this
-# test runs are exactly "one line, with a little margin" and "two lines,
-# with a little margin" at every font scale, rather than fixed pixel
-# literals that would silently stop meaning what they say the day the font
-# or the row's contents change again.
+# The one-line threshold used to be a slope and an intercept fit through
+# three font sizes (13, 20, 26pt) that this app cannot actually run at: the
+# live runtime has no adjustable UI font size at all, it renders at exactly
+# one, `theme.FONT_SIZE` (16.0), so a fit built from points around that size
+# was never tested at the size that matters and drifted from the real row
+# twice, both times caught only by a maintainer's screenshot of a row
+# reflowed with empty space beside it. `keyframe_row_required_width` now
+# computes the same number imgui itself is about to draw the row at, so
+# there is nothing here left to fit: `_KEYFRAME_ROW_FONT_SIZES` below
+# includes 16.0, the one size the app really uses, alongside a spread of
+# others for robustness, not because any of them needs its own fit.
 import autolume.live.ui.panels.loop as loop_module  # noqa: E402
 from autolume.live.ui.panels.loop import (  # noqa: E402
-    _ONE_LINE_FIT_MARGIN_PX,
-    _ONE_LINE_INTERCEPT_PX,
-    _ONE_LINE_SLOPE_PX_PER_PT,
-    _ROW_FLOOR_MARGIN_PX,
-    _TWO_LINE_EMS,
     keyframe_row_fits_one_line,
+    keyframe_row_required_width,
 )
 
-_KEYFRAME_ROW_FONT_SIZES = (13.0, 20.0, 26.0)  # font_scale_main 1.0, 1.5, 2.0
+# The harness never loads the app's bundled font (see the `frame` fixture
+# above), so every test in this file reaches a specific font size through
+# imgui's own built in font, 13px at `font_scale_main` 1.0, scaled from
+# there. 16.0 is `theme.FONT_SIZE`, the one size the live runtime ever
+# actually renders text at today; 20 and 26 are kept for headroom either
+# side of it, matching the range this suite already exercised.
+_KEYFRAME_ROW_FONT_SIZES = (13.0, 16.0, 20.0, 26.0)
+_KEYFRAME_ROW_FONT_SCALES = tuple(size / 13.0 for size in _KEYFRAME_ROW_FONT_SIZES)
 
 
-def _one_line_floor(margin_px: float, font_size: float) -> float:
-    fit = _ONE_LINE_SLOPE_PX_PER_PT * font_size + _ONE_LINE_INTERCEPT_PX
-    return fit + _ONE_LINE_FIT_MARGIN_PX + _ROW_FLOOR_MARGIN_PX + margin_px
+def _required_width_at(font_scale: float, index: int = 0) -> float:
+    """`keyframe_row_required_width(index)`, at `font_scale`, in its own
+    throwaway context: the function reads the live style and font, both of
+    which need an open imgui frame to answer from.
+    """
+    context = imgui.create_context()
+    try:
+        io = imgui.get_io()
+        io.set_ini_filename(None)
+        io.display_size = imgui.ImVec2(900.0, 700.0)
+        io.delta_time = 1.0 / 60.0
+        io.backend_flags |= imgui.BackendFlags_.renderer_has_textures
+        theme.apply_theme()
+        imgui.get_style().font_scale_main = font_scale
+        imgui.new_frame()
+        imgui.begin("W")
+        required = keyframe_row_required_width(index)
+        imgui.end()
+        imgui.render()
+        return required
+    finally:
+        imgui.destroy_context(context)
 
 
-def _two_line_floor(margin_ems: float, font_size: float) -> float:
-    return _TWO_LINE_EMS * font_size + _ROW_FLOOR_MARGIN_PX + margin_ems * font_size
-
-
-_KEYFRAME_ROW_COMBOS = tuple(
-    (width, font_scale)
-    for font_scale, font_size in zip((1.0, 1.5, 2.0), _KEYFRAME_ROW_FONT_SIZES)
-    for width in (
-        _one_line_floor(40.0, font_size),  # one-line mode, margin
-        _one_line_floor(0.0, font_size),  # one-line mode, at the floor
-        _two_line_floor(2.0, font_size),  # two-line mode, margin
-        _two_line_floor(0.0, font_size),  # two-line mode, at the floor
-    )
-)
+def _fits_one_line_at(font_scale: float, index: int, available: float) -> bool:
+    """`keyframe_row_fits_one_line(index, available)`, at `font_scale`, in
+    its own throwaway context, for the same reason `_required_width_at`
+    needs one: the predicate reads the live style and font too.
+    """
+    context = imgui.create_context()
+    try:
+        io = imgui.get_io()
+        io.set_ini_filename(None)
+        io.display_size = imgui.ImVec2(900.0, 700.0)
+        io.delta_time = 1.0 / 60.0
+        io.backend_flags |= imgui.BackendFlags_.renderer_has_textures
+        theme.apply_theme()
+        imgui.get_style().font_scale_main = font_scale
+        imgui.new_frame()
+        imgui.begin("W")
+        result = keyframe_row_fits_one_line(index, available)
+        imgui.end()
+        imgui.render()
+        return result
+    finally:
+        imgui.destroy_context(context)
 
 
 def _isolated_keyframe_row(
-    font_scale: float, available_width: float, force: bool | None
+    font_scale: float, available_width: float, force: bool | None, index: int = 0
 ):
-    """Draw keyframe 0 alone in a window sized so its content region is
+    """Draw a keyframe row alone in a window sized so its content region is
     exactly `available_width`, and report what the row actually used.
 
     Isolated to one row rather than the whole panel, and window size chosen
@@ -586,7 +612,9 @@ def _isolated_keyframe_row(
     the one-line and two-line layouts can each be measured on their own
     regardless of what the real threshold would pick at this width. `None`
     draws through the real, unforced dispatch, which is what the app
-    actually runs.
+    actually runs. `index` only changes the row's displayed index (and so,
+    for a multi digit one, the true width need), never which keyframe's
+    content is drawn: the row's own state does not depend on it.
 
     Returns `(right_margin, height)`: `right_margin` is how much of
     `available_width` was left unused (negative means it overflowed), and
@@ -595,7 +623,7 @@ def _isolated_keyframe_row(
     context = imgui.create_context()
     original = loop_module.keyframe_row_fits_one_line
     if force is not None:
-        loop_module.keyframe_row_fits_one_line = lambda font_size, available: force
+        loop_module.keyframe_row_fits_one_line = lambda index, available: force
     try:
         io = imgui.get_io()
         io.set_ini_filename(None)
@@ -615,7 +643,7 @@ def _isolated_keyframe_row(
         right = imgui.get_cursor_screen_pos().x + imgui.get_content_region_avail().x
         start_y = imgui.get_cursor_pos_y()
         imgui.push_id(0)
-        panel._keyframe_row(0, keyframe, state, len(state.keyframes))
+        panel._keyframe_row(index, keyframe, state, len(state.keyframes))
         imgui.pop_id()
         margin = right - imgui.get_item_rect_max().x
         height = imgui.get_cursor_pos_y() - start_y
@@ -627,56 +655,143 @@ def _isolated_keyframe_row(
     return margin, height
 
 
-def _true_one_line_need(font_scale: float) -> float:
-    """The one-line layout's real available-width need, bypassing the
-    threshold: forced past it (`keyframe_row_fits_one_line` stubbed True),
-    then read back how much of a generous allowance it actually used. This
-    is the measurement the one-line formula in `loop.py` was itself fit
-    from, and the same one a screenshot review repeated by hand to find the
-    previous constant, `_ONE_LINE_EMS = 50.0`, reflowing up to 508px earlier
-    than the row actually needed.
+def _one_line_floor(margin_px: float, font_scale: float) -> float:
+    return _required_width_at(font_scale) + margin_px
+
+
+def _true_two_line_need(font_scale: float) -> float:
+    """The two-line fallback's real width need, in the same panel and
+    window shape `test_no_keyframe_row_runs_past_the_panel_it_is_drawn_in`
+    itself checks against, not an isolated single row.
+
+    This matters because the two-line layout is tall enough that, with all
+    six default keyframes forced onto it, the panel's full content genuinely
+    no longer fits the 300px window height `keyframe_row_edges` draws into,
+    so a real vertical scrollbar appears and eats into the width every row
+    has left, the same live deduction `keyframe_row_fits_one_line` reads
+    off `content_region_avail` at draw time. An isolated single row never
+    triggers that scrollbar (six rows of vertical content do not fit in
+    one), so measuring against one alone understates the floor this
+    combination is actually checked at: caught by
+    `test_no_keyframe_row_runs_past_the_panel_it_is_drawn_in` failing by
+    exactly the scrollbar's own width the one time this was tried.
     """
     allowance = 3000.0
-    margin, _ = _isolated_keyframe_row(font_scale, allowance, force=True)
-    return allowance - margin
+    context = imgui.create_context()
+    original_dispatch = loop_module.keyframe_row_fits_one_line
+    loop_module.keyframe_row_fits_one_line = lambda index, available: False
+    original_row = LoopPanel._keyframe_row
+    original_seed_fields = LoopPanel._keyframe_seed_fields
+    edges: list[float] = []
+    right = [0.0]
+    try:
+        io = imgui.get_io()
+        io.set_ini_filename(None)
+        io.display_size = imgui.ImVec2(allowance + 500.0, 800.0)
+        io.delta_time = 1.0 / 60.0
+        io.backend_flags |= imgui.BackendFlags_.renderer_has_textures
+        theme.apply_theme()
+        imgui.get_style().font_scale_main = font_scale
+
+        def measure_seed_fields(self, index, keyframe, is_vector):
+            original_seed_fields(self, index, keyframe, is_vector)
+            edges.append(right[0] - imgui.get_item_rect_max().x)
+
+        def measure_row(self, index, keyframe, state, count):
+            original_row(self, index, keyframe, state, count)
+            edges.append(right[0] - imgui.get_item_rect_max().x)
+
+        LoopPanel._keyframe_row = measure_row
+        LoopPanel._keyframe_seed_fields = measure_seed_fields
+        panel = LoopPanel(PanelRuntime(), mapping_popup=lambda name: None)
+        for _ in range(3):
+            imgui.new_frame()
+            imgui.set_next_window_pos(imgui.ImVec2(0.0, 0.0))
+            imgui.set_next_window_size(imgui.ImVec2(allowance, 300.0))
+            imgui.begin("Loop")
+            edges.clear()
+            right[0] = (
+                imgui.get_cursor_screen_pos().x + imgui.get_content_region_avail().x
+            )
+            panel.gui()
+            imgui.end()
+            imgui.render()
+    finally:
+        loop_module.keyframe_row_fits_one_line = original_dispatch
+        LoopPanel._keyframe_row = original_row
+        LoopPanel._keyframe_seed_fields = original_seed_fields
+        imgui.destroy_context(context)
+    return allowance - min(edges)
+
+
+def _two_line_floor(margin_px: float, font_scale: float) -> float:
+    return _true_two_line_need(font_scale) + margin_px
+
+
+_KEYFRAME_ROW_COMBOS = tuple(
+    (width, font_scale)
+    for font_scale in _KEYFRAME_ROW_FONT_SCALES
+    for width in (
+        _one_line_floor(40.0, font_scale),  # one-line mode, margin
+        _one_line_floor(0.0, font_scale),  # one-line mode, at the floor
+        _two_line_floor(20.0, font_scale),  # two-line mode, margin
+        _two_line_floor(0.0, font_scale),  # two-line mode, at the floor
+    )
+)
 
 
 @pytest.mark.parametrize(
-    "font_scale, font_size", tuple(zip((1.0, 1.5, 2.0), _KEYFRAME_ROW_FONT_SIZES))
+    "font_scale, font_size",
+    tuple(zip(_KEYFRAME_ROW_FONT_SCALES, _KEYFRAME_ROW_FONT_SIZES)),
+)
+@pytest.mark.parametrize("index", (0, 12))
+def test_keyframe_row_required_width_matches_what_is_actually_drawn(
+    font_scale, font_size, index
+):
+    """The test that stops the reflow threshold drifting from the row a
+    third time. Both guards this suite had before this only ever asked "does
+    the drawn row overflow?" or "does it reflow once forced past a fitted
+    threshold?", never "is the number the threshold predicts the number the
+    row actually draws at?" A fitted slope and intercept could, and twice
+    did, say yes to both of the first two questions while quietly demanding
+    hundreds of pixels more than the row used, which is exactly what a
+    maintainer's screenshot caught by eye both times. Here the predicted and
+    the drawn number are compared directly, so they cannot drift apart
+    again without this failing: `keyframe_row_required_width` predicts
+    without drawing anything, `_isolated_keyframe_row` (forced past the
+    threshold) reports what a real draw actually consumed. `index` 0 and 12
+    check that a two digit row index, which the fixed items on the rest of
+    the row do not have to account for, is measured correctly too.
+    """
+    predicted = _required_width_at(font_scale, index)
+    allowance = predicted + 50.0
+    margin, _ = _isolated_keyframe_row(font_scale, allowance, force=True, index=index)
+    drawn = allowance - margin
+    assert drawn == pytest.approx(predicted, abs=1.5)
+
+
+@pytest.mark.parametrize(
+    "font_scale, font_size",
+    tuple(zip(_KEYFRAME_ROW_FONT_SCALES, _KEYFRAME_ROW_FONT_SIZES)),
 )
 def test_keyframe_row_actually_uses_one_line_once_it_truly_fits(font_scale, font_size):
-    """The direction `test_no_keyframe_row_runs_past_the_panel_it_is_drawn_in`
-    cannot check: that guard only ever asks "does the row overflow?", so a
-    threshold far more conservative than the row's real need still passes it
-    every time. That is exactly how the previous constant shipped: 50 ems
-    against a real need of 43 to 49, up to 508px too conservative at the
-    top font scale, caught only by a screenshot of a row reflowed to two
-    lines with hundreds of empty pixels beside it. This asks the other
-    direction directly: at a width the row demonstrably needs no more than,
-    does it actually draw one line, not two.
+    """The width equality test above only proves the predicted number is
+    right, not that `_keyframe_row`'s real, unforced dispatch acts on it.
+    This closes that gap end to end: at exactly the width the row is
+    predicted to need, with no margin folded in, the real dispatch should
+    still pick the one-line layout, the same as when it is forced to.
     """
-    true_need = _true_one_line_need(font_scale)
-    # The formula's own two margins, plus enough on top to cover the fit's
-    # own overshoot above the true measured need at another font size (up
-    # to 13px, at 26pt, per the fit's own docstring in loop.py): the fit is
-    # one line through all three font sizes, so it does not equal the true
-    # need at every one of them, only bound it, and `true_need` here is one
-    # specific font size's real measurement while `keyframe_row_fits_one_line`
-    # compares against the fit's prediction for it.
-    available = true_need + _ONE_LINE_FIT_MARGIN_PX + _ROW_FLOOR_MARGIN_PX + 15.0
-    assert keyframe_row_fits_one_line(font_size, available) is True
-    one_line_margin, one_line_height = _isolated_keyframe_row(
-        font_scale, available, force=True
-    )
+    required = _required_width_at(font_scale)
+    assert _fits_one_line_at(font_scale, 0, required) is True
+    _, one_line_height = _isolated_keyframe_row(font_scale, required, force=True)
     two_line_margin, two_line_height = _isolated_keyframe_row(
-        font_scale, available, force=False
+        font_scale, required, force=False
     )
-    _, natural_height = _isolated_keyframe_row(font_scale, available, force=None)
-    # Sanity: the two layouts really do differ in height and both actually
-    # fit the width this test claims for them, or the comparison below
-    # would pass no matter which one the real dispatch picked.
+    _, natural_height = _isolated_keyframe_row(font_scale, required, force=None)
+    # Sanity: the two layouts really do differ in height and the two-line
+    # one still fits at this width too, or the comparison below would pass
+    # no matter which one the real dispatch picked.
     assert two_line_height > one_line_height
-    assert one_line_margin >= 0.0
     assert two_line_margin >= 0.0
     assert natural_height == pytest.approx(one_line_height)
 
@@ -688,10 +803,7 @@ def test_no_keyframe_row_runs_past_the_panel_it_is_drawn_in(width, font_scale):
     different panel. One line: index, the kind switch, Project, the seed
     fields, Load, Randomize, Snap, Remove, everything the row draws
     regardless of kind (`_keyframe_row`'s own docstring on why they are
-    all always drawn). This includes the window's own vertical scrollbar
-    taking width once the panel's full content, not just this entry, no
-    longer fits the docked height either: the same condition a performer
-    would actually be looking at.
+    all always drawn).
 
     Every combination this test runs is one the entry claims to support and
     must keep fitting; see `_KEYFRAME_ROW_COMBOS` for the width it is

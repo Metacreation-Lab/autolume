@@ -45,7 +45,7 @@ from autolume.live.core.params import (
 )
 from autolume.live.errors import describe
 from autolume.live.ui.controls import ControlBinder
-from autolume.live.ui.panels.perform import load_vector_file
+from autolume.live.ui.panels.perform import button_width, load_vector_file
 from autolume.live.ui.theme import ERROR_COLOR
 
 logger = logging.getLogger(__name__)
@@ -57,47 +57,6 @@ logger = logging.getLogger(__name__)
 # against.
 _SEED_WIDTH_EMS = 5.5
 _VECTOR_FILTER = ["Vector files", "*.npy *.pt"]
-# The two-line fallback's own floor stays a single em ratio (rounded up from
-# the largest of three measured ratios, the same reasoning `_ONE_LINE_EMS`
-# used to follow): nothing in production branches on it, it only sizes the
-# test suite's own "two-line, at the floor" combinations, so the small
-# imprecision an em ratio carries (see the one-line threshold below for why
-# it is not exact) has no behavioural consequence.
-_TWO_LINE_EMS = 31.0
-# The one-line layout's real width need does NOT scale cleanly with the font
-# size: measured directly at the three font sizes the UI font size
-# preference renders (13, 20, 26pt; the test suite's own probe, isolated to
-# one row with no scrollbar to confound it, in the same `content_region_avail`
-# terms this function compares `available` against), it needs 611, 874 and
-# 1081px. Divided by font size that is 47.0, 43.7 and 41.6 ems, a ratio that
-# keeps falling as the font grows, so a single em multiplier is structurally
-# unable to fit all three without badly overstating the small end: the
-# previous constant here, `_ONE_LINE_EMS = 50.0`, was exactly the largest of
-# an earlier pass's ratios rounded up (from before this was refit against
-# the correct, padding-and-scrollbar-free measurement above; it predates
-# items 14 and 15 reshaping the row, and was never revisited after either
-# landed), and put the 1.0x threshold around 820px against this real need of
-# 611, 209px too conservative, enough to reflow the row a full font size
-# scale early (caught from a screenshot: the reflowed row sitting in a panel
-# with roughly 400px of empty space beside it). A straight line through the
-# three measurements, `a * font_size + b`, fits the actual shape instead:
-# least squares over (13, 611), (20, 874), (26, 1081) gives slope ~36.2,
-# intercept ~143.5; rounded up to 36.5 and 145 so the fit itself is already
-# an upper bound at all three (over by 8.5, 1 and 13px) rather than only on
-# average.
-_ONE_LINE_SLOPE_PX_PER_PT = 36.5
-_ONE_LINE_INTERCEPT_PX = 145.0
-# On top of the fit itself: it is not exact at every font size (see above),
-# so this covers that, a modest margin rather than another multiple folded
-# into the slope.
-_ONE_LINE_FIT_MARGIN_PX = 15.0
-# A vertical scrollbar, 15px in this theme, appears once the panel's full
-# content (every row, not just this one) no longer fits the docked height,
-# and eats into the width this row has left to draw in. The fit above is
-# measured with no scrollbar in play (one isolated row never needs one), so
-# this is where that gets added back, as a flat pixel margin since the
-# scrollbar's own width does not scale with the font.
-_ROW_FLOOR_MARGIN_PX = 20.0
 # Trimmed from an earlier version that also said "Project in Perform also
 # applies to this loop": that half is now redundant, since item A greys
 # Project on `derive_mode` and a running noise loop is exactly what puts the
@@ -128,17 +87,72 @@ def noise_table_pending(
     return desired is not None and desired != built
 
 
-def keyframe_row_fits_one_line(font_size: float, available: float) -> bool:
+def _paired_control_width(label: str) -> float:
+    """Width imgui gives a checkbox or a radio button: its box, then the label.
+
+    Both draw the same shape internally: a box or circle sized to
+    `get_frame_height()`, followed, when the label is non-empty, by the
+    style's inner item spacing and the label's own text width. Read off the
+    live style and font rather than assumed, so a theme or font change is
+    already accounted for with no refit.
+    """
+    box = imgui.get_frame_height()
+    return box + imgui.get_style().item_inner_spacing.x + imgui.calc_text_size(label).x
+
+
+def keyframe_row_required_width(index: int) -> float:
+    """The one-line layout's real width need, measured against the row it is
+    about to draw rather than predicted from a fitted constant.
+
+    A fitted slope and intercept shipped here twice and was wrong both
+    times: fitted against font sizes (13, 20, 26pt) the UI font size
+    preference this app carries does not actually have (the whole live
+    runtime renders at one fixed size, `theme.FONT_SIZE`), it drifted from
+    what the row truly needs the moment a control changed, which is exactly
+    what a fitted number cannot see coming. This instead mirrors
+    `_keyframe_row_one_line`'s own draw order item for item: every widget it
+    places on the line, so a widget added there is a width added here, with
+    no interpolation between measured points and nothing to refit later.
+
+    Two of the ten items are not derived from a label at all, because they
+    are not sized from one: the seed fields carry an explicit width of their
+    own (`_SEED_WIDTH_EMS`, `_keyframe_seed_fields`'s `imgui.set_next_item_width`),
+    so that number is used directly rather than re-derived. `index`'s own
+    text width varies with how many digits it prints, unlike every other
+    item on the row, so it is measured off the real value being drawn
+    instead of assumed fixed.
+    """
+    seed_field = imgui.get_font_size() * _SEED_WIDTH_EMS
+    items = (
+        imgui.calc_text_size(str(index)).x,
+        _paired_control_width("Seed"),
+        _paired_control_width("Vector"),
+        _paired_control_width("Project"),
+        seed_field,
+        seed_field,
+        button_width("Load"),
+        button_width("Randomize"),
+        button_width("Snap"),
+        button_width("Remove"),
+    )
+    return sum(items) + imgui.get_style().item_spacing.x * (len(items) - 1)
+
+
+def keyframe_row_fits_one_line(index: int, available: float) -> bool:
     """Whether `available` is wide enough for the keyframe row's one-line layout.
 
     A deliberate, width-driven reflow: this is the one thing allowed to
     change the row's height, unlike the kind switch, which must never
     (`_keyframe_row`'s own docstring). It is checked once per row, before
     anything is drawn, so the whole row commits to one layout rather than
-    part of it drawing wide and part narrow.
+    part of it drawing wide and part narrow. `keyframe_row_required_width`
+    computes the same real widths imgui is about to draw the row at, so
+    there is no separate number here to drift from what actually gets
+    drawn (verified equal, within a rounding pixel, at several font sizes
+    including the app's own: `test_keyframe_row_required_width_matches_
+    what_is_actually_drawn`).
     """
-    needed = _ONE_LINE_SLOPE_PX_PER_PT * font_size + _ONE_LINE_INTERCEPT_PX
-    return available >= needed + _ONE_LINE_FIT_MARGIN_PX + _ROW_FLOOR_MARGIN_PX
+    return available >= keyframe_row_required_width(index)
 
 
 def _pending_note(radius: float) -> str:
@@ -296,10 +310,10 @@ class LoopPanel:
         control; a keyframe entry carries up to ten, and squeezing a
         compound row into a floor calibrated for a simple one is what made
         the seed fields unreadably narrow and forced the split that time.
-        This entry sets its own floor instead (`_KEYFRAME_ROW_COMBOS`), in
-        font-relative units so it does not overstate the requirement at the
-        UI font size most performers actually run at
-        (`keyframe_row_fits_one_line`).
+        This entry sets its own floor instead (`_KEYFRAME_ROW_COMBOS`),
+        measured against the row it is about to draw rather than a fitted
+        guess, so it does not overstate the requirement
+        (`keyframe_row_fits_one_line`, `keyframe_row_required_width`).
 
         Below that floor the row still has to go somewhere: rather than
         silently overflowing the panel the way it did before task 9's
@@ -315,9 +329,8 @@ class LoopPanel:
         row takes.
         """
         imgui.push_id(index)
-        font_size = imgui.get_font_size()
         available = imgui.get_content_region_avail().x
-        if keyframe_row_fits_one_line(font_size, available):
+        if keyframe_row_fits_one_line(index, available):
             self._keyframe_row_one_line(index, keyframe, state, count)
         else:
             self._keyframe_row_two_line(index, keyframe, state, count)
@@ -344,7 +357,7 @@ class LoopPanel:
         to need this fallback at all: keeping them with Snap and Remove
         puts every button on its own line and every value field on the
         other, which is what actually buys back the most width per line
-        (measured; see `_TWO_LINE_EMS`).
+        (measured).
         """
         is_vector = self._keyframe_identity(index, keyframe)
         imgui.same_line()
