@@ -5,10 +5,16 @@ import pytest
 from autolume.live.core.events import ControlEvent
 from autolume.live.core.mapping import apply_event
 from autolume.live.core.params import (
+    ADJUST_DIRECTIONS,
+    BEND_NOISE,
+    BEND_RATIO,
+    BEND_REMOVE,
+    BEND_SET,
     BINDING_CLEAR,
     BINDING_SET,
     KEYFRAME_REMOVE,
     KEYFRAME_SET,
+    MIX_LAYERS,
     VECTOR_RANDOMIZE,
     VECTOR_SET,
     Binding,
@@ -16,8 +22,15 @@ from autolume.live.core.params import (
     ControlState,
     Keyframe,
     RemoveKeyframe,
+    RemoveTransform,
+    SetCombinedLayers,
+    SetDirections,
     SetKeyframe,
+    SetLayerNoise,
+    SetLayerRatio,
+    SetTransform,
     SetVector,
+    Transform,
     default_keyframe,
 )
 from autolume.live.core.presets import FORMAT, PRESET_APPLY, VERSION
@@ -493,3 +506,445 @@ def test_preset_apply_wraps_a_stale_loop_index_against_decoded_keyframes():
     state = apply_preset(ControlState(), payload)
     assert len(state.keyframes) == 3
     assert state.loop_index == 0  # 99 % 3
+
+
+# --- Plan 4 registry growth: image, adjuster and mixing registry rows ------
+
+
+def test_image_derivation_addresses_apply():
+    state = apply_event(ControlState(), ControlEvent("/image/grayscale", 1.0))
+    state = apply_event(state, ControlEvent("/image/contrast", 12.0))
+    state = apply_event(state, ControlEvent("/image/normalize", 1.0))
+    state = apply_event(state, ControlEvent("/image/channel", 42))
+    state = apply_event(state, ControlEvent("/image/layer", "L3"))
+    assert state.grayscale is True
+    assert state.img_scale_db == 12.0
+    assert state.img_normalize is True
+    assert state.base_channel == 42
+    assert state.capture_layer == "L3"
+
+
+def test_image_contrast_clamps_to_bounds():
+    state = apply_event(ControlState(), ControlEvent("/image/contrast", 999.0))
+    assert state.img_scale_db == 40.0
+    state = apply_event(state, ControlEvent("/image/contrast", -999.0))
+    assert state.img_scale_db == -40.0
+
+
+@pytest.mark.parametrize("i", range(1, 9))
+def test_adjuster_weight_addresses_apply_and_clamp(i):
+    state = apply_event(ControlState(), ControlEvent(f"/adjust/{i}", 2.5))
+    assert getattr(state, f"adjust_w{i}") == 2.5
+    state = apply_event(state, ControlEvent(f"/adjust/{i}", 999.0))
+    assert getattr(state, f"adjust_w{i}") == 5.0
+    state = apply_event(state, ControlEvent(f"/adjust/{i}", -999.0))
+    assert getattr(state, f"adjust_w{i}") == -5.0
+
+
+def test_mixing_addresses_apply():
+    state = apply_event(ControlState(), ControlEvent("/mix/model", "/tmp/other.pkl"))
+    state = apply_event(state, ControlEvent("/mix/enabled", 1.0))
+    assert state.pkl2 == "/tmp/other.pkl"
+    assert state.mixing_enabled is True
+
+
+def test_machine_level_addresses_apply():
+    state = apply_event(ControlState(), ControlEvent("/render/superres", 1.0))
+    state = apply_event(state, ControlEvent("/render/device", "cuda"))
+    state = apply_event(state, ControlEvent("/render/fp32", 1.0))
+    state = apply_event(state, ControlEvent("/osc/port", 9999))
+    state = apply_event(state, ControlEvent("/ndi/enabled", 1.0))
+    state = apply_event(state, ControlEvent("/ndi/name", "Stage NDI"))
+    state = apply_event(state, ControlEvent("/record", 1.0))
+    state = apply_event(state, ControlEvent("/output/fullscreen", 1.0))
+    assert state.use_superres is True
+    assert state.device == "cuda"
+    assert state.force_fp32 is True
+    assert state.osc_port == 9999
+    assert state.ndi_enabled is True
+    assert state.ndi_name == "Stage NDI"
+    assert state.recording is True
+    assert state.fullscreen is True
+
+
+# --- /bend/set --------------------------------------------------------------
+
+
+def set_transform(state, index, transform):
+    return apply_event(state, ControlEvent(BEND_SET, SetTransform(index, transform)))
+
+
+def test_bend_set_appends_then_replaces_in_place():
+    t1 = Transform("translate", "L1", (1.0, 2.0), (0, 1))
+    t2 = Transform("ablate", "L2", (1.0,), (0,))
+    state = set_transform(ControlState(), 0, t1)
+    state = set_transform(state, 1, t2)
+    assert state.transforms == (t1, t2)
+
+    t1b = Transform("rotate", "L1", (45.0,), (0,))
+    state = set_transform(state, 0, t1b)
+    assert state.transforms == (t1b, t2)
+
+
+@pytest.mark.parametrize(
+    "op,params_",
+    [
+        ("translate", (1.0, 2.0)),
+        ("rotate", (45.0,)),
+        ("scale", (1.5,)),
+        ("erode", (3.0,)),
+        ("dilate", (3.0,)),
+        ("invert", (1.0,)),
+        ("flip-h", (1.0,)),
+        ("flip-v", (1.0,)),
+        ("binary-thresh", (0.5,)),
+        ("scalar-multiply", (2.0,)),
+        ("ablate", (1.0,)),
+    ],
+)
+def test_bend_set_accepts_every_operator_at_its_arity(op, params_):
+    transform = Transform(op, "L1", params_, (0,))
+    state = set_transform(ControlState(), 0, transform)
+    assert state.transforms == (transform,)
+
+
+def test_bend_set_coerces_int_params_to_float():
+    transform = Transform("ablate", "L1", (1,), (0,))
+    state = set_transform(ControlState(), 0, transform)
+    assert state.transforms[0].params == (1.0,)
+    assert all(isinstance(p, float) for p in state.transforms[0].params)
+
+
+def test_bend_set_rejects_unknown_operator(caplog):
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = set_transform(before, 0, Transform("sharpen", "L1", (1.0,), (0,)))
+    assert after == before
+    assert any("invalid transform" in m for m in warnings_from(caplog, MAPPING_LOGGER))
+
+
+def test_bend_set_rejects_unexposed_operator(caplog):
+    # sobel/canny/resize exist in bending/transform_layers.py but are
+    # deliberately not part of the eleven exposed operators.
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = set_transform(before, 0, Transform("sobel", "L1", (1.0,), (0,)))
+    assert after == before
+    assert any("invalid transform" in m for m in warnings_from(caplog, MAPPING_LOGGER))
+
+
+def test_bend_set_rejects_empty_layer(caplog):
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = set_transform(before, 0, Transform("ablate", "", (1.0,), (0,)))
+    assert after == before
+    assert any("invalid transform" in m for m in warnings_from(caplog, MAPPING_LOGGER))
+
+
+def test_bend_set_rejects_wrong_arity(caplog):
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = set_transform(before, 0, Transform("translate", "L1", (1.0,), (0,)))
+    assert after == before
+    assert any("invalid transform" in m for m in warnings_from(caplog, MAPPING_LOGGER))
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_bend_set_rejects_non_finite_params(caplog, bad):
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = set_transform(before, 0, Transform("scale", "L1", (bad,), (0,)))
+    assert after == before
+    assert any("invalid transform" in m for m in warnings_from(caplog, MAPPING_LOGGER))
+
+
+@pytest.mark.parametrize("indices", [(-1,), (0, -2)])
+def test_bend_set_rejects_negative_indices(caplog, indices):
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = set_transform(before, 0, Transform("ablate", "L1", (1.0,), indices))
+    assert after == before
+    assert any("invalid transform" in m for m in warnings_from(caplog, MAPPING_LOGGER))
+
+
+def test_bend_set_out_of_range_index_ignored(caplog):
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = set_transform(before, 5, Transform("ablate", "L1", (1.0,), (0,)))
+    assert after == before
+    assert any("out of range" in m for m in warnings_from(caplog, MAPPING_LOGGER))
+
+
+def test_bend_set_with_non_transform_value_ignored(caplog):
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = apply_event(before, ControlEvent(BEND_SET, (0, "ablate", "L1")))
+    assert after == before
+    assert any("non transform value" in m for m in warnings_from(caplog, MAPPING_LOGGER))
+
+
+def test_bend_set_with_osc_shaped_dict_ignored(caplog):
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = apply_event(
+            before, ControlEvent(BEND_SET, {"index": 0, "op": "ablate"})
+        )
+    assert after == before
+    assert any("non transform value" in m for m in warnings_from(caplog, MAPPING_LOGGER))
+
+
+def test_bend_set_with_non_transform_payload_ignored(caplog):
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = apply_event(before, ControlEvent(BEND_SET, SetTransform(0, "ablate")))
+    assert after == before
+    assert any("malformed transform" in m for m in warnings_from(caplog, MAPPING_LOGGER))
+
+
+# --- /bend/remove -------------------------------------------------------
+
+
+def remove_transform(state, index):
+    return apply_event(state, ControlEvent(BEND_REMOVE, RemoveTransform(index)))
+
+
+def test_bend_remove_removes_at_index():
+    t1 = Transform("translate", "L1", (1.0, 2.0), (0, 1))
+    t2 = Transform("ablate", "L2", (1.0,), (0,))
+    state = ControlState(transforms=(t1, t2))
+    state = remove_transform(state, 0)
+    assert state.transforms == (t2,)
+
+
+def test_bend_remove_can_empty_the_chain():
+    t1 = Transform("ablate", "L1", (1.0,), (0,))
+    state = remove_transform(ControlState(transforms=(t1,)), 0)
+    assert state.transforms == ()
+
+
+def test_bend_remove_out_of_range_ignored(caplog):
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = remove_transform(before, 0)
+    assert after == before
+    assert any("out of range" in m for m in warnings_from(caplog, MAPPING_LOGGER))
+
+
+def test_bend_remove_with_non_transform_value_ignored(caplog):
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = apply_event(before, ControlEvent(BEND_REMOVE, 1))
+    assert after == before
+    assert any("non transform value" in m for m in warnings_from(caplog, MAPPING_LOGGER))
+
+
+# --- /bend/noise ----------------------------------------------------------
+
+
+def set_layer_noise(state, layer, strength):
+    return apply_event(state, ControlEvent(BEND_NOISE, SetLayerNoise(layer, strength)))
+
+
+def test_bend_noise_stores_a_non_zero_strength():
+    state = set_layer_noise(ControlState(), "L1", 0.5)
+    assert state.layer_noise == (("L1", 0.5),)
+
+
+def test_bend_noise_replaces_in_place():
+    state = set_layer_noise(ControlState(), "L1", 0.5)
+    state = set_layer_noise(state, "L2", 0.25)
+    state = set_layer_noise(state, "L1", 0.75)
+    assert state.layer_noise == (("L1", 0.75), ("L2", 0.25))
+
+
+def test_bend_noise_zero_strength_removes_the_entry():
+    state = set_layer_noise(ControlState(), "L1", 0.5)
+    state = set_layer_noise(state, "L1", 0.0)
+    assert state.layer_noise == ()
+
+
+def test_bend_noise_zero_strength_on_absent_layer_is_a_noop():
+    before = ControlState()
+    state = set_layer_noise(before, "L1", 0.0)
+    assert state.layer_noise == ()
+    assert state == before
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_bend_noise_rejects_non_finite_strength(caplog, bad):
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = set_layer_noise(before, "L1", bad)
+    assert after == before
+    assert warnings_from(caplog, MAPPING_LOGGER)
+
+
+def test_bend_noise_rejects_empty_layer(caplog):
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = set_layer_noise(before, "", 0.5)
+    assert after == before
+    assert any("malformed layer noise" in m for m in warnings_from(caplog, MAPPING_LOGGER))
+
+
+def test_bend_noise_with_non_layer_noise_value_ignored(caplog):
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = apply_event(before, ControlEvent(BEND_NOISE, ("L1", 0.5)))
+    assert after == before
+    assert any(
+        "non layer noise value" in m for m in warnings_from(caplog, MAPPING_LOGGER)
+    )
+
+
+# --- /bend/ratio ------------------------------------------------------------
+
+
+def set_layer_ratio(state, layer, rx, ry):
+    return apply_event(state, ControlEvent(BEND_RATIO, SetLayerRatio(layer, rx, ry)))
+
+
+def test_bend_ratio_stores_a_non_neutral_ratio():
+    state = set_layer_ratio(ControlState(), "L1", 2.0, 0.5)
+    assert state.layer_ratios == (("L1", 2.0, 0.5),)
+
+
+def test_bend_ratio_replaces_in_place():
+    state = set_layer_ratio(ControlState(), "L1", 2.0, 0.5)
+    state = set_layer_ratio(state, "L2", 0.5, 2.0)
+    state = set_layer_ratio(state, "L1", 3.0, 3.0)
+    assert state.layer_ratios == (("L1", 3.0, 3.0), ("L2", 0.5, 2.0))
+
+
+def test_bend_ratio_neutral_removes_the_entry():
+    state = set_layer_ratio(ControlState(), "L1", 2.0, 0.5)
+    state = set_layer_ratio(state, "L1", 1.0, 1.0)
+    assert state.layer_ratios == ()
+
+
+def test_bend_ratio_neutral_on_absent_layer_is_a_noop():
+    before = ControlState()
+    state = set_layer_ratio(before, "L1", 1.0, 1.0)
+    assert state.layer_ratios == ()
+    assert state == before
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_bend_ratio_rejects_non_finite(caplog, bad):
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = set_layer_ratio(before, "L1", bad, 1.0)
+    assert after == before
+    assert warnings_from(caplog, MAPPING_LOGGER)
+
+
+def test_bend_ratio_with_non_layer_ratio_value_ignored(caplog):
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = apply_event(before, ControlEvent(BEND_RATIO, ("L1", 2.0, 0.5)))
+    assert after == before
+    assert any(
+        "non layer ratio value" in m for m in warnings_from(caplog, MAPPING_LOGGER)
+    )
+
+
+# --- /adjust/directions -----------------------------------------------------
+
+
+def set_directions(state, vectors):
+    return apply_event(state, ControlEvent(ADJUST_DIRECTIONS, SetDirections(vectors)))
+
+
+def test_adjust_directions_sets_the_vectors():
+    vectors = ((1.0, 0.0), (0.0, 1.0))
+    state = set_directions(ControlState(), vectors)
+    assert state.directions == vectors
+
+
+def test_adjust_directions_zeroes_weights_beyond_the_new_count():
+    before = ControlState(
+        adjust_w1=1.0, adjust_w2=2.0, adjust_w3=3.0, adjust_w4=4.0, adjust_w8=8.0
+    )
+    state = set_directions(before, ((1.0,), (2.0,), (3.0,)))
+    assert (state.adjust_w1, state.adjust_w2, state.adjust_w3) == (1.0, 2.0, 3.0)
+    assert state.adjust_w4 == 0.0
+    assert state.adjust_w8 == 0.0
+
+
+def test_adjust_directions_with_zero_vectors_zeroes_every_weight():
+    before = ControlState(adjust_w1=1.0, adjust_w5=5.0)
+    state = set_directions(before, ())
+    assert state.directions == ()
+    assert all(getattr(state, f"adjust_w{i}") == 0.0 for i in range(1, 9))
+
+
+def test_adjust_directions_coerces_ints_to_floats():
+    state = set_directions(ControlState(), ((1, 2), (3, 4)))
+    assert state.directions == ((1.0, 2.0), (3.0, 4.0))
+
+
+def test_adjust_directions_rejects_more_than_eight(caplog):
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = set_directions(before, tuple((1.0,) for _ in range(9)))
+    assert after == before
+    assert any("malformed directions" in m for m in warnings_from(caplog, MAPPING_LOGGER))
+
+
+def test_adjust_directions_rejects_mismatched_lengths(caplog):
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = set_directions(before, ((1.0, 2.0), (3.0,)))
+    assert after == before
+    assert any("malformed directions" in m for m in warnings_from(caplog, MAPPING_LOGGER))
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_adjust_directions_rejects_non_finite_entry(caplog, bad):
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = set_directions(before, ((1.0, bad),))
+    assert after == before
+    assert any("malformed directions" in m for m in warnings_from(caplog, MAPPING_LOGGER))
+
+
+def test_adjust_directions_with_non_directions_value_ignored(caplog):
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = apply_event(before, ControlEvent(ADJUST_DIRECTIONS, [(1.0, 0.0)]))
+    assert after == before
+    assert any(
+        "non directions value" in m for m in warnings_from(caplog, MAPPING_LOGGER)
+    )
+
+
+# --- /mix/layers --------------------------------------------------------
+
+
+def set_combined_layers(state, entries):
+    return apply_event(state, ControlEvent(MIX_LAYERS, SetCombinedLayers(entries)))
+
+
+def test_mix_layers_sets_the_entries():
+    state = set_combined_layers(ControlState(), ("A", "B", "X"))
+    assert state.combined_layers == ("A", "B", "X")
+
+
+def test_mix_layers_rejects_an_invalid_entry(caplog):
+    before = ControlState(combined_layers=("A",))
+    with caplog.at_level(logging.WARNING):
+        after = set_combined_layers(before, ("A", "C"))
+    assert after == before
+    assert any(
+        "invalid entry" in m for m in warnings_from(caplog, MAPPING_LOGGER)
+    )
+
+
+def test_mix_layers_with_non_combined_layers_value_ignored(caplog):
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = apply_event(before, ControlEvent(MIX_LAYERS, ["A", "B"]))
+    assert after == before
+    assert any(
+        "non combined layers value" in m for m in warnings_from(caplog, MAPPING_LOGGER)
+    )

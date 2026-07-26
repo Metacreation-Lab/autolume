@@ -7,11 +7,17 @@ import math
 from autolume.live.core.events import ControlEvent
 from autolume.live.core.expr import ExpressionError, compile_expression
 from autolume.live.core.params import (
+    ADJUST_DIRECTIONS,
+    BEND_NOISE,
+    BEND_RATIO,
+    BEND_REMOVE,
+    BEND_SET,
     BINDING_CLEAR,
     BINDING_SET,
     BY_ADDRESS,
     KEYFRAME_REMOVE,
     KEYFRAME_SET,
+    MIX_LAYERS,
     REGISTRY,
     VECTOR_RANDOMIZE,
     VECTOR_SET,
@@ -20,13 +26,41 @@ from autolume.live.core.params import (
     ControlState,
     Keyframe,
     RemoveKeyframe,
+    RemoveTransform,
+    SetCombinedLayers,
+    SetDirections,
     SetKeyframe,
+    SetLayerNoise,
+    SetLayerRatio,
+    SetTransform,
     SetVector,
+    Transform,
     apply_value,
 )
 from autolume.live.core.presets import PRESET_APPLY, from_payload
 
 logger = logging.getLogger(__name__)
+
+# Arity of each of the eleven UI-exposed bending operators, derived from
+# `bending/transform_layers.py`'s `ManipulationLayer.forward` call sites:
+# `translate` builds a 2-vector (`torch.tensor([params])` fed straight to
+# kornia's translate), every other operator reads only `params[0]`. `sobel`,
+# `canny` and `resize` are deliberately excluded, they stay unexposed.
+_OPERATOR_ARITY: dict[str, int] = {
+    "translate": 2,
+    "rotate": 1,
+    "scale": 1,
+    "erode": 1,
+    "dilate": 1,
+    "invert": 1,
+    "flip-h": 1,
+    "flip-v": 1,
+    "binary-thresh": 1,
+    "scalar-multiply": 1,
+    "ablate": 1,
+}
+
+_VALID_LAYER_ORIGINS = ("A", "B", "X")
 
 
 def _set_binding(state: ControlState, value: object) -> ControlState:
@@ -216,6 +250,231 @@ def _wrap_loop_index(state: ControlState) -> ControlState:
     return dataclasses.replace(state, loop_index=wrapped)
 
 
+def _validate_transform(transform: Transform) -> Transform | None:
+    """Normalise and validate `transform`, or None if it cannot be applied.
+
+    `op` must be one of the eleven exposed operators, `params` must coerce to
+    finite floats matching that operator's arity, `indices` must be
+    non-negative ints, and `layer` must be a non-empty string. Returns a
+    `Transform` with `params`/`indices` normalised to tuples so downstream
+    code never has to re-check their shape.
+    """
+    arity = _OPERATOR_ARITY.get(transform.op)
+    if arity is None:
+        return None
+    if not isinstance(transform.layer, str) or not transform.layer:
+        return None
+    try:
+        params_values = tuple(float(p) for p in transform.params)
+    except (TypeError, ValueError):
+        return None
+    if len(params_values) != arity or not all(math.isfinite(p) for p in params_values):
+        return None
+    try:
+        indices_values = tuple(transform.indices)
+    except TypeError:
+        return None
+    if not all(
+        isinstance(i, int) and not isinstance(i, bool) and i >= 0
+        for i in indices_values
+    ):
+        return None
+    return dataclasses.replace(transform, params=params_values, indices=indices_values)
+
+
+def _set_transform(state: ControlState, value: object) -> ControlState:
+    if not isinstance(value, SetTransform):
+        logger.warning("Ignoring non transform value %r on %s", value, BEND_SET)
+        return state
+    if not isinstance(value.index, int) or isinstance(value.index, bool):
+        logger.warning(
+            "Ignoring malformed transform index %r on %s", value.index, BEND_SET
+        )
+        return state
+    if not isinstance(value.transform, Transform):
+        logger.warning(
+            "Ignoring malformed transform %r on %s", value.transform, BEND_SET
+        )
+        return state
+    validated = _validate_transform(value.transform)
+    if validated is None:
+        logger.warning(
+            "Ignoring invalid transform %r on %s", value.transform, BEND_SET
+        )
+        return state
+    transforms = list(state.transforms)
+    index = value.index
+    if index == len(transforms):
+        transforms.append(validated)
+    elif 0 <= index < len(transforms):
+        transforms[index] = validated
+    else:
+        logger.warning(
+            "Ignoring transform set at out of range index %d on %s", index, BEND_SET
+        )
+        return state
+    return dataclasses.replace(state, transforms=tuple(transforms))
+
+
+def _remove_transform(state: ControlState, value: object) -> ControlState:
+    if not isinstance(value, RemoveTransform):
+        logger.warning("Ignoring non transform value %r on %s", value, BEND_REMOVE)
+        return state
+    if not isinstance(value.index, int) or isinstance(value.index, bool):
+        logger.warning(
+            "Ignoring malformed transform index %r on %s", value.index, BEND_REMOVE
+        )
+        return state
+    transforms = state.transforms
+    if not (0 <= value.index < len(transforms)):
+        logger.warning(
+            "Ignoring transform remove at out of range index %d on %s",
+            value.index,
+            BEND_REMOVE,
+        )
+        return state
+    remaining = transforms[: value.index] + transforms[value.index + 1 :]
+    return dataclasses.replace(state, transforms=remaining)
+
+
+def _set_layer_noise(state: ControlState, value: object) -> ControlState:
+    if not isinstance(value, SetLayerNoise):
+        logger.warning("Ignoring non layer noise value %r on %s", value, BEND_NOISE)
+        return state
+    if not isinstance(value.layer, str) or not value.layer:
+        logger.warning(
+            "Ignoring malformed layer noise %r on %s", value, BEND_NOISE
+        )
+        return state
+    try:
+        strength = float(value.strength)
+    except (TypeError, ValueError):
+        logger.warning(
+            "Ignoring uncoercible layer noise strength %r on %s",
+            value.strength,
+            BEND_NOISE,
+        )
+        return state
+    if not math.isfinite(strength):
+        logger.warning(
+            "Ignoring non finite layer noise strength %r on %s",
+            value.strength,
+            BEND_NOISE,
+        )
+        return state
+    entries = list(state.layer_noise)
+    for index, (layer, _) in enumerate(entries):
+        if layer == value.layer:
+            if strength == 0.0:
+                del entries[index]
+            else:
+                entries[index] = (value.layer, strength)
+            break
+    else:
+        if strength != 0.0:
+            entries.append((value.layer, strength))
+    return dataclasses.replace(state, layer_noise=tuple(entries))
+
+
+def _set_layer_ratio(state: ControlState, value: object) -> ControlState:
+    if not isinstance(value, SetLayerRatio):
+        logger.warning("Ignoring non layer ratio value %r on %s", value, BEND_RATIO)
+        return state
+    if not isinstance(value.layer, str) or not value.layer:
+        logger.warning(
+            "Ignoring malformed layer ratio %r on %s", value, BEND_RATIO
+        )
+        return state
+    try:
+        rx = float(value.rx)
+        ry = float(value.ry)
+    except (TypeError, ValueError):
+        logger.warning(
+            "Ignoring uncoercible layer ratio %r on %s", value, BEND_RATIO
+        )
+        return state
+    if not (math.isfinite(rx) and math.isfinite(ry)):
+        logger.warning(
+            "Ignoring non finite layer ratio %r on %s", value, BEND_RATIO
+        )
+        return state
+    neutral = rx == 1.0 and ry == 1.0
+    entries = list(state.layer_ratios)
+    for index, (layer, _, _) in enumerate(entries):
+        if layer == value.layer:
+            if neutral:
+                del entries[index]
+            else:
+                entries[index] = (value.layer, rx, ry)
+            break
+    else:
+        if not neutral:
+            entries.append((value.layer, rx, ry))
+    return dataclasses.replace(state, layer_ratios=tuple(entries))
+
+
+def _coerce_directions(raw: object) -> tuple[tuple[float, ...], ...] | None:
+    """Coerce up to eight direction vectors, or None if they cannot be.
+
+    Every vector goes through `_coerce_vector`, so a non-finite or non-numeric
+    entry rejects that vector's whole event, same as `/vector/set`. More than
+    eight vectors, or vectors of differing lengths, are also rejected.
+    """
+    try:
+        vectors = list(raw)
+    except TypeError:
+        return None
+    if len(vectors) > 8:
+        return None
+    coerced = []
+    for vector in vectors:
+        one = _coerce_vector(vector)
+        if one is None:
+            return None
+        coerced.append(one)
+    if len({len(v) for v in coerced}) > 1:
+        return None
+    return tuple(coerced)
+
+
+def _set_directions(state: ControlState, value: object) -> ControlState:
+    if not isinstance(value, SetDirections):
+        logger.warning("Ignoring non directions value %r on %s", value, ADJUST_DIRECTIONS)
+        return state
+    coerced = _coerce_directions(value.vectors)
+    if coerced is None:
+        logger.warning(
+            "Ignoring malformed directions on %s", ADJUST_DIRECTIONS
+        )
+        return state
+    # Weights beyond the new count are zeroed, so a stale weight from a larger
+    # loaded set cannot silently keep acting on a direction that no longer
+    # exists.
+    zeroed = {f"adjust_w{i}": 0.0 for i in range(len(coerced) + 1, 9)}
+    return dataclasses.replace(state, directions=coerced, **zeroed)
+
+
+def _set_combined_layers(state: ControlState, value: object) -> ControlState:
+    if not isinstance(value, SetCombinedLayers):
+        logger.warning("Ignoring non combined layers value %r on %s", value, MIX_LAYERS)
+        return state
+    try:
+        entries = tuple(value.entries)
+    except TypeError:
+        logger.warning(
+            "Ignoring malformed combined layers %r on %s", value.entries, MIX_LAYERS
+        )
+        return state
+    if not all(entry in _VALID_LAYER_ORIGINS for entry in entries):
+        logger.warning(
+            "Ignoring combined layers with an invalid entry %r on %s",
+            entries,
+            MIX_LAYERS,
+        )
+        return state
+    return dataclasses.replace(state, combined_layers=entries)
+
+
 def apply_event(state: ControlState, event: ControlEvent) -> ControlState:
     if event.address == BINDING_SET:
         return _set_binding(state, event.value)
@@ -235,6 +494,18 @@ def apply_event(state: ControlState, event: ControlEvent) -> ControlState:
         return _set_keyframe(state, event.value)
     if event.address == KEYFRAME_REMOVE:
         return _wrap_loop_index(_remove_keyframe(state, event.value))
+    if event.address == BEND_SET:
+        return _set_transform(state, event.value)
+    if event.address == BEND_REMOVE:
+        return _remove_transform(state, event.value)
+    if event.address == BEND_NOISE:
+        return _set_layer_noise(state, event.value)
+    if event.address == BEND_RATIO:
+        return _set_layer_ratio(state, event.value)
+    if event.address == ADJUST_DIRECTIONS:
+        return _set_directions(state, event.value)
+    if event.address == MIX_LAYERS:
+        return _set_combined_layers(state, event.value)
     spec = BY_ADDRESS.get(event.address)
     if spec is None:
         logger.debug("Ignoring event for unknown address %s", event.address)
