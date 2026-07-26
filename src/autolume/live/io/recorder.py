@@ -41,6 +41,7 @@ DEFAULT_FPS = 30
 STOP_TIMEOUT = 5.0
 SCREENSHOT_CAPACITY = 8
 _IDLE_WAIT = 0.05
+_DROP_LOG_INTERVAL = 100
 
 _SIZE_CHANGED = "The frame size changed. The recording was stopped."
 _STILL_SAVING = "The previous recording is still saving. Try again in a moment."
@@ -339,6 +340,7 @@ class ScreenshotWorker:
         self._thread: threading.Thread | None = None
         self._running = False
         self._stopped = False
+        self._drops = 0
 
     def save_png(self, path: str, frame: np.ndarray) -> None:
         """Queue one PNG write. Called from the render thread: never blocks."""
@@ -347,7 +349,7 @@ class ScreenshotWorker:
                 logger.debug("Ignoring a screenshot request after shutdown")
                 return
             if len(self._pending) == self._pending.maxlen:
-                logger.warning("Screenshot queue is full, dropping the oldest request")
+                self._report_drop()
             self._pending.append((str(path), frame))
             if self._thread is None:
                 self._running = True
@@ -372,6 +374,22 @@ class ScreenshotWorker:
             return
         with self._lock:
             self._thread = None
+
+    def _report_drop(self) -> None:
+        """Say a request was dropped, throttled: this is a render-thread call.
+
+        `/capture/screenshot` is reachable from OSC, so a fader pointed at it
+        arrives every frame, and an unthrottled warning would put a formatted
+        log line on the render thread at frame rate. Must be called with the
+        lock held.
+        """
+        self._drops += 1
+        if self._drops == 1 or self._drops % _DROP_LOG_INTERVAL == 0:
+            logger.warning(
+                "Screenshots are arriving faster than they can be saved, "
+                "%d dropped so far",
+                self._drops,
+            )
 
     def _run(self) -> None:
         while True:

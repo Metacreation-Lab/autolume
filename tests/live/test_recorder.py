@@ -14,6 +14,7 @@ import pytest
 from autolume.live.io.recorder import (
     DEFAULT_FPS,
     QUEUE_CAPACITY,
+    SCREENSHOT_CAPACITY,
     Recorder,
     ScreenshotWorker,
     capture_basename,
@@ -406,6 +407,28 @@ def test_a_request_after_stop_is_ignored(tmp_path):
     worker.save_png(str(late), frame(2))
     time.sleep(0.1)
     assert late.exists() is False
+
+
+def test_a_flood_of_requests_drops_the_oldest_and_says_so_once(tmp_path, caplog):
+    """`/capture/screenshot` is reachable from OSC, so a fader can point at it.
+
+    A warning per dropped request would be a formatted log line on the render
+    thread at frame rate, which is the sort of thing that turns a mistake in
+    a mapping into dropped frames.
+    """
+    worker = ScreenshotWorker()
+    with caplog.at_level("WARNING"):
+        # The worker thread starts on the first request, so it may drain a
+        # few. Enough requests arrive here that the queue overflows whatever
+        # it manages to take.
+        for index in range(SCREENSHOT_CAPACITY * 6):
+            worker.save_png(str(tmp_path / f"shot{index}.png"), frame(index))
+        worker.stop()
+    drops = [
+        record for record in caplog.records if "faster than they can be saved" in record.message
+    ]
+    assert len(drops) == 1
+    assert len(list(tmp_path.glob("*.png"))) < SCREENSHOT_CAPACITY * 6
 
 
 def test_no_thread_is_started_until_something_is_captured():
