@@ -1613,23 +1613,59 @@ def test_the_noise_pending_note_is_silent_while_the_loop_is_stopped(frame):
 
     The control loop only calls `request_build` under `loop_active and
     noise_loop` (control.py `tick`), so a stale key with the loop stopped is
-    not a rebuild in progress, only one that has not been asked for yet. This
-    stopped, mismatched panel has to come out the same height as a playing,
-    matched one: neither has anything pending to report.
+    not a rebuild in progress, only one that has not been asked for yet.
+
+    Two stopped panels, matched and stale, so the only thing that could
+    differ between them is `_noise_pending_row`'s own output: both loop_active
+    (so the Project note, gated on it, draws identically in both, Minor 5)
+    and everything else about the state are the same. They have to come out
+    the same height: neither has anything pending to report, regardless of
+    the key.
     """
     info = ModelInfo(pkl_path="model.pkl", z_dim=4, num_ws=8)
-
-    stopped = ControlState(
+    state = ControlState(
         loop_active=False, noise_loop=True, noise_loop_seed=3, noise_radius=2.0
     )
-    stopped_runtime = PanelRuntime(state=stopped)
-    stopped_runtime.model_info_store = LatestValueStore(info)
-    # Stale on purpose: this is exactly the key mismatch the playing case
-    # reads as pending, and here it must not be.
-    stopped_runtime.control_loop = FakeControlLoop(noise_table_key=(1, 1.0, 4))
 
-    playing = dataclasses.replace(stopped, loop_active=True)
-    playing_runtime = PanelRuntime(state=playing)
+    matched_runtime = PanelRuntime(state=state)
+    matched_runtime.model_info_store = LatestValueStore(info)
+    matched_runtime.control_loop = FakeControlLoop(noise_table_key=(3, 2.0, 4))
+
+    stale_runtime = PanelRuntime(state=state)
+    stale_runtime.model_info_store = LatestValueStore(info)
+    # Stale on purpose: this is exactly the key mismatch the playing case
+    # reads as pending, and here, stopped, it must not be.
+    stale_runtime.control_loop = FakeControlLoop(noise_table_key=(1, 1.0, 4))
+
+    matched_height = loop_panel_height(
+        LoopPanel(matched_runtime, mapping_popup=lambda name: None)
+    )
+    imgui.new_line()
+    stale_height = loop_panel_height(
+        LoopPanel(stale_runtime, mapping_popup=lambda name: None)
+    )
+    assert stale_height == pytest.approx(matched_height)
+
+
+def test_the_project_note_only_draws_while_the_loop_is_playing(frame):
+    """Minor 5: the note explaining what Project changes about a noise
+    loop's frames only holds while `loop_active`, the one time a running
+    noise loop actually puts the generator in `"vec"` mode and ungreys
+    Project in Perform (item A). Selecting Noise loop mode without playing
+    it must not show it: Project sits greyed in Perform at that point, so
+    the note would assert a coupling the UI is simultaneously denying.
+
+    Matched key in both panels, so `_noise_pending_row` contributes nothing
+    to either and the only thing that can differ is the Project note.
+    """
+    info = ModelInfo(pkl_path="model.pkl", z_dim=4, num_ws=8)
+    state = ControlState(noise_loop=True, noise_loop_seed=3, noise_radius=2.0)
+
+    stopped_runtime = PanelRuntime(state=state)
+    stopped_runtime.model_info_store = LatestValueStore(info)
+    stopped_runtime.control_loop = FakeControlLoop(noise_table_key=(3, 2.0, 4))
+
+    playing_runtime = PanelRuntime(state=dataclasses.replace(state, loop_active=True))
     playing_runtime.model_info_store = LatestValueStore(info)
     playing_runtime.control_loop = FakeControlLoop(noise_table_key=(3, 2.0, 4))
 
@@ -1640,7 +1676,7 @@ def test_the_noise_pending_note_is_silent_while_the_loop_is_stopped(frame):
     playing_height = loop_panel_height(
         LoopPanel(playing_runtime, mapping_popup=lambda name: None)
     )
-    assert stopped_height == pytest.approx(playing_height)
+    assert playing_height > stopped_height
 
 
 # --- item 3: the index scrubber is one-based and bounded to the count -----

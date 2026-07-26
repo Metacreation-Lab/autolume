@@ -819,12 +819,12 @@ class ControlBinder:
     ) -> None:
         """Draw `name`, a BOOL parameter, as a two option radio pair.
 
-        A checkbox reads as "add some of this"; a mode choice, `vector_mode`
-        and `loop_uses_time` are the two today, shows both alternatives so
-        picking one is picking between them rather than toggling a
-        quantity. `false_label` is the option shown selected when the
-        parameter is False, `true_label` when it is True. The parameter, its
-        bounds and its driver marker are untouched: this is presentation
+        A checkbox reads as "add some of this"; a mode choice, `vector_mode`,
+        `loop_uses_time` and `noise_loop` are the three today, shows both
+        alternatives so picking one is picking between them rather than
+        toggling a quantity. `false_label` is the option shown selected when
+        the parameter is False, `true_label` when it is True. The parameter,
+        its bounds and its driver marker are untouched: this is presentation
         only.
 
         Routed through `_widget` like every other control, inside one imgui

@@ -58,11 +58,14 @@ logger = logging.getLogger(__name__)
 _SEED_WIDTH_EMS = 5.5
 _VECTOR_FILTER = ["Vector files", "*.npy *.pt"]
 # Trimmed from an earlier version that also said "Project in Perform also
-# applies to this loop": that half is now redundant, since item A greys
-# Project on `derive_mode` and a running noise loop is exactly what puts the
-# generator in `"vec"` mode, so starting one visibly ungreys the checkbox in
-# Perform on its own. What is left is the one thing the greying cannot say by
-# itself, what the checkbox actually changes about a noise loop's frames.
+# applies to this loop": that half only holds while `loop_active`, the one
+# time a noise loop actually puts the generator in `"vec"` mode and visibly
+# ungreys the checkbox in Perform. Selecting Noise loop mode without playing
+# it does not, so this note is only drawn then too (`_noise_rows`); showing
+# it, and this claim, while Project sits greyed in Perform would have the
+# UI assert a coupling it is simultaneously denying. What is left, once
+# it does show, is the one thing the greying alone cannot say: what the
+# checkbox actually changes about a noise loop's frames.
 _PROJECT_NOTE = "Off, each step is read as a raw W row instead of a latent."
 _IP_NOTE = "This must be an IP address. A host name will not work."
 
@@ -632,7 +635,13 @@ class LoopPanel:
         # about either is a position worth sweeping through mid-drag.
         self._binder.input_int("noise_loop_seed", "Seed")
         self._binder.input_float("noise_radius", "Radius", format="%.2f")
-        self._note(_PROJECT_NOTE)
+        # Gated on `loop_active`, not shown whenever this section is: only
+        # while playing does a noise loop put the generator in `"vec"` mode
+        # and ungrey Project in Perform, which is what this note describes
+        # (`_PROJECT_NOTE`'s own comment). Showing it with Play off would
+        # describe a checkbox the UI is simultaneously greying.
+        if state.loop_active:
+            self._note(_PROJECT_NOTE)
         self._noise_pending_row(state)
 
     def _noise_pending_row(self, state: ControlState) -> None:
