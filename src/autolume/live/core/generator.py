@@ -990,12 +990,15 @@ class ModelHost:
         "auto" still calls the loader with a single argument, exactly as
         before device switching existed, so a loader test double taking
         just `path` keeps working; any other device name requires a loader
-        that accepts `device=`. Resolution failure (an unavailable device
-        remembered from an earlier switch) is reported the same way a
-        switch failure is, through `device_store`, so the control loop's
-        revert logic handles it uniformly; any other load failure
-        (a broken pkl, say) still only reports through the plain
-        `error()`/`info_store` channel, since the device was never at fault.
+        that accepts `device=`. Resolution failure (a device remembered
+        from an earlier switch that no longer resolves) reports through
+        `device_store` only, the same channel a switch failure uses, and
+        retries `path` immediately with the device name restored to
+        whatever is actually running: never a terminal, `error()`-and-
+        `info_store`-clearing failure, since the retry is expected to
+        succeed. Any other load failure (a broken pkl, say) still reports
+        through the plain `error()`/`info_store` channel, since the device
+        was never at fault there.
         """
         try:
             device = None if device_name == "auto" else resolve_device(device_name)
@@ -1005,15 +1008,21 @@ class ModelHost:
                 won = self._pending == path and self._pending_device is None
                 active = getattr(self._current, "device", None)
                 if won:
-                    self._pending = None
-                    self._error = str(exc)
                     # Never keep a device name that just failed to resolve:
                     # fall back to whatever is actually running (or "auto"
                     # if nothing is), so this host's own state stays
                     # self-consistent no matter whether anything
                     # downstream ever notices and re-requests a good
-                    # value. Without this, every load after the first
-                    # failure keeps hitting the same dead device forever.
+                    # value. `_pending` stays put rather than clearing, so
+                    # `_run`'s own re-wake retries the same pkl through
+                    # this same method next, now with a device name that
+                    # always resolves: one retry, never a spin, and this
+                    # pkl is never silently dropped just because the
+                    # device selected before it was requested turned out
+                    # to be unavailable. Not reported through `error()`/
+                    # `info_store` for exactly that reason, matching
+                    # `_load_on_device`'s own failure below: this is a
+                    # transient, self-correcting step, not a terminal one.
                     self._device_name = str(active) if active is not None else "auto"
             if won:
                 self.device_store.set(
@@ -1023,12 +1032,6 @@ class ModelHost:
                         error=str(exc),
                     )
                 )
-                # A load that does not happen must be reported the same
-                # way any other load failure is, not silently: `error()`
-                # and `info_store` are the channels a caller already
-                # polls, and leaving them untouched is what made this
-                # unrecoverable rather than merely annoying.
-                self.info_store.set(None)
             return
         try:
             model = (

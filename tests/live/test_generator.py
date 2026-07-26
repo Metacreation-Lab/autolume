@@ -406,6 +406,38 @@ def test_model_host_a_device_request_before_any_model_is_honored_on_first_load()
     host.stop()
 
 
+def test_model_host_an_unavailable_device_picked_before_any_model_still_loads_it():
+    """Regression: `_load_default`'s own DeviceUnavailable branch cleared
+    `_pending` unconditionally, so picking an unavailable device before
+    ever loading a model dropped that first `request_load` silently:
+    `current()` stayed None, `error()` reported the device failure, but
+    nothing retried, and because `_ModelWatchingControlLoop` is edge
+    triggered on `pkl_path`, re-picking the very same path from the UI did
+    nothing either. `_load_on_device` already had this fix; `_load_default`
+    now matches it: `_device_name` is restored to a name that resolves and
+    `_pending` stays put, so the loader thread's own re-wake retries the
+    same pkl immediately."""
+
+    def loader(path, device=None):
+        return _DeviceAwareModel(path, device)
+
+    host = ModelHost(loader=loader)
+
+    # This machine never has CUDA, so this genuinely fails, before any pkl
+    # has ever been requested.
+    host.request_device("cuda")
+    host.request_load("/tmp/a.pkl")
+
+    deadline = time.monotonic() + 2.0
+    while host.current() is None and time.monotonic() < deadline:
+        time.sleep(0.005)
+
+    assert host.current() is not None
+    assert host.current().pkl_path == "/tmp/a.pkl"
+    assert host.current().device is None  # "auto": the loader's own choice
+    host.stop()
+
+
 def test_model_host_a_device_request_during_an_in_flight_pkl_load_does_not_strand_it():
     """Regression: request_device used to overwrite `_pending` with
     whatever was already `current()`, so a pkl load already in flight lost
