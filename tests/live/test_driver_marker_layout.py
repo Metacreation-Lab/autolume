@@ -1500,6 +1500,7 @@ def test_only_the_preview_opens_itself_and_every_form_keeps_its_padding():
         "Audio",
         "Mapping",
         "Presets",
+        "Bending",
         "Performance",
         "Preview",
     }
@@ -1510,6 +1511,7 @@ def test_only_the_preview_opens_itself_and_every_form_keeps_its_padding():
         "Audio",
         "Mapping",
         "Presets",
+        "Bending",
         "Performance",
     }
 

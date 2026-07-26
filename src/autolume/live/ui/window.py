@@ -8,6 +8,7 @@ from autolume.live.ui import theme
 from autolume.live.ui.output_window import OutputWindow
 from autolume.live.ui.panels import (
     AudioPanel,
+    BendingPanel,
     LoopPanel,
     MappingPanel,
     PerformancePanel,
@@ -86,6 +87,7 @@ def _build_runner_params(runtime) -> hello_imgui.RunnerParams:
     audio = AudioPanel(runtime)
     presets = PresetsPanel(runtime)
     performance = PerformancePanel(runtime, mapping.popup)
+    bending = BendingPanel(runtime, mapping.popup)
     # Not a dockable panel: it has no form of its own, only a GLFW window it
     # opens and drives on the side. `show_gui` runs every frame regardless of
     # which dock tab is focused, which a dockable window's own gui function
@@ -115,10 +117,10 @@ def _build_runner_params(runtime) -> hello_imgui.RunnerParams:
     # installs that already have an ini from an earlier pane arrangement,
     # which is what keeps a new dockable window from hiding behind a saved
     # one that predates it.
-    # Bumped once for the whole of task 10, not once per window: the three
-    # windows it adds (Bending, Mixing, Performance) ship together, and the
-    # condition this name controls is first use ever, so a second bump inside
-    # the same release would buy nothing and cost every performer their pane
+    #
+    # Bumped once for the whole of the parity round rather than once per window:
+    # Bending, Mixing and Performance ship together, and a second bump inside
+    # one release would buy nothing and cost every performer their pane
     # arrangement a second time.
     params.docking_params.layout_name = "PatchLoop2"
     params.docking_params.docking_splits = [
@@ -144,6 +146,7 @@ def _build_runner_params(runtime) -> hello_imgui.RunnerParams:
         _dockable("Audio", _PATCH_SPACE, audio.gui),
         _dockable("Mapping", _PATCH_SPACE, mapping.gui),
         _dockable("Presets", _PATCH_SPACE, presets.gui),
+        _dockable("Bending", _PATCH_SPACE, bending.gui),
         _dockable("Performance", _PATCH_SPACE, performance.gui),
         _viewport_dockable("Preview", _MAIN_SPACE, preview.gui),
     ]

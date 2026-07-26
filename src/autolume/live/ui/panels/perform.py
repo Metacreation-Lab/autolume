@@ -79,6 +79,7 @@ def string_combo(
     labels: Sequence[str] | None = None,
     *,
     enabled: bool = True,
+    reserve: float = 0.0,
 ) -> str | None:
     """Draw a combo over `values` and return the newly picked one, or None.
 
@@ -91,7 +92,9 @@ def string_combo(
     which this task does not own.
 
     `labels` are what the performer reads and default to the values
-    themselves. The caller emits, so the event stays with the panel that knows
+    themselves. `reserve` is what the row draws after the combo on the same
+    line, so the combo gives its width up first and the button beside it stays
+    on the row. The caller emits, so the event stays with the panel that knows
     which address it belongs to.
     """
     shown = list(labels) if labels is not None else list(values)
@@ -105,7 +108,7 @@ def string_combo(
         fitted_width(
             imgui.calc_item_width(),
             imgui.get_content_region_avail().x,
-            label_reserve(label),
+            label_reserve(label) + reserve,
             imgui.get_font_size(),
         )
     )

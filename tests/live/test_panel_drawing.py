@@ -15,14 +15,15 @@ manual.
 import pytest
 from imgui_bundle import imgui
 
-from autolume.live.core.generator import DeviceStatus
-from autolume.live.core.params import ControlState
+from autolume.live.core.generator import DeviceStatus, LayerInfo, ModelInfo
+from autolume.live.core.params import ControlState, Transform
 from autolume.live.core.sources import SourceTable
 from autolume.live.core.store import LatestValueStore
 from autolume.live.io.ndi import NdiStatus
 from autolume.live.io.recorder import RecorderStatus
 from autolume.live.runtime import OscStatus
 from autolume.live.ui import theme
+from autolume.live.ui.panels.bending import BendingPanel
 from autolume.live.ui.panels.performance import PerformancePanel
 
 # The docked width at the shipped window size, and the two narrower docks a
@@ -147,6 +148,40 @@ def widest_overflow(build, width: float, font_scale: float) -> float:
 
 LOADED = ControlState(pkl_path="/models/wikiart-1024.pkl")
 
+CATALOG = ModelInfo(
+    pkl_path="/models/wikiart-1024.pkl",
+    z_dim=512,
+    num_ws=18,
+    layers=(
+        LayerInfo("b4.conv1", 512, 4, 4),
+        LayerInfo("b4.torgb", 3, 4, 4),
+        LayerInfo("b8.conv0", 512, 8, 8),
+        LayerInfo("b8.conv1", 512, 8, 8),
+        LayerInfo("b8.torgb", 3, 8, 8),
+        LayerInfo("b16.conv0", 256, 16, 16),
+        LayerInfo("b16.torgb", 3, 16, 16),
+        LayerInfo("output", 3, 16, 16),
+    ),
+)
+
+# The worst case the bending panel can be asked to draw: a chain on the layer it
+# opens on, a torgb layer's greyed noise rows, directions loaded so the adjuster
+# is live, and a capture layer the catalog does not contain.
+BENT = ControlState(
+    pkl_path="/models/wikiart-1024.pkl",
+    transforms=(
+        Transform("translate", "b4.conv1", (0.5, -0.5), (0, 1, 2)),
+        Transform("erode", "b4.conv1", (3.0,), (0,)),
+        Transform("ablate", "b16.conv0", (1.0,), tuple(range(64))),
+    ),
+    layer_noise=(("b4.conv1", 0.4),),
+    layer_ratios=(("b4.conv1", 2.0, 0.5),),
+    directions=((0.1,) * 512, (0.2,) * 512),
+    adjust_w1=1.5,
+    capture_layer="b256.conv0",
+    base_channel=64,
+)
+
 
 PERFORMANCE_CASES = [
     ("empty", lambda: PerformancePanel(Runtime())),
@@ -168,12 +203,24 @@ PERFORMANCE_CASES = [
     ),
 ]
 
+BENDING_CASES = [
+    ("bending empty", lambda: BendingPanel(Runtime())),
+    (
+        "bending catalog",
+        lambda: BendingPanel(Runtime(LOADED, Host(current=Model()), CATALOG)),
+    ),
+    (
+        "bending bent",
+        lambda: BendingPanel(Runtime(BENT, Host(current=Model()), CATALOG)),
+    ),
+]
+
+CASES = PERFORMANCE_CASES + BENDING_CASES
+
 
 @pytest.mark.parametrize("font_scale", FONT_SCALES)
 @pytest.mark.parametrize("width", WIDTHS)
-@pytest.mark.parametrize(
-    "name,build", PERFORMANCE_CASES, ids=[name for name, _ in PERFORMANCE_CASES]
-)
+@pytest.mark.parametrize("name,build", CASES, ids=[name for name, _ in CASES])
 def test_no_panel_content_runs_past_the_panel_it_is_drawn_in(
     name, build, width, font_scale
 ):
@@ -188,9 +235,7 @@ def test_no_panel_content_runs_past_the_panel_it_is_drawn_in(
     assert widest_overflow(build, width, font_scale) <= WRAP_ROUNDING, name
 
 
-@pytest.mark.parametrize(
-    "name,build", PERFORMANCE_CASES, ids=[name for name, _ in PERFORMANCE_CASES]
-)
+@pytest.mark.parametrize("name,build", CASES, ids=[name for name, _ in CASES])
 def test_a_panel_draws_without_raising(name, build):
     """Nothing a panel draws may raise, whatever the state behind it.
 
