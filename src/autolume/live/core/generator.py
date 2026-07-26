@@ -15,6 +15,7 @@ from typing import Callable
 
 import numpy as np
 
+from autolume.live.core.mixing import combine
 from autolume.live.core.params import Keyframe, RenderParams, Transform
 from autolume.live.core.store import LatestValueStore
 from autolume.live.core.superres import SuperRes
@@ -910,6 +911,21 @@ class ModelHost:
         # enforced property, and a model reporting a device string
         # `resolve_device` never matches would otherwise retry forever.
         self._retry_attempted_path: str | None = None
+        # Slot B and the mix built from the pair. `_current` stays model A
+        # throughout: only `current()` chooses between it and `_mixed`, so
+        # every device and load path above is untouched by mixing.
+        self._current_b: LoadedModel | None = None
+        self._pending_b: str | None = None
+        self._mixed: LoadedModel | None = None
+        self._mixing_enabled = False
+        self._combined_layers: tuple[str, ...] = ()
+        self._pending_mix: tuple[str, ...] | None = None
+        # The catalogs for A and for the mix are kept apart because
+        # `info_store` publishes whichever one `current()` is rendering, and
+        # a mix that truncates depth has different layers from its own
+        # source A.
+        self._info_a: ModelInfo | None = None
+        self._info_mixed: ModelInfo | None = None
         self.info_store: LatestValueStore[ModelInfo | None] = LatestValueStore(None)
         self.device_store: LatestValueStore[DeviceStatus] = LatestValueStore(
             DeviceStatus()
@@ -959,9 +975,78 @@ class ModelHost:
                 return
         self._wakeup.set()
 
-    def current(self) -> LoadedModel | None:
+    def request_load_b(self, path: str) -> None:
+        """Load the second mixing source into slot B.
+
+        Independent of slot A: the render loop never sees slot B, so a load
+        here never interrupts what is on screen.
+        """
         with self._lock:
+            self._pending_b = str(path)
+        self._wakeup.set()
+
+    def request_mix(self, combined_layers) -> None:
+        """Assemble the mixed network on the loader thread.
+
+        `combined_layers` is one entry per name in `mixing.conv_names` of
+        the loaded pair, padded to the longer of the two. Never blocks and
+        never raises: a selection that no longer lines up with the models
+        under it, a pair that cannot be assembled, or a slot that is empty
+        all report through `error()` and leave model A rendering.
+        """
+        # A bare string iterates one character at a time and would be read as
+        # a selection rather than rejected, so it is ruled out by name.
+        if isinstance(combined_layers, str):
+            logger.warning("Ignoring a mix request that is not a sequence of entries")
+            return
+        try:
+            entries = tuple(str(entry) for entry in combined_layers)
+        except TypeError:
+            logger.warning("Ignoring a mix request that is not a sequence of entries")
+            return
+        with self._lock:
+            self._combined_layers = entries
+            self._pending_mix = entries
+        self._wakeup.set()
+
+    def set_mixing_enabled(self, enabled: bool) -> None:
+        """Choose between the mixed network and model A as what renders.
+
+        Never discards a built mix when it turns off: flipping between the
+        pair and the mix is a performance gesture, and rebuilding a whole
+        generator every time would cost seconds. A build is queued only
+        when mixing turns on with a selection and nothing built.
+        """
+        enabled = bool(enabled)
+        with self._lock:
+            if enabled == self._mixing_enabled:
+                return
+            self._mixing_enabled = enabled
+            queue = enabled and self._mixed is None and bool(self._combined_layers)
+            if queue:
+                self._pending_mix = self._combined_layers
+        self._publish_info()
+        if queue:
+            self._wakeup.set()
+
+    def current(self) -> LoadedModel | None:
+        """What the render loop draws: the mix while it is on, else model A."""
+        with self._lock:
+            if self._mixing_enabled and self._mixed is not None:
+                return self._mixed
             return self._current
+
+    def current_b(self) -> LoadedModel | None:
+        with self._lock:
+            return self._current_b
+
+    def pending_b(self) -> str | None:
+        with self._lock:
+            return self._pending_b
+
+    def mixing_enabled(self) -> bool:
+        with self._lock:
+            return self._mixing_enabled
 
     def error(self) -> str | None:
         with self._lock:
@@ -996,14 +1081,155 @@ class ModelHost:
                 path = self._pending
                 pending_device = self._pending_device
                 sticky_device = self._device_name
-            if path is None:
-                continue
-            if pending_device is None:
-                self._load_default(path, sticky_device)
-            else:
-                self._load_on_device(path, pending_device)
-            if self.loading():
+                path_b = self._pending_b
+                entries = self._pending_mix
+            # Slot A first, so a mix queued in the same wakeup assembles
+            # from the pair the requests actually meant.
+            if path is not None:
+                if pending_device is None:
+                    self._load_default(path, sticky_device)
+                else:
+                    self._load_on_device(path, pending_device)
+            if path_b is not None:
+                self._load_b(path_b)
+            if entries is not None:
+                self._build_mix(entries)
+            if self._has_work():
                 self._wakeup.set()
+
+    def _has_work(self) -> bool:
+        with self._lock:
+            return (
+                self._pending is not None
+                or self._pending_b is not None
+                or self._pending_mix is not None
+            )
+
+    def _publish_info(self) -> None:
+        """Publish the catalog of whatever `current()` now returns."""
+        with self._lock:
+            active = (
+                self._info_mixed
+                if self._mixing_enabled and self._mixed is not None
+                else self._info_a
+            )
+        self.info_store.set(active)
+
+    def _retire_mix_locked(self) -> LoadedModel | None:
+        """Drop the built mix and queue a rebuild if one is still wanted.
+
+        Called with the lock held whenever either source changes, a device
+        switch included. The mixed generator holds copies of the sources'
+        weights and sits on the device slot A had when it was built, so it
+        can never outlive the pair it came from. Returns the retired model
+        for the caller to release outside the lock.
+        """
+        stale = self._mixed
+        self._mixed = None
+        self._info_mixed = None
+        if self._mixing_enabled and self._combined_layers:
+            self._pending_mix = self._combined_layers
+        return stale
+
+    def _drop_mix(self, error: str | None) -> None:
+        """Stop rendering the mix and, when there is one, report why."""
+        with self._lock:
+            stale = self._mixed
+            self._mixed = None
+            self._info_mixed = None
+            if error is not None:
+                self._error = error
+        _release_quietly(stale)
+        self._publish_info()
+
+    def _load_b(self, path: str) -> None:
+        """Load the second mixing source, always onto the CPU.
+
+        Slot B is never rendered. It exists only as a bag of weights for
+        `combine`, which copies what it needs into a generator of its own,
+        and `load_state_dict` copies across devices for free. Keeping B off
+        the render device costs nothing, halves the VRAM a mixing session
+        needs, and leaves it untouched by slot A's device switching.
+        """
+        import torch
+
+        try:
+            model = self._loader(path, device=torch.device("cpu"))
+        except Exception as exc:
+            logger.exception("Failed to load the mixing model %s", path)
+            with self._lock:
+                won = self._pending_b == path
+                if won:
+                    self._pending_b = None
+                    self._error = str(exc)
+            return
+        with self._lock:
+            won = self._pending_b == path
+            if won:
+                previous = self._current_b
+                self._current_b = model
+                self._pending_b = None
+                self._error = None
+                stale_mix = self._retire_mix_locked()
+        if won:
+            _release_quietly(previous)
+            _release_quietly(stale_mix)
+            self._publish_info()
+        else:
+            _release_quietly(model)
+
+    def _build_mix(self, entries: tuple[str, ...]) -> None:
+        """Assemble `entries` into the network the render loop draws.
+
+        Both sources stay loaded and untouched: the mix is a third
+        generator holding copies. Every failure leaves model A rendering,
+        so there is never a black frame, only a status line.
+        """
+        with self._lock:
+            if self._pending_mix == entries:
+                self._pending_mix = None
+            model_a = self._current
+            model_b = self._current_b
+            enabled = self._mixing_enabled
+        if not entries:
+            self._drop_mix(None)
+            return
+        if not enabled:
+            return
+        if model_a is None or model_b is None:
+            self._drop_mix("Load a model in both slots to mix them.")
+            return
+        try:
+            network = combine(model_a.G, model_b.G, entries)
+            network = network.eval().requires_grad_(False).to(model_a.device)
+            mixed = LoadedModel(model_a.pkl_path, network, model_a.device)
+        except Exception as exc:
+            logger.warning("Could not build the mixed model: %s", exc)
+            self._drop_mix(str(exc))
+            return
+        # Enumerated before publishing, exactly as a plain load is: the dry
+        # synthesis pass hooks this model's submodules and must be finished
+        # before the render thread can reach it through current().
+        info = _model_info(model_a.pkl_path, mixed)
+        with self._lock:
+            won = (
+                self._current is model_a
+                and self._current_b is model_b
+                and self._pending_mix is None
+            )
+            if won:
+                previous = self._mixed
+                self._mixed = mixed
+                self._info_mixed = info
+                self._error = None
+        if not won:
+            # A source moved, or a newer selection arrived, while this was
+            # building: it was assembled from a pair that is no longer the
+            # pair, so it is dropped rather than shown.
+            _release_quietly(mixed)
+            return
+        _release_quietly(previous)
+        self._publish_info()
 
     def _load_default(self, path: str, device_name: str) -> None:
         """The ordinary pkl load, resolved against `device_name` (the
@@ -1066,6 +1292,7 @@ class ModelHost:
                         self._pending = None
                         self._error = str(exc)
                         self._retry_attempted_path = None
+                        self._info_a = None
                     else:
                         # First failure for this path: `_pending` stays
                         # put, so `_run`'s own re-wake retries it through
@@ -1081,7 +1308,7 @@ class ModelHost:
                     )
                 )
                 if gave_up:
-                    self.info_store.set(None)
+                    self._publish_info()
             return
         try:
             model = (
@@ -1102,10 +1329,13 @@ class ModelHost:
                     self._error = None
                     self._pending = None
                     self._retry_attempted_path = None
+                    self._info_a = info
+                    stale_mix = self._retire_mix_locked()
                 # else: a newer request arrived while loading; loop again
             if won:
                 _release_quietly(previous)
-                self.info_store.set(info)
+                _release_quietly(stale_mix)
+                self._publish_info()
                 self.device_store.set(
                     DeviceStatus(
                         active=str(getattr(model, "device", None))
@@ -1123,8 +1353,9 @@ class ModelHost:
                     self._error = str(exc)
                     self._pending = None
                     self._retry_attempted_path = None
+                    self._info_a = None
             if won:
-                self.info_store.set(None)
+                self._publish_info()
 
     def _load_on_device(self, path: str, device_name: str) -> None:
         """Reload `path` onto `device_name`, publishing the outcome.
@@ -1195,9 +1426,12 @@ class ModelHost:
                 # earlier _load_default retry cycle for this same path
                 # must not survive to confuse a later one.
                 self._retry_attempted_path = None
+                self._info_a = info
+                stale_mix = self._retire_mix_locked()
         if won:
             _release_quietly(previous)
-            self.info_store.set(info)
+            _release_quietly(stale_mix)
+            self._publish_info()
             self.device_store.set(
                 DeviceStatus(
                     active=str(getattr(model, "device", device)),

@@ -8,6 +8,7 @@ from autolume.live.core.generator import (
     DeviceStatus,
     DeviceUnavailable,
     LayerInfo,
+    LoadedModel,
     ModelHost,
     ModelInfo,
     adjust_weights,
@@ -24,6 +25,12 @@ from autolume.live.core.generator import (
     usable_indices,
 )
 from autolume.live.core.generator import _LOG_ONCE_CAP
+from autolume.live.core.mixing import (
+    INCOMPATIBLE_MODELS,
+    conv_names,
+    layer_resolution,
+    selection_length,
+)
 from autolume.live.core.params import (
     ControlState,
     Keyframe,
@@ -34,10 +41,17 @@ from autolume.live.core.params import (
 
 # The bending tests below make the generator import the operator library,
 # and merely importing kornia trips a torch FutureWarning from its lightglue
-# submodule. Matched by message so it cannot mask anything else.
-pytestmark = pytest.mark.filterwarnings(
-    r"ignore:.*torch\.cuda\.amp\.custom_fwd.*:FutureWarning"
-)
+# submodule. Matched by message so it cannot mask anything else. The mixing
+# tests at the end build real generators, whose import chain warns once about
+# pkg_resources.
+pytestmark = [
+    pytest.mark.filterwarnings(
+        r"ignore:.*torch\.cuda\.amp\.custom_fwd.*:FutureWarning"
+    ),
+    pytest.mark.filterwarnings(
+        r"ignore:pkg_resources is deprecated.*:DeprecationWarning"
+    ),
+]
 
 
 def render_params(**changes):
@@ -2260,3 +2274,364 @@ def test_release_removes_hook_handles_and_leaves_the_module_clean():
     # Idempotent: a second release on an already-released model is safe.
     model.release()
     assert model._hook_handles == []
+
+
+# --- network mixing (slot B, the mixed network, saving) -------------------
+
+
+def wait_for(predicate, timeout=5.0):
+    """Poll `predicate` until it holds, then return whether it did."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.005)
+    return predicate()
+
+
+def tiny_generator(seed=0, img_resolution=16, channel_max=8):
+    """A real custom stylegan2 generator, small enough to build in tests.
+
+    `synthesis_kwargs` is passed explicitly because `Generator.__init__`
+    declares it as a mutable default and updates it in place.
+    """
+    import torch
+
+    from architectures import custom_stylegan2
+
+    torch.manual_seed(seed)
+    return custom_stylegan2.Generator(
+        z_dim=8,
+        c_dim=0,
+        w_dim=8,
+        img_channels=3,
+        img_resolution=img_resolution,
+        synthesis_kwargs={"channel_base": 64, "channel_max": channel_max},
+    )
+
+
+def generator_loader(by_path):
+    """A loader handing back prebuilt generators wrapped in `LoadedModel`."""
+    import torch
+
+    def loader(path, device=None):
+        return LoadedModel(path, by_path[path], device or torch.device("cpu"))
+
+    return loader
+
+
+def mixing_host(a, b, entries=None):
+    """A started host with `a` in slot A, `b` in slot B and mixing on.
+
+    Returns the host once both slots are filled; the caller decides what
+    selection to send.
+    """
+    host = ModelHost(
+        loader=generator_loader({"/tmp/a.pkl": a, "/tmp/b.pkl": b})
+    )
+    host.request_load("/tmp/a.pkl")
+    host.request_load_b("/tmp/b.pkl")
+    assert wait_for(lambda: host.current() is not None and host.current_b() is not None)
+    if entries is not None:
+        host.set_mixing_enabled(True)
+        host.request_mix(entries)
+    return host
+
+
+def split_at_resolution(a, boundary):
+    """A selection taking every layer up to `boundary` from A, the rest from B."""
+    return [
+        "A" if layer_resolution(name) <= boundary else "B"
+        for name in conv_names(a)
+    ]
+
+
+def test_model_host_loads_slot_b_without_disturbing_slot_a():
+    a, b = tiny_generator(seed=1), tiny_generator(seed=2)
+    host = ModelHost(loader=generator_loader({"/tmp/a.pkl": a, "/tmp/b.pkl": b}))
+    host.request_load("/tmp/a.pkl")
+    assert wait_for(lambda: host.current() is not None)
+    rendering = host.current()
+
+    host.request_load_b("/tmp/b.pkl")
+    assert wait_for(lambda: host.current_b() is not None)
+    assert host.current_b().G is b
+    assert host.current() is rendering
+    assert host.error() is None
+    host.stop()
+
+
+def test_model_host_keeps_slot_b_on_the_cpu():
+    """Slot B is a weight source, never a rendered model, so it never takes
+    room on the render device and never needs re-homing on a device switch."""
+    import torch
+
+    seen = []
+
+    def loader(path, device=None):
+        seen.append((path, device))
+        return LoadedModel(path, tiny_generator(), device or torch.device("cpu"))
+
+    host = ModelHost(loader=loader)
+    host.request_load_b("/tmp/b.pkl")
+    assert wait_for(lambda: host.current_b() is not None)
+    assert seen == [("/tmp/b.pkl", torch.device("cpu"))]
+    host.stop()
+
+
+def test_model_host_reports_a_slot_b_load_failure():
+    def loader(path, device=None):
+        raise RuntimeError("bad second pkl")
+
+    host = ModelHost(loader=loader)
+    host.request_load_b("/tmp/b.pkl")
+    assert wait_for(lambda: host.error() is not None)
+    assert "bad second pkl" in host.error()
+    assert host.current_b() is None
+    assert host.pending_b() is None
+    host.stop()
+
+
+def test_model_host_renders_the_mix_once_it_is_built():
+    a, b = tiny_generator(seed=1), tiny_generator(seed=2)
+    host = mixing_host(a, b, split_at_resolution(a, 8))
+    assert wait_for(lambda: host.current().G is not a)
+
+    mixed = host.current()
+    assert mixed.G is not a and mixed.G is not b
+    # Both sources stay loaded and untouched.
+    assert host.current_b().G is b
+    assert host.error() is None
+    state_a, state_b, state_mixed = a.state_dict(), b.state_dict(), mixed.G.state_dict()
+    for name in conv_names(a):
+        source = state_a if layer_resolution(name) <= 8 else state_b
+        assert mixed.G.state_dict()[name].shape == source[name].shape
+        assert (state_mixed[name].cpu() == source[name].cpu()).all(), name
+    host.stop()
+
+
+def test_model_host_renders_model_a_while_mixing_is_off():
+    a, b = tiny_generator(seed=1), tiny_generator(seed=2)
+    host = mixing_host(a, b, split_at_resolution(a, 8))
+    assert wait_for(lambda: host.current().G is not a)
+
+    host.set_mixing_enabled(False)
+    assert host.current().G is a
+    host.stop()
+
+
+def test_model_host_toggling_mixing_back_on_reuses_the_built_mix():
+    a, b = tiny_generator(seed=1), tiny_generator(seed=2)
+    host = mixing_host(a, b, split_at_resolution(a, 8))
+    assert wait_for(lambda: host.current().G is not a)
+    mixed = host.current()
+
+    host.set_mixing_enabled(False)
+    host.set_mixing_enabled(True)
+    assert host.current() is mixed
+    host.stop()
+
+
+def test_model_host_a_failed_mix_keeps_rendering_a_and_reports_it():
+    # Different block widths split at a boundary: the pair cannot assemble.
+    a = tiny_generator(seed=1, channel_max=8)
+    b = tiny_generator(seed=2, channel_max=16)
+    host = mixing_host(a, b, split_at_resolution(a, 4))
+    assert wait_for(lambda: host.error() is not None)
+
+    assert host.error() == INCOMPATIBLE_MODELS
+    assert host.current().G is a
+    assert host.mixing_enabled() is True
+    host.stop()
+
+
+def test_model_host_a_selection_of_the_wrong_length_keeps_rendering_a():
+    a, b = tiny_generator(seed=1), tiny_generator(seed=2)
+    host = mixing_host(a, b, ["A"] * (selection_length(a, b) - 1))
+    assert wait_for(lambda: host.error() is not None)
+
+    assert "entries" in host.error()
+    assert host.current().G is a
+    host.stop()
+
+
+def test_model_host_a_mix_without_a_second_model_keeps_rendering_a():
+    a = tiny_generator(seed=1)
+    host = ModelHost(loader=generator_loader({"/tmp/a.pkl": a}))
+    host.request_load("/tmp/a.pkl")
+    assert wait_for(lambda: host.current() is not None)
+
+    host.set_mixing_enabled(True)
+    host.request_mix(["A"] * len(conv_names(a)))
+    assert wait_for(lambda: host.error() is not None)
+    assert "both slots" in host.error()
+    assert host.current().G is a
+    host.stop()
+
+
+def test_model_host_an_empty_selection_drops_the_mix():
+    a, b = tiny_generator(seed=1), tiny_generator(seed=2)
+    host = mixing_host(a, b, split_at_resolution(a, 8))
+    assert wait_for(lambda: host.current().G is not a)
+
+    host.request_mix(())
+    assert wait_for(lambda: host.current().G is a)
+    assert host.error() is None
+    host.stop()
+
+
+def test_model_host_publishes_the_mixed_models_layer_catalog():
+    a, b = tiny_generator(seed=1), tiny_generator(seed=2)
+    host = mixing_host(a, b)
+    plain = host.info_store.snapshot()
+    assert plain.layers and plain.layers[-1].width == 16
+
+    truncating = ["X" if layer_resolution(n) == 16 else "A" for n in conv_names(a)]
+    host.set_mixing_enabled(True)
+    host.request_mix(truncating)
+    assert wait_for(lambda: host.info_store.snapshot() is not plain)
+
+    mixed = host.info_store.snapshot()
+    assert mixed.layers and mixed.layers[-1].width == 8
+    host.stop()
+
+
+def test_model_host_republishes_model_a_catalog_when_mixing_turns_off():
+    a, b = tiny_generator(seed=1), tiny_generator(seed=2)
+    host = mixing_host(a, b)
+    plain = host.info_store.snapshot()
+
+    truncating = ["X" if layer_resolution(n) == 16 else "A" for n in conv_names(a)]
+    host.set_mixing_enabled(True)
+    host.request_mix(truncating)
+    assert wait_for(lambda: host.info_store.snapshot() is not plain)
+
+    host.set_mixing_enabled(False)
+    assert host.info_store.snapshot() == plain
+    host.stop()
+
+
+def test_model_host_a_mix_that_cannot_be_enumerated_still_renders(monkeypatch):
+    """A mixed generator whose catalog cannot be built is still a perfectly
+    good network to render. `_model_info`'s guard has to hold for it, or a
+    failed enumeration would take the whole mix down with it."""
+    a, b = tiny_generator(seed=1), tiny_generator(seed=2)
+    host = mixing_host(a, b)
+
+    def boom(self):
+        raise RuntimeError("no catalog here")
+
+    monkeypatch.setattr(LoadedModel, "enumerate_layers", boom)
+    host.set_mixing_enabled(True)
+    host.request_mix(split_at_resolution(a, 8))
+    assert wait_for(lambda: host.current().G is not a)
+
+    assert host.info_store.snapshot().layers == ()
+    assert host.error() is None
+    host.stop()
+
+
+def test_model_host_a_new_model_a_retires_the_mix_and_rebuilds_it():
+    a, b = tiny_generator(seed=1), tiny_generator(seed=2)
+    other = tiny_generator(seed=3)
+    host = ModelHost(
+        loader=generator_loader(
+            {"/tmp/a.pkl": a, "/tmp/b.pkl": b, "/tmp/other.pkl": other}
+        )
+    )
+    host.request_load("/tmp/a.pkl")
+    host.request_load_b("/tmp/b.pkl")
+    assert wait_for(lambda: host.current() is not None and host.current_b() is not None)
+    host.set_mixing_enabled(True)
+    host.request_mix(["A"] * selection_length(a, b))
+    assert wait_for(lambda: host.current().G is not a)
+    first_mix = host.current()
+
+    host.request_load("/tmp/other.pkl")
+    # `is not other` is what tells a rebuilt mix apart from the mix simply
+    # being dropped and the new slot A rendering bare.
+    assert wait_for(
+        lambda: host.current() is not first_mix and host.current().G is not other
+    )
+    rebuilt = host.current()
+    assert rebuilt.G is not a
+    name = conv_names(other)[1]
+    assert (
+        rebuilt.G.state_dict()[name] == other.state_dict()[name]
+    ).all()
+    host.stop()
+
+
+def test_model_host_a_device_switch_retires_the_mix_and_rebuilds_it():
+    """A mix is pinned to the device slot A had when it was built, so a
+    device switch has to throw it away rather than keep rendering a network
+    sitting on the device the runtime just left."""
+    a, b = tiny_generator(seed=1), tiny_generator(seed=2)
+    host = mixing_host(a, b, ["A"] * selection_length(a, b))
+    assert wait_for(lambda: host.current().G is not a)
+    first_mix = host.current()
+
+    host.request_device("cpu")
+    assert wait_for(
+        lambda: host.current() is not first_mix and host.current().G is not a
+    )
+    rebuilt = host.current()
+    assert next(rebuilt.G.parameters()).device == rebuilt.device
+    host.stop()
+
+
+def test_model_host_a_new_model_b_retires_the_mix_and_rebuilds_it():
+    a, b = tiny_generator(seed=1), tiny_generator(seed=2)
+    other = tiny_generator(seed=3)
+    host = ModelHost(
+        loader=generator_loader(
+            {"/tmp/a.pkl": a, "/tmp/b.pkl": b, "/tmp/other.pkl": other}
+        )
+    )
+    host.request_load("/tmp/a.pkl")
+    host.request_load_b("/tmp/b.pkl")
+    assert wait_for(lambda: host.current() is not None and host.current_b() is not None)
+    host.set_mixing_enabled(True)
+    host.request_mix(["B"] * selection_length(a, b))
+    assert wait_for(lambda: host.current().G is not a)
+    first_mix = host.current()
+
+    host.request_load_b("/tmp/other.pkl")
+    assert wait_for(lambda: host.current() is not first_mix)
+    name = conv_names(other)[1]
+    assert (
+        host.current().G.state_dict()[name] == other.state_dict()[name]
+    ).all()
+    host.stop()
+
+
+def test_model_host_releasing_the_mix_leaves_both_sources_usable():
+    """A mix holds copies, never the sources' own tensors, so retiring it
+    can never reach back into either model it was built from."""
+    a, b = tiny_generator(seed=1), tiny_generator(seed=2)
+    host = mixing_host(a, b, ["A"] * selection_length(a, b))
+    assert wait_for(lambda: host.current().G is not a)
+    name = conv_names(a)[1]
+    before = a.state_dict()[name].clone()
+
+    host.request_mix(())
+    assert wait_for(lambda: host.current().G is a)
+    assert (a.state_dict()[name] == before).all()
+    assert host.current_b().G is b
+    host.stop()
+
+
+def test_request_mix_ignores_a_value_that_is_not_a_sequence(caplog):
+    host = ModelHost(loader=FakeModel)
+    with caplog.at_level(logging.WARNING):
+        host.request_mix(7)
+    assert any("not a sequence" in r.getMessage() for r in caplog.records)
+    host.stop()
+
+
+def test_request_mix_ignores_a_bare_string(caplog):
+    host = ModelHost(loader=FakeModel)
+    with caplog.at_level(logging.WARNING):
+        host.request_mix("ABX")
+    assert any("not a sequence" in r.getMessage() for r in caplog.records)
+    host.stop()
