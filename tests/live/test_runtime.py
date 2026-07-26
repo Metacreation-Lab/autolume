@@ -8,6 +8,7 @@ from autolume.live.core.events import ControlEvent
 from autolume.live.core.generator import ModelHost, ModelInfo
 from autolume.live.core.params import BINDING_SET, Binding
 from autolume.live.core.presets import PRESET_APPLY
+from autolume.live.io.osc import OscEmitter
 from autolume.live.runtime import build_runtime
 
 
@@ -252,6 +253,33 @@ def test_a_failed_osc_start_does_not_leave_the_audio_thread_running():
     # The failed start left nothing running, so stopping again is still a no-op.
     runtime.stop()
     assert engine.disabled_count == 1
+
+
+def test_runtime_wires_a_real_osc_emitter_by_default():
+    """Nothing here ever sends: `pulse_address` stays empty, so `OscEmitter`
+    is constructed but its lazy client never is, and no socket opens.
+    """
+    runtime = make_runtime()
+    assert isinstance(runtime.control_loop._emit.__self__, OscEmitter)
+
+
+def test_runtime_emits_a_pulse_through_an_injected_emit():
+    emitted = []
+    runtime = make_runtime(
+        emit=lambda ip, port, address, value: emitted.append(
+            (ip, port, address, value)
+        )
+    )
+    runtime.start()
+    try:
+        runtime.submit(
+            ControlEvent("/loop/pulse/address", "/pulse", source="ui")
+        )
+        runtime.submit(ControlEvent("/loop/anim", 1.0, source="ui"))
+        assert wait_for(lambda: emitted != [])
+        assert emitted[0] == ("127.0.0.1", 5005, "/pulse", 2.0)
+    finally:
+        runtime.stop()
 
 
 def test_stop_is_clean_and_idempotent_with_audio_running():

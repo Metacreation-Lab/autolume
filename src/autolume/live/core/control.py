@@ -65,6 +65,7 @@ class ControlLoop:
         model_info_store: LatestValueStore[ModelInfo | None] | None = None,
         walk_rng: np.random.RandomState | None = None,
         noise_table_builder: NoiseLoopTableBuilder | None = None,
+        emit: Callable[[str, int, str, float], None] | None = None,
     ) -> None:
         self._control_store = control_store
         self._render_store = render_store
@@ -96,6 +97,9 @@ class ControlLoop:
         # keeps serving, so a radius change never stalls or freezes motion.
         self._noise_table_builder = noise_table_builder or NoiseLoopTableBuilder()
         self._noise_table_key: tuple[int, float, int] | None = None
+        # Injected so tests never open a socket; the runtime binds an
+        # `OscEmitter().send`. None means the pulse is not wired at all.
+        self._emit = emit
         self._queue: collections.deque[ControlEvent] = collections.deque(
             maxlen=_QUEUE_LIMIT
         )
@@ -122,9 +126,11 @@ class ControlLoop:
     def last_loop_step(self) -> LoopStep:
         """The loop's `started`/`wrapped` result from the most recent tick.
 
-        An outbound pulse (Task 7) reads this after `tick()` to decide
-        whether to emit, rather than duplicating the play/wrap edge detection
-        `_integrate_loop` already does.
+        Exposed for introspection and tests. The outbound pulse (Task 7) does
+        not read it: deciding whether a `wrapped` edge is trustworthy needs
+        `prior_alpha` and the touch state, which only exist inside
+        `_integrate_loop` while the step is still fresh, so `_emit_pulse` runs
+        there instead of re-deriving that context from this property later.
         """
         return self._last_loop_step
 
@@ -191,13 +197,27 @@ class ControlLoop:
         manual write to `/loop/alpha` or `/loop/index` earlier this tick is
         detected as "already changed" and integration leaves it alone,
         exactly as a manual write outruns a binding within one tick.
+
+        `alpha_is_integrated` is also what decides whether the outbound pulse
+        trusts `step.wrapped` (see `_emit_pulse`). `advance` computes it from
+        `state.loop_alpha` as it stands here, which is this tick's value after
+        events but before this check: while a performer holds `loop_alpha`
+        near a segment boundary, that value never moves, but the tiny
+        integration rate added to it can still tip `divmod` over the edge
+        every tick, and the same is true the tick a manual write lands
+        elsewhere in-bounds. Neither is a completed cycle, so the pulse must
+        not read `wrapped` on its own; the alpha write below is gated on the
+        same condition for the same reason, and reusing it keeps the two
+        decisions from drifting apart.
         """
         step = advance(state, dt)
         if state.loop_active and not was_active:
             step = dataclasses.replace(step, started=True)
-        if state.loop_alpha == prior_alpha and not self.touch.is_held(
-            "loop_alpha", now
-        ):
+        alpha_is_integrated = (
+            state.loop_alpha == prior_alpha
+            and not self.touch.is_held("loop_alpha", now)
+        )
+        if alpha_is_integrated:
             state = apply_value(state, "loop_alpha", step.alpha)
         if state.loop_index == prior_index and not self.touch.is_held(
             "loop_index", now
@@ -205,7 +225,37 @@ class ControlLoop:
             state = apply_value(state, "loop_index", step.index)
         if step.wrapped and state.perfect_loop:
             state = apply_value(state, "loop_active", False)
+        self._emit_pulse(state, step, alpha_is_integrated)
         return state, step
+
+    def _emit_pulse(
+        self, state: ControlState, step: LoopStep, alpha_is_integrated: bool
+    ) -> None:
+        """Fire the outbound sync pulse for this tick's play/wrap edges.
+
+        One message per event, never a stream: `step.started` and
+        `step.wrapped` are each true on at most the one tick their edge
+        happened. `wrapped` only trusts an integration-driven crossing
+        (`alpha_is_integrated`, see `_integrate_loop`) so a hand scrubbing
+        `loop_alpha` across a boundary never reads to downstream gear as a
+        completed cycle. `started` has no such hazard: it comes from
+        comparing `loop_active` across the tick, which a scrub never touches.
+        """
+        if self._emit is None:
+            return
+        address = canonical_address(state.pulse_address)
+        if not address:
+            return
+        if step.started:
+            self._safe_emit(state, address, 2.0)
+        if step.wrapped and alpha_is_integrated:
+            self._safe_emit(state, address, 1.0)
+
+    def _safe_emit(self, state: ControlState, address: str, value: float) -> None:
+        try:
+            self._emit(state.pulse_ip, state.pulse_port, address, value)
+        except Exception as exc:
+            self._report_guard(("pulse", type(exc).__name__), "Outbound pulse failed")
 
     def _noise_latent_vector(self, state: ControlState) -> tuple[float, ...] | None:
         """The noise loop's vector for this tick, or None if it cannot be built.

@@ -5,6 +5,8 @@ model loader, osc server. The UI is not part of the runtime; it is one
 more producer of control events and one consumer of the preview mailbox.
 """
 
+from typing import Callable
+
 from autolume.live.core.control import ControlLoop
 from autolume.live.core.generator import ModelHost
 from autolume.live.core.engine import RenderLoop
@@ -13,7 +15,7 @@ from autolume.live.core.sinks import PreviewMailbox
 from autolume.live.core.sources import SourceTable
 from autolume.live.core.store import LatestValueStore
 from autolume.live.io.audio import AudioEngineLike, AudioInput
-from autolume.live.io.osc import OscInput
+from autolume.live.io.osc import OscEmitter, OscInput
 
 
 class Runtime:
@@ -24,6 +26,7 @@ class Runtime:
         start_osc: bool,
         start_audio: bool = True,
         audio_engine: AudioEngineLike | None = None,
+        emit: Callable[[str, int, str, float], None] | None = None,
     ) -> None:
         self.control_store = LatestValueStore(ControlState())
         self.render_store = LatestValueStore(to_render_params(ControlState()))
@@ -31,12 +34,17 @@ class Runtime:
         self.model_host = model_host
         self.model_info_store = model_host.info_store
         self.preview = PreviewMailbox()
+        # `emit` defaults to a real `OscEmitter`'s send, the outbound half of
+        # the OSC transport. A test may inject a fake here, the same way
+        # `audio_engine` lets a test stand in for the audio device, so no test
+        # opens a socket to prove the pulse is wired.
         self.control_loop = _ModelWatchingControlLoop(
             self.control_store,
             self.render_store,
             self.source_store,
             model_host,
             model_info_store=self.model_info_store,
+            emit=emit or OscEmitter().send,
         )
         self.render_loop = RenderLoop(
             self.render_store, self.model_host, [self.preview]
@@ -111,6 +119,7 @@ def build_runtime(
     start_osc: bool = True,
     start_audio: bool = True,
     audio_engine: AudioEngineLike | None = None,
+    emit: Callable[[str, int, str, float], None] | None = None,
 ) -> Runtime:
     return Runtime(
         model_host=model_host or ModelHost(),
@@ -118,4 +127,5 @@ def build_runtime(
         start_osc=start_osc,
         start_audio=start_audio,
         audio_engine=audio_engine,
+        emit=emit,
     )

@@ -64,11 +64,13 @@ def make_loop(clock=None, store=LatestValueStore):
     return loop, control_store, render_store, source_store
 
 
-def make_loop_with_state(clock, state):
+def make_loop_with_state(clock, state, emit=None):
     control_store = LatestValueStore(state)
     render_store = LatestValueStore(to_render_params(ControlState()))
     source_store = LatestValueStore(SourceTable())
-    loop = ControlLoop(control_store, render_store, source_store, clock=clock)
+    loop = ControlLoop(
+        control_store, render_store, source_store, clock=clock, emit=emit
+    )
     return loop, control_store, render_store, source_store
 
 
@@ -1208,3 +1210,176 @@ def test_noise_loop_with_a_real_builder_publishes_a_table_and_a_vector():
     assert result.latent_vec == expected.vector(result.loop_alpha)
     assert len(result.latent_vec) == 4
     builder.stop()
+
+
+# --- outbound pulse (Task 7) --------------------------------------------------
+#
+# `emitted` records `(ip, port, address, value)` tuples so a test can check
+# both the message content and that nothing at all was sent.
+
+
+def make_recorder():
+    emitted = []
+    return emitted, (lambda ip, port, address, value: emitted.append(
+        (ip, port, address, value)
+    ))
+
+
+def test_pulse_emits_two_on_the_tick_playback_starts():
+    clock = FakeClock()
+    state = ControlState(
+        loop_active=False, loop_uses_time=False, loop_speed=1.0, pulse_address="/pulse"
+    )
+    emitted, emit = make_recorder()
+    loop, _, _, _ = make_loop_with_state(clock, state, emit=emit)
+    loop.tick()
+    assert emitted == []
+
+    loop.submit(ControlEvent("/loop/anim", 1.0, source="ui"))
+    loop.tick()
+    assert emitted == [("127.0.0.1", 5005, "/pulse", 2.0)]
+
+
+def test_pulse_emits_one_on_a_completed_cycle():
+    clock = FakeClock()
+    state = ControlState(
+        loop_active=True, loop_uses_time=True, loop_time=4.0, pulse_address="/pulse"
+    )
+    emitted, emit = make_recorder()
+    loop, _, _, _ = make_loop_with_state(clock, state, emit=emit)
+    loop.tick()
+    assert emitted == []
+
+    clock.now = 4.0
+    loop.tick()
+    assert emitted == [("127.0.0.1", 5005, "/pulse", 1.0)]
+
+
+def test_pulse_fires_once_per_edge_not_a_continuous_stream():
+    clock = FakeClock()
+    state = ControlState(
+        loop_active=True, loop_uses_time=True, loop_time=4.0, pulse_address="/pulse"
+    )
+    emitted, emit = make_recorder()
+    loop, _, _, _ = make_loop_with_state(clock, state, emit=emit)
+    loop.tick()
+    clock.now = 4.0
+    loop.tick()
+    assert [value for *_, value in emitted] == [1.0]
+
+    for _ in range(5):
+        clock.now += 0.01
+        loop.tick()
+    assert [value for *_, value in emitted] == [1.0]
+
+
+def test_pulse_is_silent_when_the_address_is_empty():
+    clock = FakeClock()
+    state = ControlState(loop_active=False, loop_uses_time=False, loop_speed=1.0)
+    emitted, emit = make_recorder()
+    loop, _, _, _ = make_loop_with_state(clock, state, emit=emit)
+    loop.tick()
+    loop.submit(ControlEvent("/loop/anim", 1.0, source="ui"))
+    loop.tick()
+    assert emitted == []
+
+
+def test_pulse_address_gets_a_missing_leading_slash_added():
+    clock = FakeClock()
+    state = ControlState(
+        loop_active=False, loop_uses_time=False, loop_speed=1.0, pulse_address="pulse"
+    )
+    emitted, emit = make_recorder()
+    loop, _, _, _ = make_loop_with_state(clock, state, emit=emit)
+    loop.tick()
+    loop.submit(ControlEvent("/loop/anim", 1.0, source="ui"))
+    loop.tick()
+    assert emitted == [("127.0.0.1", 5005, "/pulse", 2.0)]
+
+
+def test_pulse_uses_ip_and_port_from_state():
+    clock = FakeClock()
+    state = ControlState(
+        loop_active=False,
+        loop_uses_time=False,
+        loop_speed=1.0,
+        pulse_address="/pulse",
+        pulse_ip="10.0.0.9",
+        pulse_port=6000,
+    )
+    emitted, emit = make_recorder()
+    loop, _, _, _ = make_loop_with_state(clock, state, emit=emit)
+    loop.tick()
+    loop.submit(ControlEvent("/loop/anim", 1.0, source="ui"))
+    loop.tick()
+    assert emitted == [("10.0.0.9", 6000, "/pulse", 2.0)]
+
+
+def test_pulse_does_not_fire_for_a_wrap_scrubbed_while_holding_loop_alpha():
+    """A held drag near the last segment's boundary is not a cycle completion.
+
+    `advance()` recomputes `wrapped` off `state.loop_alpha` every tick, held or
+    not, so with the alpha parked at the boundary the tiny integration rate
+    still tips `divmod` over the edge on its own. `last_loop_step.wrapped`
+    still reports that raw signal (it does not know about touch), but the
+    pulse must not: nothing here is a completed cycle, the hand has not let go.
+    """
+    clock = FakeClock()
+    clock.now = 10.0
+    state = ControlState(
+        loop_active=True,
+        loop_uses_time=False,
+        loop_speed=5.0,
+        loop_alpha=0.999,
+        loop_index=5,
+        pulse_address="/pulse",
+    )
+    emitted, emit = make_recorder()
+    loop, control_store, _, _ = make_loop_with_state(clock, state, emit=emit)
+    loop.submit(ControlEvent(TOUCH_BEGIN, "loop_alpha", source="ui"))
+    loop.tick()
+    clock.now += 0.1
+    loop.tick()
+
+    assert control_store.snapshot().loop_alpha == 0.999
+    assert loop.last_loop_step.wrapped is True
+    assert emitted == []
+
+
+def test_pulse_does_not_fire_for_a_wrap_from_a_manual_alpha_write_this_tick():
+    clock = FakeClock()
+    state = ControlState(
+        loop_active=True,
+        loop_uses_time=False,
+        loop_speed=0.1,
+        loop_alpha=0.5,
+        loop_index=5,
+        pulse_address="/pulse",
+    )
+    emitted, emit = make_recorder()
+    loop, control_store, _, _ = make_loop_with_state(clock, state, emit=emit)
+    loop.tick()
+
+    loop.submit(ControlEvent("/loop/alpha", 0.999, source="ui"))
+    clock.now += 0.1
+    loop.tick()
+
+    assert control_store.snapshot().loop_alpha == 0.999
+    assert loop.last_loop_step.wrapped is True
+    assert emitted == []
+
+
+def test_a_raising_emit_never_propagates_out_of_the_tick():
+    clock = FakeClock()
+    state = ControlState(
+        loop_active=False, loop_uses_time=False, loop_speed=1.0, pulse_address="/pulse"
+    )
+
+    def raising_emit(ip, port, address, value):
+        raise RuntimeError("boom")
+
+    loop, control_store, _, _ = make_loop_with_state(clock, state, emit=raising_emit)
+    loop.tick()
+    loop.submit(ControlEvent("/loop/anim", 1.0, source="ui"))
+    loop.tick()
+    assert control_store.snapshot().loop_active is True
