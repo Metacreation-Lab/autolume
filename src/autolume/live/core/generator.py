@@ -24,6 +24,10 @@ _SEED_MASK = (1 << 32) - 1
 _BILINEAR_CORNERS = ((0, 0), (1, 0), (0, 1), (1, 1))
 _SLERP_COLINEAR_THRESHOLD = 0.9995
 _KEYFRAME_CACHE_SIZE = 4
+_FRAME_CHANNELS = 3
+# Keeps a channel that is flat across the whole frame from normalizing to
+# infinity instead of staying flat.
+_NORMALIZE_FLOOR = 1e-8
 
 
 def slerp(alpha: float, w0, w1):
@@ -80,6 +84,53 @@ def effective_noise_seed(params: RenderParams, frame_index: int) -> int:
     if params.noise_anim:
         seed += frame_index
     return seed & _SEED_MASK
+
+
+def channel_window(activation, base_channel: int, grayscale: bool):
+    """The three channel window a `[C, H, W]` activation is shown through.
+
+    Grayscale reads one channel and replicates it; colour reads three
+    consecutive channels, falling back to one when the activation is
+    narrower than three. `base_channel` is clamped so the window always
+    lands inside the activation, whatever model the number was chosen on.
+    """
+    channels = int(activation.shape[0])
+    count = 1 if grayscale else _FRAME_CHANNELS
+    if count > channels:
+        count = 1
+    base = max(0, min(int(base_channel), channels - count))
+    window = activation[base : base + count]
+    if window.shape[0] == 1:
+        window = window.repeat(_FRAME_CHANNELS, 1, 1)
+    return window
+
+
+def derive_float_image(activation, params: RenderParams):
+    """The float image a frame is derived from, before uint8 conversion.
+
+    Window, then normalize, then scale, which is the order the old app
+    used. Normalization is scale invariant, so scaling first would swallow
+    the decibel gain.
+    """
+    import torch
+
+    image = channel_window(
+        activation, params.base_channel, params.grayscale
+    ).to(torch.float32)
+    if params.img_normalize:
+        peak = image.abs().amax(dim=(1, 2), keepdim=True).clamp(min=_NORMALIZE_FLOOR)
+        image = image / peak
+    if params.img_scale_db:
+        image = image * (10.0 ** (params.img_scale_db / 20.0))
+    return image
+
+
+def to_uint8_frame(activation) -> np.ndarray:
+    """A `[3, H, W]` float image to the contiguous HWC uint8 frame."""
+    import torch
+
+    frame = (activation * 127.5 + 128).clamp(0, 255).to(torch.uint8)
+    return frame.permute(1, 2, 0).contiguous().cpu().numpy()
 
 
 def pick_device():
@@ -369,8 +420,7 @@ class LoadedModel:
             # standard stylegan synthesis returns the img tensor directly.
             if isinstance(output, tuple):
                 output = output[0]
-            image = (output[0] * 127.5 + 128).clamp(0, 255).to(torch.uint8)
-            return image.permute(1, 2, 0).contiguous().cpu().numpy()
+            return to_uint8_frame(derive_float_image(output[0], params))
 
 
 def load_model(path: str, device=None) -> LoadedModel:

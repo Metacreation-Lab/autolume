@@ -8,10 +8,13 @@ from autolume.live.core.generator import (
     LayerInfo,
     ModelHost,
     ModelInfo,
+    channel_window,
     corner_seeds,
+    derive_float_image,
     effective_noise_seed,
     noise_mode,
     slerp,
+    to_uint8_frame,
 )
 from autolume.live.core.params import ControlState, Keyframe, to_render_params
 
@@ -810,3 +813,122 @@ def test_model_host_publishes_layer_catalog_on_successful_load():
     assert info is not None
     assert [layer.name for layer in info.layers] == ["conv1", "torgb", "output"]
     host.stop()
+
+
+# --- image derivation ----------------------------------------------------
+
+
+def _activation(channels, height=1, width=2):
+    import torch
+
+    count = channels * height * width
+    return torch.arange(count, dtype=torch.float32).reshape(channels, height, width)
+
+
+def test_channel_window_takes_three_consecutive_channels():
+    window = channel_window(_activation(5), base_channel=1, grayscale=False)
+    assert window.tolist() == [[[2.0, 3.0]], [[4.0, 5.0]], [[6.0, 7.0]]]
+
+
+def test_channel_window_clamps_the_base_to_keep_three_channels_in_range():
+    window = channel_window(_activation(5), base_channel=9, grayscale=False)
+    assert window.tolist() == [[[4.0, 5.0]], [[6.0, 7.0]], [[8.0, 9.0]]]
+
+
+def test_channel_window_grayscale_replicates_one_channel():
+    window = channel_window(_activation(5), base_channel=3, grayscale=True)
+    assert window.tolist() == [[[6.0, 7.0]], [[6.0, 7.0]], [[6.0, 7.0]]]
+
+
+def test_channel_window_grayscale_clamps_the_base_to_the_last_channel():
+    window = channel_window(_activation(5), base_channel=99, grayscale=True)
+    assert window.tolist() == [[[8.0, 9.0]], [[8.0, 9.0]], [[8.0, 9.0]]]
+
+
+@pytest.mark.parametrize("channels", [1, 2])
+def test_channel_window_falls_back_to_one_channel_when_three_do_not_exist(channels):
+    window = channel_window(_activation(channels), base_channel=1, grayscale=False)
+    last = _activation(channels)[channels - 1].tolist()
+    assert window.tolist() == [last, last, last]
+
+
+def _signed_activation():
+    import torch
+
+    return torch.tensor([[[1.0, -2.0]], [[0.0, 0.0]], [[3.0, 4.0]]])
+
+
+def test_derive_normalizes_each_channel_by_its_own_max_absolute_value():
+    image = derive_float_image(_signed_activation(), render_params(img_normalize=True))
+    assert image.tolist() == [[[0.5, -1.0]], [[0.0, 0.0]], [[0.75, 1.0]]]
+
+
+def test_derive_scales_by_decibels():
+    image = derive_float_image(_signed_activation(), render_params(img_scale_db=20.0))
+    assert image.tolist() == [[[10.0, -20.0]], [[0.0, 0.0]], [[30.0, 40.0]]]
+
+
+def test_derive_normalizes_before_scaling():
+    # Normalization is scale invariant, so the other order would swallow the
+    # decibel gain entirely and leave the normalized values behind.
+    image = derive_float_image(
+        _signed_activation(), render_params(img_normalize=True, img_scale_db=20.0)
+    )
+    assert image.tolist() == [[[5.0, -10.0]], [[0.0, 0.0]], [[7.5, 10.0]]]
+
+
+def test_derive_leaves_a_flat_channel_alone_instead_of_dividing_by_zero():
+    import torch
+
+    image = derive_float_image(torch.zeros([3, 1, 2]), render_params(img_normalize=True))
+    assert image.tolist() == [[[0.0, 0.0]], [[0.0, 0.0]], [[0.0, 0.0]]]
+    assert bool(torch.isfinite(image).all())
+
+
+def test_uint8_frame_maps_the_signed_unit_range_onto_the_byte_range():
+    import torch
+
+    image = torch.tensor([[[-1.0, -0.5, 0.0, 0.5, 1.0]]]).repeat(3, 1, 1)
+    frame = to_uint8_frame(image)
+    assert frame.shape == (1, 5, 3)
+    assert frame.dtype.name == "uint8"
+    assert frame[0, :, 0].tolist() == [0, 64, 128, 191, 255]
+
+
+def test_uint8_frame_clamps_out_of_range_values():
+    import torch
+
+    image = torch.tensor([[[-4.0, 4.0]]]).repeat(3, 1, 1)
+    frame = to_uint8_frame(image)
+    assert frame[0, :, 0].tolist() == [0, 255]
+
+
+def test_uint8_frame_is_contiguous_after_the_channel_permute():
+    import torch
+
+    frame = to_uint8_frame(torch.zeros([3, 2, 4]))
+    assert frame.flags["C_CONTIGUOUS"]
+
+
+def _channel_ramp_synthesis(channels=5):
+    def synthesis(ws, noise_mode):
+        import torch
+
+        ramp = torch.arange(channels, dtype=torch.float32) / channels
+        return ramp.reshape(1, channels, 1, 1).repeat(1, 1, 1, 2)
+
+    return synthesis
+
+
+def test_render_frame_derives_from_the_selected_channels():
+    model = _fake_model(_channel_ramp_synthesis())
+    frame = model.render_frame(render_params(base_channel=1), 0)
+    # Channels 1, 2 and 3 of the ramp: 0.2, 0.4 and 0.6.
+    assert frame[0, 0].tolist() == [153, 179, 204]
+
+
+def test_render_frame_grayscale_replicates_one_channel():
+    model = _fake_model(_channel_ramp_synthesis())
+    frame = model.render_frame(render_params(base_channel=1, grayscale=True), 0)
+    assert frame.shape == (1, 2, 3)
+    assert frame[0, 0].tolist() == [153, 153, 153]
