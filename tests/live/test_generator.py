@@ -2613,7 +2613,13 @@ def test_model_host_a_new_model_b_retires_the_mix_and_rebuilds_it():
     first_mix = host.current()
 
     host.request_load_b("/tmp/other.pkl")
-    assert wait_for(lambda: host.current() is not first_mix)
+    # `is not a` as well as `is not first_mix`: retiring the mix makes
+    # `current()` fall back to bare model A for the moment before the
+    # rebuild lands, and waiting only on `is not first_mix` would accept
+    # that intermediate state and then compare A against `other`.
+    assert wait_for(
+        lambda: host.current() is not first_mix and host.current().G is not a
+    )
     name = conv_names(other)[1]
     assert (
         host.current().G.state_dict()[name] == other.state_dict()[name]
