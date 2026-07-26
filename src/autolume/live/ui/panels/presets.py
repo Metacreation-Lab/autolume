@@ -28,6 +28,28 @@ _NO_PRESETS = "No presets saved yet. Name one and press Save."
 _MISSING_MODEL_POPUP = "Missing model"
 
 
+def missing_model_message(missing: str | None, missing2: str | None) -> str | None:
+    """What the missing model modal says, or None when nothing is missing.
+
+    Both models are reported, and in one modal rather than two: a preset saved
+    from a mixing session names two files, a machine that has neither is the
+    ordinary case when a preset travels, and two dialogs in a row for one Load
+    is worse than one sentence naming both.
+
+    The second model is the half that used to be dropped: `PresetData` has
+    carried `missing_model2` since the mixing state was added to a payload, and
+    nothing read it, so a mixing preset whose second model was absent loaded
+    silently with `mixing_enabled` coming back on and no mix to show for it.
+    """
+    names = [name for name in (missing, missing2) if name]
+    if not names:
+        return None
+    if len(names) == 1:
+        return f"Model file {names[0]} is missing. The preset loaded without it."
+    joined = " and ".join(names)
+    return f"Model files {joined} are missing. The preset loaded without them."
+
+
 def is_valid_name(name: str) -> bool:
     """A preset name has to be a plain file name, not a path into the disk."""
     stripped = name.strip()
@@ -55,8 +77,9 @@ class PresetsPanel:
         self._list_error: str | None = None
         self._names_cache: list[str] | None = None
         self._names_read = 0.0
-        # Name of the model a just loaded preset could not find, or None. Set
-        # alongside `imgui.open_popup`, cleared when the performer dismisses it.
+        # What a just loaded preset could not find, or None. Set alongside
+        # `imgui.open_popup`, cleared when the performer dismisses it. One
+        # sentence covering both models, since a mixing preset names two.
         self._missing_model: str | None = None
 
     def gui(self) -> None:
@@ -149,11 +172,12 @@ class PresetsPanel:
         # because reporting a missing model is a UI concern and the control
         # thread has no channel back to this panel.
         try:
-            missing = presets.from_payload(payload).missing_model
+            data = presets.from_payload(payload)
+            message = missing_model_message(data.missing_model, data.missing_model2)
         except ValueError:
-            missing = None
-        if missing is not None:
-            self._missing_model = missing
+            message = None
+        if message is not None:
+            self._missing_model = message
             imgui.open_popup(_MISSING_MODEL_POPUP)
 
     def _missing_model_modal(self) -> None:
@@ -164,10 +188,7 @@ class PresetsPanel:
         )
         if not visible:
             return
-        imgui.text_wrapped(
-            f"Model file {self._missing_model} is missing. "
-            "The preset loaded without it."
-        )
+        imgui.text_wrapped(self._missing_model)
         if imgui.button("OK"):
             self._missing_model = None
             imgui.close_current_popup()

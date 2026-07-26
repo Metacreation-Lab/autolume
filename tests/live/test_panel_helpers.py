@@ -41,7 +41,11 @@ from autolume.live.ui.panels.mapping import (
     reference_note,
 )
 from autolume.live.ui.panels.perform import load_vector_file, save_vector_file
-from autolume.live.ui.panels.presets import PresetsPanel, is_valid_name
+from autolume.live.ui.panels.presets import (
+    PresetsPanel,
+    is_valid_name,
+    missing_model_message,
+)
 from autolume.live.ui.panels.preview import (
     DisplayMode,
     PreviewPanel,
@@ -626,6 +630,40 @@ def test_a_failure_carrying_no_message_is_still_described():
     # Shared with the audio transport, which reports its errors the same way.
     assert describe(OSError("folder is gone")) == "folder is gone"
     assert describe(KeyError()) == "KeyError"
+
+
+def test_a_preset_that_found_both_its_models_reports_nothing():
+    assert missing_model_message(None, None) is None
+
+
+def test_a_preset_missing_only_its_first_model_names_that_one():
+    assert missing_model_message("a.pkl", None) == (
+        "Model file a.pkl is missing. The preset loaded without it."
+    )
+
+
+def test_a_preset_missing_only_its_second_model_is_reported_at_all():
+    # The half that used to be dropped. `PresetData.missing_model2` existed and
+    # nothing read it, so a mixing preset whose second model was absent loaded
+    # in silence with `mixing_enabled` coming back on.
+    assert missing_model_message(None, "b.pkl") == (
+        "Model file b.pkl is missing. The preset loaded without it."
+    )
+
+
+def test_a_preset_missing_both_models_names_both_in_one_sentence():
+    assert missing_model_message("a.pkl", "b.pkl") == (
+        "Model files a.pkl and b.pkl are missing. The preset loaded without them."
+    )
+
+
+def test_the_missing_model_sentence_is_drawable_by_the_bundled_font():
+    for message in (
+        missing_model_message("a.pkl", None),
+        missing_model_message(None, "b.pkl"),
+        missing_model_message("a.pkl", "b.pkl"),
+    ):
+        assert message.isascii(), message
 
 
 def presets_at(directory):
