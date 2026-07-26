@@ -540,3 +540,64 @@ def test_a_failed_osc_rebind_keeps_the_old_transport_serving():
         assert status.error is not None
     finally:
         runtime.stop()
+
+
+def test_restart_osc_is_a_no_op_once_the_runtime_has_stopped():
+    """Both `_started` checks in `_restart_osc` are plain flag reads, not
+    timing windows, so this drives the "already stopped" branch directly
+    rather than trying to race a real shutdown."""
+    transports = []
+
+    def factory(port):
+        transport = FakeOscTransport(port)
+        transports.append(transport)
+        return transport
+
+    runtime = make_runtime(start_osc=True, osc_factory=factory)
+    runtime.start()
+    runtime.stop()
+    assert len(transports) == 1
+
+    runtime._restart_osc(6000)
+
+    assert len(transports) == 1
+    assert runtime.osc is transports[0]
+
+
+def test_restart_osc_stops_a_candidate_orphaned_by_a_concurrent_stop():
+    """The second `_started` check, right after the (possibly slow)
+    `candidate.start()` call: if the runtime finished stopping while the
+    candidate was binding, it must be stopped immediately rather than
+    swapped in behind `stop()`'s back."""
+    transports = []
+
+    def factory(port):
+        transport = FakeOscTransport(port)
+        transports.append(transport)
+        return transport
+
+    runtime = make_runtime(start_osc=True, osc_factory=factory)
+    runtime.start()
+    first = transports[0]
+
+    def factory_that_stops_mid_bind(port):
+        transport = FakeOscTransport(port)
+        transports.append(transport)
+        # Simulates Runtime.stop() completing in the window between
+        # candidate.start() returning and _restart_osc's second _started
+        # check, the exact race the guard exists to close.
+        runtime._started = False
+        return transport
+
+    runtime._osc_factory = factory_that_stops_mid_bind
+    runtime._restart_osc(6000)
+
+    candidate = transports[-1]
+    assert candidate is not first
+    assert candidate.started == 1
+    assert candidate.stopped == 1
+    assert runtime.osc is first
+    assert first.stopped == 0
+
+    runtime._started = True
+    runtime.stop()

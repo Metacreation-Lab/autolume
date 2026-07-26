@@ -192,13 +192,23 @@ class _ModelWatchingControlLoop(ControlLoop):
         # event yet (this object's own `submit` does not exist until this
         # constructor returns), so this is guaranteed to be the pristine
         # value nothing has requested changing. A lazy "adopt on first
-        # tick" sentinel would silently skip forwarding a device or
-        # osc_port change that happened to already be applied to state by
-        # the very first tick this loop ever runs.
+        # tick" sentinel would silently skip forwarding a device change
+        # that happened to already be applied to state by the very first
+        # tick this loop ever runs. `request_device` is safe to call at
+        # any time (it only ever touches `ModelHost`'s own lock-guarded
+        # state), so there is no cost to seeding it eagerly.
         initial = control_store.snapshot()
         self._last_device: str = initial.device
         self._seen_device_status = None
-        self._last_osc_port: int = initial.osc_port
+        # Deliberately still lazy (None, adopted on the first tick,
+        # unlike `_last_device` above): eager seeding here can fire
+        # `_restart_osc` on the very first tick, while `Runtime.start()`
+        # is between `control_loop.start()` and `self.osc.start()` and
+        # `_started` is already True. That races a second real bind and
+        # `serve_forever` thread against the one `start()` is about to
+        # create. Nothing needs osc_port forwarded before the transport
+        # this loop would be restarting has even started once.
+        self._last_osc_port: int | None = None
 
     def tick(self):
         result = super().tick()
@@ -256,6 +266,9 @@ class _ModelWatchingControlLoop(ControlLoop):
         if self._on_osc_port_change is None:
             return
         port = self._control_store.snapshot().osc_port
+        if self._last_osc_port is None:
+            self._last_osc_port = port
+            return
         if port != self._last_osc_port:
             self._last_osc_port = port
             self._on_osc_port_change(port)
