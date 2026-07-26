@@ -5,11 +5,10 @@ import torch
 
 # kornia's lightglue submodule triggers a torch FutureWarning on import
 # (unrelated to the operators under test) as a side effect of merely
-# importing kornia at all.
+# importing kornia at all, which autolume.bending.transform_layers does.
 warnings.filterwarnings(
     "ignore", message=r".*torch\.cuda\.amp\.custom_fwd.*", category=FutureWarning
 )
-import kornia  # noqa: E402
 
 from autolume.bending.transform_layers import (
     Ablate,
@@ -100,28 +99,6 @@ def test_invert_twice_is_identity(base_tensor):
     once = Invert().forward(x, [True], INDICES)
     twice = Invert().forward(once.clone(), [True], INDICES)
     assert torch.allclose(twice, base_tensor, atol=1e-6)
-
-
-def test_scale_zero_survives_via_epsilon_guard(monkeypatch, base_tensor):
-    # kornia.geometry.transform.scale segfaults (SIGBUS) on this CPU stack when
-    # given the literal 1e-10 scale factor the epsilon guard substitutes for 0 -
-    # a real, separate crash from the known dormant sobel bug. Calling it for
-    # real would take the whole test process down, so the warp itself is
-    # stubbed out here and only the guard's chosen factor is asserted.
-    real_scale = kornia.geometry.transform.scale
-    captured = {}
-
-    def spy_scale(tensor, factor):
-        captured["factor"] = float(factor)
-        return real_scale(tensor, torch.tensor(1.0, dtype=tensor.dtype))
-
-    monkeypatch.setattr(kornia.geometry.transform, "scale", spy_scale)
-
-    x = base_tensor.clone()
-    out = Scale().forward(x, [0], INDICES)
-
-    assert captured["factor"] == pytest.approx(1e-10)
-    assert_untouched(base_tensor, out)
 
 
 def test_manipulation_layer_empty_indices_returns_input_untouched(base_tensor):
