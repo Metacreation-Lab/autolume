@@ -1035,7 +1035,7 @@ class ModelHost:
             return
         try:
             entries = tuple(str(entry) for entry in combined_layers)
-        except TypeError:
+        except Exception:
             logger.warning("Ignoring a mix request that is not a sequence of entries")
             return
         with self._lock:
