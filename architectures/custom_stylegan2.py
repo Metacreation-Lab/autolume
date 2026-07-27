@@ -322,7 +322,10 @@ class SynthesisLayer(torch.nn.Module):
         if self.noise_regulator != 0:
             noise_strength = self.noise_regulator * self.global_noise
         if self.use_noise and noise_mode == 'random':
-            noise = torch.randn([x.shape[0], 1, self.resolution * self.init_res[0]//4, self.resolution * self.init_res[1]//4], device=x.device, dtype=x.dtype) * noise_strength
+            # !!! custom: drawn on the ratio adjusted grid, the same size the
+            # const branch below resizes to. At ratio (1, 1) that is exactly
+            # resolution * init_res // 4, so this is a no-op without a ratio.
+            noise = torch.randn([x.shape[0], 1, int(in_w * self.up * rx), int(in_h * self.up * ry)], device=x.device, dtype=x.dtype) * noise_strength
         if self.use_noise and noise_mode == 'const':
             noise = self.noise_const * noise_strength
             noise = kornia.geometry.transform.resize(noise, (int(in_w * self.up * rx), int(in_h * self.up * ry)))

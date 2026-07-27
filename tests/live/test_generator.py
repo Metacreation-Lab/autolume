@@ -768,23 +768,17 @@ def test_render_frame_with_tuple_synthesis_output():
         ({"noise_seed": 0, "noise_anim": False}, "const"),
         ({"noise_seed": 9, "noise_anim": False}, "random"),
         ({"noise_seed": 0, "noise_anim": True}, "random"),
-        # A layer ratio holds the mode on const: the random branch draws its
-        # noise field at the layer's nominal resolution while the activation
-        # beside it has been resized, and the frame raises instead of drawing.
+        # A layer ratio does not change the mode: the synthesis layer draws its
+        # random field on the ratio adjusted grid, so animated noise and a
+        # ratio work together.
         (
             {"noise_anim": True, "layer_ratios": (("conv1", 2.0, 1.0),)},
-            "const",
+            "random",
         ),
         (
             {"noise_seed": 9, "layer_ratios": (("conv1", 1.0, 0.5),)},
-            "const",
-        ),
-        # Ratios all neutral, so nothing is resized and random still runs.
-        (
-            {"noise_anim": True, "layer_ratios": (("conv1", 1.0, 1.0),)},
             "random",
         ),
-        # Noise off still wins over both.
         (
             {
                 "noise_enabled": False,
@@ -1864,6 +1858,154 @@ def test_the_ratio_push_still_only_walks_the_network_when_something_moved():
     model.render_frame(render_params(layer_ratios=(("conv1", 2.0, 0.5),)), 1)
 
     assert conv1.writes == after_first
+
+
+# --- ratios against the real synthesis layer -----------------------------
+#
+# Everything above pushes onto a fake module. These run the real
+# `custom_stylegan2.SynthesisLayer`, which is what the loader rebuilds every
+# stylegan2 pkl into (`legacy.create_networks`), so they are the tests that
+# would have caught the freeze: the layer's random noise branch drew its field
+# at the layer's nominal size while the activation beside it had been resized
+# by the ratio, and `modulated_conv2d` raised on every frame.
+
+
+def _ratio_model(img_resolution=32):
+    """A small real generator, on the CPU, wrapped as a `LoadedModel`.
+
+    Real rather than a double because the defect was in the synthesis layer
+    itself. Small enough that a handful of frames costs milliseconds.
+    """
+    import torch
+
+    from architectures import custom_stylegan2
+
+    torch.manual_seed(0)
+    G = (
+        custom_stylegan2.Generator(
+            z_dim=8,
+            c_dim=0,
+            w_dim=8,
+            img_channels=3,
+            img_resolution=img_resolution,
+            synthesis_kwargs={"channel_base": 64, "channel_max": 16},
+        )
+        .eval()
+        .requires_grad_(False)
+    )
+    return LoadedModel("/tmp/ratio.pkl", G, torch.device("cpu"))
+
+
+def _noisy_ratio_params(**changes):
+    """Params with a ratio on one layer and that layer's noise turned up.
+
+    A freshly built generator's `noise_strength` is zero, so the noise field
+    reaches the picture only through `noise_regulator`, which is what
+    `layer_noise` writes. Without it an animated frame is bit identical to a
+    still one and the animation assertion below would pass on nothing.
+    """
+    return render_params(
+        layer_ratios=(("b8.conv0", 2.0, 1.0),),
+        layer_noise=(("b8.conv0", 1.0), ("b8.conv1", 1.0), ("b16.conv0", 1.0)),
+        **changes,
+    )
+
+
+def test_a_ratio_renders_with_animated_noise_and_the_noise_actually_moves():
+    """The freeze, against the layer that had it.
+
+    Three consecutive frames, with the seed advancing on each, so this covers
+    the frame rendering at all *and* the animation still animating. A fix that
+    quietly held the mode on const would pass the first assertion and fail the
+    second.
+    """
+    import numpy as np
+
+    model = _ratio_model()
+    params = _noisy_ratio_params(noise_anim=True, noise_seed=7)
+    assert noise_mode(params) == "random"
+
+    frames = [model.render_frame(params, index) for index in range(3)]
+
+    # "Ratio x" of 2 on b8.conv0 widens every layer after it, and the whole
+    # frame with them.
+    assert [frame.shape for frame in frames] == [(32, 64, 3)] * 3
+    assert not np.array_equal(frames[0], frames[1])
+    assert not np.array_equal(frames[1], frames[2])
+
+
+def test_a_ratio_gives_the_same_frame_shape_in_every_noise_mode():
+    """The random field is sized like the const one, so the shapes agree."""
+    model = _ratio_model()
+    shapes = {
+        mode: model.render_frame(params, 0).shape
+        for mode, params in (
+            ("random", _noisy_ratio_params(noise_anim=True)),
+            ("const", _noisy_ratio_params()),
+            ("none", _noisy_ratio_params(noise_enabled=False)),
+        )
+    }
+    assert set(shapes.values()) == {(32, 64, 3)}
+
+
+def test_animated_noise_is_still_deterministic_under_a_ratio():
+    import numpy as np
+
+    model = _ratio_model()
+    params = _noisy_ratio_params(noise_anim=True, noise_seed=7)
+    assert np.array_equal(
+        model.render_frame(params, 2), model.render_frame(params, 2)
+    )
+
+
+def test_a_neutral_ratio_leaves_the_random_field_at_its_nominal_size():
+    """Why the layer's edit is a no-op for training and for every still look.
+
+    The random branch now sizes its field `in_w * up * rx` by `in_h * up * ry`,
+    the same expression the const branch resizes to. At ratio (1, 1) that has
+    to come out at exactly `resolution * init_res // 4`, the size it used to be
+    hard coded to, for every layer in the ladder: `conv0` layers upsample
+    (`up=2`) and `conv1` layers do not, and both are checked here. The
+    generator's own constant noise buffer is that nominal size too, so this
+    also pins the two branches to one grid.
+    """
+    import torch
+
+    model = _ratio_model()
+    seen = []
+
+    def pre_hook(module, inputs):
+        x = inputs[0]
+        in_w, in_h = int(x.shape[-2]), int(x.shape[-1])
+        rx, ry = module.ratio
+        nominal = (
+            module.resolution * module.init_res[0] // 4,
+            module.resolution * module.init_res[1] // 4,
+        )
+        seen.append(
+            (
+                (int(in_w * module.up * rx), int(in_h * module.up * ry)),
+                nominal,
+                tuple(module.noise_const.shape),
+            )
+        )
+
+    handles = [
+        module.register_forward_pre_hook(pre_hook)
+        for module in model.G.synthesis.modules()
+        if hasattr(module, "ratio") and getattr(module, "use_noise", False)
+    ]
+    try:
+        with torch.no_grad():
+            model.render_frame(render_params(noise_anim=True), 0)
+    finally:
+        for handle in handles:
+            handle.remove()
+
+    assert len(seen) >= 7
+    for drawn, nominal, const_buffer in seen:
+        assert drawn == nominal
+        assert const_buffer == nominal
 
 
 # --- bending hooks, transforms and layer capture --------------------------

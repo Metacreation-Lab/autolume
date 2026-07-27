@@ -17,12 +17,7 @@ from typing import Callable
 import numpy as np
 
 from autolume.live.core.mixing import combine
-from autolume.live.core.params import (
-    Keyframe,
-    RenderParams,
-    Transform,
-    ratio_forces_const_noise,
-)
+from autolume.live.core.params import Keyframe, RenderParams, Transform
 from autolume.live.core.store import LatestValueStore
 from autolume.live.core.superres import SuperRes
 
@@ -83,17 +78,11 @@ def noise_mode(params: RenderParams) -> str:
     Seed 0 means the model's own constant noise buffer, so composition stays
     put while any other seed redraws the texture. Animation forces "random"
     because the constant buffer cannot animate.
-
-    A layer ratio overrides all of that and holds the mode on "const": the
-    random branch draws its noise field at the layer's nominal resolution
-    while the activation beside it has been resized, and the two do not
-    broadcast, so the frame raises and the preview goes blank. The Bending
-    panel says so on screen, from the same predicate.
     """
     if not params.noise_enabled:
         return "none"
     if params.noise_anim or params.noise_seed != 0:
-        return "const" if ratio_forces_const_noise(params) else "random"
+        return "random"
     return "const"
 
 
@@ -567,10 +556,14 @@ class LoadedModel:
         onto the layers that support them.
 
         Runs every frame, so it walks the network only when one of the three
-        moved. Autolume's custom architecture defines these on its synthesis
-        layers, stock StyleGAN networks do not, and we never invent them. A
-        layer that has dropped out of either sparse mapping is written back
-        to neutral, so removing an override actually removes its effect.
+        moved. These are Autolume's own additions to the stylegan2 synthesis
+        layer, and every stylegan2 pkl arrives carrying them however it was
+        trained, because the loader rebuilds it from that architecture
+        (`legacy.create_networks`). A stylegan3-shaped pkl skips that rebuild
+        and keeps its own pickled classes, which have none of the three, so
+        the checks stay: we never invent an attribute a layer does not have. A
+        layer that has dropped out of either sparse mapping is written back to
+        neutral, so removing an override actually removes its effect.
 
         The ratio pair is swapped on its way onto the module, and only here.
         `SynthesisLayer.forward` binds `in_w = x.shape[-2]`, which is the

@@ -37,11 +37,7 @@ from autolume.live.io.ndi import NdiStatus
 from autolume.live.io.recorder import RecorderStatus
 from autolume.live.runtime import OscStatus
 from autolume.live.ui import theme
-from autolume.live.ui.panels.bending import (
-    _RATIO_NOISE_NOTE,
-    _TORGB_NOTE,
-    BendingPanel,
-)
+from autolume.live.ui.panels.bending import BendingPanel
 from autolume.live.ui.panels.mixing import MixingPanel
 from autolume.live.ui.panels.performance import PerformancePanel
 
@@ -303,50 +299,6 @@ def click_button(build, label: str, *, occurrence: int = 0, width: float = 448.0
         imgui.destroy_context(context)
 
 
-def drawn_notes(build, width: float = 448.0) -> list[str]:
-    """Every note a panel drew on its last frame, in the order it drew them.
-
-    `draw_note` and `draw_error` are the only things in these panels that call
-    `text_wrapped`, so the capture is the panel's notes and nothing else.
-    Recorded off imgui rather than by calling a helper, because a conditional
-    note is only right if the panel reaches it, and the condition is the part
-    that can be wrong.
-
-    Three frames, cleared each time, so what comes back is a settled panel
-    rather than the first frame of one.
-    """
-    context = imgui.create_context()
-    original = imgui.text_wrapped
-    notes: list[str] = []
-    try:
-        io = imgui.get_io()
-        io.set_ini_filename(None)
-        io.display_size = imgui.ImVec2(1280.0, 800.0)
-        io.delta_time = 1.0 / 60.0
-        io.backend_flags |= imgui.BackendFlags_.renderer_has_textures
-        theme.apply_theme()
-
-        def recording_text_wrapped(text, *args, **kwargs):
-            notes.append(text)
-            return original(text, *args, **kwargs)
-
-        imgui.text_wrapped = recording_text_wrapped
-        panel = build()
-        for _ in range(3):
-            imgui.new_frame()
-            imgui.set_next_window_pos(imgui.ImVec2(0.0, 0.0))
-            imgui.set_next_window_size(imgui.ImVec2(width, 900.0))
-            imgui.begin("Panel")
-            notes.clear()
-            panel.gui()
-            imgui.end()
-            imgui.render()
-    finally:
-        imgui.text_wrapped = original
-        imgui.destroy_context(context)
-    return notes
-
-
 LOADED = ControlState(pkl_path="/models/wikiart-1024.pkl")
 
 CATALOG = ModelInfo(
@@ -383,15 +335,6 @@ BENT = ControlState(
     base_channel=64,
 )
 
-# A ratio away from 1 with the noise settings asking for a random field, which
-# is the one state that draws the ratio note. Its own case, so the longest note
-# the panel has is measured against every dock width and font scale too.
-RATIO_HELD = ControlState(
-    pkl_path="/models/wikiart-1024.pkl",
-    layer_ratios=(("b8.conv0", 2.0, 1.0),),
-    noise_anim=True,
-)
-
 
 PERFORMANCE_CASES = [
     ("empty", lambda: PerformancePanel(Runtime())),
@@ -422,10 +365,6 @@ BENDING_CASES = [
     (
         "bending bent",
         lambda: BendingPanel(Runtime(BENT, Host(current=Model()), CATALOG)),
-    ),
-    (
-        "bending ratio holds noise",
-        lambda: BendingPanel(Runtime(RATIO_HELD, Host(current=Model()), CATALOG)),
     ),
 ]
 
@@ -747,55 +686,6 @@ def test_adding_a_transform_sends_one_that_the_control_thread_accepts():
     applied = apply_event(LOADED, sets[0])
     assert len(applied.transforms) == 1
     assert applied.transforms[0].layer == "b4.conv1"
-
-
-def test_the_ratio_note_is_drawn_only_while_a_ratio_holds_the_noise_mode():
-    """The panel and `noise_mode` answer to one predicate, so the note is true.
-
-    A ratio away from 1 makes the generator ignore Animate noise and the noise
-    seed, silently, and the whole point of the note is that the performer is
-    told why. Drawn from the state rather than from the selected layer, so
-    picking another layer does not make it disappear while it still applies.
-    """
-    held = drawn_notes(
-        lambda: BendingPanel(Runtime(RATIO_HELD, Host(current=Model()), CATALOG))
-    )
-    assert _RATIO_NOISE_NOTE in held
-
-    # The same ratio, with nothing asking for a random field: const is what
-    # the generator would have used anyway, so there is nothing to explain.
-    settled = dataclasses.replace(RATIO_HELD, noise_anim=False)
-    assert _RATIO_NOISE_NOTE not in drawn_notes(
-        lambda: BendingPanel(Runtime(settled, Host(current=Model()), CATALOG))
-    )
-
-    # And animation with every ratio neutral, which still renders random.
-    neutral = dataclasses.replace(RATIO_HELD, layer_ratios=(("b8.conv0", 1.0, 1.0),))
-    assert _RATIO_NOISE_NOTE not in drawn_notes(
-        lambda: BendingPanel(Runtime(neutral, Host(current=Model()), CATALOG))
-    )
-
-
-def test_the_ratio_note_survives_a_torgb_layer_and_no_catalog():
-    """The two ways the noise rows are drawn other than plainly.
-
-    A torgb layer greys the rows and draws its own note, and the ratio note has
-    to come after it rather than instead of it. A state with no catalog behind
-    it returns before either, which must not raise on the way.
-    """
-    panel = BendingPanel(Runtime(RATIO_HELD, Host(current=Model()), CATALOG))
-    # The list opens on the first bendable layer and Simple mode does not even
-    # offer a torgb one, so the torgb rows are reached by selecting it directly
-    # rather than by clicking through the list.
-    panel._simple = False
-    panel._layer = "b4.torgb"
-    notes = drawn_notes(lambda: panel)
-    assert _RATIO_NOISE_NOTE in notes
-    assert notes.index(_RATIO_NOISE_NOTE) > notes.index(_TORGB_NOTE)
-
-    assert _RATIO_NOISE_NOTE not in drawn_notes(
-        lambda: BendingPanel(Runtime(RATIO_HELD, Host(current=Model())))
-    )
 
 
 def test_the_first_cut_of_a_session_can_be_recovered():
