@@ -1958,54 +1958,187 @@ def test_animated_noise_is_still_deterministic_under_a_ratio():
     )
 
 
-def test_a_neutral_ratio_leaves_the_random_field_at_its_nominal_size():
-    """Why the layer's edit is a no-op for training and for every still look.
+def _ratio_probe_params(rx, ry, layer="b16.conv0", **changes):
+    """A ratio on one layer, with the noise turned up on the layers around it.
 
-    The random branch now sizes its field `in_w * up * rx` by `in_h * up * ry`,
-    the same expression the const branch resizes to. At ratio (1, 1) that has
-    to come out at exactly `resolution * init_res // 4`, the size it used to be
-    hard coded to, for every layer in the ladder: `conv0` layers upsample
-    (`up=2`) and `conv1` layers do not, and both are checked here. The
-    generator's own constant noise buffer is that nominal size too, so this
-    also pins the two branches to one grid.
+    `b16.conv0` by default because it is the layer that takes an 8 pixel
+    activation up by 2, the size where a truncation on the wrong side of the
+    upsample first disagrees with the activation.
+    """
+    return render_params(
+        layer_ratios=((layer, rx, ry),),
+        layer_noise=(
+            ("b8.conv0", 1.0),
+            ("b8.conv1", 1.0),
+            ("b16.conv0", 1.0),
+            ("b16.conv1", 1.0),
+        ),
+        **changes,
+    )
+
+
+def _observed_layer_sizes(model, params, index=0):
+    """What the real layers did, read off the tensors they handed the conv.
+
+    Each row is `(layer, activation, noise, up)` where `activation` is the
+    size the layer resized its input to and `noise` is the field it passed
+    alongside it, both taken from the tensors themselves rather than
+    recomputed from the layer's own formula. That is the whole point of
+    reading it this way: a row is evidence about the layer, not a second copy
+    of the expression under test, which is what let a wrong expression pass.
+
+    The convolution's own `up` is captured too, because the noise is added
+    after the upsample and so has to be `up` times the activation.
     """
     import torch
 
-    model = _ratio_model()
-    seen = []
+    from architectures import custom_stylegan2
 
-    def pre_hook(module, inputs):
-        x = inputs[0]
-        in_w, in_h = int(x.shape[-2]), int(x.shape[-1])
-        rx, ry = module.ratio
-        nominal = (
-            module.resolution * module.init_res[0] // 4,
-            module.resolution * module.init_res[1] // 4,
-        )
-        seen.append(
-            (
-                (int(in_w * module.up * rx), int(in_h * module.up * ry)),
-                nominal,
-                tuple(module.noise_const.shape),
+    rows = []
+    entered = []
+    real_conv = custom_stylegan2.modulated_conv2d
+
+    def spy(*args, **kwargs):
+        noise = kwargs.get("noise")
+        # `ToRGBLayer` goes through the same function with no noise at all.
+        if noise is not None:
+            rows.append(
+                (
+                    entered[-1],
+                    tuple(int(n) for n in kwargs["x"].shape[-2:]),
+                    tuple(int(n) for n in noise.shape[-2:]),
+                    int(kwargs.get("up", 1)),
+                )
             )
-        )
+        return real_conv(*args, **kwargs)
 
     handles = [
-        module.register_forward_pre_hook(pre_hook)
+        module.register_forward_pre_hook(lambda module, inputs: entered.append(module))
         for module in model.G.synthesis.modules()
         if hasattr(module, "ratio") and getattr(module, "use_noise", False)
     ]
+    custom_stylegan2.modulated_conv2d = spy
     try:
         with torch.no_grad():
-            model.render_frame(render_params(noise_anim=True), 0)
+            frame = model.render_frame(params, index)
     finally:
+        custom_stylegan2.modulated_conv2d = real_conv
         for handle in handles:
             handle.remove()
+    return frame, rows
 
-    assert len(seen) >= 7
-    for drawn, nominal, const_buffer in seen:
-        assert drawn == nominal
-        assert const_buffer == nominal
+
+def test_a_neutral_ratio_leaves_the_random_field_at_its_nominal_size():
+    """Why the layer's edit is a no-op for training and for every still look.
+
+    At ratio (1, 1) the field the layer actually draws has to come out at
+    exactly `resolution * init_res // 4`, the size it used to be hard coded
+    to, for every layer in the ladder: `conv0` layers upsample (`up=2`) and
+    `conv1` layers do not, and both are checked here. The generator's own
+    constant noise buffer is that nominal size too, so this pins the two
+    branches to one grid. Read off the real tensors, so a layer that sized
+    its field some other way that happens to agree with the old formula still
+    fails here.
+    """
+    model = _ratio_model()
+    frame, rows = _observed_layer_sizes(model, render_params(noise_anim=True))
+
+    assert frame.shape == (32, 32, 3)
+    assert len(rows) >= 7
+    for layer, activation, noise, up in rows:
+        nominal = (
+            layer.resolution * layer.init_res[0] // 4,
+            layer.resolution * layer.init_res[1] // 4,
+        )
+        assert noise == (activation[0] * up, activation[1] * up)
+        assert noise == nominal
+        assert tuple(layer.noise_const.shape) == nominal
+
+
+# The ratios below are deliberately not 2, 0.5 or 3. On an integral ratio a
+# truncation before the upsample and one after it give the same number, which
+# is why a whole band of broken sizes went unnoticed: 1.1 on an 8 pixel
+# activation with `up=2` draws 17 against an activation of 16, and 0.2 on the
+# same layer takes the activation itself to zero pixels.
+@pytest.mark.parametrize(
+    "rx, ry, frame_shape",
+    [
+        (1.1, 1.1, (32, 32, 3)),
+        (1.1, 1.0, (32, 32, 3)),
+        (0.7, 0.7, (20, 20, 3)),
+        (0.2, 0.2, (4, 4, 3)),
+        (3.3, 0.15, (4, 104, 3)),
+    ],
+)
+@pytest.mark.parametrize("anim", [True, False])
+def test_the_noise_field_follows_the_activation_at_awkward_ratios(
+    rx, ry, frame_shape, anim
+):
+    """The field the layer draws is the size the convolution will produce.
+
+    Both noise modes, because the const branch resizes its buffer with the
+    same expression and carried the same rounding.
+    """
+    model = _ratio_model()
+    params = _ratio_probe_params(rx, ry, noise_anim=anim)
+    frame, rows = _observed_layer_sizes(model, params)
+
+    assert frame.shape == frame_shape
+    assert len(rows) >= 7
+    for _layer, activation, noise, up in rows:
+        assert noise == (activation[0] * up, activation[1] * up)
+
+
+def test_a_ratio_small_enough_to_flatten_two_layers_keeps_one_grid():
+    """The floor is on the activation size, not bolted onto the noise size.
+
+    Small ratios compound: `b8.conv0` takes a 4 pixel activation to zero and
+    `b16.conv0` then works on what is left of it. A floor applied to the noise
+    on its own survives that too, but by handing the convolution a 1 by 1
+    field that broadcasts silently over the whole activation. Asserting the
+    noise against the activation rather than against 1 is what tells the two
+    apart.
+    """
+    model = _ratio_model()
+    params = render_params(
+        layer_ratios=(("b8.conv0", 0.2, 0.2), ("b16.conv0", 0.2, 0.2)),
+        layer_noise=(("b8.conv0", 1.0), ("b16.conv0", 1.0)),
+        noise_anim=True,
+    )
+    frame, rows = _observed_layer_sizes(model, params)
+
+    assert frame.shape == (4, 4, 3)
+    assert (1, 1) in [activation for _l, activation, _n, _u in rows]
+    for _layer, activation, noise, up in rows:
+        assert noise == (activation[0] * up, activation[1] * up)
+
+
+def test_a_hand_edited_negative_ratio_renders_instead_of_raising():
+    """Nothing between the preset and the layer clamps this, so the layer must.
+
+    A ratio can only reach the layer through a preset file or an OSC message,
+    and neither validates the sign. Before the floor, a negative one asked
+    `kornia` for a negative sized activation.
+    """
+    payload = presets.to_payload(ControlState())
+    payload["layer_ratios"] = [{"layer": "b16.conv0", "rx": -1.0, "ry": -0.5}]
+    reloaded = presets.from_payload(payload)
+    assert reloaded.layer_ratios == (("b16.conv0", -1.0, -0.5),)
+
+    model = _ratio_model()
+    frame, rows = _observed_layer_sizes(
+        model,
+        render_params(
+            layer_ratios=reloaded.layer_ratios,
+            layer_noise=(("b16.conv0", 1.0), ("b16.conv1", 1.0)),
+            noise_anim=True,
+        ),
+    )
+
+    assert frame.shape[2] == 3
+    for _layer, activation, noise, up in rows:
+        assert min(activation) >= 1
+        assert noise == (activation[0] * up, activation[1] * up)
 
 
 # --- bending hooks, transforms and layer capture --------------------------
