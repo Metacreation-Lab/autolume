@@ -46,7 +46,7 @@ DEFAULT_ARCHS = '7.5,8.6,8.9,12.0'
 # Keep in sync with the _init() calls in
 # torch_utils/ops/{bias_act,filtered_lrelu,upfirdn2d}.py.
 
-_OPS_DIR = os.path.join(_REPO_DIR, 'torch_utils', 'ops')
+_OPS_DIR = os.path.join(_REPO_DIR, 'src', 'torch_utils', 'ops')
 
 PLUGIN_SPECS = [
     dict(module_name='bias_act_plugin',
