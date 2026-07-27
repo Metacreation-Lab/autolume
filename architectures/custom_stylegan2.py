@@ -321,16 +321,20 @@ class SynthesisLayer(torch.nn.Module):
         noise_strength = self.noise_strength * self.global_noise
         if self.noise_regulator != 0:
             noise_strength = self.noise_regulator * self.global_noise
+        # !!! custom: one ratio adjusted size for the activation and for both
+        # noise branches, so the noise can never disagree with what the
+        # convolution produces. The floor keeps a small ratio from resizing to
+        # zero pixels, which compounds down the ladder. At ratio (1, 1) this is
+        # exactly resolution * init_res // 4, so it is a no-op without a ratio.
+        xh = max(1, int(in_w * rx))
+        xw = max(1, int(in_h * ry))
         if self.use_noise and noise_mode == 'random':
-            # !!! custom: drawn on the ratio adjusted grid, the same size the
-            # const branch below resizes to. At ratio (1, 1) that is exactly
-            # resolution * init_res // 4, so this is a no-op without a ratio.
-            noise = torch.randn([x.shape[0], 1, int(in_w * self.up * rx), int(in_h * self.up * ry)], device=x.device, dtype=x.dtype) * noise_strength
+            noise = torch.randn([x.shape[0], 1, xh * self.up, xw * self.up], device=x.device, dtype=x.dtype) * noise_strength
         if self.use_noise and noise_mode == 'const':
             noise = self.noise_const * noise_strength
-            noise = kornia.geometry.transform.resize(noise, (int(in_w * self.up * rx), int(in_h * self.up * ry)))
+            noise = kornia.geometry.transform.resize(noise, (xh * self.up, xw * self.up))
 
-        x = kornia.geometry.transform.resize(x, (int(in_w * rx), int(in_h * ry)))
+        x = kornia.geometry.transform.resize(x, (xh, xw))
         flip_weight = (self.up == 1) # slightly faster
         x = modulated_conv2d(x=x, weight=self.weight, styles=styles, noise=noise, up=self.up,
             padding=self.padding, resample_filter=self.resample_filter, flip_weight=flip_weight, fused_modconv=fused_modconv)
