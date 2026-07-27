@@ -12,9 +12,14 @@ import numpy as np
 import pytest
 
 from autolume.live.core.generator import LayerInfo
-from autolume.live.core.mapping import _OPERATOR_ARITY, _validate_transform
+from autolume.live.core.mapping import (
+    _MAX_KERNEL_SIZE,
+    _OPERATOR_ARITY,
+    _validate_transform,
+)
 from autolume.live.core.params import Transform
 from autolume.live.ui.panels.bending import (
+    MAX_KERNEL_SIZE,
     MODE_ALL,
     MODE_CLUSTER,
     MODE_RANDOM,
@@ -135,6 +140,24 @@ def test_a_kernel_is_rounded_to_a_whole_number_of_at_least_one():
     assert clamp_param("erode", 0, 0.0) == 1.0
     assert clamp_param("erode", 0, 2.4) == 2.0
     assert clamp_param("erode", 0, -5.0) == 1.0
+
+
+def test_a_kernel_is_capped_rather_than_left_to_stall_the_render():
+    # Typing 500 where 50 was meant is one keystroke. The cost of a kernel is
+    # k squared taps per pixel, so an uncapped one does not raise, it blocks
+    # the render thread on the frame in flight for minutes.
+    assert clamp_param("erode", 0, 501.0) == float(MAX_KERNEL_SIZE)
+    assert clamp_param("dilate", 0, 1e9) == float(MAX_KERNEL_SIZE)
+    assert clamp_param("erode", 0, float(MAX_KERNEL_SIZE)) == float(MAX_KERNEL_SIZE)
+
+
+def test_the_panel_and_the_validator_agree_on_the_kernel_ceiling():
+    # Restated in the panel rather than imported, same as the operator table,
+    # so this is what stops the two from drifting: a field that lets a value
+    # through which the validator then drops would silently cost the edit.
+    assert MAX_KERNEL_SIZE == _MAX_KERNEL_SIZE
+    capped = clamp_param("erode", 0, 5000.0)
+    assert _validate_transform(Transform("erode", "b8.conv1", (capped,), (0,)))
 
 
 def test_a_scale_of_zero_is_corrected_rather_than_dropped():

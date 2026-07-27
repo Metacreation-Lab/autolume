@@ -72,6 +72,22 @@ _VALID_LAYER_ORIGINS = ("A", "B", "X")
 # This minimum sits roughly 300x above that measured boundary.
 _MIN_SCALE_MAGNITUDE = 1e-6
 
+# `erode`/`dilate` build a `torch.ones((k, k))` structuring element
+# (transform_layers.py:39/50) and pay k squared taps per pixel, per selected
+# channel, every frame. Nothing bounded that from above, and the failure mode
+# is not an error, it is a stall: the render thread blocks on the frame in
+# flight and the output freezes with nothing logged and no way to interrupt it.
+#
+# 31 is where the ceiling sits, from both ends of the layer ladder. At the
+# bottom, the panel's smallest bendable map is 4x4, and a k x k structuring
+# element reaches k // 2 pixels: measured, a 4x4 map is already flat at k = 7,
+# so everything past that is the same picture. At the top, a 1024 model's
+# output is 1024x1024, and k = 31 is 961 taps per pixel there. Measured on MPS,
+# that is already about seven seconds for one 64 channel 256x256 map and an
+# allocation failure at 1024, so 31 is generous rather than tight and nothing
+# above it buys a look, only a freeze. Odd, so the element stays centred.
+_MAX_KERNEL_SIZE = 31
+
 
 def _set_binding(state: ControlState, value: object) -> ControlState:
     if not isinstance(value, Binding):
@@ -294,11 +310,13 @@ def _validate_transform(transform: Transform) -> Transform | None:
         return None
     # erode/dilate build a torch.ones((k, k)) kernel from params[0]
     # (transform_layers.py:39/50): a non-integral or non-positive k raises
-    # there. "Finite floats of the op's arity" is a floor, not a ceiling, so
-    # these two operators get an extra check the other nine do not need.
+    # there, and an unbounded one stalls the render thread instead, see
+    # `_MAX_KERNEL_SIZE` above. "Finite floats of the op's arity" is a floor,
+    # not a ceiling, so these two operators get an extra check the other nine
+    # do not need.
     if transform.op in ("erode", "dilate"):
         kernel = params_values[0]
-        if not kernel.is_integer() or kernel < 1:
+        if not kernel.is_integer() or not (1 <= kernel <= _MAX_KERNEL_SIZE):
             return None
     # scale's factor is invertible to a coefficient that reaches kornia's
     # grid_sample, see `_MIN_SCALE_MAGNITUDE` above.

@@ -3,7 +3,7 @@ import logging
 import pytest
 
 from autolume.live.core.events import ControlEvent
-from autolume.live.core.mapping import apply_event
+from autolume.live.core.mapping import _MAX_KERNEL_SIZE, apply_event
 from autolume.live.core.params import (
     ADJUST_DIRECTIONS,
     BEND_NOISE,
@@ -741,6 +741,27 @@ def test_bend_set_rejects_a_bool_param_on_a_float_wanting_operator(caplog):
         after = set_transform(before, 0, Transform("scale", "L1", (True,), (0,)))
     assert after == before
     assert any("invalid transform" in m for m in warnings_from(caplog, MAPPING_LOGGER))
+
+
+@pytest.mark.parametrize("op", ["erode", "dilate"])
+@pytest.mark.parametrize("kernel", [32.0, 63.0, 501.0, 5001.0, 1e9])
+def test_bend_set_rejects_a_kernel_size_above_the_ceiling(caplog, op, kernel):
+    # Cost is k squared taps per pixel with nothing above bounding it, so a
+    # mistyped 500 does not raise, it blocks the render thread on the frame in
+    # flight for minutes. Measured on this machine, a 31 kernel on a 256x256
+    # map costs about seven seconds and a 63 one fails to allocate.
+    before = ControlState()
+    with caplog.at_level(logging.WARNING):
+        after = set_transform(before, 0, Transform(op, "L1", (kernel,), (0,)))
+    assert after == before
+    assert any("invalid transform" in m for m in warnings_from(caplog, MAPPING_LOGGER))
+
+
+@pytest.mark.parametrize("op", ["erode", "dilate"])
+def test_bend_set_accepts_a_kernel_size_at_the_ceiling(op):
+    transform = Transform(op, "L1", (float(_MAX_KERNEL_SIZE),), (0,))
+    state = set_transform(ControlState(), 0, transform)
+    assert state.transforms == (transform,)
 
 
 def test_bend_set_out_of_range_index_ignored(caplog):

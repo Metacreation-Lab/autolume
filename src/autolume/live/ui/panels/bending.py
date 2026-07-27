@@ -91,6 +91,14 @@ OPERATORS: tuple[tuple[str, tuple[str, ...]], ...] = (
 OPERATOR_NAMES = tuple(name for name, _ in OPERATORS)
 _PARAM_KINDS = dict(OPERATORS)
 
+# The largest kernel `erode` and `dilate` fields accept. Restated here rather
+# than imported from `core/mapping.py`, whose constant is private, and held to
+# it by the same test that holds the operator table. A kernel costs k squared
+# taps per pixel every frame, so an unbounded one does not fail, it freezes the
+# output for as long as the frame takes. See `mapping.py` for how 31 was
+# picked against the layer ladder.
+MAX_KERNEL_SIZE = 31
+
 # What a freshly added operator starts at. A switch starts on, so adding one
 # does something visible. `scale` starts at 1 and `scalar-multiply` at 1
 # because those are their neutral values, and `scale` is refused outright below
@@ -285,12 +293,14 @@ def clamp_param(op: str, index: int, value: float) -> float:
     Done here rather than left to the validator because the validator's answer
     to an unacceptable value is to drop the whole transform, silently. A kernel
     of zero and a scale of zero are both easy to type on the way to something
-    else, so both are corrected in the field instead of costing the edit.
+    else, so both are corrected in the field instead of costing the edit. A
+    kernel of 500 typed where 50 was meant is the same slip and costs more, so
+    the field caps it rather than let it stall the render thread.
     """
     kinds = param_kinds(op)
     kind = kinds[index] if index < len(kinds) else "float"
     if kind == "kernel":
-        return float(max(1, round(value)))
+        return float(min(MAX_KERNEL_SIZE, max(1, round(value))))
     if op == "scale" and abs(value) < 1e-6:
         return 1e-6 if value >= 0.0 else -1e-6
     return float(value)
