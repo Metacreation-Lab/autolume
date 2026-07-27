@@ -26,18 +26,22 @@ autolume/
   pyproject.toml              # Dependencies, Python pin (3.12), CUDA torch index
   release.py                  # Cross-platform release script (drives PyInstaller)
 
+  src/                        # Packaged code (installed; on sys.path via the editable install)
+    autolume/
+      live/                   # The new live runtime: core/, io/, ui/panels/, runtime.py
+      audio/                  # Audio capture and analysis (sounddevice, numpy)
+      bending/                # Network bending operators applied at inference
+    dnnlib/                   # Vendored NVIDIA dnnlib (StyleGAN2/3)
+    torch_utils/              # Vendored NVIDIA torch utilities (custom ops, persistence)
+
   architectures/              # Generator/discriminator network definitions
-  audio/                      # Audio capture and analysis (sounddevice, numpy)
-  bending/                    # Network bending operators applied at inference
-  dnnlib/                     # Vendored NVIDIA dnnlib (StyleGAN2/3)
   ganspace/                   # GANSpace PCA latent direction discovery
   metrics/                    # FID, KID, and related quality metrics
-  modules/                    # UI modules and live-performance widgets
-  widgets/                    # Reusable imgui widgets
+  modules/                    # UI modules and live-performance widgets (legacy app)
+  widgets/                    # Reusable imgui widgets (legacy app)
   projection/                 # Image-to-latent projection
-  sr_models/                  # Super-resolution model weights (gitignored)
+  sr_models/                  # Super-resolution model weights
   super_res/                  # Real-ESRGAN super-resolution wrappers
-  torch_utils/                # Vendored NVIDIA torch utilities (custom ops, persistence)
   training/                   # Model training and distillation
   utils/                      # Shared helpers (datasets, GUI, paths, version)
   assets/                     # Bundled images and icons
@@ -89,10 +93,18 @@ Do not claim to have tested a UI workflow you could not actually perform. Honest
 
 - **Windows-first project.** Many code paths assume Windows; `Path` objects come back as `WindowsPath` and break JSON serialization (e.g. training kwargs, preset save). Wrap as `str()` defensively. See commits `d77d944`, `1000e66`, `b75b68d` for prior fixes.
 - **CUDA 12.8 is mandatory.** `pyproject.toml` pins `torch==2.8.0+cu128` against a custom uv index. Do not suggest CPU torch, do not relax the pin to test a fix locally — it will break the release.
-- **Custom CUDA ops are JIT-compiled** under `torch_utils/ops/`. Cache busting and runtime MSVC autoresolution exist (commits `8f806ee`, `da2b384`) — do not re-introduce env-var-based MSVC selection or break the cache key.
+- **The `src/` layout is half-adopted.** `autolume`, `dnnlib` and `torch_utils` live under
+  `src/` and are on `sys.path` through the editable install. `utils/`, `modules/`, `widgets/`,
+  `architectures/` and `training/` are still at the repo root and resolve only through the
+  implicit current-directory entry, so anything importing them works from the repo root and
+  fails elsewhere. A frozen bundle is unaffected (PyInstaller flattens everything). When you
+  move a directory, grep for hardcoded path literals naming it — `scripts/precompile_ops.py`
+  was left pointing at the pre-move `torch_utils/ops` and silently broke the Windows and Linux
+  release builds.
+- **Custom CUDA ops are JIT-compiled** under `src/torch_utils/ops/`. Cache busting and runtime MSVC autoresolution exist (commits `8f806ee`, `da2b384`) — do not re-introduce env-var-based MSVC selection or break the cache key.
 - **PyInstaller bundle is the shipped artifact.** New runtime files (help texts, models, assets) must be added to [release.py](release.py) — either to the shared `datas`/`binaries` lists, a per-platform branch, or the `post_build()` copy step. The auto-generated `Autolume.spec` is gitignored — never edit it, the change will be lost on the next build. The bundle also needs to load resources conditionally depending on whether the app is running from source or bundled — use the `utils/resource_paths.py` helpers. Note: app code that loads files via hardcoded `./relative/...` paths (e.g. `sr_models/`) resolves against the CWD, which is unreliable inside `Autolume.app` — prefer `resource_paths.resource_path(...)`.
 - **No test suite** — relying on type checks or static analysis alone is not enough; you must exercise the UI manually.
-- **Vendored NVIDIA code** in `dnnlib/` and `torch_utils/` carries the [Nvidia Source Code License](https://github.com/NVlabs/stylegan2-ada-pytorch/blob/main/LICENSE.txt). Treat those modules as upstream — do not refactor them, and minimize edits.
+- **Vendored NVIDIA code** in `src/dnnlib/` and `src/torch_utils/` carries the [Nvidia Source Code License](https://github.com/NVlabs/stylegan2-ada-pytorch/blob/main/LICENSE.txt). Treat those modules as upstream — do not refactor them, and minimize edits.
 
 ## Workflow
 
