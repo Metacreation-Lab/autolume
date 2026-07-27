@@ -133,11 +133,50 @@ def _clear_binding(state: ControlState, value: object) -> ControlState:
     return dataclasses.replace(state, bindings=remaining)
 
 
+def _preset_transforms(transforms: object) -> tuple[Transform, ...]:
+    """A preset's transforms, through the same gate `/bend/set` uses.
+
+    `presets.py` validates a row's structure, but only `_validate_transform`
+    knows the two operator specific guards, and both of those exist because the
+    values they refuse do not merely look wrong. A `scale` factor near zero
+    takes the process down with a native SIGBUS, which is not an exception and
+    so leaves no traceback, no crash report and no overlay. An `erode` kernel
+    outside its band either raises inside the layer, so the row draws in the
+    chain and does nothing forever, or stalls the render thread for minutes.
+
+    So this is where the preset door meets the bend door: every write to
+    `ControlState.transforms` in this module now passes `_validate_transform`,
+    and a third door cannot be added without going through it. A bad row is
+    logged and skipped and the rest of the preset loads, matching how every
+    other structured section here treats a malformed entry.
+    """
+    try:
+        entries = list(transforms)
+    except TypeError:
+        logger.warning("Ignoring preset transforms, %r is not a sequence", transforms)
+        return ()
+    kept: list[Transform] = []
+    for index, entry in enumerate(entries):
+        validated = (
+            _validate_transform(entry) if isinstance(entry, Transform) else None
+        )
+        if validated is None:
+            logger.warning(
+                "Skipping preset transform %d, %r is not valid", index, entry
+            )
+            continue
+        kept.append(validated)
+    return tuple(kept)
+
+
 def _apply_preset(state: ControlState, value: object) -> ControlState:
     """Apply a whole preset payload as one state replacement.
 
     Every value goes through `apply_value`, so a hand edited file cannot push a
     parameter out of range, and the caller only ever sees the finished state.
+    The transform chain is the one section that is not a registry parameter and
+    so has no `apply_value` of its own, and it goes through
+    `_preset_transforms` for the same reason.
 
     No `keyframe_count` special case any more: the registry carries no such
     parameter, so `from_payload`'s own unknown-parameter handling
@@ -160,7 +199,7 @@ def _apply_preset(state: ControlState, value: object) -> ControlState:
         bindings=data.bindings,
         latent_vec=data.latent_vec,
         keyframes=data.keyframes,
-        transforms=data.transforms,
+        transforms=_preset_transforms(data.transforms),
         layer_noise=data.layer_noise,
         layer_ratios=data.layer_ratios,
         directions=data.directions,

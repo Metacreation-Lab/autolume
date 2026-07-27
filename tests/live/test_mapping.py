@@ -276,6 +276,71 @@ def test_preset_apply_with_wrong_format_ignored(caplog):
     assert any("malformed preset" in m for m in warnings_from(caplog, MAPPING_LOGGER))
 
 
+def preset_with_transforms(entries):
+    payload = preset_payload()
+    payload["transforms"] = entries
+    return payload
+
+
+@pytest.mark.parametrize("factor", [0.0, 1e-10, -1e-12, 1e-9, -1e-7])
+def test_preset_apply_rejects_a_scale_factor_below_the_safety_minimum(caplog, factor):
+    # The same values `/bend/set` already refuses. A preset is a file a
+    # performer receives from a collaborator or hand edits, and this factor
+    # inverts into a coefficient that takes the process down with a native
+    # SIGBUS no try/except can contain, so the preset door has to refuse it
+    # too.
+    payload = preset_with_transforms(
+        [{"op": "scale", "layer": "b4.conv1", "params": [factor], "indices": [0, 1]}]
+    )
+    with caplog.at_level(logging.WARNING):
+        state = apply_preset(ControlState(), payload)
+    assert state.transforms == ()
+    assert any("preset transform" in m for m in warnings_from(caplog, MAPPING_LOGGER))
+
+
+@pytest.mark.parametrize("op", ["erode", "dilate"])
+@pytest.mark.parametrize("kernel", [0, -5, 2.5, 32.0, 501.0, 1e9])
+def test_preset_apply_rejects_an_out_of_range_kernel_size(caplog, op, kernel):
+    payload = preset_with_transforms(
+        [{"op": op, "layer": "b4.conv1", "params": [kernel], "indices": [0]}]
+    )
+    with caplog.at_level(logging.WARNING):
+        state = apply_preset(ControlState(), payload)
+    assert state.transforms == ()
+    assert any("preset transform" in m for m in warnings_from(caplog, MAPPING_LOGGER))
+
+
+def test_preset_apply_drops_only_the_bad_transform_and_keeps_the_preset(caplog):
+    # A bad row degrades the way every other malformed preset section does: it
+    # is logged and skipped, the good rows load, and the rest of the preset is
+    # not thrown away.
+    payload = preset_with_transforms(
+        [
+            {"op": "rotate", "layer": "b8.conv1", "params": [15.0], "indices": [0]},
+            {"op": "scale", "layer": "b4.conv1", "params": [1e-10], "indices": [0, 1]},
+            {"op": "erode", "layer": "b8.conv1", "params": [501], "indices": [0]},
+            {"op": "dilate", "layer": "b8.conv1", "params": [3], "indices": [1]},
+        ]
+    )
+    payload["params"] = {"truncation_psi": 1.4}
+    with caplog.at_level(logging.WARNING):
+        state = apply_preset(ControlState(), payload)
+    assert state.transforms == (
+        Transform("rotate", "b8.conv1", (15.0,), (0,)),
+        Transform("dilate", "b8.conv1", (3.0,), (1,)),
+    )
+    assert state.truncation_psi == 1.4
+    assert any("preset transform" in m for m in warnings_from(caplog, MAPPING_LOGGER))
+
+
+def test_preset_apply_keeps_a_transform_the_bend_door_accepts():
+    payload = preset_with_transforms(
+        [{"op": "scale", "layer": "b4.conv1", "params": [0.5], "indices": [0, 1]}]
+    )
+    state = apply_preset(ControlState(), payload)
+    assert state.transforms == (Transform("scale", "b4.conv1", (0.5,), (0, 1)),)
+
+
 # --- /vector/set --------------------------------------------------------
 
 
