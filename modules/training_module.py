@@ -85,7 +85,7 @@ class TrainingModule:
         self.done = False
         self.training_process = LoggedProcess(target=train_main, args=(self.queue, self.reply), name='training')
         self._zipfile = None
-        self.gamma = 10
+        self.gamma = 10.0
         self.glr = ''  # blank = use the selected config's default G learning rate
         self.dlr = 0.002
         self.snap = 4
@@ -168,7 +168,7 @@ class TrainingModule:
 
         gamma = options.get("loss_kwargs", {}).get("r1_gamma")
         if isinstance(gamma, (int, float)):
-            self.gamma = int(round(gamma))
+            self.gamma = float(gamma)
 
         glr = options.get("G_opt_kwargs", {}).get("lr")
         if isinstance(glr, (int, float)):
@@ -420,7 +420,7 @@ class TrainingModule:
                     self.dlr = value
 
                 imgui.text("Gamma")
-                changed, value = imgui.input_int("##Gamma", self.gamma)
+                changed, value = imgui_utils.input_float("##Gamma", self.gamma)
                 if changed and not training_active:
                     self.gamma = value
 
