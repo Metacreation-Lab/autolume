@@ -243,6 +243,27 @@ def test_apply_value_rejects_non_finite_int(value):
     assert params.apply_value(before, "noise_seed", value) == before
 
 
+# D13: `bool(nan)` is True, an arbitrary answer to a meaningless question,
+# and `str(nan)` is the text "nan" posing as a model reference. The same
+# refusal as FLOAT and INT, on the grounds that a non-finite input is a
+# broken input whatever parameter it lands on.
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_apply_value_rejects_non_finite_bool(value):
+    before = params.ControlState(noise_enabled=False)
+    assert params.apply_value(before, "noise_enabled", value) == before
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_apply_value_rejects_non_finite_text(value):
+    before = params.ControlState(pkl_path="/models/keep.pkl")
+    assert params.apply_value(before, "pkl_path", value) == before
+
+
+def test_apply_value_still_switches_a_bool_with_a_finite_number():
+    before = params.ControlState(noise_enabled=False)
+    assert params.apply_value(before, "noise_enabled", 1.0).noise_enabled is True
+
+
 @pytest.mark.parametrize("name", ["latent_x", "noise_seed"])
 def test_apply_value_rejects_a_number_too_large_for_a_float(name):
     before = params.ControlState()

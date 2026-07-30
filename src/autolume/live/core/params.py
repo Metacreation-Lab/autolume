@@ -559,15 +559,20 @@ def _coerce(spec: ParamSpec, value: object) -> object:
     coerced. A NaN or an infinity is refused rather than clamped: `max` and
     `min` propagate a NaN instead of bounding it, so it would land in the state
     claiming to be within its declared range, and it is a broken input rather
-    than an extreme one.
+    than an extreme one. Refused on every kind, not only the clamped ones:
+    `bool(nan)` is True, an arbitrary answer to a meaningless question, and
+    `str(nan)` is the text "nan" posing as a model reference. A non-finite
+    input is a broken input whatever parameter it lands on.
     """
     if spec.kind is ParamKind.FLOAT:
         coerced = _finite(float(value))
     elif spec.kind is ParamKind.INT:
         coerced = int(round(_finite(float(value))))
     elif spec.kind is ParamKind.BOOL:
-        return bool(float(value)) if not isinstance(value, bool) else value
+        return bool(_finite(float(value))) if not isinstance(value, bool) else value
     else:
+        if isinstance(value, float):
+            _finite(value)
         return str(value)
     if spec.minimum is not None:
         coerced = max(coerced, type(coerced)(spec.minimum))
