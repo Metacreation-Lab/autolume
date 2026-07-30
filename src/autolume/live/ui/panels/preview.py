@@ -180,7 +180,11 @@ def model_name(path: str) -> str:
 
 
 def preview_status(
-    pending: str | None, error: str | None, loaded: bool, has_frame: bool
+    pending: str | None,
+    error: str | None,
+    loaded: bool,
+    has_frame: bool,
+    render_error: str | None = None,
 ) -> PreviewStatus:
     """What the preview says about the model, in the order it says it.
 
@@ -194,6 +198,12 @@ def preview_status(
     partway through a set leaves the previous model rendering happily, and
     without this the performer sees a preview that simply ignored them.
 
+    A render failure comes after those and still ahead of the frame check,
+    because it is the one state where the frame on screen is a lie: the loop
+    retries the same params while the preview holds the last frame that
+    worked, so without this line the picture just stops moving with every
+    status green.
+
     Frames arriving means there is nothing to say. The two remaining silences
     are told apart because they call for different things: no model loaded is
     an invitation, and a model loaded with nothing on screen yet is the app
@@ -203,6 +213,8 @@ def preview_status(
         return PreviewStatus(f"Loading {model_name(pending)}.")
     if error:
         return PreviewStatus(error, True)
+    if render_error:
+        return PreviewStatus(f"Rendering failed. {render_error}", True)
     if has_frame:
         return PreviewStatus("")
     return PreviewStatus(_NO_FRAMES if loaded else _NO_MODEL)
@@ -453,6 +465,7 @@ class PreviewPanel:
             host.error(),
             host.current() is not None,
             frame is not None,
+            self._runtime.render_loop.status_store.snapshot().error,
         )
         area = imgui.get_content_region_avail()
         # A child of exactly the space available, with no padding of its own

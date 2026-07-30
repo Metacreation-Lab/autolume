@@ -6,8 +6,10 @@ stacking on the cap (pacing strategy ported from balagan engine.py).
 """
 
 import logging
+import re
 import threading
 import time
+from dataclasses import dataclass
 from typing import Callable
 
 import numpy as np
@@ -15,10 +17,37 @@ import numpy as np
 from autolume.live.core.params import RenderParams
 from autolume.live.core.sinks import FrameSink
 from autolume.live.core.store import LatestValueStore
+from autolume.live.errors import safe_describe
 
 logger = logging.getLogger(__name__)
 
 _IDLE_SLEEP = 0.05
+# Past this many distinct failure causes the model has bigger problems than a
+# missing log line, and the set stops growing (mirrors superres.py's cap,
+# which says why it went quiet).
+_LOG_ONCE_CAP = 64
+_DIGIT_RUN = re.compile(r"\d+")
+
+
+@dataclass(frozen=True)
+class RenderStatus:
+    """What the render thread has to report, published for the preview.
+
+    Every other subsystem already has a channel like this (`RecorderStatus`,
+    `NdiStatus`, `OscStatus`, `ModelHost.error()`), and the render path was
+    the one whose failure the performer could see without being able to read
+    why: a model that raises on every frame leaves the preview holding the
+    last good frame, indefinitely, while the loop retries the same params.
+
+    `error` is set while frames are failing and cleared by the first frame
+    that renders. `failed_frames` counts the current streak. `last_ok_seq`
+    names the frame the picture is stuck on, or -1 when no frame has ever
+    rendered.
+    """
+
+    error: str | None = None
+    failed_frames: int = 0
+    last_ok_seq: int = -1
 
 
 class RenderLoop:
@@ -38,6 +67,14 @@ class RenderLoop:
         self._screenshot = screenshot
         self._screenshot_path: str | None = None
         self._screenshot_lock = threading.Lock()
+        self.status_store: LatestValueStore[RenderStatus] = LatestValueStore(
+            RenderStatus()
+        )
+        # Written only on the render thread; a plain flag so the healthy
+        # steady state costs no store read or write per frame.
+        self._failing = False
+        self._logged_errors: set[str] = set()
+        self._log_cap_warned = False
         self._seq = 0
         self._thread: threading.Thread | None = None
         self._running = threading.Event()
@@ -57,11 +94,16 @@ class RenderLoop:
         seq = self._seq
         try:
             frame = model.render_frame(params, seq)
-        except Exception:
-            logger.exception("Frame render failed")
+        except Exception as exc:
+            self._record_render_failure(exc)
             self._next_deadline = None
             return False
         self._seq = seq + 1
+        if self._failing:
+            self._failing = False
+            self.status_store.set(
+                RenderStatus(error=None, failed_frames=0, last_ok_seq=seq)
+            )
         # Every sink is about to be handed this one array, so nothing may write
         # to it. Marked here, once, before the fan-out, so a sink added later is
         # covered by construction rather than by whoever adds it remembering.
@@ -82,6 +124,42 @@ class RenderLoop:
         self._track_fps()
         self._limit_framerate(params.fps_cap)
         return True
+
+    def _record_render_failure(self, exc: Exception) -> None:
+        """Publish the failure for the UI and log it once per cause.
+
+        `_run` retries the same params every `_IDLE_SLEEP`, so a model that
+        raises on every frame used to write a full traceback ~18 times a
+        second, indefinitely, while every status line stayed green. The dedup
+        key normalises digit runs the way `superres.py`'s does, so an OOM
+        message carrying varying byte counts is one cause. The status itself
+        is set unconditionally: it is the current state, not a log.
+        """
+        text = safe_describe(exc)
+        previous = self.status_store.snapshot()
+        last_ok = previous.last_ok_seq if self._failing else self._seq - 1
+        self._failing = True
+        self.status_store.set(
+            RenderStatus(
+                error=text,
+                failed_frames=previous.failed_frames + 1,
+                last_ok_seq=last_ok,
+            )
+        )
+        key = f"{type(exc).__name__}:{_DIGIT_RUN.sub('N', text)}"
+        if key in self._logged_errors:
+            return
+        if len(self._logged_errors) >= _LOG_ONCE_CAP:
+            if not self._log_cap_warned:
+                self._log_cap_warned = True
+                logger.warning(
+                    "Reached %d distinct render failure causes, further "
+                    "distinct causes will not be logged",
+                    _LOG_ONCE_CAP,
+                )
+            return
+        self._logged_errors.add(key)
+        logger.exception("Frame render failed")
 
     def request_screenshot(self, path: str) -> None:
         """Latch a screenshot for the next frame this loop fans out.

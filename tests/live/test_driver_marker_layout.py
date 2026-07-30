@@ -26,6 +26,7 @@ import numpy as np
 import pytest
 from imgui_bundle import hello_imgui, imgui, immvision
 
+from autolume.live.core.engine import RenderStatus
 from autolume.live.core.generator import ModelInfo
 from autolume.live.core.params import Binding, ControlState, Keyframe, default_keyframe
 from autolume.live.core.sources import SourceTable
@@ -288,6 +289,9 @@ class FakePreview:
 
 
 class FakeRenderLoop:
+    def __init__(self):
+        self.status_store = LatestValueStore(RenderStatus())
+
     def fps(self):
         return 60.0
 
@@ -1338,6 +1342,23 @@ def test_the_status_is_painted_over_the_frame_rather_than_placed_above_it(frame)
     failing = PanelRuntime(host=FakeModelHost(error="Could not load the model"))
     failing.preview = FramePreview()
     painted = draw_preview(failing)
+    assert painted.ink > 0
+    assert not painted.moved
+
+
+def test_a_render_failure_is_painted_over_the_frame_it_is_stuck_on(frame):
+    """The preview reads the render loop's status channel, not just the host.
+
+    A model that raises on every frame leaves the host healthy and the
+    preview holding the last good frame, so before this channel the picture
+    just stopped moving with every status green.
+    """
+    running = PanelRuntime(host=FakeModelHost(current=object()))
+    running.preview = FramePreview()
+    running.render_loop.status_store.set(
+        RenderStatus(error="boom", failed_frames=3, last_ok_seq=7)
+    )
+    painted = draw_preview(running)
     assert painted.ink > 0
     assert not painted.moved
 

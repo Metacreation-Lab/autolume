@@ -175,6 +175,30 @@ def test_the_model_being_loaded_is_named_ahead_of_the_last_one_that_failed():
     assert not status.error
 
 
+def test_a_render_failure_is_reported_over_the_stale_frame():
+    """The frame on screen is the last one that worked, and it stops moving.
+
+    The host stays healthy through this, so without the render channel every
+    status the preview composes from is green while the picture is frozen.
+    """
+    status = preview_status(None, None, True, True, "mat1 and mat2 shapes cannot be multiplied")
+    assert status.text == "Rendering failed. mat1 and mat2 shapes cannot be multiplied"
+    assert status.error
+
+
+def test_a_load_in_progress_outranks_a_render_failure():
+    # The load about to finish is what resolves the failure, so it is the
+    # thing worth naming.
+    status = preview_status(WIKIART, None, True, True, "boom")
+    assert status.text == "Loading wikiart-1024.pkl."
+
+
+def test_a_failed_load_outranks_a_render_failure():
+    # Both are failures. The load error is the one the performer just caused,
+    # so it reads first, and the render line returns once it is resolved.
+    assert preview_status(None, "No such file", True, True, "boom").text == "No such file"
+
+
 def test_a_preview_with_frames_in_it_says_nothing():
     # The line is still drawn, so nothing on the panel moves when it goes
     # quiet, but a performance is not the place to read a running commentary.

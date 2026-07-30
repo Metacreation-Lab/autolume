@@ -1,9 +1,10 @@
+import logging
 import time
 
 import numpy as np
 import pytest
 
-from autolume.live.core.engine import RenderLoop
+from autolume.live.core.engine import RenderLoop, RenderStatus
 from autolume.live.core.params import ControlState, to_render_params
 from autolume.live.core.sinks import PreviewMailbox
 from autolume.live.core.store import LatestValueStore
@@ -185,6 +186,131 @@ def test_render_error_does_not_kill_loop():
     assert mailbox.latest() == (0, None)
     assert loop.render_one() is True
     assert mailbox.latest()[1] is not None
+
+
+# --- the render status channel --------------------------------------------
+#
+# Every other subsystem has one (RecorderStatus, NdiStatus, OscStatus, the
+# host's error()). The render path was the sole exception, and the only one
+# whose failure the performer can see, as a picture that stops moving, without
+# being able to read why.
+
+
+class BrokenModel:
+    """A model that raises on every frame, like C1's size-mismatch did."""
+
+    pkl_path = "/tmp/broken.pkl"
+
+    def __init__(self, message=None):
+        self.calls = 0
+        self._message = message
+
+    def render_frame(self, params, frame_index):
+        self.calls += 1
+        if self._message is not None:
+            raise RuntimeError(self._message(self.calls))
+        raise RuntimeError("mat1 and mat2 shapes cannot be multiplied")
+
+
+def test_a_render_failure_is_published_for_the_ui():
+    loop = RenderLoop(make_store(fps_cap=0), FakeHost(BrokenModel()), [])
+    assert loop.render_one() is False
+    status = loop.status_store.snapshot()
+    assert status.error == "mat1 and mat2 shapes cannot be multiplied"
+    assert status.failed_frames == 1
+    assert loop.render_one() is False
+    assert loop.status_store.snapshot().failed_frames == 2
+
+
+def test_no_model_is_idle_not_a_failure():
+    loop = RenderLoop(make_store(fps_cap=0), FakeHost(None), [])
+    assert loop.render_one() is False
+    assert loop.status_store.snapshot() == RenderStatus()
+
+
+def test_the_status_names_the_frame_the_picture_is_stuck_on():
+    host = FakeHost(FakeModel())
+    loop = RenderLoop(make_store(fps_cap=0), host, [])
+    for _ in range(3):
+        assert loop.render_one() is True
+    host.model = BrokenModel()
+    loop.render_one()
+    loop.render_one()
+    status = loop.status_store.snapshot()
+    assert status.last_ok_seq == 2
+    assert status.failed_frames == 2
+    assert status.error is not None
+
+
+def test_the_first_good_frame_clears_the_failure():
+    class Flaky:
+        pkl_path = "/tmp/flaky.pkl"
+
+        def __init__(self):
+            self.calls = 0
+
+        def render_frame(self, params, frame_index):
+            self.calls += 1
+            if self.calls <= 2:
+                raise RuntimeError("transient")
+            return np.zeros((4, 4, 3), dtype=np.uint8)
+
+    loop = RenderLoop(make_store(fps_cap=0), FakeHost(Flaky()), [])
+    loop.render_one()
+    loop.render_one()
+    assert loop.status_store.snapshot().failed_frames == 2
+    assert loop.render_one() is True
+    assert loop.status_store.snapshot() == RenderStatus(
+        error=None, failed_frames=0, last_ok_seq=0
+    )
+
+
+def test_a_failure_repeating_with_varying_numbers_is_logged_once(caplog):
+    # A CUDA OOM message embeds varying byte counts. Keyed on the raw text it
+    # filled the whole dedup set in seconds; normalised, it is one cause.
+    model = BrokenModel(lambda n: f"Tried to allocate {n * 20} MiB")
+    loop = RenderLoop(make_store(fps_cap=0), FakeHost(model), [])
+    with caplog.at_level(logging.ERROR):
+        for _ in range(5):
+            loop.render_one()
+    errors = [r for r in caplog.records if r.levelno == logging.ERROR]
+    assert len(errors) == 1
+    # The status still carries the current message, not the first one.
+    assert loop.status_store.snapshot().error == "Tried to allocate 100 MiB"
+
+
+def test_the_render_failure_log_cannot_grow_without_bound(caplog):
+    model = BrokenModel(lambda n: "cause " + "x" * n)
+    loop = RenderLoop(make_store(fps_cap=0), FakeHost(model), [])
+    with caplog.at_level(logging.WARNING):
+        for _ in range(70):
+            loop.render_one()
+    tracebacks = [r for r in caplog.records if r.levelno == logging.ERROR]
+    assert len(tracebacks) == 64
+    cap_notices = [
+        r
+        for r in caplog.records
+        if r.levelno == logging.WARNING and "not be logged" in r.getMessage()
+    ]
+    assert len(cap_notices) == 1
+    # The status channel is not capped: it is state, not a log.
+    assert loop.status_store.snapshot().failed_frames == 70
+
+
+def test_a_broken_error_str_still_reaches_the_status():
+    class Unprintable(Exception):
+        def __str__(self):
+            raise RuntimeError("broken __str__")
+
+    class Model:
+        pkl_path = "/tmp/unprintable.pkl"
+
+        def render_frame(self, params, frame_index):
+            raise Unprintable()
+
+    loop = RenderLoop(make_store(fps_cap=0), FakeHost(Model()), [])
+    assert loop.render_one() is False
+    assert loop.status_store.snapshot().error == "Unprintable"
 
 
 # --- screenshots ----------------------------------------------------------
