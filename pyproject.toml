@@ -50,6 +50,9 @@ dependencies = [
     "zensical==0.0.23",
 ]
 
+[project.scripts]
+autolume-live = "autolume.live.__main__:run"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
