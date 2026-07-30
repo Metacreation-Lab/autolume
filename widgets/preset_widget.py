@@ -340,13 +340,13 @@ class PresetWidget:
             # 加载和保存按钮
             imgui.same_line()
             imgui.begin_group()
-            if imgui_utils.button('Load##presets', width=viz.app.button_w):
-                self.load(self.paths[np.where(self.active)].item())
+            selected = self.paths[np.where(self.active)]
+            if imgui_utils.button('Load##presets', width=viz.app.button_w, enabled=len(selected) == 1):
+                self.load(selected[0])
             imgui.same_line()
-            if imgui_utils.button("Save##presets", width=viz.app.button_w):
-                if self.active.any():
-                    self.save(self.paths[np.where(self.active)].item())
-                    self.assigned[np.where(self.active)] = 0
+            if imgui_utils.button("Save##presets", width=viz.app.button_w, enabled=len(selected) == 1):
+                self.save(selected[0])
+                self.assigned[np.where(self.active)] = 0
             imgui.same_line()
             if imgui_utils.button("New Folder##presets", width=viz.app.button_w):
                 self.create_new_folder()
@@ -403,5 +403,7 @@ class PresetWidget:
         value = str(args[-1])
         index = np.where(self.dir_name == value)
         self.active *= False
-        self.active[index]=True
-        self.load(self.paths[np.where(self.active)].item())
+        self.active[index] = True
+        selected = self.paths[np.where(self.active)]
+        if len(selected) == 1:
+            self.load(selected[0])
