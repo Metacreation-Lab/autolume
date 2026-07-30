@@ -59,7 +59,11 @@ class SuperRes:
         stays that way. A device-move or forward failure is transient: it
         depends on frame size and current memory pressure, so it only sets
         ``last_error`` for that call, cleared again on the next success,
-        rather than permanently killing the stage over one bad frame.
+        rather than permanently killing the stage over one bad frame. The
+        exception is a ``TypeError`` out of the forward call: a signature
+        mismatch is deterministic, the same call fails the same way on every
+        frame, so it is treated like a bad weight file rather than retried
+        forever as a silent 1x.
         """
         import torch
 
@@ -91,6 +95,14 @@ class SuperRes:
             with torch.inference_mode(), self._autocast(device):
                 batch = image.unsqueeze(0).to(device)
                 output = self._model(batch).float()
+        except TypeError as exc:
+            self._disabled = True
+            self.disabled_reason = (
+                "The super-res network rejected the call, which would fail "
+                f"on every frame. {safe_describe(exc)}"
+            )
+            logger.warning(self.disabled_reason)
+            return image
         except Exception as exc:
             self._record_forward_failure("Super-res forward pass failed", exc)
             return image

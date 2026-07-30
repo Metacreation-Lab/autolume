@@ -106,7 +106,10 @@ class TwoDistinctCausesModel(torch.nn.Module):
         self.calls += 1
         if self.calls == 1:
             raise RuntimeError("CUDA out of memory. Tried to allocate 384 MiB")
-        raise TypeError("unrelated interface failure")
+        # A ValueError, not a TypeError: a forward TypeError is a signature
+        # mismatch and permanently disables the stage (D-14), which is not
+        # the transient dedup behaviour this fixture exists to drive.
+        raise ValueError("unrelated interface failure")
 
 
 class UniqueCauseEachCallModel(torch.nn.Module):
@@ -122,6 +125,21 @@ class UniqueCauseEachCallModel(torch.nn.Module):
     def forward(self, x):
         self.calls += 1
         raise RuntimeError(f"cause-{chr(ord('a') + self.calls)}")
+
+
+class SignatureMismatchModel(torch.nn.Module):
+    """The forward call itself is malformed: it fails identically every frame."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        self.calls = 0
+
+    def load_state_dict(self, state_dict, *args, **kwargs):
+        return None
+
+    def forward(self, x):
+        self.calls += 1
+        raise TypeError("forward() missing 1 required positional argument: 'scale'")
 
 
 class PathologicalStrError(RuntimeError):
@@ -348,6 +366,48 @@ def test_forward_failure_recovers_on_next_success(install_model):
     second = sr.apply(image, "cpu")
     assert second.shape == (3, 32, 32)
     assert sr.last_error is None
+
+
+def test_a_signature_mismatch_disables_the_stage_instead_of_retrying_forever(
+    install_model, caplog
+):
+    """A forward TypeError is deterministic, unlike an OOM (D-14).
+
+    Treated like an OOM it was retried on every frame and failed on every
+    frame, a permanent silent 1x. It is a fact about this install's network,
+    so it disables the stage the way a bad weight file does, with a reason
+    the performance panel shows.
+    """
+    install_model(SignatureMismatchModel)
+    sr = SuperRes()
+    image = torch.zeros(3, 8, 8)
+
+    with caplog.at_level(logging.WARNING):
+        first = sr.apply(image, "cpu")
+        second = sr.apply(image, "cpu")
+
+    assert first is image
+    assert second is image
+    assert sr.disabled
+    assert sr.disabled_reason is not None
+    assert "forward() missing" in sr.disabled_reason
+    # Disabled short-circuits apply(), so the doomed call is never retried.
+    assert sr._model.calls == 1
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+
+
+def test_a_memory_failure_is_still_transient_after_the_type_error_split(install_model):
+    # The other half of the distinction: an OOM-shaped RuntimeError keeps the
+    # retry-next-frame behaviour, because memory pressure changes.
+    install_model(AlwaysFailsForwardModel)
+    sr = SuperRes()
+    image = torch.zeros(3, 8, 8)
+
+    sr.apply(image, "cpu")
+
+    assert not sr.disabled
+    assert sr.last_error is not None
 
 
 def test_forward_failure_dedup_collapses_varying_byte_counts(install_model, caplog):
