@@ -607,10 +607,12 @@ def test_a_failed_osc_rebind_keeps_the_old_transport_serving():
 
 
 def test_a_port_change_never_blocks_the_control_thread_on_the_old_transport():
-    """IO-1: `BaseServer.shutdown()` blocks until `serve_forever`'s 0.5 s poll
+    """IO-1: `BaseServer.shutdown()` blocks until `serve_forever`'s poll
     expires, and `_restart_osc` runs on the control thread. Measured through
-    a real socket: a 494.6 ms tick gap, all motion frozen, then a jump when
-    the next tick integrated the whole gap. The old transport's stop must
+    a real socket: a ~39 ms tick gap against the 0.05 s poll, which is five
+    8 ms control ticks of frozen motion and then a jump when the next tick
+    integrated the whole gap. (It was 494.6 ms before the poll came down from
+    0.5 s, which is what first made this visible.) The old transport's stop must
     happen off the control thread, so here it blocks until released and the
     control thread has to stay live, swap in the replacement and keep
     applying events while it does."""

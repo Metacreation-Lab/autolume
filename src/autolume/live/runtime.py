@@ -237,9 +237,10 @@ class Runtime:
         self.osc_status_store.set(OscStatus(bound_port=bound_port, error=None))
         # Stopped on a short-lived thread of its own, never here: this runs on
         # the control thread, and `BaseServer.shutdown()` blocks until
-        # `serve_forever`'s 0.5 s poll interval expires. Measured at 494.6 ms,
-        # which froze all motion for half a second and then made the picture
-        # jump when the next tick integrated the whole gap at once. The
+        # `serve_forever`'s poll interval expires. Measured at ~39 ms against
+        # the 0.05 s poll, which is still five control ticks of 8 ms: motion
+        # would freeze and then jump when the next tick integrated the whole
+        # gap at once. It was 494.6 ms before the poll came down to 0.05 s. The
         # replacement is already serving on its own socket, so nothing waits
         # on the old one being torn down. The status goes up first, so anyone
         # who sees the old transport stopped also sees the new port published.
