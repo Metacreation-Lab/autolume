@@ -266,9 +266,9 @@ def ninja_binary() -> Path:
 
 def icon_path() -> Path | None:
     candidates = {
-        "Windows": REPO / "assets" / "metacreation-logo.ico",
-        "Darwin": REPO / "assets" / "metacreation-logo.icns",
-        "Linux": REPO / "assets" / "metacreation-logo.png",
+        "Windows": REPO / "src" / "assets" / "metacreation-logo.ico",
+        "Darwin": REPO / "src" / "assets" / "metacreation-logo.icns",
+        "Linux": REPO / "src" / "assets" / "metacreation-logo.png",
     }
     icon = candidates[SYSTEM]
     if not icon.exists():
@@ -315,8 +315,8 @@ def build_args(disable_crash_reporting: bool = False) -> tuple[list[str], str | 
         (REPO / "pyproject.toml", "."),
         (REPO / "models.csv", "."),
         (REPO / "modules" / "help_texts.csv", "modules"),
-        (REPO / "architectures", "architectures"),
-        (REPO / "assets", "assets"),
+        (REPO / "src" / "architectures", "architectures"),
+        (REPO / "src" / "assets", "assets"),
         (REPO / "training", "training"),
         (REPO / "src" / "torch_utils", "torch_utils"),
         (REPO / "sr_models" / "Fast.pt", "sr_models"),  # Quality/Balance download on first use
@@ -550,7 +550,7 @@ def package_linux() -> None:
         "Categories=Graphics;\n"
         "Terminal=false\n"
     )
-    shutil.copy2(REPO / "assets" / "metacreation-logo.png", appdir / "autolume.png")
+    shutil.copy2(REPO / "src" / "assets" / "metacreation-logo.png", appdir / "autolume.png")
 
     output = REPO / "dist" / artifact_name(".AppImage")
     # APPIMAGE_EXTRACT_AND_RUN lets appimagetool run without FUSE on the build host.
@@ -662,7 +662,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 Compression=lzma2
 SolidCompression=yes
-SetupIconFile={REPO / 'assets' / 'metacreation-logo.ico'}
+SetupIconFile={REPO / 'src' / 'assets' / 'metacreation-logo.ico'}
 UninstallDisplayIcon={{app}}\\Autolume.exe
 OutputDir={REPO / 'dist'}
 OutputBaseFilename={output_base}

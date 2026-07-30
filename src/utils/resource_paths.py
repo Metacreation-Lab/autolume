@@ -5,7 +5,8 @@ import sys
 
 import tomllib
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+_SRC_ROOT = Path(__file__).resolve().parent.parent
+_REPO_ROOT = _SRC_ROOT.parent
 
 
 def is_frozen() -> bool:
@@ -24,8 +25,19 @@ def resource_root() -> Path:
 
 
 def resource_path(*parts: str) -> Path:
-    """Resolve a resource path relative to :func:`resource_root`."""
-    return resource_root().joinpath(*parts)
+    """Resolve a resource path relative to :func:`resource_root`.
+
+    A frozen bundle flattens all data under ``sys._MEIPASS``. A source
+    checkout splits it between the repo root (``sr_models/``,
+    ``pyproject.toml``) and ``src/`` (``assets/``), so fall back to ``src/``
+    when the root candidate does not exist.
+    """
+    candidate = resource_root().joinpath(*parts)
+    if not candidate.exists() and not is_frozen():
+        src_candidate = _SRC_ROOT.joinpath(*parts)
+        if src_candidate.exists():
+            return src_candidate
+    return candidate
 
 
 @lru_cache(maxsize=1)
