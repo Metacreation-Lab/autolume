@@ -1,13 +1,55 @@
 import multiprocessing
+import os
+import sys
 
-from utils import startup_env
+IS_FROZEN = getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS")
 
-# Everything below imports torch, glfw or imgui, all of which read the
-# environment as they load, so this call comes first. The GLFW argument is the
-# legacy app's half of the two-app policy recorded in release.py.
-startup_env.configure(startup_env.PYGLFW)
+# Build cache for the custom CUDA ops: precompiled entries ship inside the
+# bundle; in development the cache lives at the repository root. Must be set
+# before the first op is loaded and is inherited by spawned worker processes.
+os.environ.setdefault(
+    "TORCH_EXTENSIONS_DIR",
+    os.path.join(sys._MEIPASS, "torch_extensions") if IS_FROZEN
+    else os.path.join(os.path.dirname(os.path.abspath(__file__)), "torch_extensions"),
+)
+
+if sys.platform == 'darwin':
+    # Must be set before torch is imported.
+    os.environ.setdefault('PYTORCH_ENABLE_MPS_FALLBACK', '1')
+
+if sys.platform == 'linux' and os.environ.get('WAYLAND_DISPLAY'):
+    # Use X11 GLFW (XWayland) so GNOME decorates the window; native Wayland
+    # requires libdecor-gtk which is unavailable or crashes on some systems.
+    os.environ.setdefault('PYGLFW_LIBRARY_VARIANT', 'x11')
+
 
 from utils.user_data import init_data_root
+
+
+def get_runtime_bin_dir():
+    # PyInstaller frozen app: bundled ffmpeg/ffprobe/ninja live in _MEIPASS/bin
+    # (a subdir, to avoid colliding with same-named Python packages at the root).
+    if IS_FROZEN:
+        return os.path.join(sys._MEIPASS, "bin")
+
+    # Development mode
+    base = os.path.dirname(os.path.abspath(__file__))
+    bin_root = os.path.join(base, "bin")
+    for root, dirs, files in os.walk(bin_root):
+        if "ffmpeg.exe" in files:
+            return root
+    return bin_root
+
+BIN_DIR = get_runtime_bin_dir()
+os.environ["PATH"] = BIN_DIR + os.pathsep + os.environ.get("PATH", "")
+
+if IS_FROZEN:
+    # imageio-ffmpeg's own binary is pruned from the bundle (release.py);
+    # route it to the ffmpeg already shipped in bin/.
+    os.environ.setdefault(
+        "IMAGEIO_FFMPEG_EXE",
+        os.path.join(BIN_DIR, "ffmpeg.exe" if os.name == "nt" else "ffmpeg"),
+    )
 
 
 def main():

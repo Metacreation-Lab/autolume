@@ -1,33 +1,7 @@
 """Cross-platform PyInstaller build for Autolume (Windows / macOS / Linux).
 
 Run with ``uv run release.py``. Detects the host platform and assembles the
-right PyInstaller invocation.
-
-The build produces two executables from one collected dependency folder:
-``Autolume`` (``main.py``, the imgui app) and ``Autolume Live``
-(``main_live.py``, the live runtime). They share everything except their entry
-script, and the shared folder is the whole point: a second, separate build
-would duplicate torch and CUDA, which is most of the several GB the release
-weighs. PyInstaller expresses this with a generated spec file (``pyinstaller``
-on the command line only ever builds one executable), so ``build/autolume.spec``
-is written on every build from the lists below and handed to PyInstaller. It is
-generated, never edited by hand, and lives in ``build/`` next to the other
-generated build inputs.
-
-Per platform:
-
-- Windows / Linux: ``dist/Autolume/Autolume[.exe]`` and
-  ``dist/Autolume/Autolume Live[.exe]`` next to a single ``_internal/``.
-- macOS: one ``dist/Autolume.app`` with both executables in ``Contents/MacOS``.
-  A .app has exactly one ``CFBundleExecutable``, and a second .app cannot
-  share the first one's payload without breaking code signing (a bundle may
-  not reach outside itself), so a second .app would mean a second full copy.
-  ``Autolume Live`` is therefore launched by path
-  (``open -n dist/Autolume.app/Contents/MacOS/Autolume\\ Live`` or from a
-  terminal) until the live runtime is what the app bundle ships as its main
-  executable.
-
-Details:
+right PyInstaller invocation:
 
 - Windows / Linux precompile the custom StyleGAN CUDA ops for compute
   capabilities 7.5/8.6/8.9/12.0 (RTX 20/30/40/50 series) via
@@ -133,6 +107,11 @@ def package_dir(name: str) -> Path:
     return Path(spec.submodule_search_locations[0])
 
 
+def spec_arg(src: Path, dest: str) -> str:
+    """Build a PyInstaller add-data/add-binary value using the host separator."""
+    return f"{src}{os.pathsep}{dest}"
+
+
 # Windows bundles gyan.dev's "essentials" ffmpeg (~97 MB/exe vs ~136 MB for
 # the default full build); libx264 + aac is all Autolume uses. The major
 # version is pinned because "release@essentials" resolves the latest version
@@ -211,39 +190,6 @@ def bake_crash_endpoint() -> str:
         "    return d(_U), d(_T)\n",
         encoding="utf-8")
     return tmp_dir
-
-
-# --- GLFW policy for a two-app bundle ---------------------------------------
-#
-# The bundle carries two GLFW native libraries and that is deliberate:
-#
-# - the one collected below from the ``glfw`` (pyglfw) wheel, into ``glfw/``,
-#   where pyglfw's own frozen loader finds it. On Windows that placement also
-#   pre-loads MSVCR120.dll; on Linux it preserves the x11/wayland variant
-#   directories pyglfw selects between.
-# - the one the ``imgui_bundle`` wheel ships next to its compiled extension,
-#   collected automatically because that extension links it. hello_imgui
-#   creates the live app's windows through it.
-#
-# They are different builds of GLFW and a process must load exactly one of
-# them: two GLFW images in one process is what produces the macOS "Class
-# GLFWHelper is implemented in both ..." warning, and their window handles are
-# not interchangeable. Since the two apps are separate processes, each one
-# picks its own, before any import that would load either: see
-# ``utils.startup_env``, called first thing by ``main.py`` (pyglfw) and by
-# ``autolume/live/__main__.py`` (imgui_bundle).
-#
-# Nothing here is ambient. Importing ``imgui_bundle`` sets ``PYGLFW_LIBRARY``
-# to its own library as a side effect, which would give the live app the right
-# answer by accident and only as long as nothing imported ``glfw`` first, and
-# would leak into the legacy app if it were ever inherited. Both launchers
-# therefore state their choice rather than rely on that.
-#
-# Linux caveat, untested at the time of writing: ``PYGLFW_LIBRARY_VARIANT=x11``
-# (main.py's XWayland decoration workaround) selects between the variants
-# inside the pyglfw wheel and so applies to the legacy app only. The live app's
-# windows come from the GLFW imgui_bundle ships, so if they misbehave under
-# Wayland the lever is that library, not this variable.
 
 
 def glfw_native_libs() -> list[tuple[Path, str]]:
@@ -331,18 +277,28 @@ def icon_path() -> Path | None:
     return icon
 
 
-def spec_inputs(endpoint_dir: str | None) -> dict:
-    """Everything PyInstaller needs to collect, resolved for this host.
+def build_args(disable_crash_reporting: bool = False) -> tuple[list[str], str | None]:
+    args = [sys.executable, "-m", "PyInstaller", "main.py", "--name", "Autolume", "--noconfirm", "--windowed"]
 
-    Returned as plain strings so :func:`write_spec` can write them into the
-    generated spec as literals: the spec is then self-contained and can be read
-    (or run again) without re-deriving anything.
-    """
+    icon = icon_path()
+    if icon:
+        args += ["--icon", str(icon)]
+
+    if IS_MACOS:
+        identity = signing_identity()
+        if identity:
+            # PyInstaller deep-signs every nested binary with the hardened
+            # runtime, as notarization requires.
+            args += [
+                "--codesign-identity", identity,
+                "--osx-entitlements-file", str(ENTITLEMENTS),
+            ]
+
     # --- Binaries shipped on every platform -------------------------------
     # ffmpeg/ffprobe (and ninja below) go in a bin/ subdir, not the bundle root:
     # on macOS/Linux the extensionless `ffmpeg` binary would otherwise collide
     # with the `ffmpeg` (ffmpeg-python) package PyInstaller packs at the root.
-    # utils.startup_env adds this bin/ dir to PATH at runtime, for both apps.
+    # main.py adds this bin/ dir to PATH at runtime.
     ffmpeg, ffprobe = ensure_ffmpeg()
     binaries = [
         (ffmpeg, "bin"), (ffprobe, "bin"), *glfw_native_libs(), *sounddevice_native_libs(),
@@ -350,6 +306,11 @@ def spec_inputs(endpoint_dir: str | None) -> dict:
 
     # --- Data files shipped on every platform -----------------------------
     clip = package_dir("clip")
+    if disable_crash_reporting:
+        endpoint_dir = None
+        print("warning: building without crash reporting (--disable-crash-reporting)")
+    else:
+        endpoint_dir = bake_crash_endpoint()
     datas = [
         (REPO / "pyproject.toml", "."),
         (REPO / "models.csv", "."),
@@ -401,176 +362,30 @@ def spec_inputs(endpoint_dir: str | None) -> dict:
             else:
                 print(f"warning: {python_lib} not found; runtime op compilation may fail")
 
-    for src, _dest in datas:
+    for src, dest in binaries:
+        args += ["--add-binary", spec_arg(src, dest)]
+    for src, dest in datas:
         if not src.exists():
             fail(f"missing data file: {src}")
+        args += ["--add-data", spec_arg(src, dest)]
 
-    hiddenimports = []
-    # The repo root, so the flat top-level packages (modules, training, ...)
-    # resolve; the spec lives in build/, so this is not implicit.
-    pathex = [str(REPO)]
+    args += ["--collect-all", "lpips", "--collect-all", "codecarbon"]
 
-    # pathex finds the temp-dir module; the hidden import forces its inclusion
+    # --paths finds the temp-dir module; --hidden-import forces its inclusion
     # (crash_report imports it inside a function, untraceable). None for a
     # --disable-crash-reporting build.
     if endpoint_dir is not None:
-        pathex.append(endpoint_dir)
-        hiddenimports.append("_endpoint_baked")
+        args += ["--paths", endpoint_dir, "--hidden-import", "_endpoint_baked"]
 
     # PyOpenGL resolves its platform backend (GLX/EGL) via dynamic import at
     # startup. PyInstaller misses these because there's no static import to trace.
     if IS_LINUX:
-        hiddenimports += ["OpenGL.platform.glx", "OpenGL.platform.egl"]
-
-    return {
-        "binaries": [(str(src), dest) for src, dest in binaries],
-        "datas": [(str(src), dest) for src, dest in datas],
-        "hiddenimports": hiddenimports,
-        "pathex": pathex,
-    }
-
-
-# Packages whose data files, binaries and submodules PyInstaller cannot trace
-# from the import graph alone (the --collect-all equivalent).
-COLLECT_ALL_PACKAGES = ["lpips", "codecarbon"]
-
-# hello_imgui reads fonts and images from the imgui_bundle package at runtime,
-# and there is no hooks-contrib hook for imgui_bundle (checked against
-# pyinstaller-hooks-contrib shipped with PyInstaller 6.16). The compiled
-# extension and the GLFW library it links are traced normally; only these data
-# files are not. Restricted to assets/ because the demos_assets/ and demos_*/
-# trees next to it are the packaged demo programs, which nothing in Autolume
-# reaches. opensimplex and python-osc are pure python with no data files, and
-# ndi-python's library sits inside its package next to the extension that
-# links it, so all three need nothing here.
-IMGUI_BUNDLE_DATA = ["assets/*", "assets/**/*"]
-
-# The scripts that become executables, as (script, executable name). The first
-# one is the .app's CFBundleExecutable on macOS.
-TARGETS = [(REPO / "main.py", "Autolume"), (REPO / "main_live.py", "Autolume Live")]
-
-SPEC_BODY = '''
-datas = list(DATAS)
-binaries = list(BINARIES)
-hiddenimports = list(HIDDENIMPORTS)
-
-for package in COLLECT_ALL_PACKAGES:
-    package_datas, package_binaries, package_hiddenimports = collect_all(package)
-    datas += package_datas
-    binaries += package_binaries
-    hiddenimports += package_hiddenimports
-
-datas += collect_data_files("imgui_bundle", includes=IMGUI_BUNDLE_DATA)
-
-analysis = Analysis(
-    [script for script, _name in TARGETS],
-    pathex=PATHEX,
-    binaries=binaries,
-    datas=datas,
-    hiddenimports=hiddenimports,
-    noarchive=False,
-)
-pyz = PYZ(analysis.pure)
-
-# One analysis over both entry scripts, so the collected folder is the union of
-# what the two apps import and every shared dependency is analysed once. Each
-# executable then embeds the runtime hooks plus its own script and not the
-# other's; `analysis.scripts` names them by their stem.
-SCRIPT_STEMS = [os.path.splitext(os.path.basename(script))[0] for script, _name in TARGETS]
-
-
-def scripts_for(stem):
-    return [entry for entry in analysis.scripts
-            if entry[0] == stem or entry[0] not in SCRIPT_STEMS]
-
-
-executables = [
-    EXE(
-        pyz,
-        scripts_for(stem),
-        [],
-        exclude_binaries=True,
-        name=name,
-        debug=False,
-        bootloader_ignore_signals=False,
-        strip=False,
-        upx=True,
-        console=False,
-        disable_windowed_traceback=False,
-        argv_emulation=False,
-        target_arch=None,
-        codesign_identity=CODESIGN_IDENTITY,
-        entitlements_file=ENTITLEMENTS_FILE,
-        icon=ICON,
-    )
-    for stem, (_script, name) in zip(SCRIPT_STEMS, TARGETS)
-]
-
-collected = COLLECT(
-    *executables,
-    analysis.binaries,
-    analysis.datas,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    name="Autolume",
-)
-
-if sys.platform == "darwin":
-    app = BUNDLE(
-        collected,
-        name="Autolume.app",
-        icon=ICON,
-        bundle_identifier=None,
-        version=APP_VERSION,
-    )
-'''
-
-
-def write_spec(endpoint_dir: str | None) -> Path:
-    """Generate build/autolume.spec and return its path.
-
-    PyInstaller's command line builds a single executable; two executables
-    sharing one collected folder needs a spec file. It is generated on every
-    build from the values above rather than kept in the tree, so there is one
-    place to change what the release contains.
-    """
-    inputs = spec_inputs(endpoint_dir)
-    icon = icon_path()
-    identity = signing_identity() if IS_MACOS else None
-    # PyInstaller deep-signs every nested binary with the hardened runtime, as
-    # notarization requires.
-    entitlements = str(ENTITLEMENTS) if identity else None
-
-    header = "\n".join(
-        f"{name} = {value!r}" for name, value in [
-            ("BINARIES", inputs["binaries"]),
-            ("DATAS", inputs["datas"]),
-            ("HIDDENIMPORTS", inputs["hiddenimports"]),
-            ("PATHEX", inputs["pathex"]),
-            ("COLLECT_ALL_PACKAGES", COLLECT_ALL_PACKAGES),
-            ("IMGUI_BUNDLE_DATA", IMGUI_BUNDLE_DATA),
-            ("TARGETS", [(str(script), name) for script, name in TARGETS]),
-            ("ICON", str(icon) if icon else None),
-            ("CODESIGN_IDENTITY", identity),
-            ("ENTITLEMENTS_FILE", entitlements),
-            ("APP_VERSION", get_version()),
+        args += [
+            "--hidden-import", "OpenGL.platform.glx",
+            "--hidden-import", "OpenGL.platform.egl",
         ]
-    )
 
-    spec = REPO / "build" / "autolume.spec"
-    spec.parent.mkdir(parents=True, exist_ok=True)
-    spec.write_text(
-        "# Generated by release.py on every build. Do not edit: your changes\n"
-        "# would be overwritten. Change release.py instead.\n"
-        "import os\n"
-        "import sys\n\n"
-        "from PyInstaller.utils.hooks import collect_all, collect_data_files\n\n"
-        f"{header}\n"
-        f"{SPEC_BODY}",
-        encoding="utf-8",
-    )
-    return spec
+    return args, endpoint_dir
 
 
 def precompile_ops() -> None:
@@ -658,7 +473,6 @@ def post_build() -> None:
         else:
             subprocess.run(["codesign", "--force", "--sign", "-", str(app)], check=True)
         print(f"Built dist/Autolume.app (requires macOS {MACOS_MIN_VERSION}+)")
-        print("Autolume Live: dist/Autolume.app/Contents/MacOS/'Autolume Live'")
     else:
         prune_bundle()
         print(f"Release created in {REPO / 'dist' / 'Autolume'}")
@@ -720,17 +534,9 @@ def package_linux() -> None:
     shutil.copytree(REPO / "dist" / "Autolume", appdir / "usr" / "bin", symlinks=True)
 
     apprun = appdir / "AppRun"
-    # An AppImage has one entry point, and the desktop entry uses it. The live
-    # runtime is the same image's second executable, reached with --live
-    # (`./Autolume.AppImage --live`), since a second .desktop file inside the
-    # image would not be seen by anything.
     apprun.write_text(
         '#!/bin/sh\n'
         'HERE="$(dirname "$(readlink -f "$0")")"\n'
-        'if [ "$1" = "--live" ]; then\n'
-        '    shift\n'
-        '    exec "$HERE/usr/bin/Autolume Live" "$@"\n'
-        'fi\n'
         'exec "$HERE/usr/bin/Autolume" "$@"\n'
     )
     apprun.chmod(0o755)
@@ -872,7 +678,6 @@ Source: "{REPO / 'dist' / 'Autolume'}\\*"; DestDir: "{{app}}"; Flags: recursesub
 
 [Icons]
 Name: "{{group}}\\Autolume"; Filename: "{{app}}\\Autolume.exe"
-Name: "{{group}}\\Autolume Live"; Filename: "{{app}}\\Autolume Live.exe"
 Name: "{{autodesktop}}\\Autolume"; Filename: "{{app}}\\Autolume.exe"; Tasks: desktopicon
 """)
     subprocess.run([str(iscc_path()), str(iss)], check=True)
@@ -977,22 +782,14 @@ def main() -> None:
             fail(f"{bundle} not found; run `uv run release.py` first")
         package()
     elif opts.package or not post_only:
-        print(f"Building Autolume and Autolume Live for {SYSTEM}...")
+        print(f"Building Autolume for {SYSTEM}...")
         clean()
         if NEEDS_JIT_TOOLCHAIN:
             precompile_ops()
-        if opts.disable_crash_reporting:
-            endpoint_dir = None
-            print("warning: building without crash reporting (--disable-crash-reporting)")
-        else:
-            endpoint_dir = bake_crash_endpoint()
+        args, endpoint_dir = build_args(opts.disable_crash_reporting)
+        print("Running PyInstaller...")
         try:
-            spec = write_spec(endpoint_dir)
-            print("Running PyInstaller...")
-            subprocess.run(
-                [sys.executable, "-m", "PyInstaller", str(spec), "--noconfirm"],
-                check=True, cwd=REPO,
-            )
+            subprocess.run(args, check=True, cwd=REPO)
         finally:
             if endpoint_dir is not None:
                 shutil.rmtree(endpoint_dir, ignore_errors=True)
