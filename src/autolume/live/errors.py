@@ -23,10 +23,11 @@ def safe_describe(exc: BaseException) -> str:
     """`describe(exc)`, defensively: for text that feeds a log line or a
     dedup key.
 
-    Neither may raise (an exception whose ``__str__`` is broken would
-    otherwise escape the caller's own handler) and neither may be unbounded
-    (a pathological or enormous message would be its own problem in both
-    places).
+    Neither place can afford text that raises or that has no bound, so a
+    broken ``__str__`` falls back to the exception's type name and an
+    enormous message is truncated. Best effort rather than a guarantee:
+    the fallback reads ``type(exc).__name__`` unguarded, so an exception
+    built on a pathological metaclass could still raise here.
     """
     try:
         text = describe(exc)
