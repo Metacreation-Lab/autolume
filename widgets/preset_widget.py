@@ -348,7 +348,7 @@ class PresetWidget:
                 self.save(selected[0])
                 self.assigned[np.where(self.active)] = 0
             imgui.same_line()
-            if imgui_utils.button("New Folder##presets", width=viz.app.button_w):
+            if imgui_utils.button("New Preset##presets", width=viz.app.button_w):
                 self.create_new_folder()
             imgui.end_group()
             # 其余的UI元素保持不变
