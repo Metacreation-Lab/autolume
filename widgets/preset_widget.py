@@ -39,9 +39,12 @@ class PresetWidget:
         self.osc_addresses = ""
         self.browser = NativeBrowserWidget()
 
-    def _preset_dirs(self):
+    def _preset_dirs(self, path=None):
         """Existing preset folders on disk; empty until the first preset is saved."""
-        return os.listdir(self.path) if os.path.isdir(self.path) else []
+        path = self.path if path is None else path
+        if not os.path.isdir(path):
+            return []
+        return [d for d in os.listdir(path) if os.path.isdir(os.path.join(path, d))]
 
     def check_presets(self):
         dirs = self._preset_dirs()
@@ -62,7 +65,7 @@ class PresetWidget:
     def create_new_folder(self):
         try:
             # 确保 self.num_presets 至少等于当前文件夹数量
-            current_folders = len([name for name in self._preset_dirs() if os.path.isdir(os.path.join(self.path, name))])
+            current_folders = len(self._preset_dirs())
             self.num_presets = max(self.num_presets, current_folders)
 
             new_folder_index = self.num_presets
@@ -116,7 +119,7 @@ class PresetWidget:
         try:
             if not os.path.exists(path):
                 os.makedirs(path)
-            dirs = os.listdir(path)
+            dirs = self._preset_dirs(path)
             self.num_presets = max(12, len(dirs))
             self.active = np.resize(self.active, self.num_presets)
             self.dir_name = np.resize(self.dir_name, self.num_presets)
