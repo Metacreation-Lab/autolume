@@ -234,20 +234,21 @@ class Runtime:
             return
         previous_osc = self.osc
         self.osc = candidate
+        self.osc_status_store.set(OscStatus(bound_port=bound_port, error=None))
         # Stopped on a short-lived thread of its own, never here: this runs on
         # the control thread, and `BaseServer.shutdown()` blocks until
         # `serve_forever`'s 0.5 s poll interval expires. Measured at 494.6 ms,
         # which froze all motion for half a second and then made the picture
         # jump when the next tick integrated the whole gap at once. The
         # replacement is already serving on its own socket, so nothing waits
-        # on the old one being torn down.
+        # on the old one being torn down. The status goes up first, so anyone
+        # who sees the old transport stopped also sees the new port published.
         threading.Thread(
             target=_stop_transport,
             args=(previous_osc,),
             name="osc-retire",
             daemon=True,
         ).start()
-        self.osc_status_store.set(OscStatus(bound_port=bound_port, error=None))
 
 
 def _stop_transport(transport: object) -> None:
