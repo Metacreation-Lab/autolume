@@ -10,6 +10,7 @@ Ported from balagan (latent_navigator.py).
 import logging
 import math
 import os
+import re
 import threading
 from dataclasses import dataclass
 from typing import Callable
@@ -20,6 +21,7 @@ from autolume.live.core.mixing import combine
 from autolume.live.core.params import Keyframe, RenderParams, Transform
 from autolume.live.core.store import LatestValueStore
 from autolume.live.core.superres import SuperRes
+from autolume.live.errors import safe_describe
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +37,7 @@ _NORMALIZE_FLOOR = 1e-8
 # straight from the params, and `capture_layer` is a free-form string an OSC
 # sender can vary every frame, so the set needs a ceiling.
 _LOG_ONCE_CAP = 64
+_DIGIT_RUN = re.compile(r"\d+")
 
 
 def slerp(alpha: float, w0, w1):
@@ -738,12 +741,26 @@ class LoadedModel:
                 tensor = manipulation(tensor, manipulation_dict(transform, indices))
                 applied = True
             except Exception as exc:
+                # Keyed on the type and the digit-normalised text, not the
+                # raw message: a CUDA OOM embeds the live byte count it
+                # tried to allocate, so keying on `str(exc)` burned the
+                # whole `_logged_once` set on one cause and silenced every
+                # other diagnostic for this model. Same shape as
+                # `superres.py`'s dedup, and `safe_describe` keeps a broken
+                # `__str__` from raising inside a forward hook.
+                text = safe_describe(exc)
                 self._log_once(
-                    ("transform", transform.op, name, str(exc)),
+                    (
+                        "transform",
+                        transform.op,
+                        name,
+                        type(exc).__name__,
+                        _DIGIT_RUN.sub("N", text),
+                    ),
                     "Bending %s on %s failed, skipping it: %s",
                     transform.op,
                     name,
-                    exc,
+                    text,
                 )
         return tensor, applied
 

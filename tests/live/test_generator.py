@@ -2464,6 +2464,61 @@ def test_a_failing_operator_does_not_stop_the_rest_of_the_chain(caplog):
     assert len([r for r in caplog.records if r.levelno == logging.WARNING]) == 1
 
 
+def test_an_operator_failure_with_varying_numbers_is_one_cause(caplog):
+    """I1: the dedup key must survive a message that never repeats verbatim.
+
+    A CUDA OOM embeds the live byte count it tried to allocate, so keyed on
+    the raw text it filled all 64 `_logged_once` slots in seconds, after
+    which every other diagnostic for this model was permanently silent. The
+    existing kornia-rejection test cannot see this: its message is constant.
+    """
+    model = _bendable_model()
+    calls = {"n": 0}
+
+    def exploding(tensor, params):
+        calls["n"] += 1
+        raise RuntimeError(
+            f"CUDA out of memory. Tried to allocate {384 + calls['n']} MiB"
+        )
+
+    model._manipulation = exploding
+    params = render_params(
+        transforms=(Transform("ablate", "conv1", (1.0,), _ALL_CHANNELS),)
+    )
+    with caplog.at_level(logging.WARNING):
+        for index in range(3):
+            assert _pixel(model.render_frame(params, index)) == _UNBENT
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert len(model._logged_once) == 1
+
+
+def test_an_operator_failure_with_a_broken_str_does_not_escape_the_hook(caplog):
+    """The docstring contract on `_apply_transforms`: it cannot raise.
+
+    The old key stringified the exception unguarded, so a broken `__str__`
+    raised inside the forward hook and took the frame down with it.
+    """
+
+    class Unprintable(RuntimeError):
+        def __str__(self):
+            raise ValueError("str() itself blew up")
+
+    def exploding(tensor, params):
+        raise Unprintable()
+
+    model = _bendable_model()
+    model._manipulation = exploding
+    params = render_params(
+        transforms=(Transform("ablate", "conv1", (1.0,), _ALL_CHANNELS),)
+    )
+    with caplog.at_level(logging.WARNING):
+        assert _pixel(model.render_frame(params, 0)) == _UNBENT
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert "Unprintable" in warnings[0].getMessage()
+
+
 def test_two_different_failures_are_logged_separately(caplog):
     model = _fake_model(_group_bendable_synthesis())
     params = render_params(
