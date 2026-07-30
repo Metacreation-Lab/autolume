@@ -133,13 +133,24 @@ def test_the_expression_scales_a_fader_across_the_folder(models):
     assert store.snapshot().pkl_path == models[1]
 
 
-def test_a_path_into_the_models_folder_is_taken_as_it_is(models):
+def test_a_path_into_the_models_folder_resolves_to_the_listing_entry(
+    models, tmp_path, monkeypatch
+):
+    """A path is taken, but the listing's spelling of it is what lands in state.
+
+    `pkl_path` is written straight into a saved preset, so a relative
+    reference from a controller must not put a path into that file that only
+    means anything from the directory the app happened to be started in.
+    """
     loop, store = make_loop(models)
     bind(loop)
 
     send(loop, models[0])
-
     assert store.snapshot().pkl_path == models[0]
+
+    monkeypatch.chdir(tmp_path)
+    send(loop, "./beach-256.pkl")
+    assert store.snapshot().pkl_path == models[2]
 
 
 def test_a_path_outside_the_models_folder_is_refused(models, tmp_path):

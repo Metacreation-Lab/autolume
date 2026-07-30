@@ -73,7 +73,7 @@ class ModelFolder:
         self._clock = clock
         self._interval = interval
         self._paths: list[str] = []
-        self._real: set[str] = set()
+        self._real: dict[str, str] = {}
         self._read_at: float | None = None
         self._noted: set[str] = set()
         self._note_cap_hit = False
@@ -95,10 +95,12 @@ class ModelFolder:
             except Exception:
                 logger.warning("Could not read the models folder", exc_info=True)
                 self._paths = []
-            # Resolved once per listing, not once per message: `named` checks
-            # a typed path against this set, and resolving the whole folder on
-            # every value would put a stat storm on the control thread.
-            self._real = {os.path.realpath(path) for path in self._paths}
+            # Resolved once per listing, not once per message: `named` looks a
+            # typed path up here, and resolving the whole folder on every value
+            # would put a stat storm on the control thread. Keyed by the
+            # resolved path and holding the listing's own spelling, so a match
+            # both proves containment and yields the path to hand on.
+            self._real = {os.path.realpath(path): path for path in self._paths}
         return self._paths
 
     def _note(self, message: str) -> None:
@@ -165,6 +167,12 @@ class ModelFolder:
         which compares the whole reference and so refuses it like any other
         name the folder does not hold.
 
+        What comes back is always the listing's own spelling, never the
+        caller's. The returned path is written into the state and persisted
+        into presets, so a relative reference from a controller would otherwise
+        save a path that only means anything from the directory the app
+        happened to be started in.
+
         A fragment can match several models, so the first match in the same
         sorted order the index uses wins. That way one listing explains both
         paths and a performer can predict either from it. A whole filename is
@@ -181,8 +189,10 @@ class ModelFolder:
             self._note("Ignoring empty model reference")
             return None
         paths = self.paths()
-        if os.path.isfile(reference) and os.path.realpath(reference) in self._real:
-            return reference
+        if os.path.isfile(reference):
+            listed = self._real.get(os.path.realpath(reference))
+            if listed is not None:
+                return listed
         wanted = reference.casefold()
         names = [(path, os.path.basename(path).casefold()) for path in paths]
         for path, name in names:
