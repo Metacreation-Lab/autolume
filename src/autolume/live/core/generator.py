@@ -1343,7 +1343,14 @@ class ModelHost:
         from utils.model_dir import ensure_models_dir
 
         with self._lock:
-            self._pending_save = None
+            # Guarded like every sibling clear in the same dispatch
+            # (`_build_mix`, `_load_b`): `_run` snapshots its work and then
+            # spends seconds on loads and builds before reaching this, so an
+            # unconditional clear here would swallow a save requested in that
+            # window - a second click with the corrected name would produce
+            # no file, no error, and a green line naming the first one.
+            if self._pending_save == output_name:
+                self._pending_save = None
             model_a = self._current
             model_b = self._current_b
             entries = self._combined_layers

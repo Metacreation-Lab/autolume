@@ -3240,6 +3240,70 @@ def test_model_host_saves_the_merged_model_next_to_the_users_models(
     host.stop()
 
 
+def test_a_second_save_requested_mid_build_still_writes_its_file(
+    monkeypatch, tmp_path
+):
+    """I4: `_run` snapshots its work and then spends seconds on loads and
+    builds before `_save_mix` runs, so a Save requested in that window used
+    to be cleared unconditionally: no file, no error, and a green line
+    naming the first file. The performer who retypes a wrong name and
+    clicks Save again mid merge must get their second file.
+
+    The choreography holds the loader inside slot-B loads so the second
+    Save deterministically lands after the cycle snapshotted the first."""
+    use_data_root(monkeypatch, tmp_path)
+    stub_discriminator(monkeypatch)
+    a, b = tiny_generator(seed=1), tiny_generator(seed=2)
+    inner = generator_loader(
+        {"/tmp/a.pkl": a, "/tmp/b.pkl": b, "/tmp/b2.pkl": b, "/tmp/b3.pkl": b}
+    )
+    gates = {"/tmp/b2.pkl": threading.Event(), "/tmp/b3.pkl": threading.Event()}
+    entered = {"/tmp/b2.pkl": threading.Event(), "/tmp/b3.pkl": threading.Event()}
+
+    def loader(path, device=None):
+        gate = gates.get(path)
+        if gate is not None:
+            entered[path].set()
+            gate.wait(5.0)
+        return inner(path, device)
+
+    host = ModelHost(loader=loader)
+    try:
+        host.request_load("/tmp/a.pkl")
+        host.request_load_b("/tmp/b.pkl")
+        assert wait_for(
+            lambda: host.current() is not None and host.current_b() is not None
+        )
+        host.set_mixing_enabled(True)
+        host.request_mix(split_at_resolution(a, 8))
+        assert wait_for(lambda: host.current().G is not a)
+
+        # A cycle snapshots (load b2), blocks inside the loader; the first
+        # Save and a further B load queue up behind it.
+        host.request_load_b("/tmp/b2.pkl")
+        assert entered["/tmp/b2.pkl"].wait(5.0)
+        host.request_save_mix("first")
+        host.request_load_b("/tmp/b3.pkl")
+        gates["/tmp/b2.pkl"].set()
+
+        # The next cycle snapshots save_name="first" and blocks in the b3
+        # load: the second Save lands exactly mid build.
+        assert entered["/tmp/b3.pkl"].wait(5.0)
+        host.request_save_mix("second")
+        gates["/tmp/b3.pkl"].set()
+
+        assert wait_for(lambda: (tmp_path / "models" / "first.pkl").exists())
+        assert wait_for(lambda: (tmp_path / "models" / "second.pkl").exists())
+        assert wait_for(
+            lambda: host.mix_save_store.snapshot().path
+            == str(tmp_path / "models" / "second.pkl")
+        )
+    finally:
+        for gate in gates.values():
+            gate.set()
+        host.stop()
+
+
 def test_model_host_a_save_name_cannot_escape_the_models_folder(
     monkeypatch, tmp_path
 ):
