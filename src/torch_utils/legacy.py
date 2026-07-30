@@ -15,7 +15,7 @@ import copy
 import numpy as np
 import torch
 import dnnlib
-from training.distillation.Util.network_util import Get_Network_Shape
+from architectures.network_util import Get_Network_Shape
 from torch_utils import misc
 
 #----------------------------------------------------------------------------
