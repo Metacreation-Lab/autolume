@@ -358,8 +358,10 @@ class Recorder:
         try:
             while True:
                 self._wake.clear()
-                frames = self._drain()
-                for stamp, frame in frames:
+                drained = False
+                while (queued := self._take_one()) is not None:
+                    drained = True
+                    stamp, frame = queued
                     if self._abort.is_set():
                         reason = _ABORTED
                         break
@@ -428,7 +430,7 @@ class Recorder:
                     break
                 if self._stopping.is_set() and not self._pending():
                     break
-                if not frames:
+                if not drained:
                     self._wake.wait(_IDLE_WAIT)
         except Exception as exc:
             logger.exception("The recorder's encoder thread failed")
@@ -460,11 +462,19 @@ class Recorder:
             return None, f"Could not open {self._path} for recording."
         return writer, None
 
-    def _drain(self) -> list[tuple[float, np.ndarray]]:
+    def _take_one(self) -> tuple[float, np.ndarray] | None:
+        """The oldest queued frame, or None. One at a time on purpose:
+        draining the whole deque let the encoder hold a full batch for the
+        length of its flush while the render thread refilled the deque to
+        the full allowance again, so the real peak was 2x the byte budget
+        (measured: allowance 8, 16 simultaneous frames, 48 MB against a
+        24 MB budget). Popping one keeps everything the recorder holds
+        inside the allowance, plus the single frame being encoded.
+        """
         with self._lock:
-            frames = list(self._frames)
-            self._frames.clear()
-        return frames
+            if not self._frames:
+                return None
+            return self._frames.popleft()
 
     def _pending(self) -> bool:
         with self._lock:

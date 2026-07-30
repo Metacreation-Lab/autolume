@@ -645,6 +645,74 @@ def test_the_allowance_never_falls_below_a_usable_floor(writers, tmp_path):
     assert recorder.queue_allowance() == MIN_QUEUE_FRAMES
 
 
+def test_the_budget_bounds_what_the_encoder_holds_as_well_as_the_queue(
+    monkeypatch, tmp_path
+):
+    """IO-6: the budget must bound every frame the recorder holds, not the
+    deque alone. Draining the whole deque let the encoder hold a full batch
+    for the length of its flush while the render thread refilled the deque
+    to the full allowance again: measured allowance 8, peak 16 simultaneous
+    frames, 2x the byte budget (604 MB, not 320, in the documented 4096
+    super-res case). Every write here needs a permit, so the encoder is
+    provably mid flush while the queue refills, exactly the window the old
+    drain doubled the footprint in."""
+    permits = threading.Semaphore(0)
+
+    class OnePermitWriter:
+        attempts = 0
+
+        def __init__(self, path, fourcc, fps, size):
+            pass
+
+        def isOpened(self):
+            return True
+
+        def write(self, image):
+            OnePermitWriter.attempts += 1
+            permits.acquire()
+
+        def release(self):
+            pass
+
+    OnePermitWriter.attempts = 0
+    monkeypatch.setattr(cv2, "VideoWriter", OnePermitWriter)
+    allowance = 4
+    nbytes = frame(0).nbytes
+    recorder = Recorder(byte_budget=allowance * nbytes, clock=StepClock(1.0 / 30))
+    recorder.start(str(tmp_path / "take.mp4"), 30)
+    try:
+        # The encoder takes the first frame and blocks mid write.
+        recorder.on_frame(frame(0), 0)
+        assert wait_for(lambda: OnePermitWriter.attempts == 1)
+        assert recorder.queue_allowance() == allowance
+
+        # The render thread refills the queue to its full allowance.
+        for value in range(1, 1 + allowance):
+            recorder.on_frame(frame(value), value)
+
+        # One write completes; the encoder is now holding whatever it took
+        # off the queue while the render thread fills it up again.
+        permits.release()
+        assert wait_for(
+            lambda: OnePermitWriter.attempts == 2
+            and recorder.status().frames_written == 1
+        )
+        fed = 1 + 2 * allowance
+        for value in range(1 + allowance, fed):
+            recorder.on_frame(frame(value), value)
+
+        status = recorder.status()
+        held = fed - status.frames_written - status.frames_dropped
+        assert held <= allowance + 1
+    finally:
+        # Enough permits for every write the flush still owes, so the
+        # encoder can finish and `stop()`'s join is not left waiting on a
+        # gate this test holds shut.
+        for _ in range(200):
+            permits.release()
+        recorder.stop()
+
+
 def test_the_byte_budget_is_what_actually_bounds_the_queue(writers, tmp_path):
     """The allowance is not just reported, it is the drop threshold."""
     FakeWriter.open_gate = threading.Event()
