@@ -7,6 +7,7 @@ more producer of control events and one consumer of the preview mailbox.
 
 import dataclasses
 import logging
+import threading
 from typing import Callable
 
 from autolume.live.core.control import ControlLoop
@@ -233,11 +234,28 @@ class Runtime:
             return
         previous_osc = self.osc
         self.osc = candidate
-        try:
-            previous_osc.stop()
-        except Exception:
-            logger.exception("Failed stopping the previous OSC transport")
+        # Stopped on a short-lived thread of its own, never here: this runs on
+        # the control thread, and `BaseServer.shutdown()` blocks until
+        # `serve_forever`'s 0.5 s poll interval expires. Measured at 494.6 ms,
+        # which froze all motion for half a second and then made the picture
+        # jump when the next tick integrated the whole gap at once. The
+        # replacement is already serving on its own socket, so nothing waits
+        # on the old one being torn down.
+        threading.Thread(
+            target=_stop_transport,
+            args=(previous_osc,),
+            name="osc-retire",
+            daemon=True,
+        ).start()
         self.osc_status_store.set(OscStatus(bound_port=bound_port, error=None))
+
+
+def _stop_transport(transport: object) -> None:
+    """Stop a retired OSC transport, off the control thread."""
+    try:
+        transport.stop()
+    except Exception:
+        logger.exception("Failed stopping the previous OSC transport")
 
 
 class _ModelWatchingControlLoop(ControlLoop):

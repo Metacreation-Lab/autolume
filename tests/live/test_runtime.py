@@ -606,6 +606,59 @@ def test_a_failed_osc_rebind_keeps_the_old_transport_serving():
         runtime.stop()
 
 
+def test_a_port_change_never_blocks_the_control_thread_on_the_old_transport():
+    """IO-1: `BaseServer.shutdown()` blocks until `serve_forever`'s 0.5 s poll
+    expires, and `_restart_osc` runs on the control thread. Measured through
+    a real socket: a 494.6 ms tick gap, all motion frozen, then a jump when
+    the next tick integrated the whole gap. The old transport's stop must
+    happen off the control thread, so here it blocks until released and the
+    control thread has to stay live, swap in the replacement and keep
+    applying events while it does."""
+    import threading
+
+    release = threading.Event()
+    stop_entered = threading.Event()
+    transports = []
+
+    class BlockingStopTransport(FakeOscTransport):
+        def stop(self):
+            stop_entered.set()
+            release.wait(5.0)
+            super().stop()
+
+    def factory(port):
+        cls = BlockingStopTransport if not transports else FakeOscTransport
+        transport = cls(port)
+        transports.append(transport)
+        return transport
+
+    runtime = make_runtime(start_osc=True, osc_factory=factory)
+    runtime.start()
+    try:
+        first = transports[0]
+        runtime.submit(ControlEvent("/osc/port", 6000, source="ui"))
+
+        # The swap and the status publish complete while the old transport's
+        # stop is still in progress, which is only possible off the tick.
+        assert wait_for(lambda: stop_entered.is_set())
+        assert wait_for(lambda: runtime.osc is transports[-1])
+        assert first.stopped == 0
+        second = transports[-1]
+        assert runtime.osc_status_store.snapshot() == OscStatus(
+            bound_port=second.port, error=None
+        )
+
+        # The control thread is still ticking: an ordinary event lands while
+        # the old transport is still refusing to die.
+        runtime.submit(ControlEvent("/latent/x", 0.75, source="ui"))
+        assert wait_for(lambda: runtime.control_store.snapshot().latent_x == 0.75)
+        assert first.stopped == 0
+    finally:
+        release.set()
+        assert wait_for(lambda: first.stopped == 1)
+        runtime.stop()
+
+
 def test_restart_osc_is_a_no_op_once_the_runtime_has_stopped():
     """Both `_started` checks in `_restart_osc` are plain flag reads, not
     timing windows, so this drives the "already stopped" branch directly
