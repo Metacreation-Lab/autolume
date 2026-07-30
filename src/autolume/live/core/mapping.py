@@ -133,8 +133,13 @@ def _clear_binding(state: ControlState, value: object) -> ControlState:
     return dataclasses.replace(state, bindings=remaining)
 
 
-def _preset_transforms(transforms: object) -> tuple[Transform, ...]:
+def preset_transforms(transforms: object) -> tuple[Transform, ...]:
     """A preset's transforms, through the same gate `/bend/set` uses.
+
+    Public because the presets panel counts what a load will keep so it can
+    tell the performer how many rows were dropped, and it has to ask this
+    function rather than a copy of its rules: a second implementation of the
+    gate would report a number the control thread disagrees with.
 
     `presets.py` validates a row's structure, but only `_validate_transform`
     knows the two operator specific guards, and both of those exist because the
@@ -176,7 +181,7 @@ def _apply_preset(state: ControlState, value: object) -> ControlState:
     parameter out of range, and the caller only ever sees the finished state.
     The transform chain is the one section that is not a registry parameter and
     so has no `apply_value` of its own, and it goes through
-    `_preset_transforms` for the same reason.
+    `preset_transforms` for the same reason.
 
     No `keyframe_count` special case any more: the registry carries no such
     parameter, so `from_payload`'s own unknown-parameter handling
@@ -199,7 +204,7 @@ def _apply_preset(state: ControlState, value: object) -> ControlState:
         bindings=data.bindings,
         latent_vec=data.latent_vec,
         keyframes=data.keyframes,
-        transforms=_preset_transforms(data.transforms),
+        transforms=preset_transforms(data.transforms),
         layer_noise=data.layer_noise,
         layer_ratios=data.layer_ratios,
         directions=data.directions,

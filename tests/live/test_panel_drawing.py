@@ -18,6 +18,7 @@ and every GL upload. Those stay manual.
 """
 
 import dataclasses
+import json
 
 import pytest
 from imgui_bundle import imgui
@@ -28,6 +29,7 @@ from autolume.live.core.generator import (
     MixSaveStatus,
     ModelInfo,
 )
+from autolume.live.core import presets as preset_files
 from autolume.live.core.mapping import apply_event
 from autolume.live.core.mixing import conv_names
 from autolume.live.core.params import BY_ADDRESS, ControlState, Transform
@@ -40,6 +42,7 @@ from autolume.live.ui import theme
 from autolume.live.ui.panels.bending import BendingPanel
 from autolume.live.ui.panels.mixing import MixingPanel
 from autolume.live.ui.panels.performance import PerformancePanel
+from autolume.live.ui.panels.presets import PresetsPanel
 
 # The docked width at the shipped window size, and the two narrower docks a
 # performer can drag to, matching the widths the perform panel is held to.
@@ -773,3 +776,145 @@ def test_a_wrapped_note_measures_one_pixel_past_its_own_wrap_width():
                 imgui.dummy(imgui.ImVec2(1.0, 20.0))
 
     assert widest_overflow(WrappedNote, 360.0, 1.0) == WRAP_ROUNDING
+
+
+# --- the presets panel's load notice (ui/panels/presets.py) -------------------
+
+
+def write_preset(directory, name: str, **sections) -> None:
+    """A preset file on disk, in the real format `presets.load` accepts."""
+    payload = {"format": preset_files.FORMAT, "version": preset_files.VERSION}
+    payload.update(sections)
+    (directory / f"{name}.json").write_text(json.dumps(payload), encoding="utf-8")
+
+
+def press_in_turn(panel, labels, width: float = 448.0) -> list[str]:
+    """Press each of `labels` in one run, and collect every wrapped line drawn.
+
+    One context for the whole sequence, unlike `click_button`: a modal lives in
+    imgui's own popup stack, so a second context knows nothing about the popup
+    the first one opened and the button inside it is never drawn. Dismissing
+    what a press opened can only be tested in the run that opened it.
+
+    Six frames per press. Three to lay the panel out, the label's rect taken
+    from the third, then the mouse down and up frames, then one more frame so
+    what the press did is drawn. The text is recorded rather than inspected on
+    the panel because `begin_popup_modal` decides whether the body runs at all,
+    and only text that reached imgui proves the performer was told.
+    """
+    context = imgui.create_context()
+    original_button = imgui.button
+    original_wrapped = imgui.text_wrapped
+    drawn: list[str] = []
+    try:
+        io = imgui.get_io()
+        io.set_ini_filename(None)
+        io.display_size = imgui.ImVec2(1280.0, 800.0)
+        io.delta_time = 1.0 / 60.0
+        io.backend_flags |= imgui.BackendFlags_.renderer_has_textures
+        theme.apply_theme()
+        seen: dict[str, tuple[float, float]] = {}
+
+        def recording_button(text, *args, **kwargs):
+            pressed = original_button(text, *args, **kwargs)
+            low = imgui.get_item_rect_min()
+            high = imgui.get_item_rect_max()
+            seen.setdefault(text, ((low.x + high.x) * 0.5, (low.y + high.y) * 0.5))
+            return pressed
+
+        def recording_wrapped(text, *args, **kwargs):
+            drawn.append(text)
+            return original_wrapped(text, *args, **kwargs)
+
+        imgui.button = recording_button
+        imgui.text_wrapped = recording_wrapped
+        for label in labels:
+            target: tuple[float, float] | None = None
+            for step in range(6):
+                if target is not None and step in (3, 4):
+                    io.add_mouse_pos_event(*target)
+                    io.add_mouse_button_event(0, step == 3)
+                imgui.new_frame()
+                imgui.set_next_window_pos(imgui.ImVec2(0.0, 0.0))
+                imgui.set_next_window_size(imgui.ImVec2(width, 900.0))
+                imgui.begin("Panel")
+                seen.clear()
+                panel.gui()
+                imgui.end()
+                imgui.render()
+                if step == 2:
+                    if label not in seen:
+                        raise AssertionError(f"no button {label!r} was drawn")
+                    target = seen[label]
+    finally:
+        imgui.button = original_button
+        imgui.text_wrapped = original_wrapped
+        imgui.destroy_context(context)
+    return drawn
+
+
+def load_preset(directory) -> tuple[PresetsPanel, list[str]]:
+    """Press Load on the one preset row in `directory`."""
+    panel = PresetsPanel(Runtime(), directory)
+    return panel, press_in_turn(panel, ["Load"])
+
+
+def test_a_preset_whose_model_is_gone_says_so_on_screen(tmp_path):
+    """The modal that never opened.
+
+    `open_popup` used to fire from inside the preset list's child window and
+    inside `push_id(name)`, so the id it seeded was not the id the panel asks
+    for a frame later. `_missing_model` was set, `begin_popup_modal` returned
+    false on every frame, and the one sentence the code exists to say was drawn
+    on none of them. Nothing short of real frames catches that: the pure helper
+    is correct and the field is set.
+    """
+    write_preset(tmp_path, "gig", model={"path": str(tmp_path / "gone.pkl")})
+    _, drawn = load_preset(tmp_path)
+    assert any("gone.pkl is missing" in line for line in drawn), drawn
+
+
+def test_the_load_notice_can_be_dismissed(tmp_path):
+    """And stays dismissed, which is the other half of the same defect.
+
+    The notice was only ever cleared by the OK button inside a modal that never
+    drew, so once a load set it the panel was wedged for the rest of the
+    session.
+    """
+    write_preset(tmp_path, "gig", model={"path": str(tmp_path / "gone.pkl")})
+    panel = PresetsPanel(Runtime(), tmp_path)
+    drawn = press_in_turn(panel, ["Load", "OK"])
+    assert any("gone.pkl is missing" in line for line in drawn), drawn
+    assert panel._notice is None
+
+
+def test_a_preset_row_the_kernel_ceiling_refuses_says_so_on_screen(tmp_path):
+    """The surface the kernel ceiling needed and did not have.
+
+    A preset row is dropped by the control thread's own gate, which has no
+    channel back to this panel, so an out of band erode kernel loaded in
+    silence exactly the way a missing model used to.
+    """
+    write_preset(
+        tmp_path,
+        "gig",
+        transforms=[
+            {"op": "erode", "layer": "b8.conv1", "params": [501.0], "indices": [0]},
+            {"op": "invert", "layer": "b8.conv1", "params": [1.0], "indices": [0]},
+        ],
+    )
+    _, drawn = load_preset(tmp_path)
+    assert any("could not be loaded" in line for line in drawn), drawn
+
+
+def test_a_preset_every_row_of_which_loads_shows_no_notice(tmp_path):
+    write_preset(
+        tmp_path,
+        "gig",
+        transforms=[
+            {"op": "invert", "layer": "b8.conv1", "params": [1.0], "indices": [0]},
+        ],
+    )
+    panel, drawn = load_preset(tmp_path)
+    assert panel._notice is None
+    assert not any("could not be loaded" in line for line in drawn), drawn

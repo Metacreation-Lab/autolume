@@ -44,7 +44,9 @@ from autolume.live.ui.panels.perform import load_vector_file, save_vector_file
 from autolume.live.ui.panels.presets import (
     PresetsPanel,
     is_valid_name,
+    load_notice,
     missing_model_message,
+    skipped_transforms_message,
 )
 from autolume.live.ui.panels.preview import (
     DisplayMode,
@@ -654,6 +656,37 @@ def test_a_preset_missing_only_its_second_model_is_reported_at_all():
 def test_a_preset_missing_both_models_names_both_in_one_sentence():
     assert missing_model_message("a.pkl", "b.pkl") == (
         "Model files a.pkl and b.pkl are missing. The preset loaded without them."
+    )
+
+
+def test_a_preset_every_transform_of_which_loaded_reports_nothing():
+    assert skipped_transforms_message(3, 3) is None
+    # More kept than the file held cannot happen, and is not a complaint.
+    assert skipped_transforms_message(0, 0) is None
+
+
+def test_one_refused_transform_row_is_counted_in_words():
+    assert skipped_transforms_message(2, 1) == (
+        "One transform in this preset could not be loaded. It was skipped."
+    )
+
+
+def test_several_refused_transform_rows_are_counted_in_figures():
+    assert skipped_transforms_message(5, 2) == (
+        "3 transforms in this preset could not be loaded. They were skipped."
+    )
+
+
+def test_a_load_with_nothing_to_report_raises_no_notice():
+    assert load_notice(None, None) is None
+
+
+def test_a_load_that_lost_a_model_and_a_row_says_both_in_one_paragraph():
+    assert load_notice(
+        missing_model_message("a.pkl", None), skipped_transforms_message(2, 1)
+    ) == (
+        "Model file a.pkl is missing. The preset loaded without it. "
+        "One transform in this preset could not be loaded. It was skipped."
     )
 
 
