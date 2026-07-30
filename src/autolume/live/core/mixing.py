@@ -10,9 +10,11 @@ calls `combine` on the loader thread and owns what happens to the result.
 
 The selection is one entry per name in `conv_names`, aligned by index, and
 padded to whichever model has more layers. "A" and "B" name the model a
-layer's weights come from, and "X" removes the layer, which in practice
-only ever truncates the tail and so lowers the mixed model's output
-resolution.
+layer's weights come from, and "X" removes the layer, which may only
+truncate the tail and so lowers the mixed model's output resolution. The
+first entry carries more than its own layer: the mapping network is not
+per layer, so the mix inherits the whole of it from the model that entry
+names, and it may not be an "X".
 """
 
 import logging
@@ -108,6 +110,31 @@ def _output_resolution(
     )
 
 
+def _check_truncation_only(entries: tuple[str, ...]) -> None:
+    """Enforce what `_output_resolution` documents: X only ever truncates.
+
+    A removed layer with a kept layer after it is not a shorter network, it
+    is the same network with one tensor left at its construction draw, and
+    that builds, renders and saves without a word. The panel's own X always
+    cuts a trailing run (`ui/panels/mixing.py::cut`), so this only ever
+    refuses a selection that came from a preset file or from OSC.
+
+    Called after the channel merge rather than from inside
+    `_output_resolution`, so a whole block removed from the middle keeps the
+    merge's own sentence, which names the resolution the performer sees on
+    the row instead of a layer number they have no way to count.
+    """
+    kept = [index for index, entry in enumerate(entries) if entry not in ("", ORIGIN_X)]
+    if not kept:
+        return
+    for index, entry in enumerate(entries[: kept[-1]]):
+        if entry in ("", ORIGIN_X):
+            raise ValueError(
+                f"Layer {index + 1} is removed but a later layer is kept. "
+                "Removing a layer can only shorten the end of the network."
+            )
+
+
 def _merged_channels(
     entries: tuple[str, ...],
     names_a: tuple[str, ...],
@@ -194,7 +221,7 @@ def _origin_by_module(
 
 
 def _buffer_origin(
-    key: str, module_origins: dict[str, str], mapping_origin: str | None
+    key: str, module_origins: dict[str, str], mapping_origin: str
 ) -> str | None:
     """The model a non-parameter state entry should be taken from.
 
@@ -239,14 +266,26 @@ def combine(G_a, G_b, combined_layers):
             f"The layer selection has {len(entries)} entries but this pair "
             f"of models has {expected}"
         )
+    # The mapping network is not per layer, so the first entry decides which
+    # model's whole mapping the mix inherits, its build arguments included.
+    # A first entry naming neither model leaves nothing to inherit it from,
+    # and the mix then carries a freshly drawn mapping, `w_avg` at zero and a
+    # random `b4.const`, which builds and renders and says nothing. Refused
+    # here rather than repaired, because there is no repair a caller could
+    # have meant: the first layer is the one layer that is not optional.
+    first = entries[0] if entries else ""
+    mapping_origin = first if first in (ORIGIN_A, ORIGIN_B) else None
+    if mapping_origin is None:
+        raise ValueError(
+            f"The first layer must come from A or B, not {first!r}. The mixed "
+            "model takes its whole mapping network from it."
+        )
+    mapping_source = G_b if mapping_origin == ORIGIN_B else G_a
     img_resolution = _output_resolution(entries, names_a, names_b)
     channels = _merged_channels(
         entries, names_a, names_b, G_a, G_b, img_resolution
     )
-    # The mapping network is not per layer, so the first entry decides which
-    # model's whole mapping the mix inherits, its build arguments included.
-    mapping_origin = entries[0] if entries and entries[0] in (ORIGIN_A, ORIGIN_B) else None
-    mapping_source = G_b if mapping_origin == ORIGIN_B else G_a
+    _check_truncation_only(entries)
     # Construction is inside the guard, not just the load: the mapping
     # arguments come out of a user's pkl and go straight into a constructor
     # with no `**kwargs`, so an unexpected key there is a way for a source
@@ -268,9 +307,8 @@ def combine(G_a, G_b, combined_layers):
         state_a = G_a.state_dict()
         state_b = G_b.state_dict()
         state_by_origin = {ORIGIN_A: state_a, ORIGIN_B: state_b}
-        if mapping_origin is not None:
-            for name in mapping_names(mapping_source):
-                destination[name] = state_by_origin[mapping_origin][name]
+        for name in mapping_names(mapping_source):
+            destination[name] = state_by_origin[mapping_origin][name]
         for index, entry in enumerate(entries):
             if entry == ORIGIN_A:
                 name = names_a[index]

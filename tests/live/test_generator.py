@@ -2904,6 +2904,25 @@ def test_model_host_a_failed_mix_keeps_rendering_a_and_reports_it():
     host.stop()
 
 
+def test_model_host_a_leading_x_is_refused_and_reported():
+    """The refusal has to reach the performer, not just the log.
+
+    A selection whose first entry is neither model used to assemble a
+    generator with a freshly random mapping network and render it as if it
+    were a mix. The check lives in `combine` rather than in the watcher
+    precisely so it comes out here, through the same `_drop_mix` path every
+    other mixing failure uses, with model A still on screen.
+    """
+    a, b = tiny_generator(seed=1), tiny_generator(seed=2)
+    entries = ["X"] + ["A"] * (selection_length(a, b) - 1)
+    host = mixing_host(a, b, entries)
+    assert wait_for(lambda: host.error() is not None)
+
+    assert "first layer" in host.error()
+    assert host.current().G is a
+    host.stop()
+
+
 def test_model_host_a_selection_of_the_wrong_length_keeps_rendering_a():
     a, b = tiny_generator(seed=1), tiny_generator(seed=2)
     host = mixing_host(a, b, ["A"] * (selection_length(a, b) - 1))

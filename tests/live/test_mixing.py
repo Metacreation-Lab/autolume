@@ -293,6 +293,41 @@ def test_a_gap_in_the_middle_of_the_selection_raises():
     assert "8" in str(caught.value)
 
 
+def test_a_leading_x_raises_rather_than_mixing_a_random_mapping():
+    """The whole mapping network hangs off the first entry.
+
+    `combine` takes the mapping from the model the first entry names, so an
+    entry that names neither left every mapping tensor at its construction
+    draw, `w_avg` at zero and `b4.const` random. It built, it rendered, it
+    saved to a pkl, and nothing said a word: truncation collapsed to a plain
+    multiply and the picture was a stranger's.
+    """
+    a = generator(seed=1)
+    b = generator(seed=2)
+    entries = ["X"] + ["A"] * (selection_length(a, b) - 1)
+    with pytest.raises(ValueError) as caught:
+        combine(a, b, entries)
+    assert "first layer" in str(caught.value)
+
+
+def test_a_removed_layer_whose_resolution_survives_it_raises():
+    """The gap the channel table cannot see.
+
+    Removing one parameter of a block leaves the block's resolution in the
+    channel table, so the merged channel check passes and the mixed model is
+    built with that one tensor left random. Removing a layer is only ever a
+    truncation of the tail, which is what the panel's own X does.
+    """
+    a = generator(seed=1)
+    b = generator(seed=2)
+    names = conv_names(a)
+    entries = ["A"] * len(names)
+    entries[names.index("synthesis.b8.conv0.weight")] = "X"
+    with pytest.raises(ValueError) as caught:
+        combine(a, b, entries)
+    assert "later layer" in str(caught.value)
+
+
 def test_combine_does_not_alias_the_source_weights():
     a = generator(seed=1)
     b = generator(seed=2)
