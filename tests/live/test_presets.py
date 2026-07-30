@@ -447,16 +447,37 @@ def test_non_finite_json_literals_from_a_hand_edited_file_are_skipped(tmp_path):
     assert state.truncation_psi == 1.25
 
 
-def test_absent_bindings_key_clears_mappings_and_says_so(caplog):
+def test_absent_bindings_key_clears_mappings_silently(caplog):
+    """D8: a preset is a whole look, so an absent key clearing the mappings
+    is the recall working, not damage. It must not be reported at all,
+    least of all as a malformed NoneType."""
     payload = presets.to_payload(SAMPLE)
     del payload["bindings"]
     current = ControlState(bindings=(Binding("latent_x", "/ctl/1", "x"),))
     with caplog.at_level(logging.WARNING):
         state = apply_payload(current, payload)
     assert state.bindings == ()
+    assert not any(
+        "binding" in message.lower() for message in warnings_from(caplog)
+    )
+
+
+def test_corrupt_bindings_key_still_clears_but_says_so_plainly(caplog):
+    """D8's other half: a key that exists but is not a list is a corrupt
+    file. The clearing stays (the section is unreadable either way), and
+    the report names the corruption and its consequence rather than
+    reading like parse noise."""
+    payload = presets.to_payload(SAMPLE)
+    payload["bindings"] = None
+    current = ControlState(bindings=(Binding("latent_x", "/ctl/1", "x"),))
+    with caplog.at_level(logging.WARNING):
+        state = apply_payload(current, payload)
+    assert state.bindings == ()
     messages = warnings_from(caplog)
-    assert any("clear" in message.lower() for message in messages)
-    assert not any("NoneType" in message for message in messages)
+    assert any(
+        "malformed" in message and "clearing every mapping" in message
+        for message in messages
+    )
 
 
 def test_absent_params_key_keeps_current_values_without_a_parse_complaint(caplog):

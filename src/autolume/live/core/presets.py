@@ -606,11 +606,19 @@ def _read_params(raw: object) -> dict:
 def _read_bindings(raw: object) -> tuple[Binding, ...]:
     if raw is _ABSENT:
         # A preset is a whole look, so no bindings section means no bindings.
-        # Said plainly, because it discards mappings the performer set up.
-        logger.warning("Preset holds no bindings, clearing every mapping")
+        # Clearing here is the recall working as designed, not damage, so it
+        # is silent: a warning would report an ordinary preset as a problem.
+        logger.debug("Preset holds no bindings, clearing every mapping")
         return ()
     if not isinstance(raw, list):
-        logger.warning("Ignoring preset bindings of type %s", type(raw).__name__)
+        # A key that exists but is not a list is a corrupt file, and unlike
+        # the absent key it is said plainly, destructive consequence
+        # included: the same clearing that is by-design above is collateral
+        # of the corruption here.
+        logger.warning(
+            "Preset bindings are malformed (%s), clearing every mapping",
+            type(raw).__name__,
+        )
         return ()
     bindings: list[Binding] = []
     seen: set[str] = set()
