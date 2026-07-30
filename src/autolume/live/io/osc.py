@@ -22,6 +22,15 @@ _PORT_ATTEMPTS = 20
 # Distinct failure strings are rare (a handful of socket/DNS errors); this
 # only guards against a pathological error message that changes every call.
 _ERROR_LOG_LIMIT = 32
+# How often `serve_forever` checks whether it was told to shut down.
+# `BaseServer`'s default is 0.5 s, and `shutdown()` blocks for the remainder
+# of the current poll, so the default keeps the old socket alive for up to
+# half a second after a rebind swaps it out. During that window a rebind back
+# to the same port raises `EADDRINUSE` and the port scan lands one up. The
+# retire already runs off the control thread; this shrinks the window it
+# leaves the socket open, 10x, for the price of waking an idle thread twenty
+# times a second.
+_POLL_INTERVAL = 0.05
 
 
 class OscInput:
@@ -59,8 +68,13 @@ class OscInput:
                     f"{self._requested_port}-{self._requested_port + _PORT_ATTEMPTS - 1}"
                 )
         self.port = self._server.server_address[1]
+        # Captured locally: `stop()` clears `self._server`, and the serve
+        # thread must keep polling the server it was started for.
+        server = self._server
         self._thread = threading.Thread(
-            target=self._server.serve_forever, name="osc", daemon=True
+            target=lambda: server.serve_forever(poll_interval=_POLL_INTERVAL),
+            name="osc",
+            daemon=True,
         )
         self._thread.start()
         logger.info("OSC server listening on %s:%s", self._host, self.port)

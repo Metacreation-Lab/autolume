@@ -48,6 +48,27 @@ def test_stop_is_idempotent():
     osc.stop()
 
 
+def test_stop_returns_quickly_enough_to_free_the_port():
+    """IO-1 hardening: `shutdown()` blocks for the remainder of the serve
+    loop's current poll, `BaseServer`'s default being 0.5 s. The retire runs
+    off the control thread now, but the socket it holds open for that long
+    makes a rebind back to the same port land one port up. The small poll
+    interval shrinks that window 10x; a stop taking anywhere near the old
+    half second means the interval is not being passed through.
+
+    Timing bounds, not exact values: with the interval the poll remainder is
+    at most 0.05 s, without it this measures ~0.49 s (stop lands ~10 ms into
+    a fresh 0.5 s poll), so 0.3 s splits the arms with a wide margin either
+    side.
+    """
+    osc = OscInput(lambda e: None, host="127.0.0.1", port=0)
+    osc.start()
+    time.sleep(0.01)
+    started = time.monotonic()
+    osc.stop()
+    assert time.monotonic() - started < 0.3
+
+
 # --- OscEmitter (Task 7) -----------------------------------------------------
 #
 # The emitter is called from the control thread, so none of these tests may
