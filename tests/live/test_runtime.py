@@ -51,6 +51,19 @@ class FakeModel:
         return np.full((8, 8, 3), value, dtype=np.uint8)
 
 
+class SlowFakeModel(FakeModel):
+    """A model that cannot keep up with the render cap, the way a real one is.
+
+    A 1024 StyleGAN renders at around 17 fps, well under the default cap of
+    60. Ten frames a second here, so a take recorded at a cap of 30 has two
+    file frames to fill for every frame that arrives.
+    """
+
+    def render_frame(self, params, frame_index):
+        time.sleep(0.1)
+        return super().render_frame(params, frame_index)
+
+
 class FakeAudioEngine:
     """Stands in for AudioEngine, guards included.
 
@@ -727,7 +740,7 @@ def test_recording_follows_the_parameter(writers, monkeypatch, tmp_path):
     assert runtime.recorder.status().frames_written == len(writer.frames)
 
 
-def test_an_uncapped_render_rate_records_at_the_default_fps(
+def test_an_uncapped_render_rate_records_at_the_default_nominal_fps(
     writers, monkeypatch, tmp_path
 ):
     use_data_root(monkeypatch, tmp_path)
@@ -739,6 +752,40 @@ def test_an_uncapped_render_rate_records_at_the_default_fps(
     finally:
         runtime.stop()
     assert writers[0].fps == DEFAULT_FPS
+
+
+def test_a_model_slower_than_the_cap_still_records_in_real_time(
+    writers, monkeypatch, tmp_path
+):
+    """The whole path: a render loop that cannot reach the cap it declares.
+
+    A 1024 model renders at around 17 fps under the default cap of 60, and a
+    file that declared 60 and held one frame per rendered frame replayed the
+    take three and a half times too fast. The model here is slowed to a third
+    of the cap, so a file counted in rendered frames would be a third of the
+    length of the take it recorded.
+    """
+    use_data_root(monkeypatch, tmp_path)
+    fps = 30
+    host = ModelHost(loader=SlowFakeModel)
+    runtime = running_runtime(model_host=host)
+    try:
+        runtime.submit(ControlEvent("/render/fps", float(fps), source="ui"))
+        runtime.submit(ControlEvent("/record", 1.0, source="ui"))
+        assert wait_for(lambda: writers and writers[0].frames)
+        started = time.monotonic()
+        time.sleep(1.0)
+        runtime.submit(ControlEvent("/record", 0.0, source="ui"))
+        assert wait_for(lambda: writers[0].released)
+        elapsed = time.monotonic() - started
+    finally:
+        runtime.stop()
+
+    assert writers[0].fps == fps
+    # The take is the second slept through plus however long the frames on
+    # either side of it took, so the count is bounded rather than exact. A
+    # file counted in rendered frames would hold around a third of this.
+    assert fps * 0.9 <= len(writers[0].frames) <= fps * (elapsed + 0.4)
 
 
 def test_a_take_that_ends_itself_puts_the_parameter_back(

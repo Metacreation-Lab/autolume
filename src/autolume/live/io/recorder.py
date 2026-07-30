@@ -4,9 +4,19 @@ The old app captured frames at the rate the UI happened to change them, wrote
 them at a hard coded 30 fps, and only started the encoder thread at Stop,
 joining it on the UI thread while it flushed the whole queue (constraints.md
 legacy bugs 3, 4 and 8). Here the encoder runs for the whole take on its own
-thread behind a bounded queue, the writer's fps is the render cap the take
-started at, and every frame comes from the render loop's fan-out, so what is
-written is what was shown.
+thread behind a bounded queue and every frame comes from the render loop's
+fan-out, so what is written is what was shown.
+
+When it was shown is a separate promise, and the one legacy bug 4 was really
+about. `cv2.VideoWriter` is constant frame rate: it names one rate for the
+whole file and every frame handed to it lasts exactly 1/rate. Naming the
+render cap and writing one frame per rendered frame therefore replays the
+take at cap/achieved times its real speed, which for a 1024 model at 17 fps
+under the default cap of 60 is three and a half times too fast. So every
+frame is stamped as it is queued, and the encoder holds each one for as many
+of the file's frames as the clock says it was on screen for, dropping the
+ones that arrive faster than the file's rate. The declared rate is nominal:
+what it fixes is the file's resolution in time, not its speed.
 
 `cv2` is imported inside the worker threads rather than at module scope, so
 importing this module (which the control plane does) never pays for OpenCV.
@@ -19,6 +29,8 @@ import logging
 import os
 import re
 import threading
+import time
+from collections.abc import Callable
 
 import numpy as np
 
@@ -48,6 +60,13 @@ MIN_QUEUE_FRAMES = 4
 # What the file records at when the render loop is uncapped: an mp4 has to
 # name a rate, and the old app's hard coded 30 is a sane one to inherit.
 DEFAULT_FPS = 30
+# The longest gap between two rendered frames a single frame may be held
+# across. Loading a model can stall the render loop for a minute, and filling
+# that honestly would write a minute of duplicates one at a time, which the
+# performer waits through at Stop. Past the ceiling the take loses the excess:
+# a recording that drifts by the length of a stall beats one that spends
+# minutes saving.
+MAX_GAP_SECONDS = 5.0
 STOP_TIMEOUT = 5.0
 # How long the encoder gets to finalize the file after it has been told to
 # drop the backlog. Only one write and a release remain at that point.
@@ -164,16 +183,20 @@ class Recorder:
         stop_timeout: float = STOP_TIMEOUT,
         byte_budget: int = BYTE_BUDGET,
         abort_grace: float = ABORT_GRACE,
+        clock: Callable[[], float] | None = None,
     ) -> None:
         self._capacity = int(capacity)
         self._byte_budget = int(byte_budget)
         self._stop_timeout = float(stop_timeout)
         self._abort_grace = float(abort_grace)
+        # Read once per queued frame, on the render thread. Monotonic, because
+        # a take spanning a clock adjustment must not run backwards.
+        self._clock = clock or time.monotonic
         self._lock = threading.Lock()
         # Bounded by `_allowance` rather than by the deque's own maxlen: the
         # allowance is only knowable once a frame's size is, and a deque
         # cannot be re-bounded after construction.
-        self._frames: collections.deque[np.ndarray] = collections.deque()
+        self._frames: collections.deque[tuple[float, np.ndarray]] = collections.deque()
         self._allowance: int | None = None
         self._wake = threading.Event()
         self._stopping = threading.Event()
@@ -185,6 +208,12 @@ class Recorder:
         self._active = False
         self._path: str | None = None
         self._fps = DEFAULT_FPS
+        # When the take's first frame was queued, which is where the file
+        # begins. Taken here rather than from the first frame the encoder
+        # gets to see: an encoder that falls behind from the very first frame
+        # drops the head of the queue, and timing the file from what survived
+        # would silently cut that much off the front of the take.
+        self._origin: float | None = None
         self._written = 0
         self._dropped = 0
         # A refused start, kept until a new take actually begins. The take
@@ -206,9 +235,12 @@ class Recorder:
     def start(self, path: str, fps: int) -> None:
         """Begin a take. Called from the control thread: never blocks, never raises.
 
-        `fps` is the render fps cap as it stands now. It is what the file
-        records at for the whole take, because a `VideoWriter` names its rate
-        once and cannot be told otherwise later.
+        `fps` is the render fps cap as it stands now, and it is the file's
+        nominal rate for the whole take, because a `VideoWriter` names its
+        rate once and cannot be told otherwise later. Nominal: frames are
+        held or dropped against their own timestamps to fill it, so the take
+        plays back at the speed it was performed at whatever the render loop
+        actually managed.
         """
         if self._active:
             return
@@ -225,6 +257,7 @@ class Recorder:
         with self._lock:
             self._frames.clear()
             self._allowance = None
+            self._origin = None
             self._written = 0
             self._dropped = 0
         self._path = str(path)
@@ -279,6 +312,9 @@ class Recorder:
         """Queue one rendered frame. Runs on the render thread."""
         if not self._active:
             return
+        # Before the lock, so a contended queue cannot backdate the frame it
+        # delayed. This is the take's only record of when the frame was shown.
+        stamp = self._clock()
         with self._lock:
             # Checked again, under the lock this time. A render thread
             # already past the check above when the take ends appends to a
@@ -291,11 +327,13 @@ class Recorder:
                 self._allowance = _queue_allowance(
                     getattr(frame, "nbytes", 0), self._capacity, self._byte_budget
                 )
+            if self._origin is None:
+                self._origin = stamp
             dropped = len(self._frames) >= self._allowance
             if dropped:
                 self._frames.popleft()
                 self._dropped += 1
-            self._frames.append(frame)
+            self._frames.append((stamp, frame))
         self._wake.set()
         if dropped:
             self._publish()
@@ -309,11 +347,20 @@ class Recorder:
         writer = None
         size: tuple[int, int] | None = None
         reason: str | None = None
+        # Where the file's clock starts, read once from the take's first
+        # queued frame and then moved on by whatever a stall gave up. Not the
+        # moment Record was pressed: the wait for the first frame is the
+        # pipeline coming up, not part of the take.
+        origin: float | None = None
+        # The last image written, held across the file's frames that no
+        # rendered frame arrived for.
+        held = None
+        max_gap = max(1, int(round(self._fps * MAX_GAP_SECONDS)))
         try:
             while True:
                 self._wake.clear()
                 frames = self._drain()
-                for frame in frames:
+                for stamp, frame in frames:
                     if self._abort.is_set():
                         reason = _ABORTED
                         break
@@ -334,20 +381,50 @@ class Recorder:
                         )
                         reason = _SIZE_CHANGED
                         break
-                    try:
-                        writer.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
-                    except Exception as exc:
-                        logger.exception("Writing a recorded frame failed")
-                        reason = f"Recording failed. {describe(exc)}"
+                    if origin is None:
+                        origin = self._origin if self._origin is not None else stamp
+                    # Which of the file's frames this one belongs in.
+                    # `_written` is also how many of them are already filled,
+                    # so the difference is the gap this frame arrived after:
+                    # negative if it arrived faster than the file's rate, in
+                    # which case its slot is taken and it is dropped.
+                    slot = int(round((stamp - origin) * self._fps))
+                    gap = slot - self._written
+                    if gap > max_gap:
+                        # The take gives up the excess rather than writing it
+                        # out. `origin` moves with it so the frames after the
+                        # stall are timed against where the file actually is,
+                        # instead of every one of them re-owing the same gap.
+                        origin += (gap - max_gap) / self._fps
+                        gap = max_gap
+                    if gap < 0:
+                        continue
+                    image = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                    # The gap holds the picture that was on screen through it,
+                    # so a frame lands at the time it was rendered rather than
+                    # appearing early to cover for the frames before it.
+                    batch = [held if held is not None else image] * gap + [image]
+                    held = image
+                    for one in batch:
+                        if self._abort.is_set():
+                            reason = _ABORTED
+                            break
+                        try:
+                            writer.write(one)
+                        except Exception as exc:
+                            logger.exception("Writing a recorded frame failed")
+                            reason = f"Recording failed. {describe(exc)}"
+                            break
+                        with self._lock:
+                            self._written += 1
+                        # Per frame, not per drained batch: a batch can be a
+                        # hundred frames and several seconds of encoding, and a
+                        # counter that freezes for the whole flush freezes at
+                        # exactly the moment somebody is watching it to see
+                        # whether their recording is going anywhere.
+                        self._publish()
+                    if reason is not None:
                         break
-                    with self._lock:
-                        self._written += 1
-                    # Per frame, not per drained batch: a batch can be a
-                    # hundred frames and several seconds of encoding, and a
-                    # counter that freezes for the whole flush freezes at
-                    # exactly the moment somebody is watching it to see
-                    # whether their recording is going anywhere.
-                    self._publish()
                 if reason is not None:
                     break
                 if self._stopping.is_set() and not self._pending():
@@ -384,7 +461,7 @@ class Recorder:
             return None, f"Could not open {self._path} for recording."
         return writer, None
 
-    def _drain(self) -> list[np.ndarray]:
+    def _drain(self) -> list[tuple[float, np.ndarray]]:
         with self._lock:
             frames = list(self._frames)
             self._frames.clear()

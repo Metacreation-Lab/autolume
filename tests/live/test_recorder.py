@@ -2,6 +2,12 @@
 
 Every test here stands a fake `cv2.VideoWriter` in for the real one: the codec
 is not what is under test, the queue discipline and the thread lifecycle are.
+
+The recorder times the file against a clock, so a test that feeds frames in a
+tight loop is feeding a take that lasted microseconds, and the file it gets is
+one frame long however many it fed. The tests about the queue and the encoder
+hand it a `StepClock` at the file's own rate instead, which is the take those
+tests were written about: one rendered frame per frame of the file.
 """
 
 import datetime
@@ -14,6 +20,7 @@ import pytest
 
 from autolume.live.io.recorder import (
     DEFAULT_FPS,
+    MAX_GAP_SECONDS,
     MIN_QUEUE_FRAMES,
     QUEUE_CAPACITY,
     SCREENSHOT_CAPACITY,
@@ -39,6 +46,35 @@ def frame(value=1, width=4, height=2):
     image[:, :] = (value, value + 1, value + 2)
     image.flags.writeable = False
     return image
+
+
+class StepClock:
+    """A monotonic clock advancing a fixed step per reading, first read at 0.
+
+    The recorder reads it once per queued frame, on the thread that queues
+    one, so a step is the interval between two rendered frames.
+    """
+
+    def __init__(self, step):
+        self._step = float(step)
+        self._now = -float(step)
+
+    def __call__(self):
+        self._now += self._step
+        return self._now
+
+
+class ListClock:
+    """A clock reading off a script, holding the last reading once spent."""
+
+    def __init__(self, readings):
+        self._readings = list(readings)
+        self._index = 0
+
+    def __call__(self):
+        value = self._readings[min(self._index, len(self._readings) - 1)]
+        self._index += 1
+        return value
 
 
 class FakeWriter:
@@ -100,7 +136,7 @@ def writers(monkeypatch):
 
 def test_the_recorder_writes_what_it_drains(writers, tmp_path):
     path = str(tmp_path / "take.mp4")
-    recorder = Recorder()
+    recorder = Recorder(clock=StepClock(1.0 / 24))
     recorder.start(path, 24)
     try:
         for value in range(5):
@@ -144,7 +180,96 @@ def test_the_writer_is_created_only_once_the_first_frame_arrives(writers, tmp_pa
     recorder.stop()
 
 
-def test_an_uncapped_render_rate_records_at_the_default_fps(writers, tmp_path):
+def test_a_take_fed_slower_than_the_cap_still_lasts_as_long_as_it_did(
+    writers, tmp_path
+):
+    """The contract is the take's duration, not the number it declares.
+
+    `VideoWriter` is constant frame rate only, so a file that declares the
+    render cap and holds one frame per rendered frame plays back at
+    cap/achieved times too fast: a 1024 model at 17 fps under the default cap
+    of 60 replays a three second take in under a second. Fed here in real
+    time at half the cap, so a file that ignored the clock would be exactly
+    twice too short.
+    """
+    fps = 30
+    feed_fps = 15
+    recorder = Recorder()
+    recorder.start(str(tmp_path / "take.mp4"), fps)
+    try:
+        started = time.monotonic()
+        for value in range(15):
+            recorder.on_frame(frame(value), value)
+            time.sleep(1.0 / feed_fps)
+        elapsed = time.monotonic() - started - 1.0 / feed_fps
+        assert wait_for(lambda: writers and len(writers[0].frames) >= elapsed * fps)
+    finally:
+        recorder.stop()
+    expected = elapsed * fps
+    assert abs(len(writers[0].frames) - expected) <= 0.15 * expected
+
+
+def test_a_slow_take_fills_the_gaps_between_its_frames(writers, tmp_path):
+    """The same contract as the real time test above, counted exactly.
+
+    Frames arrive at a fifth of the file's rate, so every one of them has to
+    be held for five of the file's frames. The last frame lands at second 7,
+    which is slot 210, so the file is 211 frames long and plays for the seven
+    seconds the take lasted.
+    """
+    recorder = Recorder(clock=StepClock(1.0 / 6))
+    recorder.start(str(tmp_path / "take.mp4"), 30)
+    try:
+        for value in range(43):
+            recorder.on_frame(frame(value), value)
+        assert wait_for(lambda: writers and len(writers[0].frames) == 211)
+    finally:
+        recorder.stop()
+    assert recorder.status().frames_written == 211
+
+
+def test_a_take_fed_faster_than_the_files_rate_is_thinned_to_it(writers, tmp_path):
+    """The error the other way: an uncapped loop outrunning the file's rate.
+
+    A small model with the render loop uncapped renders far faster than the
+    30 fps the file falls back to. Holding one file frame per rendered frame
+    would stretch a two second take over eight.
+    """
+    recorder = Recorder(clock=StepClock(1.0 / 120))
+    recorder.start(str(tmp_path / "take.mp4"), 0)
+    try:
+        for value in range(241):
+            recorder.on_frame(frame(value), value)
+        assert wait_for(lambda: writers and len(writers[0].frames) == 61)
+        time.sleep(0.05)
+    finally:
+        recorder.stop()
+    assert len(writers[0].frames) == 61
+
+
+def test_a_stall_mid_take_is_filled_only_up_to_the_gap_ceiling(writers, tmp_path):
+    """A long stall must not turn into minutes of duplicated frames.
+
+    Loading a model can hold the render loop for far longer than anyone wants
+    written out one held frame at a time, so the gap a single frame can fill
+    is bounded. The take drifts by whatever the stall was over the ceiling,
+    which is the only thing left to trade. Ten minutes apart here, so the file
+    is the two frames themselves plus the ceiling between them.
+    """
+    expected = 2 + int(30 * MAX_GAP_SECONDS)
+    recorder = Recorder(clock=ListClock([0.0, 600.0]))
+    recorder.start(str(tmp_path / "take.mp4"), 30)
+    try:
+        recorder.on_frame(frame(1), 0)
+        recorder.on_frame(frame(2), 1)
+        assert wait_for(lambda: writers and len(writers[0].frames) == expected)
+        time.sleep(0.05)
+    finally:
+        recorder.stop()
+    assert len(writers[0].frames) == expected
+
+
+def test_an_uncapped_render_rate_records_at_the_default_nominal_fps(writers, tmp_path):
     recorder = Recorder()
     recorder.start(str(tmp_path / "take.mp4"), 0)
     try:
@@ -174,34 +299,40 @@ def test_frames_beyond_the_queue_drop_the_oldest_and_are_counted(writers, tmp_pa
     left the queue when the rest arrive. That makes the arithmetic exact:
     everything past the capacity is a drop, and what survives is the newest
     tail, not the oldest head.
+
+    A drop costs the take its picture, never its length. The frames fed here
+    are one file frame apart, so the file is still `total` frames long and the
+    stretch nothing survived for holds the last picture that did.
     """
     FakeWriter.open_gate = threading.Event()
-    recorder = Recorder()
+    recorder = Recorder(clock=StepClock(1.0 / 30))
     recorder.start(str(tmp_path / "take.mp4"), 30)
     total = QUEUE_CAPACITY + 60
+    lost = total - 1 - QUEUE_CAPACITY
     try:
         recorder.on_frame(frame(0), 0)
         assert wait_for(lambda: len(writers) == 1)
         for value in range(1, total):
             recorder.on_frame(frame(value), value)
-        assert recorder.status().frames_dropped == total - 1 - QUEUE_CAPACITY
+        assert recorder.status().frames_dropped == lost
         FakeWriter.open_gate.set()
-        assert wait_for(lambda: len(writers[0].frames) == QUEUE_CAPACITY + 1)
+        assert wait_for(lambda: len(writers[0].frames) == total)
     finally:
         FakeWriter.open_gate.set()
         recorder.stop()
 
     # Channel 2 of a written (BGR) frame is the red channel the fake frame put
     # its value in. The first frame got through before the queue filled;
-    # everything after it is the tail of the run, which is what "drop the
+    # everything after the gap is the tail of the run, which is what "drop the
     # oldest" means.
     written = writers[0].frames
     assert written[0][0, 0, 2] == 0
-    assert written[1][0, 0, 2] == total - QUEUE_CAPACITY
+    assert written[lost][0, 0, 2] == 0
+    assert written[lost + 1][0, 0, 2] == total - QUEUE_CAPACITY
     assert written[-1][0, 0, 2] == total - 1
     status = recorder.status()
-    assert status.frames_written == QUEUE_CAPACITY + 1
-    assert status.frames_dropped == total - 1 - QUEUE_CAPACITY
+    assert status.frames_written == total
+    assert status.frames_dropped == lost
 
 
 def test_stop_is_idempotent_and_bounded_in_time(writers, tmp_path):
@@ -307,7 +438,7 @@ def test_a_write_failure_ends_the_take_without_raising(writers, tmp_path):
 
 
 def test_the_end_of_a_take_logs_what_was_written_and_dropped(writers, tmp_path, caplog):
-    recorder = Recorder()
+    recorder = Recorder(clock=StepClock(1.0 / 30))
     with caplog.at_level("INFO"):
         recorder.start(str(tmp_path / "take.mp4"), 30)
         recorder.on_frame(frame(1), 0)
@@ -518,17 +649,20 @@ def test_the_byte_budget_is_what_actually_bounds_the_queue(writers, tmp_path):
     """The allowance is not just reported, it is the drop threshold."""
     FakeWriter.open_gate = threading.Event()
     allowance = 4
-    recorder = Recorder(byte_budget=allowance * 64 * 64 * 3)
+    total = 20
+    recorder = Recorder(byte_budget=allowance * 64 * 64 * 3, clock=StepClock(1.0 / 30))
     recorder.start(str(tmp_path / "take.mp4"), 30)
     try:
         recorder.on_frame(big_frame(0), 0)
         assert wait_for(lambda: len(writers) == 1)
-        for value in range(1, 20):
+        for value in range(1, total):
             recorder.on_frame(big_frame(value), value)
         assert recorder.queue_allowance() == allowance
-        assert recorder.status().frames_dropped == 19 - allowance
+        assert recorder.status().frames_dropped == total - 1 - allowance
         FakeWriter.open_gate.set()
-        assert wait_for(lambda: len(writers[0].frames) == allowance + 1)
+        # Only the allowance survived the queue, and the file is still the
+        # length of the take: the dropped stretch holds the last picture.
+        assert wait_for(lambda: len(writers[0].frames) == total)
     finally:
         FakeWriter.open_gate.set()
         recorder.stop()
@@ -548,7 +682,7 @@ def test_a_stop_that_runs_out_of_time_still_releases_the_writer(writers, tmp_pat
     # of one. Measured mp4v cost at 4096x4096 is 118 ms a frame, so this is
     # the shape of a real shutdown during a high resolution take.
     FakeWriter.write_delay = 0.05
-    recorder = Recorder()
+    recorder = Recorder(clock=StepClock(1.0 / 30))
     recorder.start(str(tmp_path / "take.mp4"), 30)
     for value in range(20):
         recorder.on_frame(frame(value), value)
@@ -568,7 +702,7 @@ def test_a_stop_that_runs_out_of_time_still_releases_the_writer(writers, tmp_pat
 def test_an_ordinary_stop_never_abandons_the_backlog(writers, tmp_path):
     """Only a shutdown deadline aborts. A normal Stop flushes everything."""
     FakeWriter.write_delay = 0.01
-    recorder = Recorder()
+    recorder = Recorder(clock=StepClock(1.0 / 30))
     recorder.start(str(tmp_path / "take.mp4"), 30)
     for value in range(20):
         recorder.on_frame(frame(value), value)
@@ -611,7 +745,7 @@ def test_the_refusal_survives_the_finishing_take(writers, tmp_path):
 def test_frames_written_keeps_moving_while_a_take_is_flushing(writers, tmp_path):
     """The counter a performer watches at Stop must not be the one that freezes."""
     FakeWriter.write_gate = threading.Event()
-    recorder = Recorder()
+    recorder = Recorder(clock=StepClock(1.0 / 30))
     recorder.start(str(tmp_path / "take.mp4"), 30)
     for value in range(6):
         recorder.on_frame(frame(value), value)
