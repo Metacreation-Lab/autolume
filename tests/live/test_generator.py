@@ -153,7 +153,17 @@ def test_model_host_publishes_model_info_on_successful_load():
     host.stop()
 
 
-def test_model_host_clears_model_info_on_load_failure():
+def test_model_host_keeps_model_info_when_a_load_fails_mid_set():
+    """I2: a failed load leaves the previous model rendering, so its catalog
+    must stay published.
+
+    This used to pin the opposite: `info_store.set(None)` on failure, while
+    `current()` kept returning the live model. That mismatch froze the noise
+    loop, turned Randomize into a no-op about "no model" and collapsed the
+    bending panel, all while the picture kept rendering, with no recovery
+    short of a successful load. `error()` is the channel that carries the
+    failure; the catalog belongs to whatever is actually on screen.
+    """
     should_fail = threading.Event()
 
     def loader(path):
@@ -171,9 +181,14 @@ def test_model_host_clears_model_info_on_load_failure():
     should_fail.set()
     host.request_load("/tmp/bad.pkl")
     deadline = time.monotonic() + 2.0
-    while host.info_store.snapshot() is not None and time.monotonic() < deadline:
+    while host.error() is None and time.monotonic() < deadline:
         time.sleep(0.005)
-    assert host.info_store.snapshot() is None
+
+    assert host.error() is not None
+    assert host.current().pkl_path == "/tmp/a.pkl"
+    assert host.info_store.snapshot() == ModelInfo(
+        pkl_path="/tmp/a.pkl", z_dim=4, num_ws=2
+    )
     host.stop()
 
 
@@ -512,7 +527,10 @@ def test_model_host_a_device_that_never_resolves_does_not_spin(monkeypatch):
 
     assert host.error() is not None
     assert host.current().pkl_path == "/tmp/a.pkl"  # b.pkl never loaded
-    assert host.info_store.snapshot() is None
+    # a.pkl keeps rendering, so its catalog stays published: giving up on
+    # b.pkl must not clear the info for the model still on screen (I2).
+    assert host.info_store.snapshot() is not None
+    assert host.info_store.snapshot().pkl_path == "/tmp/a.pkl"
     # Bounded: one attempt, one retry, then stop. Never unbounded.
     assert resolve_calls.count("quantum") == 2
     host.stop()

@@ -1383,7 +1383,6 @@ class ModelHost:
             device = None if device_name == "auto" else resolve_device(device_name)
         except DeviceUnavailable as exc:
             logger.warning("Could not load %s on device %s: %s", path, device_name, exc)
-            gave_up = False
             with self._lock:
                 won = self._pending == path and self._pending_device is None
                 active = getattr(self._current, "device", None)
@@ -1411,12 +1410,14 @@ class ModelHost:
                         # spin: a `.device` this never anticipated
                         # degrades to one reported failure, not a hot
                         # loop taking the lock and re-waking every
-                        # iteration.
-                        gave_up = True
+                        # iteration. `_info_a` is deliberately left
+                        # alone: `_current` keeps rendering, and
+                        # publishing a None catalog for a model still on
+                        # screen froze the noise loop and collapsed
+                        # every panel that reads it.
                         self._pending = None
                         self._error = str(exc)
                         self._retry_attempted_path = None
-                        self._info_a = None
                     else:
                         # First failure for this path: `_pending` stays
                         # put, so `_run`'s own re-wake retries it through
@@ -1431,8 +1432,6 @@ class ModelHost:
                         error=str(exc),
                     )
                 )
-                if gave_up:
-                    self._publish_info()
             return
         try:
             model = (
@@ -1474,12 +1473,12 @@ class ModelHost:
             with self._lock:
                 won = self._pending == path and self._pending_device is None
                 if won:
+                    # Not clearing `_info_a`: `_current` is deliberately left
+                    # rendering, so the catalog for it must stay published.
+                    # `error()` carries the failure to the preview overlay.
                     self._error = str(exc)
                     self._pending = None
                     self._retry_attempted_path = None
-                    self._info_a = None
-            if won:
-                self._publish_info()
 
     def _load_on_device(self, path: str, device_name: str) -> None:
         """Reload `path` onto `device_name`, publishing the outcome.
