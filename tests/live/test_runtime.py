@@ -21,6 +21,7 @@ from autolume.live.core.store import LatestValueStore
 from autolume.live.io import ndi as ndi_module
 from autolume.live.io.osc import OscEmitter
 from autolume.live.io.recorder import DEFAULT_FPS, SCREENSHOT_ADDRESS
+from autolume.live.ui.panels.performance import osc_note
 from autolume.live.runtime import OscStatus, _ModelWatchingControlLoop, build_runtime
 from tests.live.test_ndi import FakeNDIlib
 from tests.live.test_recorder import FakeWriter
@@ -278,17 +279,60 @@ class FailingOsc:
         self.stopped += 1
 
 
-def test_a_failed_osc_start_does_not_leave_the_audio_thread_running():
+def test_a_failed_first_osc_bind_still_brings_the_show_up():
+    """A port that will not bind costs remote control, never the window.
+
+    Every later bind failure already keeps the show running. The first one
+    used to be fatal: it came out of `start()` before `run_ui`, and in the
+    frozen bundle there is no console for it to come out into, so the app was
+    a double click that did nothing, for ever, with no reason anywhere.
+    """
     engine = FakeAudioEngine()
-    runtime = make_runtime(start_audio=True, audio_engine=engine, start_osc=True)
+    host = ModelHost(loader=FakeModel)
+    runtime = make_runtime(
+        model_host=host, start_audio=True, audio_engine=engine, start_osc=True
+    )
     runtime.osc = FailingOsc()
 
-    with pytest.raises(OSError):
+    runtime.start()
+    try:
+        # Rendering, which is the whole point of the window that never opened.
+        runtime.submit(ControlEvent("/model/path", "/tmp/fake.pkl", source="ui"))
+        assert wait_for(lambda: runtime.preview.latest()[1] is not None)
+        assert engine.enabled is False
+        assert runtime.audio._thread is not None
+
+        status = runtime.osc_status_store.snapshot()
+        assert status.bound_port is None
+        # The reason, not just the absence of a port: the panel has nothing
+        # else to tell the performer why their controller went quiet.
+        assert "No OSC port available in 1338-1357" in status.error
+        assert osc_note(1338, status.bound_port, status.error) == (
+            "Could not listen on port 1338. No OSC port available in 1338-1357"
+        )
+    finally:
+        runtime.stop()
+    assert engine.disabled_count == 1
+
+
+def test_a_subsystem_that_will_not_start_does_not_leave_the_audio_thread_running():
+    """The unwind `start()` keeps for the failures it cannot absorb.
+
+    The engine is only disabled once the audio thread has been joined, so a
+    disabled engine is what proves the thread went with it and released the
+    device.
+    """
+    engine = FakeAudioEngine()
+    runtime = make_runtime(start_audio=True, audio_engine=engine, start_osc=False)
+
+    def refuse():
+        raise RuntimeError("the render loop would not start")
+
+    runtime.render_loop.start = refuse
+
+    with pytest.raises(RuntimeError):
         runtime.start()
 
-    # The engine is only disabled once the audio thread has been joined, so a
-    # disabled engine is what proves the thread went with it and released the
-    # device.
     assert engine.disabled_count == 1
     assert runtime.audio._thread is None
     # The failed start left nothing running, so stopping again is still a no-op.

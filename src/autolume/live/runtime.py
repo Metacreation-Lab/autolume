@@ -115,10 +115,9 @@ class Runtime:
         if self._started:
             return
         # Flagged as started before anything is, so that a subsystem failing to
-        # come up can be unwound by the same stop() a normal shutdown uses. The
-        # OSC transport raises when no port in its range binds, and leaving the
-        # audio thread behind for that would hold the input device open with no
-        # way left to release it.
+        # come up can be unwound by the same stop() a normal shutdown uses.
+        # Leaving the audio thread behind for that would hold the input device
+        # open with no way left to release it.
         self._started = True
         try:
             self.control_loop.start()
@@ -126,11 +125,32 @@ class Runtime:
             if self._start_audio:
                 self.audio.start()
             if self._start_osc:
-                bound_port = self.osc.start()
-                self.osc_status_store.set(OscStatus(bound_port=bound_port, error=None))
+                self._start_osc_input()
         except Exception:
             self.stop()
             raise
+
+    def _start_osc_input(self) -> None:
+        """Bind the OSC transport, or come up with remote control off.
+
+        Wrapped exactly the way `_restart_osc` wraps its own bind, and for
+        the same reason turned up one notch: a port range that will not bind
+        costs the show its remote control, and it must not cost it the
+        window. This runs before the UI exists, so an exception here used to
+        end the process before anything was ever drawn, and the frozen bundle
+        has no console for it to be reported in: the performer double clicked
+        Autolume and nothing happened, with no reason anywhere.
+
+        The reason goes on the store instead. The performance panel already
+        reads it, and the port field is still there to point somewhere else.
+        """
+        try:
+            bound_port = self.osc.start()
+        except Exception as exc:
+            logger.warning("Could not start OSC input: %s", exc)
+            self.osc_status_store.set(OscStatus(bound_port=None, error=str(exc)))
+            return
+        self.osc_status_store.set(OscStatus(bound_port=bound_port, error=None))
 
     def stop(self) -> None:
         if not self._started:
