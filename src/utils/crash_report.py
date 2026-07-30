@@ -35,7 +35,7 @@ import uuid
 import zipfile
 from pathlib import Path
 
-from utils import user_data
+from utils import resource_paths, user_data
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +80,11 @@ def _endpoint_config():
             url = os.environ.get("AUTOLUME_CRASH_REPORT_URL")
             token = os.environ.get("AUTOLUME_CRASH_REPORT_TOKEN")
             if not (url and token):
-                env_file = Path(__file__).resolve().parent.parent / ".env"
+                # Through `resource_paths` rather than off `__file__`: this
+                # module sits two levels under the repo root now that it lives
+                # in `src/utils/`, and one arithmetic error here is silent
+                # because an unconfigured endpoint is an ordinary state.
+                env_file = resource_paths.resource_root() / ".env"
                 if env_file.exists():
                     values = _parse_env(env_file)
                     url = values.get("AUTOLUME_CRASH_REPORT_URL")
