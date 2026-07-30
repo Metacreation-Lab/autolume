@@ -13,6 +13,7 @@ import contextlib
 import logging
 import re
 
+from autolume.live.errors import safe_describe
 from utils import resource_paths
 
 logger = logging.getLogger(__name__)
@@ -25,25 +26,6 @@ MAX_SHORT_SIDE = 1024
 # falling silent).
 _LOG_ONCE_CAP = 64
 _DIGIT_RUN = re.compile(r"\d+")
-_MAX_ERROR_TEXT = 200
-
-
-def _safe_error_text(exc: Exception) -> str:
-    """`str(exc)`, defensively: this goes into a log line and a dedup key, so
-    it must never itself raise (an exception subclass with a broken
-    ``__str__`` would otherwise escape ``apply()`` uncaught) and must never
-    be unbounded (a pathological or enormous message would be its own
-    problem in both places).
-    """
-    try:
-        text = str(exc)
-    except Exception:
-        text = ""
-    if not text:
-        text = type(exc).__name__
-    if len(text) > _MAX_ERROR_TEXT:
-        text = text[:_MAX_ERROR_TEXT] + "...(truncated)"
-    return text
 
 
 class SuperRes:
@@ -126,7 +108,7 @@ class SuperRes:
         both the message and the dedup key rather than formatting `exc`
         directly at each call site.
         """
-        text = _safe_error_text(exc)
+        text = safe_describe(exc)
         message = f"{context}: {text}"
         self.last_error = message
         key = f"{type(exc).__name__}:{_DIGIT_RUN.sub('N', text)}"

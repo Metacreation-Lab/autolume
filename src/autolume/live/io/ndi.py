@@ -18,7 +18,7 @@ import threading
 import numpy as np
 
 from autolume.live.core.store import LatestValueStore
-from autolume.live.errors import describe
+from autolume.live.errors import describe, safe_describe
 
 try:
     import NDIlib
@@ -35,7 +35,6 @@ _IDLE_WAIT = 0.05
 # log line (mirrors superres.py's cap, which says why it went quiet).
 _LOG_ONCE_CAP = 64
 _DIGIT_RUN = re.compile(r"\d+")
-_MAX_ERROR_TEXT = 200
 
 _NO_LIBRARY = "NDI is not installed on this machine."
 _STILL_STOPPING = "NDI is still stopping. Try again in a moment."
@@ -260,7 +259,7 @@ class NdiSink:
         keying on the raw text would put a traceback in the log for every
         frame of a failing session.
         """
-        text = _safe_error_text(exc)
+        text = safe_describe(exc)
         message = f"{context}: {text}"
         key = f"{type(exc).__name__}:{_DIGIT_RUN.sub('N', text)}"
         if key in self._logged_errors:
@@ -277,18 +276,3 @@ class NdiSink:
         self._logged_errors.add(key)
         logger.warning(message)
         return message
-
-
-def _safe_error_text(exc: Exception) -> str:
-    """`describe(exc)`, defensively: this feeds a log line and a dedup key.
-
-    Neither may raise (an exception whose `__str__` is broken would otherwise
-    escape the sink thread's own handler) and neither may be unbounded.
-    """
-    try:
-        text = describe(exc)
-    except Exception:
-        text = type(exc).__name__
-    if len(text) > _MAX_ERROR_TEXT:
-        text = text[:_MAX_ERROR_TEXT] + "...(truncated)"
-    return text

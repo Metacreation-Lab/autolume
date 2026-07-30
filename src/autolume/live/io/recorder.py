@@ -35,7 +35,7 @@ from collections.abc import Callable
 import numpy as np
 
 from autolume.live.core.store import LatestValueStore
-from autolume.live.errors import describe
+from autolume.live.errors import describe, safe_describe
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +78,6 @@ _DROP_LOG_INTERVAL = 100
 # stops growing and says so once.
 _LOG_ONCE_CAP = 64
 _DIGIT_RUN = re.compile(r"\d+")
-_MAX_ERROR_TEXT = 200
 
 _SIZE_CHANGED = "The frame size changed. The recording was stopped."
 # Past tense on purpose. It stays on the status until a new take starts, and
@@ -635,7 +634,7 @@ class ScreenshotWorker:
         The key normalises digit runs so a message carrying an errno or a
         frame number is still one cause.
         """
-        text = _safe_error_text(exc) if exc is not None else "OpenCV would not write it"
+        text = safe_describe(exc) if exc is not None else "OpenCV would not write it"
         key = f"{type(exc).__name__ if exc is not None else 'refused'}:{_DIGIT_RUN.sub('N', text)}"
         if key in self._logged_errors:
             return
@@ -650,22 +649,6 @@ class ScreenshotWorker:
             return
         self._logged_errors.add(key)
         logger.warning("Could not save the screenshot %s. %s", path, text)
-
-
-def _safe_error_text(exc: Exception) -> str:
-    """`describe(exc)`, defensively: this feeds a log line and a dedup key.
-
-    Neither may raise nor be unbounded. Same shape as `ndi.py`'s and
-    `superres.py`'s; the three of them want lifting into `errors.py`, which
-    is not this task's file to touch.
-    """
-    try:
-        text = describe(exc)
-    except Exception:
-        text = type(exc).__name__
-    if len(text) > _MAX_ERROR_TEXT:
-        text = text[:_MAX_ERROR_TEXT] + "...(truncated)"
-    return text
 
 
 def _queue_allowance(nbytes: int, capacity: int, budget: int) -> int:
