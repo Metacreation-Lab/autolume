@@ -25,10 +25,16 @@ things for a performer to send mid show, and none of them may cost a tick.
 
 import logging
 import os
+import re
 import time
 from typing import Callable
 
 logger = logging.getLogger(__name__)
+
+_DIGIT_RUN = re.compile(r"\d+")
+# Mirrors ndi.py and recorder.py: past this many distinct causes the log
+# stops growing and says so once.
+_LOG_ONCE_CAP = 64
 
 # How long one listing is reused before the folder is read again. The read
 # happens on the control thread, so it must not happen once per message: a
@@ -69,6 +75,8 @@ class ModelFolder:
         self._paths: list[str] = []
         self._real: set[str] = set()
         self._read_at: float | None = None
+        self._noted: set[str] = set()
+        self._note_cap_hit = False
 
     def paths(self) -> list[str]:
         """The models in the folder, sorted, from a recent enough listing.
@@ -93,6 +101,31 @@ class ModelFolder:
             self._real = {os.path.realpath(path) for path in self._paths}
         return self._paths
 
+    def _note(self, message: str) -> None:
+        """Log a rejection once per cause, not once per message.
+
+        A rejection here is the documented normal case: an index off the end
+        is what the top of a wrongly scaled fader sends on the way past, at
+        whatever rate the controller sends. Logging each message wrote 57 MB
+        an hour on the control thread and buried every other diagnostic.
+        Digit runs are normalised so a sweep of different indices is one
+        cause, following ndi.py and superres.py.
+        """
+        key = _DIGIT_RUN.sub("N", message)
+        if key in self._noted:
+            return
+        if len(self._noted) >= _LOG_ONCE_CAP:
+            if not self._note_cap_hit:
+                self._note_cap_hit = True
+                logger.warning(
+                    "Reached %d distinct model rejection causes, further "
+                    "distinct causes will not be logged",
+                    _LOG_ONCE_CAP,
+                )
+            return
+        self._noted.add(key)
+        logger.warning("%s", message)
+
     def at_index(self, index: float) -> str | None:
         """The model at `index` in the listing, rounded, or None.
 
@@ -104,17 +137,16 @@ class ModelFolder:
         try:
             position = round(float(index))
         except (TypeError, ValueError, OverflowError):
-            logger.warning("Ignoring unusable model index %r", index)
+            self._note(f"Ignoring unusable model index {index!r}")
             return None
         paths = self.paths()
         if not paths:
-            logger.warning("Ignoring model index %d: no models in the folder", position)
+            self._note(f"Ignoring model index {position}: no models in the folder")
             return None
         if not 0 <= position < len(paths):
-            logger.warning(
-                "Ignoring model index %d: the folder holds %d models",
-                position,
-                len(paths),
+            self._note(
+                f"Ignoring model index {position}: "
+                f"the folder holds {len(paths)} models"
             )
             return None
         return paths[position]
@@ -146,7 +178,7 @@ class ModelFolder:
         """
         reference = reference.strip()
         if not reference:
-            logger.warning("Ignoring empty model reference")
+            self._note("Ignoring empty model reference")
             return None
         paths = self.paths()
         if os.path.isfile(reference) and os.path.realpath(reference) in self._real:
@@ -159,7 +191,7 @@ class ModelFolder:
         for path, name in names:
             if wanted in name:
                 return path
-        logger.warning(
-            "Ignoring model reference %r: nothing in the folder matches", reference
+        self._note(
+            f"Ignoring model reference {reference!r}: nothing in the folder matches"
         )
         return None

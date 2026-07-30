@@ -12,6 +12,7 @@ the expression running on the numeric path has its own test: it is what turns a
 0 to 1 fader into a selector across the folder.
 """
 
+import logging
 import threading
 import time
 
@@ -275,6 +276,49 @@ def test_a_name_matching_nothing_is_ignored(models):
     assert store.snapshot().pkl_path == models[1]
     assert store.snapshot().bindings[0].error is None
     assert loop._guard_hits == {}
+
+
+def test_a_sweep_off_the_end_logs_its_rejection_once(models, caplog):
+    """IO-4: an index off the end is the documented normal case, sent at
+    whatever rate the controller sweeps. Measured unthrottled: 959 log lines
+    in 3.2 s, 57 MB an hour of control-thread IO burying every other
+    diagnostic. One cause must be one line, not one per message."""
+    loop, store = make_loop(models)
+    bind(loop)
+
+    with caplog.at_level(logging.WARNING, logger="autolume.live.core.models"):
+        for index in range(5, 25):
+            send(loop, index)
+
+    rejections = [
+        record
+        for record in caplog.records
+        if record.name == "autolume.live.core.models"
+    ]
+    assert len(rejections) == 1
+    assert "Ignoring model index" in rejections[0].getMessage()
+    assert store.snapshot().pkl_path is None
+
+
+def test_a_new_rejection_cause_still_gets_its_line(models, caplog):
+    """The dedup is per cause, not a mute button: a refusal of a different
+    shape after a swept index must still reach the log."""
+    loop, store = make_loop(models)
+    bind(loop)
+
+    with caplog.at_level(logging.WARNING, logger="autolume.live.core.models"):
+        send(loop, 7)
+        send(loop, 9)
+        send(loop, "portraits")
+
+    messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "autolume.live.core.models"
+    ]
+    assert len(messages) == 2
+    assert any("Ignoring model index" in message for message in messages)
+    assert any("portraits" in message for message in messages)
 
 
 def test_a_models_folder_that_cannot_be_read_is_not_an_error():
