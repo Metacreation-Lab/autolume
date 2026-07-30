@@ -26,6 +26,10 @@ ada_pipes = ['blit', 'geom', 'color', 'filter', 'noise', 'cutout', 'bg', 'bgc', 
 diffaug_pipes = ['color,translation,cutout', 'color,translation', 'color,cutout', 'color',
                  'translation', 'cutout,translation', 'cutout']
 configs = ['stylegan2', 'stylegan3-t', 'stylegan3-r']
+# Ordered by flip bitmask (bit 0 = x-flip, bit 1 = y-flip) so a mode index
+# can be recombined from the xflip/yflip flags of a past run.
+mirror_modes = ['none', 'x', 'y', 'xy']
+mirror_labels = ['None', 'X', 'Y', 'X+Y']
 # Mirrors augpipe_specs in train.py; used to recover the pipe name from
 # the augment_kwargs flags stored in a run's training_options.json.
 augpipe_specs = {
@@ -85,7 +89,7 @@ class TrainingModule:
         self.glr = ''  # blank = use the selected config's default G learning rate
         self.dlr = 0.002
         self.snap = 4
-        self.mirror = False # Mirror only accesible in preprocessing module
+        self.mirror = 0
         self.done_button = False
         self.image_path = ''
 
@@ -178,6 +182,11 @@ class TrainingModule:
         if isinstance(snap, int):
             self.snap = snap
 
+        xflip = options.get("training_set_kwargs", {}).get("xflip")
+        yflip = options.get("training_set_kwargs", {}).get("yflip")
+        if isinstance(xflip, bool) or isinstance(yflip, bool):
+            self.mirror = int(bool(xflip)) | int(bool(yflip)) << 1
+
     def _start_training(self):
         target_data_path = self.data_path
 
@@ -199,7 +208,7 @@ class TrainingModule:
             z_dim=512,
             w_dim=512,
             cond=False,
-            mirror=self.mirror,
+            mirror=mirror_modes[self.mirror],
             aug="ada" if augs[self.aug] == "ADA" else "noaug",
             augpipe=ada_pipes[self.ada_pipe],
             resume=self.resume_pkl if self.resume_pkl != "" else None,
@@ -419,6 +428,13 @@ class TrainingModule:
                 changed, value = imgui.input_int("##Number of ticks between snapshots", self.snap)
                 if changed and not training_active:
                     self.snap = value
+
+                imgui.text("Mirror")
+                for i, label in enumerate(mirror_labels):
+                    if i > 0:
+                        imgui.same_line()
+                    if imgui.radio_button(f"{label}##train_mirror_{i}", self.mirror == i) and not training_active:
+                        self.mirror = i
 
         if self.done_button:
             imgui_utils.button("Stopping...", width=-1, enabled=False)
