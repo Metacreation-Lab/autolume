@@ -67,6 +67,7 @@ class ModelFolder:
         self._clock = clock
         self._interval = interval
         self._paths: list[str] = []
+        self._real: set[str] = set()
         self._read_at: float | None = None
 
     def paths(self) -> list[str]:
@@ -86,6 +87,10 @@ class ModelFolder:
             except Exception:
                 logger.warning("Could not read the models folder", exc_info=True)
                 self._paths = []
+            # Resolved once per listing, not once per message: `named` checks
+            # a typed path against this set, and resolving the whole folder on
+            # every value would put a stat storm on the control thread.
+            self._real = {os.path.realpath(path) for path in self._paths}
         return self._paths
 
     def at_index(self, index: float) -> str | None:
@@ -117,9 +122,16 @@ class ModelFolder:
     def named(self, reference: str) -> str | None:
         """The model `reference` names, or None.
 
-        A path that exists wins, then a filename, then a fragment of one. The
-        fragment is what makes this usable from a controller: nobody types
-        `wikiart-1024.pkl` mid set, they type `wikiart`.
+        A path into the models folder wins, then a filename, then a fragment
+        of one. The fragment is what makes this usable from a controller:
+        nobody types `wikiart-1024.pkl` mid set, they type `wikiart`.
+
+        A path is only taken when it resolves to a model in the listing. This
+        value arrives from the network, and without the containment check any
+        sender on the OSC port could name any existing file on disk as the
+        pickle to load. A path elsewhere falls through to the matching below,
+        which compares the whole reference and so refuses it like any other
+        name the folder does not hold.
 
         A fragment can match several models, so the first match in the same
         sorted order the index uses wins. That way one listing explains both
@@ -136,9 +148,9 @@ class ModelFolder:
         if not reference:
             logger.warning("Ignoring empty model reference")
             return None
-        if os.path.isfile(reference):
-            return reference
         paths = self.paths()
+        if os.path.isfile(reference) and os.path.realpath(reference) in self._real:
+            return reference
         wanted = reference.casefold()
         names = [(path, os.path.basename(path).casefold()) for path in paths]
         for path, name in names:

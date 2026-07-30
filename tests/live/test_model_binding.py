@@ -132,7 +132,20 @@ def test_the_expression_scales_a_fader_across_the_folder(models):
     assert store.snapshot().pkl_path == models[1]
 
 
-def test_a_path_that_exists_is_taken_as_it_is(models, tmp_path):
+def test_a_path_into_the_models_folder_is_taken_as_it_is(models):
+    loop, store = make_loop(models)
+    bind(loop)
+
+    send(loop, models[0])
+
+    assert store.snapshot().pkl_path == models[0]
+
+
+def test_a_path_outside_the_models_folder_is_refused(models, tmp_path):
+    """S4: this value arrives from the network. Before the containment check,
+    `named()` returned any existing file verbatim, so a sender on the OSC
+    port chose which local file got handed to the unpickler. A path outside
+    the listing must never be taken as a path, however real the file is."""
     outside = tmp_path / "elsewhere" / "one-off.pkl"
     outside.parent.mkdir()
     outside.write_bytes(b"")
@@ -141,7 +154,9 @@ def test_a_path_that_exists_is_taken_as_it_is(models, tmp_path):
 
     send(loop, str(outside))
 
-    assert store.snapshot().pkl_path == str(outside)
+    assert store.snapshot().pkl_path is None
+
+
 
 
 def test_a_filename_resolves_inside_the_models_folder(models):
