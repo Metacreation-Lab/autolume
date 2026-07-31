@@ -145,8 +145,15 @@ class OscMenu:
     @imgui_utils.scoped_by_object_id
     def __call__(self):
         viz = self.viz
+        # Everything here lives in the menu bar, so the child never scrolls and
+        # NoScrollWithMouse is stated outright rather than left to
+        # imgui_utils.begin_child: window padding overflows the 1.5-line height
+        # by a few pixels, which reads as "scrollable" and would keep the strip
+        # swallowing the wheel. Adding NoScrollbar here would block the
+        # pass-through imgui 1.65 grants in exchange for NoScrollWithMouse.
         imgui.begin_child(self.label, viz.pane_w, viz.app.font_size*1.5,
-                          flags=imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_MENU_BAR)
+                          flags=imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE
+                          | imgui.WINDOW_MENU_BAR | imgui.WINDOW_NO_SCROLL_WITH_MOUSE)
         if imgui.begin_menu_bar():
             imgui.text("OSC Menu |")
             for key in self.funcs.keys():

@@ -152,8 +152,8 @@ class LayerWidget:
             imgui.push_style_color(imgui.COLOR_HEADER, 0, 0, 0, 0)
             imgui.push_style_color(imgui.COLOR_HEADER_HOVERED, 0.16, 0.29, 0.48, 0.5)
             imgui.push_style_color(imgui.COLOR_HEADER_ACTIVE, 0.16, 0.29, 0.48, 0.9)
-            imgui.begin_child('##list', width=width, height=height, border=True,
-                              flags=imgui.WINDOW_ALWAYS_VERTICAL_SCROLLBAR)
+            imgui_utils.begin_child(self, '##list', width=width, height=height, border=True,
+                                    flags=imgui.WINDOW_ALWAYS_VERTICAL_SCROLLBAR)
 
             # List items.
             checkbox_size = viz.app.font_size + viz.app.spacing * 2
@@ -198,11 +198,11 @@ class LayerWidget:
             # End list.
             if len(layers) == 0:
                 imgui.text_colored('No layers found', *dim_color)
-            imgui.end_child()
+            imgui_utils.end_child()
             imgui.pop_style_color(4)
             imgui.pop_style_var(1)
             imgui.same_line()
-            imgui.begin_child('##adjust', width=-1, height=height, border=True)
+            imgui_utils.begin_child(self, '##adjust', width=-1, height=height, border=True)
             tab_width = imgui.get_content_region_available_width() // 2 - viz.app.spacing
             if imgui_utils.button("Activations",
                                   width=tab_width, enabled=self.tab):
@@ -236,7 +236,7 @@ class LayerWidget:
                     #     self.adjust_widget(layers)
             else:
                 self.adjust_noise()
-            imgui.end_child()
+            imgui_utils.end_child()
 
             if self.cur_layer is not None:
                 self.ratios[self.cur_layer] = ratio
