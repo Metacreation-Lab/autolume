@@ -131,7 +131,6 @@ class ImguiWindow(glfw_window.GlfwWindow):
         super().begin_frame()
 
         # Process imgui events.
-        self._imgui_renderer.mouse_wheel_multiplier = self._cur_font_size / 10
         if self.content_width > 0 and self.content_height > 0:
             self._imgui_renderer.process_inputs()
         self._apply_pending_font_sizes()
@@ -190,10 +189,17 @@ def _refresh_font_texture(renderer, alpha8):
 #----------------------------------------------------------------------------
 # Wrapper class for GlfwRenderer to fix a mouse wheel bug on Linux.
 
+# GLFW does not normalize scroll deltas: Windows and X11 report one unit per
+# wheel notch, macOS reports the OS line rate (3 per notch) or, on precise
+# devices, points/10. imgui then scrolls by mouse_wheel * 5 * font_size, which
+# is already constant in DPI-independent units -- deriving the scale from the
+# font size would apply the display scale a second time. Both values put a wheel
+# notch at ~60 units, matching native scrolling.
+_MOUSE_WHEEL_SCALE = 0.25 if sys.platform == 'darwin' else 0.75
+
 class _GlfwRenderer(imgui.integrations.glfw.GlfwRenderer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.mouse_wheel_multiplier = 1
         # The base class only polls button state once per frame, so a click whose
         # press and release both happen between two frames (e.g. a trackpad tap,
         # or any click while the frame rate is low) is lost. Latch presses from
@@ -226,7 +232,11 @@ class _GlfwRenderer(imgui.integrations.glfw.GlfwRenderer):
                     self.io.mouse_pos = cx / xscale, cy / yscale
 
     def scroll_callback(self, window, x_offset, y_offset):
-        self.io.mouse_wheel += y_offset * self.mouse_wheel_multiplier
+        # Accumulate rather than assign: several scroll events can arrive between
+        # two frames, and imgui clears mouse_wheel at the end of each one.
+        # x_offset is dropped on purpose -- trackpads leak sideways deltas into
+        # vertical swipes, and nothing in the UI scrolls horizontally.
+        self.io.mouse_wheel += y_offset * _MOUSE_WHEEL_SCALE
 
     def refresh_font_texture(self):
         _refresh_font_texture(self, alpha8=False)
