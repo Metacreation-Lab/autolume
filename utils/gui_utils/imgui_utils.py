@@ -7,6 +7,8 @@
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
 import contextlib
+import weakref
+
 import imgui
 from assets.colors import *
 
@@ -115,6 +117,38 @@ def scoped_by_object_id(method):
         return res
 
     return decorator
+
+
+# ----------------------------------------------------------------------------
+# imgui 1.65 only passes the mouse wheel from a child up to its parent when the
+# child sets NoScrollWithMouse and not NoScrollbar. A child that simply has
+# nothing to scroll swallows the wheel instead, so every child covering the pane
+# becomes a dead band. Upstream fixed this in 1.72 by also passing it up when the
+# child's ScrollMax is 0; these wrappers reproduce that rule from the previous
+# frame's ScrollMax, keyed per owning widget because labels repeat across
+# widgets. Drop-in replacements for imgui.begin_child / imgui.end_child.
+#
+# Only for children whose content genuinely comes and goes. A child that is
+# always too short for its own padding reports a few pixels of ScrollMax while
+# holding nothing scrollable, so it reads as scrollable here and keeps
+# swallowing the wheel -- those should set NoScrollWithMouse themselves.
+
+_child_scrollable = weakref.WeakKeyDictionary()
+_open_children = []
+
+
+def begin_child(owner, label, width=0, height=0, border=False, flags=0):
+    scrollable = _child_scrollable.setdefault(owner, {})
+    if not scrollable.get(label, False):
+        flags = (flags | imgui.WINDOW_NO_SCROLL_WITH_MOUSE) & ~imgui.WINDOW_NO_SCROLLBAR
+    imgui.begin_child(label, width, height, border, flags)
+    _open_children.append((scrollable, label))
+
+
+def end_child():
+    scrollable, label = _open_children.pop()
+    scrollable[label] = imgui.get_scroll_max_y() > 0
+    imgui.end_child()
 
 
 # ----------------------------------------------------------------------------

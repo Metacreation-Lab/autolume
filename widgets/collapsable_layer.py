@@ -207,7 +207,7 @@ class LayerWidget:
             imgui.push_style_color(imgui.COLOR_HEADER_ACTIVE, 0,0,0,0)
 
             imgui.begin_child('##list', width=width, height=height, border=True, flags=imgui.WINDOW_NO_SCROLLBAR|imgui.WINDOW_NO_INPUTS)
-            imgui.begin_child('##list2', width=width, height=self.viz.app.font_size * 1.75, border=False, flags=imgui.WINDOW_NO_SCROLLBAR|imgui.WINDOW_NO_SCROLL_WITH_MOUSE)
+            imgui_utils.begin_child(self, '##list2', width=width, height=self.viz.app.font_size * 1.75, border=False, flags=imgui.WINDOW_NO_SCROLLBAR|imgui.WINDOW_NO_SCROLL_WITH_MOUSE)
             imgui.set_cursor_pos((0, -1))
             if self.simplified:
                 imgui_utils.color_button("Simple", color=GREEN, width=(width // 2))
@@ -234,9 +234,9 @@ class LayerWidget:
                     self.simplified = False
                 imgui.pop_style_color(4)
             imgui.separator()
-            imgui.end_child()
-            imgui.begin_child('##list3', width=width, height=height - self.viz.app.font_size * 1.5, border=False,
-                              flags=imgui.WINDOW_ALWAYS_VERTICAL_SCROLLBAR)
+            imgui_utils.end_child()
+            imgui_utils.begin_child(self, '##list3', width=width, height=height - self.viz.app.font_size * 1.5, border=False,
+                                    flags=imgui.WINDOW_ALWAYS_VERTICAL_SCROLLBAR)
             checkbox_size = viz.app.font_size
             draw_list = imgui.get_window_draw_list()
             # List items.
@@ -480,12 +480,12 @@ class LayerWidget:
             # End list.
             if len(layers) == 0:
                 imgui.text_colored('No layers found', *LIGHTGRAY)
-            imgui.end_child()
+            imgui_utils.end_child()
             imgui.end_child()
             imgui.pop_style_color(6)
             # imgui.pop_style_var(1)
             imgui.same_line()
-            imgui.begin_child('##adjust', width=-1, height=height, border=True)
+            imgui_utils.begin_child(self, '##adjust', width=-1, height=height, border=True)
             tab_width = imgui.get_content_region_available_width() / 2
             if (self.tab is False) and (len(layers) > 0):
                 if self.has_transforms[layer.name]:
@@ -550,7 +550,7 @@ class LayerWidget:
                     if noise in self.has_osc:
                         if self.has_osc[noise]==False:
                             self.has_osc[noise] = self.noises[noise]["use_osc"]
-            imgui.end_child()
+            imgui_utils.end_child()
 
             if self.cur_layer is not None:
                 self.ratios[self.cur_layer] = ratio
