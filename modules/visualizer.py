@@ -582,9 +582,9 @@ class Visualizer:
         self._header_help_icon('performance_osc')
         self.perf_widget(header_opened)
 
-        # Adjust Input
-        header_opened = imgui_utils.collapsing_header('Adjust Input', default=True)[0]
-        self._header_help_icon('adjust_input')
+        # Feature Mixer
+        header_opened = imgui_utils.collapsing_header('Feature Mixer', default=True)[0]
+        self._header_help_icon('feature_mixer')
         self.adjuster_widget(header_opened)
 
         # Layer Transformations
