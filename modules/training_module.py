@@ -16,7 +16,7 @@ from training.dataset_validator import validate_dataset
 from widgets.native_browser_widget import NativeBrowserWidget
 from utils.user_data import data_path
 from widgets.help_icon_widget import HelpIconWidget
-from widgets.model_dropdown_widget import ModelDropdownButton
+from widgets.model_input_widget import ModelInputWidget
 
 import cv2
 from utils.gui_utils import gl_utils
@@ -72,7 +72,7 @@ class TrainingModule:
         self.data_path_browser = NativeBrowserWidget()
         self.save_path_browser = NativeBrowserWidget()
 
-        self.model_dropdown = ModelDropdownButton(label='Browse')
+        self.resume_input = ModelInputWidget(menu.app)
 
         self.menu = menu
 
@@ -316,18 +316,12 @@ class TrainingModule:
             imgui.text("Resume Pkl (optional)")
             current_y = imgui.get_cursor_pos_y()
             imgui.set_cursor_pos_y(current_y - 3)
-            if not training_active:
-                _, self.resume_pkl = imgui_utils.input_text("##Resume Pkl", self.resume_pkl, 1024, 0,
-                    width=pane_width - imgui.calc_text_size("Browse##Resume Pkl")[0] - style.window_padding[0] * 2)
-            else:
-                imgui_utils.input_text("##Resume Pkl", self.resume_pkl, 1024, imgui.INPUT_TEXT_READ_ONLY,
-                    width=pane_width - imgui.calc_text_size("Browse##Resume Pkl")[0] - style.window_padding[0] * 2)
-
-            imgui.same_line()
-            picked = self.model_dropdown(width=self.menu.app.button_w)
-            if picked is not None and not training_active:
-                self.resume_pkl = picked
-                self._apply_run_settings(picked)
+            changed, self.resume_pkl = self.resume_input(self.resume_pkl,
+                width=-1,
+                enabled=not training_active,
+                flags=imgui.INPUT_TEXT_AUTO_SELECT_ALL)
+            if changed:
+                self._apply_run_settings(self.resume_pkl)
 
             imgui.text("Dataset Path")
             current_y = imgui.get_cursor_pos_y()

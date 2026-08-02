@@ -6,7 +6,6 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
-import glob
 import logging
 import os
 import re
@@ -19,19 +18,14 @@ except ModuleNotFoundError:
 import dnnlib
 import imgui
 from utils.gui_utils import imgui_utils
-from utils.model_dir import list_model_pkls, models_dir
-from widgets.native_browser_widget import NativeBrowserWidget
+from utils.model_dir import list_model_pkls, models_dir, resolve_pkl
 from widgets.model_download_widget import ModelDownloadWidget
 from widgets.model_dropdown_widget import ModelDropdownButton
+from widgets.model_input_widget import ModelInputWidget
 
 from . import renderer
 
 logger = logging.getLogger(__name__)
-
-#----------------------------------------------------------------------------
-
-def _locate_results(pattern):
-    return pattern
 
 #----------------------------------------------------------------------------
 
@@ -46,11 +40,10 @@ class PickleWidget:
         self.use_osc = False
         self.osc_addresses = ""
 
-        self.browser = NativeBrowserWidget()
-
         self.rescan_models()
         self.model_downloader = ModelDownloadWidget(viz.app, models_dir=models_dir(), on_complete=self.rescan_models)
         self.model_dropdown = ModelDropdownButton(show_download=True, downloader=self.model_downloader)
+        self.model_input = ModelInputWidget(viz.app, dropdown=self.model_dropdown)
 
     def rescan_models(self):
         self.browse_cache = list_model_pkls()
@@ -63,7 +56,7 @@ class PickleWidget:
 
     def add_recent(self, pkl, ignore_errors=False):
         try:
-            resolved = self.resolve_pkl(pkl)
+            resolved = resolve_pkl(pkl)
             if resolved not in self.recent_pkls:
                 self.recent_pkls.append(resolved)
         except:
@@ -74,7 +67,7 @@ class PickleWidget:
         viz = self.viz
         viz.app.skip_frame() # The input field will change on next frame.
         try:
-            resolved = self.resolve_pkl(pkl)
+            resolved = resolve_pkl(pkl)
             name = resolved.replace('\\', '/').split('/')[-1]
             self.cur_pkl = resolved
             self.user_pkl = resolved
@@ -112,50 +105,24 @@ class PickleWidget:
                 self.cur_pkl = os.path.join(models_dir(), tail)
             else:
                 logger.error("Model does not exist in the model folder")
-        for recent_pkl in self.recent_pkls:
-            if not os.path.exists(self.recent_pkl):
-                head, tail = os.path.split(self.recent_pkl)
-                if os.path.exists(os.path.join(models_dir(), tail)):
-                    self.cur_pkl = os.path.join(models_dir(), tail)
+        for i, recent_pkl in enumerate(self.recent_pkls):
+            if not os.path.exists(recent_pkl):
+                head, tail = os.path.split(recent_pkl)
+                candidate = os.path.join(models_dir(), tail)
+                if os.path.exists(candidate):
+                    self.recent_pkls[i] = candidate
                 else:
                     logger.error("Model does not exist in the model folder")
-        
-
 
     @imgui_utils.scoped_by_object_id
     def __call__(self, show=True):
         viz = self.viz
-        recent_pkls = [pkl for pkl in self.recent_pkls if pkl != self.user_pkl]
         if show:
             imgui.text('Pickle')
             imgui.same_line(viz.app.label_w)
-            changed, self.user_pkl = imgui_utils.input_text('##pkl', self.user_pkl, 1024,
-                flags=(imgui.INPUT_TEXT_AUTO_SELECT_ALL | imgui.INPUT_TEXT_ENTER_RETURNS_TRUE),
-                width=(-1 - viz.app.button_w * 3 - viz.app.spacing * 3),
-                help_text='<PATH> | <URL> | <RUN_DIR> | <RUN_ID> | <RUN_ID>/<KIMG>.pkl')
+            changed, self.user_pkl = self.model_input(self.user_pkl, width=-1)
             if changed:
                 self.load_pkl(self.user_pkl, ignore_errors=True)
-            if imgui.is_item_hovered() and not imgui.is_item_active() and self.user_pkl != '':
-                imgui.set_tooltip(self.user_pkl)
-            imgui.same_line()
-            if imgui_utils.button('Recent...', width=viz.app.button_w, enabled=(len(recent_pkls) != 0)):
-                imgui.open_popup('recent_pkls_popup')
-            imgui.same_line()
-            if imgui_utils.button("Find##pkl", width=self.viz.app.button_w):
-                pkl = self.browser.select_model_file(initial_dir=self.user_pkl)
-                if pkl:
-                    self.load_pkl(str(pkl), ignore_errors=True)
-            imgui.same_line()
-            picked = self.model_dropdown(width=-1)
-            if picked is not None:
-                self.load_pkl(picked, ignore_errors=True)
-
-        if imgui.begin_popup('recent_pkls_popup'):
-            for pkl in recent_pkls:
-                clicked, _state = imgui.menu_item(pkl)
-                if clicked:
-                    self.load_pkl(pkl, ignore_errors=True)
-            imgui.end_popup()
 
         self.model_downloader()
 
@@ -179,27 +146,5 @@ class PickleWidget:
 
         items = sorted(items, key=lambda item: (item.name.replace('_', ' '), item.path))
         return items
-
-    def resolve_pkl(self, pattern):
-        assert isinstance(pattern, str)
-        assert pattern != ''
-
-        # URL => return as is.
-        if dnnlib.util.is_url(pattern):
-            return pattern
-
-        # Short-hand pattern => locate.
-        path = _locate_results(pattern)
-
-        # Run dir => pick the last saved snapshot.
-        if os.path.isdir(path):
-            pkl_files = sorted(glob.glob(os.path.join(path, 'network-snapshot-*.pkl')))
-            if len(pkl_files) == 0:
-                raise IOError(f'No network pickle found in "{path}"')
-            path = pkl_files[-1]
-
-        # Normalize.
-        path = os.path.abspath(path)
-        return path
 
 #----------------------------------------------------------------------------

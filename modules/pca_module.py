@@ -1,4 +1,4 @@
-import glob
+import logging
 import os
 from pathlib import Path
 import multiprocessing as mp
@@ -12,15 +12,14 @@ from utils import device_utils
 from utils.app_logging import LoggedProcess
 from utils.gui_utils import imgui_utils
 from ganspace.extract_pca import fit
-from widgets.model_dropdown_widget import ModelDropdownButton
+from utils.model_dir import resolve_pkl
+from widgets.model_input_widget import ModelInputWidget
 from widgets.native_browser_widget import NativeBrowserWidget
 from widgets.help_icon_widget import HelpIconWidget
 from utils.user_data import data_path
 
 
-def _locate_results(pattern):
-    return pattern
-
+logger = logging.getLogger(__name__)
 
 pca_modes = ['pca', 'ipca', 'fbpca', "ica", 'spca']
 
@@ -48,15 +47,14 @@ class PCA_Module:
         self.save_path_browser = NativeBrowserWidget()
         self.X_comp, self.Z_comp = None, None
         self.done = False
-        self.model_dropdown = ModelDropdownButton()
+        self.model_input = ModelInputWidget(menu.app)
 
     @imgui_utils.scoped_by_object_id
     def __call__(self):
         help_width = imgui.calc_text_size("(?)").x + 10
         button_width = self.menu.app.button_w
-        spacing = self.menu.app.spacing
-        
-        input_width = -(button_width + spacing + help_width + 30)
+
+        input_width = -(help_width + 30)
 
         text = "Extract Meaningful Directions from a Model"
         imgui.text(text)
@@ -77,19 +75,12 @@ class PCA_Module:
             np.save(os.path.join(self.save_path,f"{filename}_xcomp.npy"), self.X_comp)
             np.save(os.path.join(self.save_path,f"{filename}_zcomp.npy"), self.Z_comp)
 
-        changed, self.user_pkl = imgui_utils.input_text('##pkl', self.user_pkl, 1024,
-                                                        flags=(imgui.INPUT_TEXT_AUTO_SELECT_ALL |
-                                                               imgui.INPUT_TEXT_ENTER_RETURNS_TRUE),
-                                                        width=input_width,
-                                                        help_text='<PATH> | <URL> | <RUN_DIR> | <RUN_ID> | <RUN_ID>/<KIMG>.pkl')
-        if changed:
-            self.load(self.user_pkl)
-
-        imgui.same_line()
-        picked = self.model_dropdown(width=button_width)
-        if picked is not None:
-            self.user_pkl = picked
-            self.load(picked)
+        changed, self.user_pkl = self.model_input(self.user_pkl, width=input_width)
+        if changed and self.user_pkl:
+            try:
+                self.load(self.user_pkl)
+            except Exception:
+                logger.exception("Could not load model %s", self.user_pkl)
 
         help_width = imgui.calc_text_size("(?)").x + 10
         input_width = -(self.app.button_w + self.app.spacing + help_width)
@@ -154,30 +145,8 @@ class PCA_Module:
 
 
 
-    def resolve_pkl(self, pattern):
-        assert isinstance(pattern, str)
-        assert pattern != ''
-
-        # URL => return as is.
-        if dnnlib.util.is_url(pattern):
-            return pattern
-
-        # Short-hand pattern => locate.
-        path = _locate_results(pattern)
-
-        # Run dir => pick the last saved snapshot.
-        if os.path.isdir(path):
-            pkl_files = sorted(glob.glob(os.path.join(path, 'network-snapshot-*.pkl')))
-            if len(pkl_files) == 0:
-                raise IOError(f'No network pickle found in "{path}"')
-            path = pkl_files[-1]
-
-        # Normalize.
-        path = os.path.abspath(path)
-        return path
-
     def load(self, user_pkl):
-        path = self.resolve_pkl(user_pkl)
+        path = resolve_pkl(user_pkl)
         with dnnlib.util.open_url(path, verbose=False) as f:
             data = legacy.load_network_pkl(f, custom=True)
         self.G = data["G"].to(device_utils.get_device())
