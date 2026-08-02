@@ -157,7 +157,6 @@ class DragWidget:
         if commit and self._w is not None:
             latent = self.viz.latent_widget.latent
             latent.mode = False     # switch to vector mode
-            latent.project = False  # already a W+ latent
             vec = torch.from_numpy(self._w[0].copy())   # [num_ws, 512]
             if self._d0 is not None:
                 # res.w was captured after the renderer added the adjuster
@@ -192,7 +191,7 @@ class DragWidget:
     # ---- image interaction (called by the visualizer) ----
 
     def wants_input(self):
-        return self.armed
+        return self.armed and not self._error
 
     def on_image_click(self, clicked, down, mouse_x, mouse_y, image_area):
         if self.g_dims is None or image_area is None:

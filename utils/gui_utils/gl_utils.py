@@ -388,6 +388,7 @@ def draw_arrow(x1, y1, x2, y2, *, width=3, head=12, color=1, alpha=1):
     if length < 1e-3:
         return
     direction /= length
+    head = min(head, length)
     normal = np.array([-direction[1], direction[0]], dtype=np.float32)
     tip = np.array([x2, y2], dtype=np.float32)
     base = tip - direction * head
