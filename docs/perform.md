@@ -21,16 +21,17 @@ This widget allows you to load models and explore their latent space, i.e. the i
 
 ### Model Loading
 
-Use Find to navigate to the location of a .pkl file or press Models to open a list of models in your models folder (under your [data folder](index.md#where-autolume-stores-your-data), `~/autolume/models` by default). You can copy any .pkl file there for quick access inside Autolume, or use the Get Models... entry at the bottom of the Models dropdown to download curated pre-trained models directly from within Autolume.
+Press Browse to open your file browser and pick a .pkl file from anywhere on your computer, or press Models to open a dropdown of the models Autolume already knows about. You can also type or paste a path directly into the field and press Enter.
 
 Loading a model for the first time can take a few seconds as we test if the computer is capable of running custom CUDA code that improves the performance. Afterward, models are stored in cache and loading should be much faster.
 
 ![](assets/live-module-model-loading-01.png)
 
-- Recent: Shows the most recently loaded models.
-- Find: Opens a file browser to find a model.
-- Models: Shows all models in the “models” folder.
-- Get Models...: An entry at the bottom of every model dropdown that opens a catalog of curated pre-trained models, with each model’s author and license listed. Press Download next to a model to download it into the “models” folder; a progress popup with a Cancel button is shown while it downloads, and the model appears under Models once finished. Models you already have are marked as Downloaded.
+The Models dropdown contains:
+
+- Your models folder: All .pkl files in your models folder (under your [data folder](index.md#where-autolume-stores-your-data), `~/autolume/models` by default). You can copy any .pkl file there for quick access inside Autolume.
+- Your training runs: One submenu per training run, listing the snapshots it produced, so the models you trained yourself are available without looking them up on disk.
+- Download Models...: The entry at the bottom, which opens a catalog of curated pre-trained models, with each model’s author and license listed. Press Download next to a model to download it into the “models” folder; a progress popup with a Cancel button is shown while it downloads, and the model appears under Models once finished. Models you already have are marked as Downloaded.
 
 ### Latent Space
 
@@ -159,7 +160,7 @@ This widget allows you to perform model mixing like the [Model Mixing](tools.md#
 
 The first checkbox allows you to toggle if the mixed model should be used or not.
 
-Following you can select a model either through the browse feature, by listing all models in the "models" folder. Or using the "Find" button to open a file browser.
+Following you can select a model with the "Browse" button, which opens a file browser, or with the "Models" button, which lists the models in your "models" folder and the snapshots of your training runs. You can also type or paste a path into the field and press Enter.
 
 Lastly, you can write a model name into the text field following the buttons. This allows you to quickly save the mixed model into the "models" folder.
 
