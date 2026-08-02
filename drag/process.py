@@ -15,6 +15,8 @@ Replies on reply_queue:
     {'step': int, 'w': np[1, L, 512] float32, 'points': [[y, x], ...],
      'converged': bool} once per optimization step
     {'error': str} full traceback on any exception, then the process returns
+    {'error': 'start before load'} when a 'start' arrives before a 'load'. This
+        is the one error reply the process survives: it keeps serving commands.
 """
 import numpy as np
 import torch
@@ -66,7 +68,10 @@ def run_drag(cmd_queue, reply_queue):
                     G = legacy.load_network_pkl(f)['G_ema']
                 G = G.eval().requires_grad_(False).to(device)
                 reply_queue.put({'ready': True})
-            elif cmd == 'start' and G is not None:
+            elif cmd == 'start':
+                if G is None:
+                    reply_queue.put({'error': 'start before load'})
+                    continue
                 engine = DragEngine(G, msg['w0'], device, lr=msg.get('lr', 2e-3))
                 try:
                     outcome = drag_session(engine, msg, cmd_queue, reply_queue)

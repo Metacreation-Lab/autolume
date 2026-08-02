@@ -55,3 +55,12 @@ def test_run_drag_shutdown():
     cmd.put({'cmd': 'shutdown'})
     run_drag(cmd, reply)   # must return, not hang
     assert reply.empty()
+
+
+def test_run_drag_start_before_load():
+    cmd, reply = queue.Queue(), queue.Queue()
+    cmd.put({'cmd': 'start', 'w0': None, 'points': [], 'targets': [], 'mask': None})
+    cmd.put({'cmd': 'shutdown'})
+    assert run_drag(cmd, reply) is None   # keeps serving, exits on shutdown
+    assert reply.get_nowait() == {'error': 'start before load'}
+    assert reply.empty()
