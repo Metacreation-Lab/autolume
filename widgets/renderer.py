@@ -272,6 +272,8 @@ class Renderer:
             res.image = self.to_cpu(res.image).numpy()
         if 'stats' in res:
             res.stats = self.to_cpu(res.stats).numpy()
+        if 'w' in res:
+            res.w = self.to_cpu(res.w).numpy()
         if 'error' in res:
             res.error = str(res.error)
         if self._is_timing:
@@ -590,6 +592,8 @@ class Renderer:
             cache_key = (G.synthesis, tuple(sorted(synthesis_kwargs.items())))
             torch.manual_seed(random_seed)
             w += self.to_device(direction)
+            res.w = w.detach()
+            res.g_dims = (int(G.output_shape[2]), int(G.output_shape[3]))
             out, manip_layers, = self.run_synthesis_net( w, capture_layer=layer_name, transforms=latent_transforms,
                                                  adjustments=adjustments, noise_adjustments=noise_adjustments, ratios=ratios, use_superres=use_superres,global_noise=global_noise,
                                                  combined_layers=combined_layers,mixing=mixing,
