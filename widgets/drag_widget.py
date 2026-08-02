@@ -39,6 +39,7 @@ class DragWidget:
         self.g_dims = None          # (gh, gw)
         self._w = None              # np [1, L, 512], latest from worker
         self._w0 = None
+        self._d0 = None             # np [512], adjuster direction baked into _w0
         self._linger = False        # keep overriding args one frame post-commit
         self._error = ''
         self._ready = False
@@ -129,6 +130,7 @@ class DragWidget:
         self.targets = self.targets[:n_pairs]
         self._w0 = np.array(result.w, dtype=np.float32, copy=True)
         self._w = np.array(result.w, dtype=np.float32, copy=True)
+        self._d0 = self._current_direction()
         mask = self.mask.numpy() if self.mask is not None else None
         self._cmd.put({'cmd': 'start', 'w0': self._w0,
                        'points': [list(p) for p in self.points],
@@ -137,6 +139,14 @@ class DragWidget:
                        'lr': float(self.lr)})
         self.step_count = 0
         self.dragging = True
+
+    def _current_direction(self):
+        direction = self.viz.args.get('direction')
+        if direction is None:
+            return None
+        if torch.is_tensor(direction):
+            direction = direction.detach().cpu().numpy()
+        return np.array(direction, dtype=np.float32)
 
     def stop_drag(self, commit=True):
         if not self.dragging:
@@ -148,7 +158,13 @@ class DragWidget:
             latent = self.viz.latent_widget.latent
             latent.mode = False     # switch to vector mode
             latent.project = False  # already a W+ latent
-            latent.vec = torch.from_numpy(self._w[0].copy())   # [num_ws, 512]
+            vec = torch.from_numpy(self._w[0].copy())   # [num_ws, 512]
+            if self._d0 is not None:
+                # res.w was captured after the renderer added the adjuster
+                # direction, and the renderer adds it again to whatever the
+                # latent widget serves, so shed the copy already baked in.
+                vec = vec - torch.from_numpy(self._d0)
+            latent.vec = vec
             self._linger = True
 
     def _poll(self):
