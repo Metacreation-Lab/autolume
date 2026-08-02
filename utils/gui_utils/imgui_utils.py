@@ -277,6 +277,28 @@ def drag_hidden_window(label, x, y, width, height, enabled=True):
 
 # ----------------------------------------------------------------------------
 
+def click_hidden_window(label, x, y, width, height, enabled=True):
+    """Invisible window over the given area reporting left-button state.
+    Returns (clicked, down, mouse_x, mouse_y) in screen coordinates."""
+    clicked = False
+    down = False
+    imgui.push_style_color(imgui.COLOR_WINDOW_BACKGROUND, 0, 0, 0, 0)
+    imgui.push_style_color(imgui.COLOR_BORDER, 0, 0, 0, 0)
+    imgui.set_next_window_position(x, y)
+    imgui.set_next_window_size(width, height)
+    imgui.begin(label, closable=False,
+                flags=(imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE))
+    if enabled and imgui.is_window_hovered():
+        clicked = imgui.is_mouse_clicked(0)
+        down = imgui.is_mouse_down(0)
+    imgui.end()
+    imgui.pop_style_color(2)
+    mouse_x, mouse_y = imgui.get_mouse_pos()
+    return clicked, down, mouse_x, mouse_y
+
+
+# ----------------------------------------------------------------------------
+
 def drag_float_slider(label, value, min_value, max_value, format):
     changed, value = imgui.slider_float(label, value, min_value, max_value, format)
 

@@ -381,3 +381,21 @@ def _setup_circle(hole):
     return v.astype('float32')
 
 #----------------------------------------------------------------------------
+
+def draw_arrow(x1, y1, x2, y2, *, width=3, head=12, color=1, alpha=1):
+    direction = np.array([x2 - x1, y2 - y1], dtype=np.float32)
+    length = float(np.linalg.norm(direction))
+    if length < 1e-3:
+        return
+    direction /= length
+    normal = np.array([-direction[1], direction[0]], dtype=np.float32)
+    tip = np.array([x2, y2], dtype=np.float32)
+    base = tip - direction * head
+    start = np.array([x1, y1], dtype=np.float32)
+    shaft = np.stack([start + normal * (width / 2), start - normal * (width / 2),
+                      base - normal * (width / 2), base + normal * (width / 2)])
+    draw_shape(shaft, mode=gl.GL_TRIANGLE_FAN, pos=0, size=1, color=color, alpha=alpha)
+    head_tri = np.stack([tip, base + normal * (head / 2), base - normal * (head / 2)])
+    draw_shape(head_tri, mode=gl.GL_TRIANGLE_FAN, pos=0, size=1, color=color, alpha=alpha)
+
+#----------------------------------------------------------------------------
