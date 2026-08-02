@@ -117,7 +117,6 @@ class Autolume(imgui_window.ImguiWindow):
 
         self._training_module = None
         self._projection_module = None
-        self._features_module = None
         self._super_res_module = None
         self._mixing_module = None
 
@@ -252,9 +251,6 @@ class Autolume(imgui_window.ImguiWindow):
         if self._projection_module is None:
             from modules.projection_module import ProjectionModule
             self._projection_module = ProjectionModule(ModuleHost(self))
-        if self._features_module is None:
-            from modules.pca_module import PCA_Module
-            self._features_module = PCA_Module(ModuleHost(self))
         if self._super_res_module is None:
             from modules.super_res_module import SuperResModule
             self._super_res_module = SuperResModule(ModuleHost(self))
@@ -486,9 +482,8 @@ class Autolume(imgui_window.ImguiWindow):
 
         cells = [
             (0, 0, 'Projection', self._projection_module),
-            (1, 0, 'Feature Extractor', self._features_module),
-            (0, 1, 'Super Resolution', self._super_res_module),
-            (1, 1, 'Model Mixing', self._mixing_module),
+            (1, 0, 'Super Resolution', self._super_res_module),
+            (0, 1, 'Model Mixing', self._mixing_module),
         ]
 
         for col, row, title, module in cells:
@@ -593,7 +588,7 @@ class Autolume(imgui_window.ImguiWindow):
                     self._draw_module_fullscreen('Training##fullscreen', self._training_module)
 
             elif self.state == States.TOOLS:
-                if (self._projection_module is None or self._features_module is None
+                if (self._projection_module is None
                         or self._super_res_module is None or self._mixing_module is None):
                     self.state = States.ERROR
                 else:
