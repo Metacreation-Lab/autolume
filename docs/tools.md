@@ -1,6 +1,6 @@
 # Tools
 
-The Tools screen gathers four utilities in a single grid: [Projection](#projection), [Feature Extractor](#feature-extractor), [Super Resolution](#super-resolution), and [Model Mixing](#model-mixing).
+The Tools screen gathers three utilities in a single grid: [Projection](#projection), [Super Resolution](#super-resolution), and [Model Mixing](#model-mixing).
 
 ## Projection
 
@@ -23,26 +23,6 @@ The following options are available for projection:
 - Use Pixel: Enable this option to use pixel distance for image comparison. This puts more weight on pixel similarity between the match and the target.
 - Use Penalty: Enable this option to penalize large update steps, resulting in a smoother projection and avoiding local minimums.
 - Use Center: Enable this option to use an additional center crop as the target image. This can improve matching accuracy but may reduce overall accuracy.
-
-## Feature Extractor
-
-This tool identifies and extracts interpretable feature directions in the latent space of a trained model based on Principal Component Analysis (PCA), using the GANSpace method. These extracted feature directions can then be used on the Perform screen (see [Adjust Input](perform.md#adjust-input)).
-
-![](assets/offline-modules-ganspace-01.png)
-
-The tool provides the following options:
-
-- Models: Select the .pkl file of the model for feature extraction.
-- PCA Estimator: Choose an algorithm to find salient directions in the latent space. Different algorithms result in slightly different extracted directions. Experiment with each option to find the best fit for your model.
-- Features: Specify the number of features to extract. More features result in more adjustable directions on the Perform screen but also increase file size. Often, extracting around 10 features is recommended.
-- Sparsity: This parameter adjusts the sparsity of the extracted directions. Leave it at the default if you are unsure about its impact.
-- Save Path: Choose the path to save the results, which include the extracted directions. These directions can be loaded in the "[Adjust Input](perform.md#adjust-input)" widget on the Perform screen.
-
-For more technical information on GANSpace, please refer to the following resources:
-
-[GANSpace Paper](https://www.google.com/url?q=https://arxiv.org/abs/2004.02546&sa=D&source=editors&ust=1769724592296454&usg=AOvVaw1GSkgPNlwUg633Ht9d3zn6)
-
-[GANSpace Repository on GitHub](https://www.google.com/url?q=https://github.com/harskish/ganspace&sa=D&source=editors&ust=1769724592296788&usg=AOvVaw3Xsw5-fahRCc_ZXrq6FtT5)
 
 ## Super Resolution
 
