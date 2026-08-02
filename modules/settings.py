@@ -91,7 +91,7 @@ class Settings:
             imgui.text("Data folder")
             imgui.text_colored(
                 "Autolume stores your models, presets, captures, datasets, "
-                "GANSpace features and training runs in this folder.",
+                "features and training runs in this folder.",
                 0.7, 0.7, 0.7)
             changed, self.pending_root = imgui_utils.input_text(
                 "##data_root", self.pending_root, 1024, imgui.INPUT_TEXT_ENTER_RETURNS_TRUE,
