@@ -583,6 +583,16 @@ class Renderer:
                     if len(w.shape) == 2 and w.shape[0] != G.num_ws:
                         w = w.repeat(G.num_ws, 1).unsqueeze(0)
 
+                # A stored W+ vector can carry a different number of ws than the
+                # model currently loaded, so cut off or repeat the last ws.
+                if len(w.shape) == 3 and w.shape[1] != G.num_ws:
+                    if w.shape[1] > G.num_ws:
+                        w = w[:, :G.num_ws, :]
+                    else:
+                        last_ws = w[:, -1:, :]
+                        repeated_ws = last_ws.repeat(1, G.num_ws - w.shape[1], 1)
+                        w = torch.cat([w, repeated_ws], dim=1)
+
             elif mode == "loop":
                 res.snap = {"mode": 2, "snap": {"looping_list": looping_list, "index": looping_index, "alpha": alpha}}
                 w = self.to_device(self.process_loop(G, looping_list, looping_index, alpha, trunc_psi, trunc_cutoff))
