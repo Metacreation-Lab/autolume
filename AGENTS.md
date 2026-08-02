@@ -30,7 +30,7 @@ autolume/
   audio/                      # Audio capture and analysis (sounddevice, numpy)
   bending/                    # Network bending operators applied at inference
   dnnlib/                     # Vendored NVIDIA dnnlib (StyleGAN2/3)
-  ganspace/                   # GANSpace PCA latent direction discovery
+  features/                   # Latent feature extraction, storage, worker (GANSpace method)
   metrics/                    # FID, KID, and related quality metrics
   modules/                    # UI modules and live-performance widgets
   widgets/                    # Reusable imgui widgets
@@ -65,7 +65,7 @@ autolume/
 
 ## Testing
 
-There is **no automated test suite**, and Autolume is a desktop GUI app (imgui + GLFW + GPU). An agent cannot drive the UI, see rendered frames, or verify visual output. Be explicit about this limit instead of pretending to have tested.
+A pytest suite exists in `tests/` and runs via `uv run pytest`. It covers headless logic only. Autolume is a desktop GUI app (imgui + GLFW + GPU), and an agent cannot drive the UI, see rendered frames, or verify visual output. Be explicit about this limit instead of pretending to have tested.
 
 What an agent **can and should** do:
 

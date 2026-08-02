@@ -34,7 +34,7 @@ uv run zensical serve    # serve the docs locally at http://127.0.0.1:8000
 | `audio/` | Audio capture and analysis (sounddevice, numpy) |
 | `bending/` | Network bending operators applied at inference |
 | `dnnlib/` | Vendored NVIDIA dnnlib utilities (StyleGAN2/3) |
-| `ganspace/` | GANSpace PCA-based latent direction discovery |
+| `features/` | Latent feature extraction, storage, worker (GANSpace method) |
 | `metrics/` | FID, KID, and related quality metrics |
 | `modules/` | UI modules and live performance widgets |
 | `widgets/` | Reusable imgui widgets |

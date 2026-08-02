@@ -116,11 +116,25 @@ The GUI and Render rows show the frame time and frame rate of the interface and 
 - OSC input: The source and port on which Autolume listens for incoming OSC signals. The default source, Any network, receives from other devices such as phones and controllers. This machine receives only from apps running on this computer. The source list also shows the addresses of your computer on each network it is connected to. Use one of them as the destination in the app sending the OSC signals. Changing the source applies immediately. For the port, press Restart (or Enter) to apply. See [OSC](#osc) for how to control parameters.
 - NDI output: When Enabled, the visuals are streamed over the NDI protocol and can be received in other software such as OBS, Resolume, or TouchDesigner. Name sets the name under which the stream appears on the network. Disabling it saves a bit of processing time per frame.
 
-## Adjust Input
+## Feature Mixer
 
-![](assets/live-module-adjust-input-01.png)
+![](assets/live-module-feature-mixer-01.png)
 
-This widget allows you to move the latent vector in adjustable directions. By default, the sliders correspond to random directions, each controllable also through OSC. You can also use Browse (on the right) to load the vectors calculated from the [Feature Extractor](tools.md#feature-extractor) tool so that all the sliders correspond to the extracted features. It is also possible to load individual vectors for each slider or to randomize directions altogether or individually.
+This widget moves the latent vector along up to eight directions at once, each controlled by its own slider.
+
+The first time you load a model, Autolume automatically extracts a bank of 64 meaningful directions for it using the [GANSpace](https://github.com/harskish/ganspace) method. The sliders are disabled while this runs and a progress bar is shown in the header. It happens once per model. The bank is stored in the features folder of your [data folder](index.md#where-autolume-stores-your-data) and loads instantly whenever you open that model again. If extraction fails or is cancelled, the sliders fall back to random directions and a Retry button appears.
+
+Each of the eight slots combines a direction, a zone, and a slider:
+
+- Direction: Picks what the slot controls. f1 to f64 are the extracted directions, ordered from strongest to most subtle. Pick random to give the slot a random direction instead. The same direction can be used in several slots.
+- Zone: Applies the direction to a part of the model. Form changes pose and geometry. Texture changes structure and materials. Color changes lighting and palette. All applies the direction everywhere. Custom applies it to a hand picked set of layers. The same direction on different zones gives genuinely different controls.
+- Customize: Opens a grid of the model's layers, grouped by resolution, to hand pick exactly where the direction applies. It starts from the current zone's layers. The checkbox in front of each row selects a whole resolution, and None and All clear or select everything. Any selection here sets the zone to Custom.
+- Slider: Moves the image along the direction. Sliders are scaled to each direction's natural strength, so every slot responds consistently.
+- Randomize: Replaces the slot's direction with a new random one. Press repeatedly to explore.
+- Reset: Restores the slot's extracted direction and returns the slider to zero.
+- Use OSC: Lets the slider be driven through OSC with an address and a mapping. See [OSC](#osc).
+
+![](assets/live-module-feature-mixer-02.png)
 
 ## Layer Transformations
 
