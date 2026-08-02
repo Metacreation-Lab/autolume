@@ -33,17 +33,17 @@ class ModelDropdownButton:
         self._pending_pick = None
 
     def notify_downloaded(self, pkl):
-        """Queue a just-downloaded model to be selected on the next frame."""
+        """Queue a just-downloaded model to be selected on the next enabled frame."""
         self._pending_pick = pkl
 
     @imgui_utils.scoped_by_object_id
-    def __call__(self, width=0):
+    def __call__(self, width=0, enabled=True):
         """Draw the button and dropdown; return the picked model path, or None."""
         picked = None
-        if self._pending_pick is not None:
+        if self._pending_pick is not None and enabled:
             picked = self._pending_pick
             self._pending_pick = None
-        if imgui_utils.button(self.label, width=width):
+        if imgui_utils.button(self.label, width=width, enabled=enabled):
             self.models = self.items_provider() if self.include_models else []
             self.run_items = self.runs_provider() if self.include_training_runs else []
             imgui.open_popup('model_dropdown')

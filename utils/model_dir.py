@@ -1,7 +1,9 @@
 """Helpers for the runtime model folders, which may not exist until first use."""
+import glob
 import os
 import re
 
+import dnnlib
 from utils.user_data import data_path
 
 
@@ -47,3 +49,24 @@ def list_training_run_pkls():
         if snapshots:
             runs.append((run, snapshots))
     return runs
+
+
+def resolve_pkl(pattern):
+    """Absolute path of the model pickle a pattern points at; URLs pass through.
+
+    A run directory resolves to its last saved snapshot.
+    """
+    assert isinstance(pattern, str)
+    assert pattern != ''
+
+    if dnnlib.util.is_url(pattern):
+        return pattern
+
+    path = pattern
+    if os.path.isdir(path):
+        pkl_files = sorted(glob.glob(os.path.join(path, 'network-snapshot-*.pkl')))
+        if len(pkl_files) == 0:
+            raise IOError(f'No network pickle found in "{path}"')
+        path = pkl_files[-1]
+
+    return os.path.abspath(path)
