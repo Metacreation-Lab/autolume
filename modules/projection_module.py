@@ -11,7 +11,7 @@ import multiprocessing as mp
 from projection.bayle_projection import run_projection
 from widgets.native_browser_widget import NativeBrowserWidget
 from widgets.help_icon_widget import HelpIconWidget
-from widgets.model_dropdown_widget import ModelDropdownButton
+from widgets.model_input_widget import ModelInputWidget
 
 class ProjectionModule:
     def __init__(self, menu):
@@ -52,7 +52,7 @@ class ProjectionModule:
                                                 daemon=True, name='projection')
         self.projected_texture = None
 
-        self.model_dropdown = ModelDropdownButton()
+        self.model_input = ModelInputWidget(menu.app)
 
     @imgui_utils.scoped_by_object_id
     def __call__(self):
@@ -78,16 +78,7 @@ class ProjectionModule:
 
         imgui.separator()
 
-        _, self.network_path = imgui_utils.input_text('##projection_network', self.network_path, 1024,
-                                                        flags=(
-                                                                    imgui.INPUT_TEXT_AUTO_SELECT_ALL | imgui.INPUT_TEXT_ENTER_RETURNS_TRUE),
-                                                        width=-self.app.button_w - self.app.spacing - 30,
-                                                        help_text='<PATH> | <URL> | <RUN_DIR> | <RUN_ID> | <RUN_ID>/<KIMG>.pkl')
-        imgui.same_line()
-        picked = self.model_dropdown(width=self.app.button_w)
-        if picked is not None:
-            self.network_path = picked
-
+        _changed, self.network_path = self.model_input(self.network_path, width=-30)
 
         joined = '\n'.join(self.target_fname)
         imgui_utils.input_text("##projection_file", joined, 1024, flags=imgui.INPUT_TEXT_READ_ONLY,

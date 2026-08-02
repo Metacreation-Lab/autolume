@@ -3,24 +3,19 @@ import copy
 import imgui
 import numpy as np
 
-import dnnlib
 from utils.gui_utils import imgui_utils
-from widgets.model_dropdown_widget import ModelDropdownButton
+from utils.model_dir import resolve_pkl
 
 try:
     import cPickle as pickle
 except ModuleNotFoundError:
     import pickle
 
-import glob
 import os
 import re
 
-from widgets.native_browser_widget import NativeBrowserWidget
+from widgets.model_input_widget import ModelInputWidget
 
-
-def _locate_results(pattern):
-    return pattern
 
 def extract_conv_names(model):
     model_names = [name for name, weight in model.named_parameters() if "mapping" not in name]
@@ -29,28 +24,6 @@ def extract_conv_names(model):
 def extract_mapping_names(model):
     model_names = [name for name, weight in model.named_parameters() if "mapping" in name]
     return model_names
-
-def resolve_pkl(pattern):
-        assert isinstance(pattern, str)
-        assert pattern != ''
-
-        # URL => return as is.
-        if dnnlib.util.is_url(pattern):
-            return pattern
-
-        # Short-hand pattern => locate.
-        path = _locate_results(pattern)
-
-        # Run dir => pick the last saved snapshot.
-        if os.path.isdir(path):
-            pkl_files = sorted(glob.glob(os.path.join(path, 'network-snapshot-*.pkl')))
-            if len(pkl_files) == 0:
-                raise IOError(f'No network pickle found in "{path}"')
-            path = pkl_files[-1]
-
-        # Normalize.
-        path = os.path.abspath(path)
-        return path
 
 class MixingWidget:
     def __init__(self, viz):
@@ -68,35 +41,21 @@ class MixingWidget:
         self.cached_layers = []
         self.mixing = False
 
-        self.browser = NativeBrowserWidget()
-
-        self.model_dropdown = ModelDropdownButton()
+        self.model_input = ModelInputWidget(viz.app)
 
     @imgui_utils.scoped_by_object_id
     def __call__(self, show):
         if show:
             _, self.mixing = imgui.checkbox("##mixingwidget_ckb", self.mixing)
             imgui.same_line()
-            model_changed, self.model_pth = imgui_utils.input_text(f'##network_mixing_widget', self.model_pth , 1024,
-                                                        flags=(
-                                                                    imgui.INPUT_TEXT_AUTO_SELECT_ALL | imgui.INPUT_TEXT_ENTER_RETURNS_TRUE),
-                                                        width=(100),
-                                                        help_text='<PATH> | <URL> | <RUN_DIR> | <RUN_ID> | <RUN_ID>/<KIMG>.pkl')
+            model_changed, self.model_pth = self.model_input(self.model_pth,
+                width=100 + 2 * (self.viz.app.button_w + self.viz.app.spacing))
+            if model_changed and self.model_pth:
+                try:
+                    self.model_pth = resolve_pkl(self.model_pth)
+                except OSError:
+                    pass
 
-
-            imgui.same_line()
-            picked = self.model_dropdown()
-            if picked is not None:
-                self.model_pth = resolve_pkl(picked)
-                model_changed = True
-
-            imgui.same_line()
-            if imgui_utils.button("Find##mixpkl", width=self.viz.app.button_w):
-                pkl = self.browser.select_model_file(initial_dir=self.model_pth)
-                if pkl:
-                    self.model_pth = resolve_pkl(str(pkl))
-                    model_changed = True
-            
             imgui.same_line()
             with imgui_utils.item_width(self.viz.app.button_w):
                 _, self.output_name = imgui_utils.input_text("##network_mixing_pkl", self.output_name, 1024, help_text="Name of the output model",

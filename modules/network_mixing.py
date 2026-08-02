@@ -8,20 +8,15 @@ import dnnlib
 from torch_utils import legacy
 from architectures import custom_stylegan2
 from utils.gui_utils import imgui_utils
-from utils.model_dir import ensure_models_dir
-from widgets.model_dropdown_widget import ModelDropdownButton
+from utils.model_dir import ensure_models_dir, resolve_pkl
+from widgets.model_input_widget import ModelInputWidget
 import pickle
 
-import glob
 import os
 import re
 from widgets.help_icon_widget import HelpIconWidget
 
 logger = logging.getLogger(__name__)
-
-
-def _locate_results(pattern):
-    return pattern
 
 
 def extract_conv_names(model):
@@ -56,11 +51,11 @@ class MixingModule:
         self.help_icon = HelpIconWidget()
         self.help_texts, self.help_urls = self.help_icon.load_help_texts("network_mixing")
 
-        self.model_dropdowns = {m: ModelDropdownButton(label='Browse...') for m in (1, 2)}
+        self.model_inputs = {m: ModelInputWidget(menu.app) for m in (1, 2)}
 
     def load_pkl(self, pkl, m, ignore_errors=False):
         try:
-            resolved = self.resolve_pkl(pkl)
+            resolved = resolve_pkl(pkl)
             name = resolved.replace('\\', '/').split('/')[-1]
             if m == 1:
                 self.model1 = resolved
@@ -114,22 +109,16 @@ class MixingModule:
         else:
             model = self.model2
 
-        changed, model = imgui_utils.input_text(f'##surgery{m}', model, 1024,
-                                                flags=(
-                                                        imgui.INPUT_TEXT_AUTO_SELECT_ALL | imgui.INPUT_TEXT_ENTER_RETURNS_TRUE),
-                                                width=input_width if input_width is not None else imgui.get_content_region_available_width()/2,
-                                                help_text='<PATH> | <URL> | <RUN_DIR> | <RUN_ID> | <RUN_ID>/<KIMG>.pkl')
+        if input_width is None:
+            input_width = imgui.get_content_region_available_width() / 2
+        changed, model = self.model_inputs[m](model,
+                                              width=input_width + self.app.spacing + self.app.button_w)
         if changed:
             if m == 1:
                 self.model1 = model
             else:
                 self.model2 = model
-            self.load_pkl(self.model1 if m == 1 else self.model2, m, ignore_errors=True)
-
-        imgui.same_line()
-        picked = self.model_dropdowns[m](width=self.app.button_w)
-        if picked is not None:
-            self.load_pkl(picked, m, ignore_errors=True)
+            self.load_pkl(model, m, ignore_errors=True)
 
         imgui.end_group()
 
@@ -153,28 +142,6 @@ class MixingModule:
                 return e
             self._networks[cache_key] = net
         return net, data
-
-    def resolve_pkl(self, pattern):
-        assert isinstance(pattern, str)
-        assert pattern != ''
-
-        # URL => return as is.
-        if dnnlib.util.is_url(pattern):
-            return pattern
-
-        # Short-hand pattern => locate.
-        path = _locate_results(pattern)
-
-        # Run dir => pick the last saved snapshot.
-        if os.path.isdir(path):
-            pkl_files = sorted(glob.glob(os.path.join(path, 'network-snapshot-*.pkl')))
-            if len(pkl_files) == 0:
-                raise IOError(f'No network pickle found in "{path}"')
-            path = pkl_files[-1]
-
-        # Normalize.
-        path = os.path.abspath(path)
-        return path
 
     @imgui_utils.scoped_by_object_id
     def __call__(self):
