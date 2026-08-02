@@ -94,11 +94,16 @@ class DragEngine:
         candidates = [r for r in G.synthesis.block_resolutions if r <= feature_res]
         self.feature_res = candidates[-1] if candidates else G.synthesis.block_resolutions[0]
         block = getattr(G.synthesis, f'b{self.feature_res}')
+        self._capturing = False
         self._hook = block.register_forward_hook(self._on_block)
         self.feat_refs = None
         self.feat0 = None
 
     def _on_block(self, module, inputs, outputs):
+        # Inert unless this engine is mid-capture, so the hook never disturbs
+        # another engine's or a third party's forward through the same G.
+        if not self._capturing:
+            return
         feat = outputs[0] if isinstance(outputs, (tuple, list)) else outputs
         raise _CaptureDone(feat)
 
@@ -113,10 +118,13 @@ class DragEngine:
     def _features(self):
         ws = torch.cat([self.w[:, :self.trainable_ws],
                         self.w0[:, self.trainable_ws:]], dim=1)
+        self._capturing = True
         try:
             self.G.synthesis(ws, noise_mode='const', force_fp32=True)
         except _CaptureDone as e:
             return e.feat.float()
+        finally:
+            self._capturing = False
         raise RuntimeError(f'feature block b{self.feature_res} did not run')
 
     def step(self, points, targets, mask=None, lambda_mask=20.0, r1=3, r2=12):

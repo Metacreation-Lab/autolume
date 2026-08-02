@@ -74,6 +74,19 @@ def test_step_converged_leaves_w_unchanged(tiny_g, w0):
         engine.close()
 
 
+def test_live_engine_does_not_break_other_forwards(tiny_g, w0):
+    # The capture hook must stay inert outside the engine's own forward, or it
+    # would hijack every other pass through the same generator.
+    engine = make_engine(tiny_g, w0)
+    try:
+        engine.step([[32, 32]], [[44, 32]])
+        with torch.no_grad():
+            img, _ = tiny_g.synthesis(w0, noise_mode='const', force_fp32=True)
+        assert tuple(img.shape) == tuple(tiny_g.output_shape)
+    finally:
+        engine.close()
+
+
 def test_mask_guard(tiny_g, w0):
     # An untouched (all ones) mask must not constrain the optimization.
     engine_a = make_engine(tiny_g, w0)
