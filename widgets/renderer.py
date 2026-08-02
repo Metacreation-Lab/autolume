@@ -592,8 +592,11 @@ class Renderer:
             cache_key = (G.synthesis, tuple(sorted(synthesis_kwargs.items())))
             torch.manual_seed(random_seed)
             w += self.to_device(direction)
-            res.w = w.detach()
-            res.g_dims = (int(G.output_shape[2]), int(G.output_shape[3]))
+            res.w = w.detach().float()
+            # StyleGAN3 generators skip the custom rebuild, so they carry no output_shape.
+            g_shape = getattr(G, 'output_shape', None)
+            res.g_dims = ((int(g_shape[2]), int(g_shape[3])) if g_shape is not None
+                          else (int(G.img_resolution), int(G.img_resolution)))
             out, manip_layers, = self.run_synthesis_net( w, capture_layer=layer_name, transforms=latent_transforms,
                                                  adjustments=adjustments, noise_adjustments=noise_adjustments, ratios=ratios, use_superres=use_superres,global_noise=global_noise,
                                                  combined_layers=combined_layers,mixing=mixing,
