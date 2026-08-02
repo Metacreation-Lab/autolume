@@ -29,6 +29,7 @@ from widgets import preset_widget
 from widgets import audio_widget
 from widgets import mixing_widget
 from widgets import collapsable_layer
+from widgets.drag_widget import DragWidget
 from widgets.help_icon_widget import HelpIconWidget
 
 from pythonosc.osc_server import BlockingOSCUDPServer
@@ -117,6 +118,8 @@ class Visualizer:
         self.mixing_widget = mixing_widget.MixingWidget(self)
         self.collapsed_widget = collapsable_layer.LayerWidget(self)
         self.audio_widget = audio_widget.AudioWidget(self)
+        self.drag_widget = DragWidget(self)
+        self._image_area = None
 
     #Screen capture and screen recording
         self.is_recording = False
@@ -507,6 +510,8 @@ class Visualizer:
             self._async_renderer.close()
             self._async_renderer = None
 
+        self.drag_widget.close()
+
         self.stop_osc_server()
 
         self.stop_ndi()
@@ -543,10 +548,19 @@ class Visualizer:
 
         navbar_h = self.app.navbar_height
 
-        # Detect mouse dragging in the result area.
-        dragging, dx, dy = imgui_utils.drag_hidden_window('##result_area', x=self.pane_w, y=navbar_h, width=self.app.content_width-self.pane_w, height=self.app.content_height - navbar_h)
-        if dragging:
-            self.latent_widget.drag(dx, dy)
+        # Result-area mouse input: drag points when the drag widget is armed,
+        # otherwise pan seeds as before.
+        area_w = self.app.content_width - self.pane_w
+        area_h = self.app.content_height - navbar_h
+        if self.drag_widget.wants_input():
+            clicked, down, mouse_x, mouse_y = imgui_utils.click_hidden_window(
+                '##result_area', x=self.pane_w, y=navbar_h, width=area_w, height=area_h)
+            self.drag_widget.on_image_click(clicked, down, mouse_x, mouse_y, self._image_area)
+        else:
+            dragging, dx, dy = imgui_utils.drag_hidden_window(
+                '##result_area', x=self.pane_w, y=navbar_h, width=area_w, height=area_h)
+            if dragging:
+                self.latent_widget.drag(dx, dy)
 
         imgui.set_next_window_position(0, navbar_h)
         imgui.set_next_window_size(self.pane_w, self.app.content_height - navbar_h)
@@ -586,6 +600,10 @@ class Visualizer:
         header_opened = imgui_utils.collapsing_header('Adjust Input', default=True)[0]
         self._header_help_icon('adjust_input')
         self.adjuster_widget(header_opened)
+
+        # Drag
+        header_opened = imgui_utils.collapsing_header('Drag', default=True)[0]
+        self.drag_widget(header_opened)
 
         # Layer Transformations
         header_opened = imgui_utils.collapsing_header('Layer Transformations', default=True)[0]
@@ -664,7 +682,13 @@ class Visualizer:
                 
                 zoom = np.floor(zoom) if zoom >= 1 else zoom
             
+            disp_w = self._tex_obj.width * zoom
+            disp_h = self._tex_obj.height * zoom
+            self._image_area = [float(pos[0] - disp_w / 2), float(pos[1] - disp_h / 2),
+                                float(disp_w), float(disp_h)]
+
             self._tex_obj.draw(pos=pos, zoom=zoom, align=0.5, rint=True)
+            self.drag_widget.draw_overlay(self._image_area)
         if 'error' in self.result:
             self.print_error(self.result.error)
             if 'message' not in self.result:
