@@ -177,7 +177,8 @@ def test_tensorrt_reports_built_versus_running(imgui_frame, widget_factory, monk
     widget.params.acceleration = "tensorrt"
     monkeypatch.setattr(diffusion_widget.trt, "engines_ready", lambda params: False)
     widget._ready_key = None
-    assert indicators(widget)["TensorRT"][0] is RED
+    # the stage runs unaccelerated meanwhile, so the label has to say why
+    assert indicators(widget)["TensorRT (unbuilt)"][0] is RED
 
     monkeypatch.setattr(diffusion_widget.trt, "engines_ready", lambda params: True)
     widget._ready_key = None
@@ -188,12 +189,18 @@ def test_tensorrt_reports_built_versus_running(imgui_frame, widget_factory, monk
     assert indicators(widget, loaded=live)["TensorRT"][0] is GREEN
 
 
-def test_loading_message_does_not_editorialise(imgui_frame, widget_factory):
+def test_status_line_only_reports_loading_and_ready(imgui_frame, widget_factory, monkeypatch):
+    from widgets import diffusion_widget
+    from widgets.diffusion_widget import GREEN
     widget = widget_factory(make_viz())
     widget.available = True
     widget.enabled = True
-    text, _color = widget.status_line("Loading pipeline (4 s)", needs_build=False)
-    assert text == "Loading pipeline (4 s)"
+    assert widget.status_line("Loading pipeline (4 s)")[0] == "Loading pipeline (4 s)"
+    # unbuilt engines are the TensorRT indicator's business, not this line's
+    widget.params.acceleration = "tensorrt"
+    monkeypatch.setattr(diffusion_widget.trt, "engines_ready", lambda params: False)
+    widget._ready_key = None
+    assert widget.status_line("") == ("Ready", GREEN)
 
 
 def test_header_help_covers_every_control():

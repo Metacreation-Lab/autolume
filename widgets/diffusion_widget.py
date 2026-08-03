@@ -222,16 +222,17 @@ class DiffusionWidget:
                 imgui.close_current_popup()
             imgui.end_popup()
 
-    def status_line(self, status, needs_build):
-        """(text, rgba). One line, always present, so the panel is never silent."""
+    def status_line(self, status):
+        """(text, rgba). One line, always present, so the panel is never silent.
+
+        Loading and ready only: what is wrong with a specific part of the setup
+        belongs on that part's indicator."""
         if not self.available:
             return 'Requires an NVIDIA GPU. Not available on this platform.', GRAY
         if status.startswith('Error'):
             return status, RED
         if status.startswith(diffusion_engine.LOADING_PREFIX):
             return status, AMBER
-        if needs_build:
-            return 'TensorRT selected but engines are not built for this setup.', AMBER
         if not self.enabled:
             return 'Off - configure below, then enable', GRAY
         return 'Ready', GREEN
@@ -270,36 +271,45 @@ class DiffusionWidget:
         else:
             lora = (AMBER, 'Fusing' if loading else 'Not fused')
 
+        # the stage runs unaccelerated when engines are missing, so the label
+        # carries the reason rather than stealing the status line for it
+        trt_label = 'TensorRT'
         if self.params.acceleration != 'tensorrt':
             tensorrt = (GRAY, 'Off - running the unaccelerated pipeline')
         elif self.build_state == 'building':
+            trt_label = 'TensorRT (building)'
             tensorrt = (AMBER, self.build_message or 'Building engines')
         elif not self.engines_ready():
-            tensorrt = (RED, 'No engines for this setup yet. Use Build engines.')
+            trt_label = 'TensorRT (unbuilt)'
+            tensorrt = (RED, 'No engines for this setup, so it runs unaccelerated. '
+                             'Use Build engines.')
         elif live.get('acceleration') == 'tensorrt':
             tensorrt = (GREEN, 'Engines built and running')
         else:
             tensorrt = (AMBER, 'Engines built, not loaded yet')
 
-        return [('Checkpoint',) + checkpoint, ('LoRA',) + lora, ('TensorRT',) + tensorrt]
+        return [('Checkpoint',) + checkpoint, ('LoRA',) + lora, (trt_label,) + tensorrt]
 
-    def status_dot(self, color):
-        """Font-independent bullet: the bundled font carries no dot glyph."""
+    def status_dot_label(self, label, color):
+        """A bullet and its label. The bundled font carries no dot glyph, so the
+        dot is drawn, and it is centred on the label's own rect: a framed widget
+        earlier on the line shifts text down and the dot would not follow."""
         size = imgui.get_text_line_height()
-        x, y = imgui.get_cursor_screen_pos()
-        imgui.get_window_draw_list().add_circle_filled(
-            x + size * 0.5, y + size * 0.5, size * 0.28, imgui.get_color_u32_rgba(*color))
+        imgui.begin_group()
         imgui.dummy(size, size)
+        dot_x = imgui.get_item_rect_min()[0] + size * 0.5
+        imgui.same_line()
+        imgui.text_colored(label, *color)
+        top, bottom = imgui.get_item_rect_min()[1], imgui.get_item_rect_max()[1]
+        imgui.end_group()
+        imgui.get_window_draw_list().add_circle_filled(
+            dot_x, (top + bottom) * 0.5, size * 0.25, imgui.get_color_u32_rgba(*color))
 
     def draw_status(self, viz, status, loaded, loading):
         for i, (label, color, tooltip) in enumerate(self.status_indicators(status, loaded, loading)):
             if i:
                 imgui.same_line(spacing=viz.app.spacing * 3)
-            imgui.begin_group()
-            self.status_dot(color)
-            imgui.same_line()
-            imgui.text_colored(label, *color)
-            imgui.end_group()
+            self.status_dot_label(label, color)
             if imgui.is_item_hovered():
                 imgui.set_tooltip(tooltip)
 
@@ -483,7 +493,7 @@ class DiffusionWidget:
                 self.draw_status(viz, status, loaded, loading)
                 # end_group() already broke the line, so no same_line() here
                 imgui.set_cursor_pos_x(self.column_x(viz))
-                text, color = self.status_line(status, needs_build)
+                text, color = self.status_line(status)
                 imgui.text_colored(text, *color)
 
                 # everything stays editable while disabled: set the look up first,

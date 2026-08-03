@@ -364,34 +364,33 @@ def trt_params(**kwargs):
     return dict(engine.default_params(), acceleration="tensorrt", **kwargs)
 
 
-def test_tensorrt_without_engines_passes_through_and_never_builds(monkeypatch):
+def test_tensorrt_without_engines_runs_unaccelerated(monkeypatch):
     from diffusion import trt
     monkeypatch.setattr(trt, "engines_ready", lambda params: False)
-    calls = []
+    seen = []
 
     def fake_make(params, device):
-        calls.append(1)
+        seen.append(params["acceleration"])
         return FakeWrapper()
 
     monkeypatch.setattr(engine, "_make_wrapper", fake_make)
     eng = engine.DiffusionEngine()
-    out = torch.full((1, 3, 64, 64), 0.5)
-    res = eng.process(out, trt_params(), torch.device("cpu"))
-    assert torch.equal(res, out)
-    assert eng.status == "TensorRT engines not built. Use Build engines."
-    assert calls == []
+    res = pump(eng, torch.zeros(1, 3, 64, 64), trt_params())
+    # withholding the image would be worse than losing the speed, and the panel
+    # flags TensorRT as unbuilt so the loss is visible
+    assert res.shape == (1, 3, 512, 512)
+    assert seen == ["none"]
+    assert eng.status == "" and eng.loaded["acceleration"] == "none"
 
 
-def test_tensorrt_check_applies_when_a_wrapper_already_exists(monkeypatch):
+def test_ticking_tensorrt_without_engines_keeps_the_existing_pipeline(monkeypatch):
     from diffusion import trt
     monkeypatch.setattr(trt, "engines_ready", lambda params: False)
     eng, calls = make_engine(monkeypatch)
-    eng.process(torch.zeros(1, 3, 64, 64), engine.default_params(), torch.device("cpu"))
-    out = torch.full((1, 3, 64, 64), 0.5)
-    res = eng.process(out, trt_params(), torch.device("cpu"))
-    assert torch.equal(res, out)
-    assert len(calls) == 1
-    assert eng.status == "TensorRT engines not built. Use Build engines."
+    pump(eng, torch.zeros(1, 3, 64, 64), engine.default_params())
+    res = pump(eng, torch.full((1, 3, 64, 64), 0.5), trt_params())
+    # same effective setup, so no reload and no dropped frames
+    assert len(calls) == 1 and res.shape == (1, 3, 512, 512)
 
 
 def test_tensorrt_builds_when_engines_are_ready(monkeypatch):
@@ -410,10 +409,11 @@ def test_engines_appearing_trigger_a_build_without_a_param_change(monkeypatch):
     eng, calls = make_engine(monkeypatch)
     p = trt_params()
     pump(eng, torch.zeros(1, 3, 64, 64), p)
-    assert calls == []
+    assert calls == [engine.build_key(dict(p, acceleration="none"))]
     state["ready"] = True
     res = pump(eng, torch.zeros(1, 3, 64, 64), p)
-    assert len(calls) == 1
+    # the finished build swaps the unaccelerated pipeline for the compiled one
+    assert calls[-1] == engine.build_key(p)
     assert eng.status == "" and res.shape == (1, 3, 512, 512)
 
 

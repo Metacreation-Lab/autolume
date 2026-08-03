@@ -10,8 +10,6 @@ import torch.nn.functional as F
 
 NUM_INFERENCE_STEPS = 50
 
-TRT_NOT_BUILT = "TensorRT engines not built. Use Build engines."
-
 LOADING_PREFIX = "Loading pipeline"
 
 
@@ -162,19 +160,15 @@ class DiffusionEngine:
             self.status = ""
 
     def process(self, out, params, device):
-        key = build_key(params)
-        self._sweep_loader(key)
         if params["acceleration"] == "tensorrt":
             from diffusion import trt
-            # falling back to the eager pipeline here would silently cost the user
-            # the speed they asked for, so the stage passes frames through instead
+            # No engines yet: run unaccelerated rather than withholding the
+            # image. The UI flags TensorRT as unbuilt, so the missing speed is
+            # visible and the 20 to 30 minute build still never runs inline.
             if not trt.engines_ready(params):
-                self._wrapper = None
-                self._loaded = None
-                self._applied = None
-                self._key = None
-                self.status = TRT_NOT_BUILT
-                return out
+                params = dict(params, acceleration="none")
+        key = build_key(params)
+        self._sweep_loader(key)
         if key != self._key and self._loader is None:
             # release the old pipeline first so the load never doubles VRAM
             self._wrapper = None
