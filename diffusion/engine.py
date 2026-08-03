@@ -2,6 +2,8 @@
 and importable on platforms where the streamdiffusion extra is absent."""
 import importlib.util
 import os
+import threading
+import time
 
 import torch
 import torch.nn.functional as F
@@ -9,6 +11,8 @@ import torch.nn.functional as F
 NUM_INFERENCE_STEPS = 50
 
 TRT_NOT_BUILT = "TensorRT engines not built. Use Build engines."
+
+LOADING_PREFIX = "Loading pipeline"
 
 
 def is_available():
@@ -94,13 +98,51 @@ def _error_status(exc):
 
 
 class DiffusionEngine:
+    """Pipelines load in a background thread so the render worker keeps
+    producing (undiffused) frames instead of freezing for the 3 to 40 s a
+    build takes; the finished pipeline is swapped in between frames."""
+
     def __init__(self):
         self._wrapper = None
         self._key = None
         self._applied = None
+        self._loader = None
         self.status = ""
 
+    def _start_load(self, params, device, key):
+        box = {}
+        snapshot = dict(params)
+
+        def work():
+            try:
+                box["wrapper"] = _make_wrapper(snapshot, device)
+            except Exception as e:
+                box["error"] = e
+
+        thread = threading.Thread(target=work, daemon=True, name="diffusion-load")
+        self._loader = dict(key=key, thread=thread, box=box, started=time.time())
+        thread.start()
+
+    def _sweep_loader(self, key):
+        """Install a finished load for the current key; discard a stale one."""
+        if self._loader is None or self._loader["thread"].is_alive():
+            return
+        loader = self._loader
+        self._loader = None
+        if loader["key"] != key:
+            loader["box"].pop("wrapper", None)
+            return
+        self._key = key  # errors latch: no retry until the key changes
+        if "error" in loader["box"]:
+            self.status = _error_status(loader["box"]["error"])
+        else:
+            self._wrapper = loader["box"]["wrapper"]
+            self._applied = None
+            self.status = ""
+
     def process(self, out, params, device):
+        key = build_key(params)
+        self._sweep_loader(key)
         if params["acceleration"] == "tensorrt":
             from diffusion import trt
             # falling back to the eager pipeline here would silently cost the user
@@ -111,16 +153,16 @@ class DiffusionEngine:
                 self._key = None
                 self.status = TRT_NOT_BUILT
                 return out
-        key = build_key(params)
-        if key != self._key:
+        if key != self._key and self._loader is None:
+            # release the old pipeline first so the load never doubles VRAM
             self._wrapper = None
             self._applied = None
-            self._key = key
-            self.status = ""
-            try:
-                self._wrapper = _make_wrapper(params, device)
-            except Exception as e:
-                self.status = _error_status(e)
+            self.status = f"{LOADING_PREFIX} (0 s)"
+            self._start_load(params, device, key)
+            return out
+        if self._loader is not None:
+            self.status = f"{LOADING_PREFIX} ({int(time.time() - self._loader['started'])} s)"
+            return out
         if self._wrapper is None:
             return out
         try:

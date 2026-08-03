@@ -1,10 +1,21 @@
 import sys
+import time
 import types
 
 import pytest
 import torch
 
 from diffusion import engine
+
+
+def pump(eng, out, p, device=torch.device("cpu")):
+    """Drive process() until a pending background load settles."""
+    res = eng.process(out, p, device)
+    deadline = time.time() + 5
+    while eng.status.startswith(engine.LOADING_PREFIX) and time.time() < deadline:
+        time.sleep(0.001)
+        res = eng.process(out, p, device)
+    return res
 
 
 def test_availability_probe_is_bool():
@@ -115,7 +126,7 @@ def holding_engine(monkeypatch):
 def test_process_returns_diffused_frame_in_stylegan_range(monkeypatch):
     eng, _ = make_engine(monkeypatch)
     out = torch.zeros(1, 3, 64, 64)
-    res = eng.process(out, engine.default_params(), torch.device("cpu"))
+    res = pump(eng, out, engine.default_params())
     assert res.shape == (1, 3, 512, 512)
     assert res.min() >= -1.0001 and res.max() <= 1.0001
     assert eng.status == ""
@@ -124,7 +135,7 @@ def test_process_returns_diffused_frame_in_stylegan_range(monkeypatch):
 def test_no_rebuild_on_prompt_or_strength_change(monkeypatch):
     eng, calls = make_engine(monkeypatch)
     p = engine.default_params()
-    eng.process(torch.zeros(1, 3, 64, 64), p, torch.device("cpu"))
+    pump(eng, torch.zeros(1, 3, 64, 64), p)
     eng.process(torch.zeros(1, 3, 64, 64), dict(p, prompt="new", strength=0.9), torch.device("cpu"))
     assert len(calls) == 1
 
@@ -132,7 +143,7 @@ def test_no_rebuild_on_prompt_or_strength_change(monkeypatch):
 def test_no_rebuild_on_seed_change(monkeypatch):
     eng, calls = make_engine(monkeypatch)
     p = engine.default_params()
-    eng.process(torch.zeros(1, 3, 64, 64), p, torch.device("cpu"))
+    pump(eng, torch.zeros(1, 3, 64, 64), p)
     eng.process(torch.zeros(1, 3, 64, 64), dict(p, seed=7), torch.device("cpu"))
     assert len(calls) == 1
 
@@ -140,15 +151,15 @@ def test_no_rebuild_on_seed_change(monkeypatch):
 def test_rebuild_on_model_change(monkeypatch):
     eng, calls = make_engine(monkeypatch)
     p = engine.default_params()
-    eng.process(torch.zeros(1, 3, 64, 64), p, torch.device("cpu"))
-    eng.process(torch.zeros(1, 3, 64, 64), dict(p, model="other/model"), torch.device("cpu"))
+    pump(eng, torch.zeros(1, 3, 64, 64), p)
+    pump(eng, torch.zeros(1, 3, 64, 64), dict(p, model="other/model"))
     assert len(calls) == 2
 
 
 def test_first_frame_prepares_before_the_first_call(monkeypatch):
     eng, holder, _ = holding_engine(monkeypatch)
     p = dict(engine.default_params(), prompt="a", strength=0.4, seed=3)
-    eng.process(torch.zeros(1, 3, 64, 64), p, torch.device("cpu"))
+    pump(eng, torch.zeros(1, 3, 64, 64), p)
     w = holder["w"]
     assert w.prepares == [("a", 50)]
     assert w.calls.index("prepare") < w.calls.index("frame")
@@ -161,8 +172,8 @@ def test_first_frame_prepares_before_the_first_call(monkeypatch):
 def test_prompt_change_reaches_wrapper_once(monkeypatch):
     eng, holder, _ = holding_engine(monkeypatch)
     p = engine.default_params()
-    eng.process(torch.zeros(1, 3, 64, 64), dict(p, prompt="a"), torch.device("cpu"))
-    eng.process(torch.zeros(1, 3, 64, 64), dict(p, prompt="a"), torch.device("cpu"))
+    pump(eng, torch.zeros(1, 3, 64, 64), dict(p, prompt="a"))
+    pump(eng, torch.zeros(1, 3, 64, 64), dict(p, prompt="a"))
     eng.process(torch.zeros(1, 3, 64, 64), dict(p, prompt="b"), torch.device("cpu"))
     assert holder["w"].prompts.count("b") == 1
 
@@ -170,7 +181,7 @@ def test_prompt_change_reaches_wrapper_once(monkeypatch):
 def test_prompt_change_does_not_re_prepare_or_touch_stream_params(monkeypatch):
     eng, holder, _ = holding_engine(monkeypatch)
     p = engine.default_params()
-    eng.process(torch.zeros(1, 3, 64, 64), dict(p, prompt="a"), torch.device("cpu"))
+    pump(eng, torch.zeros(1, 3, 64, 64), dict(p, prompt="a"))
     w = holder["w"]
     before = len(w.stream_params)
     eng.process(torch.zeros(1, 3, 64, 64), dict(p, prompt="b"), torch.device("cpu"))
@@ -181,7 +192,7 @@ def test_prompt_change_does_not_re_prepare_or_touch_stream_params(monkeypatch):
 def test_strength_and_seed_changes_update_stream_params(monkeypatch):
     eng, holder, _ = holding_engine(monkeypatch)
     p = engine.default_params()
-    eng.process(torch.zeros(1, 3, 64, 64), p, torch.device("cpu"))
+    pump(eng, torch.zeros(1, 3, 64, 64), p)
     eng.process(torch.zeros(1, 3, 64, 64), dict(p, strength=0.9, seed=11), torch.device("cpu"))
     w = holder["w"]
     assert len(w.stream_params) == 2
@@ -194,7 +205,7 @@ def test_unchanged_params_do_not_re_send_updates(monkeypatch):
     eng, holder, _ = holding_engine(monkeypatch)
     p = engine.default_params()
     for _ in range(3):
-        eng.process(torch.zeros(1, 3, 64, 64), p, torch.device("cpu"))
+        pump(eng, torch.zeros(1, 3, 64, 64), p)
     w = holder["w"]
     assert len(w.prepares) == 1 and len(w.stream_params) == 1 and w.prompts == []
     assert w.frames == 3
@@ -211,7 +222,7 @@ def test_build_error_latches_passthrough_and_no_retry(monkeypatch):
     eng = engine.DiffusionEngine()
     out = torch.full((1, 3, 64, 64), 0.5)
     p = engine.default_params()
-    res1 = eng.process(out, p, torch.device("cpu"))
+    res1 = pump(eng, out, p)
     res2 = eng.process(out, p, torch.device("cpu"))
     assert torch.equal(res1, out) and torch.equal(res2, out)
     assert len(calls) == 1
@@ -229,9 +240,9 @@ def test_error_clears_when_build_key_changes(monkeypatch):
     monkeypatch.setattr(engine, "_make_wrapper", fake_make)
     eng = engine.DiffusionEngine()
     p = engine.default_params()
-    eng.process(torch.zeros(1, 3, 64, 64), p, torch.device("cpu"))
+    pump(eng, torch.zeros(1, 3, 64, 64), p)
     state["fail"] = False
-    res = eng.process(torch.zeros(1, 3, 64, 64), dict(p, model="other/model"), torch.device("cpu"))
+    res = pump(eng, torch.zeros(1, 3, 64, 64), dict(p, model="other/model"))
     assert res.shape == (1, 3, 512, 512)
     assert eng.status == ""
 
@@ -239,7 +250,7 @@ def test_error_clears_when_build_key_changes(monkeypatch):
 def test_frame_error_passes_through_without_raising(monkeypatch):
     eng, holder, _ = holding_engine(monkeypatch)
     p = engine.default_params()
-    eng.process(torch.zeros(1, 3, 64, 64), p, torch.device("cpu"))
+    pump(eng, torch.zeros(1, 3, 64, 64), p)
     holder["w"].fail_on_frame = True
     out = torch.full((1, 3, 64, 64), 0.5)
     res = eng.process(out, p, torch.device("cpu"))
@@ -257,7 +268,7 @@ def test_lora_params_reach_wrapper(monkeypatch):
     monkeypatch.setattr(engine, "_make_wrapper", fake_make)
     eng = engine.DiffusionEngine()
     p = dict(engine.default_params(), lora_path="/tmp/style.safetensors", lora_scale=0.7)
-    eng.process(torch.zeros(1, 3, 64, 64), p, torch.device("cpu"))
+    pump(eng, torch.zeros(1, 3, 64, 64), p)
     assert seen["lora_path"] == "/tmp/style.safetensors" and seen["lora_scale"] == 0.7
 
 
@@ -287,7 +298,7 @@ def test_missing_lora_file_errors_without_retry(monkeypatch, tmp_path):
     eng = engine.DiffusionEngine()
     out = torch.full((1, 3, 64, 64), 0.5)
     p = dict(engine.default_params(), lora_path=str(tmp_path / "missing.safetensors"))
-    res1 = eng.process(out, p, torch.device("cpu"))
+    res1 = pump(eng, out, p)
     res2 = eng.process(out, p, torch.device("cpu"))
     assert torch.equal(res1, out) and torch.equal(res2, out)
     assert len(calls) == 1
@@ -300,12 +311,12 @@ def test_lora_error_recovers_when_path_is_fixed(monkeypatch, tmp_path):
     eng = engine.DiffusionEngine()
     out = torch.full((1, 3, 64, 64), 0.5)
     p = engine.default_params()
-    eng.process(out, dict(p, lora_path=str(tmp_path / "missing.safetensors")), torch.device("cpu"))
+    pump(eng, out, dict(p, lora_path=str(tmp_path / "missing.safetensors")))
     assert eng.status.startswith("Error")
     assert built == []
     lora = tmp_path / "style.safetensors"
     lora.write_bytes(b"")
-    res = eng.process(out, dict(p, lora_path=str(lora), lora_scale=0.7), torch.device("cpu"))
+    res = pump(eng, out, dict(p, lora_path=str(lora), lora_scale=0.7))
     assert res.shape == (1, 3, 512, 512)
     assert eng.status == ""
     assert built[0]["lora_dict"] == {str(lora): 0.7}
@@ -315,7 +326,7 @@ def test_empty_lora_path_builds_without_lora_dict(monkeypatch):
     built = []
     fake_streamdiffusion_module(monkeypatch, built)
     eng = engine.DiffusionEngine()
-    eng.process(torch.zeros(1, 3, 64, 64), engine.default_params(), torch.device("cpu"))
+    pump(eng, torch.zeros(1, 3, 64, 64), engine.default_params())
     assert eng.status == ""
     assert built[0]["lora_dict"] is None
 
@@ -387,7 +398,7 @@ def test_tensorrt_builds_when_engines_are_ready(monkeypatch):
     from diffusion import trt
     monkeypatch.setattr(trt, "engines_ready", lambda params: True)
     eng, calls = make_engine(monkeypatch)
-    res = eng.process(torch.zeros(1, 3, 64, 64), trt_params(), torch.device("cpu"))
+    res = pump(eng, torch.zeros(1, 3, 64, 64), trt_params())
     assert res.shape == (1, 3, 512, 512)
     assert eng.status == "" and len(calls) == 1
 
@@ -398,10 +409,10 @@ def test_engines_appearing_trigger_a_build_without_a_param_change(monkeypatch):
     monkeypatch.setattr(trt, "engines_ready", lambda params: state["ready"])
     eng, calls = make_engine(monkeypatch)
     p = trt_params()
-    eng.process(torch.zeros(1, 3, 64, 64), p, torch.device("cpu"))
+    pump(eng, torch.zeros(1, 3, 64, 64), p)
     assert calls == []
     state["ready"] = True
-    res = eng.process(torch.zeros(1, 3, 64, 64), p, torch.device("cpu"))
+    res = pump(eng, torch.zeros(1, 3, 64, 64), p)
     assert len(calls) == 1
     assert eng.status == "" and res.shape == (1, 3, 512, 512)
 
@@ -413,7 +424,7 @@ def test_tensorrt_wrapper_gets_the_engine_dir_and_never_builds_inline(monkeypatc
     fake_streamdiffusion_module(monkeypatch, built)
     eng = engine.DiffusionEngine()
     p = trt_params()
-    eng.process(torch.zeros(1, 3, 64, 64), p, torch.device("cpu"))
+    pump(eng, torch.zeros(1, 3, 64, 64), p)
     assert eng.status == ""
     assert built[0]["engine_dir"] == trt.engine_dir(p)
     assert built[0]["build_engines_if_missing"] is False
@@ -459,10 +470,99 @@ def test_trt_list_skips_incomplete_stale_and_unmanifested_sets(monkeypatch, tmp_
     assert trt.list_built_engines() == []
 
 
+def test_load_does_not_block_and_reports_progress(monkeypatch):
+    import threading
+    release = threading.Event()
+
+    def slow_make(params, device):
+        release.wait(5)
+        return FakeWrapper()
+
+    monkeypatch.setattr(engine, "_make_wrapper", slow_make)
+    eng = engine.DiffusionEngine()
+    out = torch.full((1, 3, 64, 64), 0.5)
+    p = engine.default_params()
+    for _ in range(3):
+        res = eng.process(out, p, torch.device("cpu"))
+        assert torch.equal(res, out)  # frames keep flowing, undiffused
+        assert eng.status.startswith(engine.LOADING_PREFIX)
+    release.set()
+    assert pump(eng, out, p).shape == (1, 3, 512, 512)
+    assert eng.status == ""
+
+
+def test_load_started_for_an_abandoned_key_is_discarded(monkeypatch):
+    import threading
+    release = threading.Event()
+    made = []
+
+    def slow_make(params, device):
+        made.append(params["model"])
+        release.wait(5)
+        return FakeWrapper()
+
+    monkeypatch.setattr(engine, "_make_wrapper", slow_make)
+    eng = engine.DiffusionEngine()
+    out = torch.zeros(1, 3, 64, 64)
+    p = engine.default_params()
+    eng.process(out, p, torch.device("cpu"))
+    other = dict(p, model="other/model")
+    eng.process(out, other, torch.device("cpu"))  # user moves on mid-load
+    release.set()
+    pump(eng, out, other)
+    assert eng.status == "" and made[-1] == "other/model"
+
+
+def test_only_one_load_runs_per_key_change(monkeypatch):
+    import threading
+    release = threading.Event()
+    made = []
+
+    def slow_make(params, device):
+        made.append(1)
+        release.wait(5)
+        return FakeWrapper()
+
+    monkeypatch.setattr(engine, "_make_wrapper", slow_make)
+    eng = engine.DiffusionEngine()
+    out = torch.zeros(1, 3, 64, 64)
+    p = engine.default_params()
+    for _ in range(5):
+        eng.process(out, p, torch.device("cpu"))
+    release.set()
+    pump(eng, out, p)
+    assert len(made) == 1
+
+
+def test_build_progress_tracks_artifacts_on_disk(tmp_path):
+    import os
+    from diffusion import trt
+    root = str(tmp_path)
+    assert trt.build_progress(root, 0) == "Exporting unet (1 of 3)"
+    open(os.path.join(root, "unet.onnx"), "w").close()
+    assert trt.build_progress(root, 0).startswith("Compiling unet (1 of 3)")
+    open(os.path.join(root, "unet.engine"), "w").close()
+    assert trt.build_progress(root, 0).startswith("Exporting vae_decoder (2 of 3)")
+    for name in trt.REQUIRED_ENGINES:
+        open(os.path.join(root, name), "w").close()
+    assert trt.build_progress(root, 0).startswith("Finishing")
+    assert "5 min elapsed" in trt.build_progress(root, 5 * 60 + 3)
+
+
+def test_build_fraction_is_monotonic_across_stages():
+    from widgets.diffusion_widget import build_fraction
+    steps = [build_fraction(m) for m in
+             ["Exporting unet (1 of 3)", "Compiling unet (1 of 3)",
+              "Exporting vae_decoder (2 of 3)", "Compiling vae_decoder (2 of 3)",
+              "Exporting vae_encoder (3 of 3)", "Finishing"]]
+    assert steps == sorted(steps)
+    assert steps[0] == 0.0 and steps[-1] == 1.0
+
+
 def test_stage_output_survives_uint8_conversion(monkeypatch):
     eng, _ = make_engine(monkeypatch)
     out = torch.rand(1, 3, 64, 64) * 2 - 1
-    staged = eng.process(out, engine.default_params(), torch.device("cpu"))
+    staged = pump(eng, out, engine.default_params())
     img = staged[0]
     img = (img * 127.5 + 128).clamp(0, 255).to(torch.uint8).permute(1, 2, 0)
     assert img.shape == (512, 512, 3)

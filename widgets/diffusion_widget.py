@@ -1,7 +1,7 @@
 import logging
-import math
 import multiprocessing as mp
 import os
+import re
 import time
 
 import imgui
@@ -26,14 +26,27 @@ except ModuleNotFoundError:
 
 MODELS = ["stabilityai/sd-turbo", "KBlueLeaf/kohaku-v2.1"]
 ACCELERATIONS = ["none", "tensorrt"]
-ACCELERATION_LABELS = ["Standard", "TensorRT"]
 RESOLUTIONS = [512, 768, 1024]
+
+RED = (1.0, 0.3, 0.3, 1.0)
+AMBER = (1.0, 0.75, 0.3, 1.0)
+GREEN = (0.4, 0.9, 0.5, 1.0)
+GRAY = (0.6, 0.6, 0.6, 1.0)
 
 
 def _short_name(path_or_id):
     if path_or_id.lower().endswith(('.safetensors', '.ckpt')):
         return os.path.splitext(os.path.basename(path_or_id))[0]
     return path_or_id
+
+
+def build_fraction(message):
+    """Rough completion from a build stage message: 3 engines, 2 phases each."""
+    match = re.search(r'\((\d+) of (\d+)\)', message)
+    if not match:
+        return 1.0 if message.startswith('Finishing') else 0.0
+    index, total = int(match.group(1)), int(match.group(2))
+    return min(1.0, (index - 1 + (0.5 if message.startswith('Compiling') else 0.0)) / total)
 
 
 def engine_label(entry):
@@ -49,7 +62,12 @@ class DiffusionWidget:
         self.available = diffusion_engine.is_available()
         self.enabled = False
         self.params = dnnlib.EasyDict(diffusion_engine.default_params())
-        self._lora_scale_ui = self.params.lora_scale
+        # kept outside params so unticking LoRA does not lose the path or weight
+        self.use_lora = False
+        self.lora_path = self.params.lora_path
+        self.lora_scale = self.params.lora_scale
+        self.show_setup = True
+        self._lora_scale_ui = self.lora_scale
         self._lora_scale_dragging = False
         self.browser = NativeBrowserWidget()
         os.makedirs(diffusion_checkpoints_dir(), exist_ok=True)
@@ -63,6 +81,7 @@ class DiffusionWidget:
             include_training_runs=False)
         self.build_state = 'idle'  # 'idle' | 'building' | 'error'
         self.build_message = ''
+        self.build_fraction = 0.0
         self.build_error = ''
         self.build_process = None
         self.build_queue = None
@@ -88,10 +107,14 @@ class DiffusionWidget:
         return func
 
     def get_params(self):
-        return self.enabled, dict(self.params), self.osc_menu.get_params()
+        return (self.enabled, dict(self.params), self.use_lora, self.lora_path,
+                self.lora_scale, self.osc_menu.get_params())
 
     def set_params(self, params):
-        if len(params) == 5:  # legacy presets carried a custom-model field and combo index
+        use_lora = lora_path = lora_scale = None
+        if len(params) == 6:
+            enabled, saved, use_lora, lora_path, lora_scale, osc_params = params
+        elif len(params) == 5:  # legacy: custom-model field and combo index
             enabled, saved, _custom_model, _model_index, osc_params = params
         else:
             enabled, saved, osc_params = params
@@ -99,6 +122,11 @@ class DiffusionWidget:
         self.params.update(saved)
         self.params.strength = float(self.params.strength)
         self.params.seed = int(self.params.seed)
+        # older presets encoded "LoRA off" as an empty path
+        self.lora_path = self.params.lora_path if lora_path is None else lora_path
+        self.lora_scale = float(self.params.lora_scale if lora_scale is None else lora_scale)
+        self.use_lora = bool(self.lora_path) if use_lora is None else bool(use_lora)
+        self._lora_scale_ui = self.lora_scale
         self.enabled = enabled and self.available
         self.osc_menu.set_params(osc_params)
 
@@ -152,6 +180,7 @@ class DiffusionWidget:
                 self.stop_build()
             elif 'progress' in message:
                 self.build_message = message['progress']
+                self.build_fraction = build_fraction(message['progress'])
 
     def draw_build_modal(self):
         app = self.viz.app
@@ -167,7 +196,7 @@ class DiffusionWidget:
                 imgui.separator()
                 imgui.spacing()
                 imgui.text(self.build_message)
-                imgui.progress_bar(math.fmod(time.time(), 1.0), (width - 40, 20))
+                imgui.progress_bar(self.build_fraction, (width - 40, 20))
                 imgui.spacing()
                 if imgui_utils.button('Cancel##diffusion_build', width=app.button_w):
                     self.stop_build()
@@ -184,141 +213,177 @@ class DiffusionWidget:
                 imgui.close_current_popup()
             imgui.end_popup()
 
+    def status_line(self, status, needs_build):
+        """(text, rgba). One line, always present, so the panel is never silent."""
+        if not self.available:
+            return 'Requires an NVIDIA GPU. Not available on this platform.', GRAY
+        if status.startswith('Error'):
+            return status, RED
+        if status.startswith(diffusion_engine.LOADING_PREFIX):
+            return status + ' - the image keeps playing until it is ready', AMBER
+        if needs_build:
+            return 'TensorRT selected but engines are not built for this setup.', AMBER
+        if not self.enabled:
+            return 'Off - configure below, then enable', GRAY
+        return 'Ready', GREEN
+
+    def draw_live_controls(self, viz):
+        imgui.text('Prompt')
+        imgui.same_line(viz.app.label_w)
+        _changed, self.params.prompt = imgui_utils.input_text(
+            '##diffusion_prompt', self.params.prompt, 1024, 0,
+            width=-1, help_text="what the image should become")
+
+        imgui.text('Strength')
+        imgui.same_line(viz.app.label_w)
+        with imgui_utils.item_width(-1 - viz.app.button_w * 2 - viz.app.spacing * 2):
+            _changed, self.params.strength = imgui.slider_float(
+                '##diffusion_strength', self.params.strength, 0, 1,
+                format='%.2f  (low keeps the original, high repaints)')
+        imgui.same_line()
+        imgui.text('Seed')
+        imgui.same_line()
+        with imgui_utils.item_width(-1):
+            _changed, self.params.seed = imgui.input_int('##diffusion_seed', self.params.seed)
+
+    def draw_model_setup(self, viz):
+        imgui.text('Checkpoint')
+        imgui.same_line(viz.app.label_w)
+        changed, model_text = imgui_utils.input_text(
+            '##diffusion_model', self.params.model, 1024,
+            imgui.INPUT_TEXT_AUTO_SELECT_ALL | imgui.INPUT_TEXT_ENTER_RETURNS_TRUE,
+            width=-1 - viz.app.button_w * 2 - viz.app.spacing * 2,
+            help_text="model id or checkpoint file")
+        if changed:
+            self.params.model = model_text.strip()
+        if imgui.is_item_hovered() and not imgui.is_item_active() and self.params.model:
+            imgui.set_tooltip(self.params.model)
+        imgui.same_line()
+        if imgui_utils.button('Browse##diffusion_model', width=viz.app.button_w):
+            model = self.browser.select_checkpoint_file(
+                initial_dir=self.params.model
+                if os.path.isfile(self.params.model) else diffusion_checkpoints_dir())
+            if model:
+                self.params.model = str(model)
+        imgui.same_line()
+        picked = self.model_dropdown(width=-1)
+        if picked is not None:
+            self.params.model = picked
+
+        imgui.text('Resolution')
+        imgui.same_line(viz.app.label_w)
+        res_index = (RESOLUTIONS.index(self.params.resolution)
+                     if self.params.resolution in RESOLUTIONS else 0)
+        with imgui_utils.item_width(viz.app.button_w * 1.5):
+            changed, res_index = imgui.combo('##diffusion_resolution', res_index,
+                                             [str(r) for r in RESOLUTIONS])
+        if changed:
+            self.params.resolution = RESOLUTIONS[res_index]
+        imgui.same_line()
+        imgui.text_colored('higher is sharper and slower', *GRAY)
+
+        _clicked, self.use_lora = imgui.checkbox('LoRA##diffusion_use', self.use_lora)
+        imgui.same_line(viz.app.label_w)
+        with imgui_utils.grayed_out(not self.use_lora):
+            changed, lora_text = imgui_utils.input_text(
+                '##diffusion_lora', self.lora_path, 1024,
+                imgui.INPUT_TEXT_AUTO_SELECT_ALL | imgui.INPUT_TEXT_ENTER_RETURNS_TRUE,
+                width=-1 - viz.app.button_w * 2 - viz.app.spacing * 2, help_text="lora file")
+            if changed:
+                self.lora_path = lora_text.strip()
+            if imgui.is_item_hovered() and not imgui.is_item_active() and self.lora_path:
+                imgui.set_tooltip(self.lora_path)
+            imgui.same_line()
+            if imgui_utils.button('Browse##lora', width=viz.app.button_w):
+                lora = self.browser.select_lora_file(
+                    initial_dir=self.lora_path or diffusion_loras_dir())
+                if lora:
+                    self.lora_path = str(lora)
+                    self.use_lora = True
+            imgui.same_line()
+            picked = self.lora_dropdown(width=-1)
+            if picked is not None:
+                self.lora_path = picked
+                self.use_lora = True
+
+            imgui.text('Weight')
+            imgui.same_line(viz.app.label_w)
+            # slider LoRAs (age, LECO) use weights well past 1, in both directions.
+            # a scale change reloads the pipeline, so it only commits on release
+            with imgui_utils.item_width(-1):
+                changed, scale_ui = imgui.slider_float('##diffusion_lora_scale',
+                                                       self._lora_scale_ui, -5, 5, format='%.2f')
+            if changed:
+                self._lora_scale_ui = scale_ui
+            if imgui.is_item_active():
+                self._lora_scale_dragging = True
+            elif self._lora_scale_dragging:
+                self._lora_scale_dragging = False
+                self.lora_scale = self._lora_scale_ui
+            else:
+                self._lora_scale_ui = self.lora_scale
+
+    def draw_acceleration(self, viz, needs_build):
+        _clicked, use_trt = imgui.checkbox('TensorRT##diffusion', self.params.acceleration == 'tensorrt')
+        self.params.acceleration = 'tensorrt' if use_trt else 'none'
+        imgui.same_line(viz.app.label_w)
+        if imgui_utils.button('Build engines##diffusion', width=viz.app.button_w * 1.5,
+                              enabled=(needs_build and self.build_state == 'idle')):
+            self.start_build()
+        imgui.same_line()
+        if imgui_utils.button('Saved setups##diffusion', width=viz.app.button_w * 1.5):
+            self._built_engines = trt.list_built_engines()
+            imgui.open_popup('diffusion_engines_popup')
+        imgui.same_line()
+        imgui.text_colored('2x to 3x faster, 20 to 30 min build', *GRAY)
+        if imgui.begin_popup('diffusion_engines_popup'):
+            if not self._built_engines:
+                imgui.menu_item('No engines built yet', None, False, False)
+            for i, entry in enumerate(self._built_engines):
+                clicked, _state = imgui.menu_item(f'{engine_label(entry)}##engine{i}')
+                if clicked:
+                    self.params.model = entry['model']
+                    self.lora_path = entry['lora_path']
+                    self.use_lora = bool(entry['lora_path'])
+                    self.lora_scale = float(entry['lora_scale'])
+                    self._lora_scale_ui = self.lora_scale
+                    self.params.resolution = int(entry['resolution'])
+                    self.params.acceleration = 'tensorrt'
+            imgui.end_popup()
+
     @imgui_utils.scoped_by_object_id
     def __call__(self, show=True):
         viz = self.viz
         status = viz.result.get('diffusion_status', '')
         self.poll_build()
+        # the LoRA checkbox keeps the path while off, so params carry the effective value
+        self.params.lora_path = self.lora_path if self.use_lora else ''
+        self.params.lora_scale = self.lora_scale
+        needs_build = (self.params.acceleration == 'tensorrt' and self.available
+                       and not self.engines_ready())
 
         if show:
             with imgui_utils.grayed_out(not self.available):
                 _clicked, enabled = imgui.checkbox('Enable##diffusion', self.enabled)
                 if self.available:
                     self.enabled = enabled
-                else:
-                    imgui.same_line()
-                    imgui.text('Requires an NVIDIA GPU. Not available on this platform.')
+                imgui.same_line(viz.app.label_w)
+                text, color = self.status_line(status, needs_build)
+                imgui.text_colored(text, *color)
 
+                # setup stays editable while disabled: pick a checkpoint before spending VRAM
                 with imgui_utils.grayed_out(not self.enabled):
-                    changed, model_text = imgui_utils.input_text(
-                        '##diffusion_model', self.params.model, 1024,
-                        imgui.INPUT_TEXT_AUTO_SELECT_ALL | imgui.INPUT_TEXT_ENTER_RETURNS_TRUE,
-                        width=-1 - viz.app.button_w * 2 - viz.app.spacing * 2,
-                        help_text="model id or checkpoint")
-                    if changed:
-                        self.params.model = model_text.strip()
-                    if imgui.is_item_hovered() and not imgui.is_item_active() and self.params.model:
-                        imgui.set_tooltip(self.params.model)
-                    imgui.same_line()
-                    if imgui_utils.button('Find##diffusion_model', width=viz.app.button_w):
-                        model = self.browser.select_checkpoint_file(
-                            initial_dir=self.params.model
-                            if os.path.isfile(self.params.model) else diffusion_checkpoints_dir())
-                        if model:
-                            self.params.model = str(model)
-                    imgui.same_line()
-                    picked = self.model_dropdown(width=-1)
-                    if picked is not None:
-                        self.params.model = picked
-
-                    _changed, self.params.prompt = imgui_utils.input_text(
-                        '##diffusion_prompt', self.params.prompt, 1024, 0,
-                        width=-1 - viz.app.font_size * 4 - viz.app.spacing, help_text="prompt")
-                    imgui.same_line()
-                    imgui.text('Prompt')
-
-                    with imgui_utils.item_width(viz.app.button_w * 2):
-                        _changed, self.params.strength = imgui.slider_float('##diffusion_strength',
-                                                                            self.params.strength, 0, 1,
-                                                                            format='Strength %.2f')
-                    imgui.same_line(spacing=viz.app.spacing * 2)
-                    with imgui_utils.item_width(viz.app.button_w * 1.5):
-                        _changed, self.params.seed = imgui.input_int('##diffusion_seed', self.params.seed)
-                    imgui.same_line(spacing=0)
-                    imgui.text('Seed')
-                    imgui.same_line(spacing=viz.app.spacing * 2)
-                    res_index = (RESOLUTIONS.index(self.params.resolution)
-                                 if self.params.resolution in RESOLUTIONS else 0)
-                    with imgui_utils.item_width(viz.app.button_w):
-                        changed, res_index = imgui.combo('##diffusion_resolution', res_index,
-                                                         [str(r) for r in RESOLUTIONS])
-                    if changed:
-                        self.params.resolution = RESOLUTIONS[res_index]
-                    imgui.same_line(spacing=0)
-                    imgui.text('Res')
-
-                    changed, lora_text = imgui_utils.input_text(
-                        '##diffusion_lora', self.params.lora_path, 1024,
-                        imgui.INPUT_TEXT_AUTO_SELECT_ALL | imgui.INPUT_TEXT_ENTER_RETURNS_TRUE,
-                        width=-1 - viz.app.button_w * 3 - viz.app.spacing * 3, help_text="lora file")
-                    if changed:
-                        self.params.lora_path = lora_text.strip()
-                    if imgui.is_item_hovered() and not imgui.is_item_active() and self.params.lora_path:
-                        imgui.set_tooltip(self.params.lora_path)
-                    imgui.same_line()
-                    if imgui_utils.button('Find##lora', width=viz.app.button_w):
-                        lora = self.browser.select_lora_file(
-                            initial_dir=self.params.lora_path or diffusion_loras_dir())
-                        if lora:
-                            self.params.lora_path = str(lora)
-                    imgui.same_line()
-                    picked = self.lora_dropdown(width=viz.app.button_w)
-                    if picked is not None:
-                        self.params.lora_path = picked
-                    imgui.same_line()
-                    with imgui_utils.item_width(viz.app.button_w):
-                        # slider LoRAs (age, LECO) use weights well past 1, in both directions.
-                        # scale changes rebuild the whole pipeline, so only commit on release
-                        changed, scale_ui = imgui.slider_float('##diffusion_lora_scale',
-                                                               self._lora_scale_ui, -5, 5,
-                                                               format='LoRA %.2f')
-                    if changed:
-                        self._lora_scale_ui = scale_ui
-                    if imgui.is_item_active():
-                        self._lora_scale_dragging = True
-                    elif self._lora_scale_dragging:
-                        self._lora_scale_dragging = False
-                        self.params.lora_scale = self._lora_scale_ui
-                    else:
-                        self._lora_scale_ui = self.params.lora_scale
-
-                    accel_index = (ACCELERATIONS.index(self.params.acceleration)
-                                   if self.params.acceleration in ACCELERATIONS else 0)
-                    with imgui_utils.item_width(viz.app.button_w * 2):
-                        _changed, accel_index = imgui.combo('##diffusion_acceleration', accel_index,
-                                                            ACCELERATION_LABELS)
-                    self.params.acceleration = ACCELERATIONS[accel_index]
-                    needs_build = self.params.acceleration == 'tensorrt' and not self.engines_ready()
-                    imgui.same_line(spacing=viz.app.spacing * 2)
-                    if imgui_utils.button('Build engines##diffusion', width=viz.app.button_w * 1.5,
-                                          enabled=(self.enabled and needs_build
-                                                   and self.build_state == 'idle')):
-                        self.start_build()
-                    imgui.same_line()
-                    if imgui_utils.button('Engines...##diffusion', width=viz.app.button_w,
-                                          enabled=self.enabled):
-                        self._built_engines = trt.list_built_engines()
-                        imgui.open_popup('diffusion_engines_popup')
-                    if imgui.begin_popup('diffusion_engines_popup'):
-                        if not self._built_engines:
-                            imgui.menu_item('No engines built', None, False, False)
-                        for i, entry in enumerate(self._built_engines):
-                            clicked, _state = imgui.menu_item(f'{engine_label(entry)}##engine{i}')
-                            if clicked:
-                                self.params.model = entry['model']
-                                self.params.lora_path = entry['lora_path']
-                                self.params.lora_scale = float(entry['lora_scale'])
-                                self._lora_scale_ui = self.params.lora_scale
-                                self.params.resolution = int(entry['resolution'])
-                                self.params.acceleration = 'tensorrt'
-                        imgui.end_popup()
-
-                    if status:
-                        imgui.text_colored(status, 1.0, 0.3, 0.3, 1.0)
-                    elif needs_build:
-                        imgui.text_colored(diffusion_engine.TRT_NOT_BUILT, 1.0, 0.3, 0.3, 1.0)
-                    else:
-                        imgui.text('Ready' if self.enabled else 'Off')
+                    self.draw_live_controls(viz)
+                imgui.spacing()
+                _expanded, self.show_setup = imgui.collapsing_header(
+                    'Model setup##diffusion', flags=imgui.TREE_NODE_DEFAULT_OPEN if self.show_setup
+                    else 0)
+                if self.show_setup:
+                    imgui.indent(viz.app.spacing * 2)
+                    self.draw_model_setup(viz)
+                    imgui.spacing()
+                    self.draw_acceleration(viz, needs_build)
+                    imgui.unindent(viz.app.spacing * 2)
 
             self.osc_menu()
 

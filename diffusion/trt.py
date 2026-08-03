@@ -82,6 +82,41 @@ def list_built_engines():
     return sorted(entries, key=lambda e: str(e["model"]).lower())
 
 
+def build_progress(root, elapsed):
+    """Human-readable build stage, derived from what is on disk.
+
+    TensorRT exposes no percentage, so progress is reported from the artifacts
+    each stage leaves behind: an .onnx export, then a compiled .engine.
+    """
+    done, exporting = set(), set()
+    for _dirpath, _dirnames, filenames in os.walk(root):
+        for name in filenames:
+            if name.endswith(".engine"):
+                done.add(name)
+            elif name.endswith(".onnx"):
+                exporting.add(os.path.splitext(name)[0])
+    minutes = int(elapsed // 60)
+    suffix = f" - {minutes} min elapsed" if minutes else ""
+    if len(done) >= len(REQUIRED_ENGINES):
+        return f"Finishing{suffix}"
+    stage = sorted(name for name in REQUIRED_ENGINES if name not in done)[0]
+    stage = stage[: -len(".engine")]
+    verb = "Compiling" if stage in exporting else "Exporting"
+    return f"{verb} {stage} ({len(done) + 1} of {len(REQUIRED_ENGINES)}){suffix}"
+
+
+def _watch_progress(root, reply_queue, stop):
+    import time
+    started = time.time()
+    last = None
+    while not stop.is_set():
+        message = build_progress(root, time.time() - started)
+        if message != last:
+            reply_queue.put({"progress": message})
+            last = message
+        stop.wait(2.0)
+
+
 def run_build(cmd_queue, reply_queue):
     """LoggedProcess entry point.
 
@@ -110,9 +145,15 @@ def run_build(cmd_queue, reply_queue):
 
             from streamdiffusion import StreamDiffusionWrapper
 
-            reply_queue.put({"progress": "Exporting ONNX and building engines"})
-            StreamDiffusionWrapper(**kwargs)
-            reply_queue.put({"progress": "Finishing"})
+            import threading
+            stop = threading.Event()
+            watcher = threading.Thread(target=_watch_progress, daemon=True,
+                                       args=(engine_dir(params), reply_queue, stop))
+            watcher.start()
+            try:
+                StreamDiffusionWrapper(**kwargs)
+            finally:
+                stop.set()
             write_manifest(params)
             reply_queue.put({"done": True})
     except Exception:
