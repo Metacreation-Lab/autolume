@@ -27,6 +27,7 @@ except ModuleNotFoundError:
 MODELS = ["stabilityai/sd-turbo", "KBlueLeaf/kohaku-v2.1"]
 ACCELERATIONS = ["none", "tensorrt"]
 ACCELERATION_LABELS = ["Standard", "TensorRT"]
+RESOLUTIONS = [512, 768, 1024]
 
 
 def _short_name(path_or_id):
@@ -235,6 +236,16 @@ class DiffusionWidget:
                         _changed, self.params.seed = imgui.input_int('##diffusion_seed', self.params.seed)
                     imgui.same_line(spacing=0)
                     imgui.text('Seed')
+                    imgui.same_line(spacing=viz.app.spacing * 2)
+                    res_index = (RESOLUTIONS.index(self.params.resolution)
+                                 if self.params.resolution in RESOLUTIONS else 0)
+                    with imgui_utils.item_width(viz.app.button_w):
+                        changed, res_index = imgui.combo('##diffusion_resolution', res_index,
+                                                         [str(r) for r in RESOLUTIONS])
+                    if changed:
+                        self.params.resolution = RESOLUTIONS[res_index]
+                    imgui.same_line(spacing=0)
+                    imgui.text('Res')
 
                     changed, lora_text = imgui_utils.input_text(
                         '##diffusion_lora', self.params.lora_path, 1024,
