@@ -93,6 +93,40 @@ def test_panel_draws_while_enabled_and_erroring(imgui_frame, monkeypatch, tmp_pa
     assert viz.args.diffusion["lora_path"] == "x.safetensors"
 
 
+def test_every_control_row_shares_one_column(imgui_frame, monkeypatch, tmp_path):
+    from utils import session_state
+    monkeypatch.setattr(session_state, "cache_path", lambda *p: tmp_path.joinpath(*p))
+    monkeypatch.setattr(session_state, "_state", None)
+    viz = make_viz()
+    widget = DiffusionWidget(viz)
+    widget.available = True
+    widget.enabled = True
+    widget.use_lora = True
+    columns = []
+    move = widget.control_column
+
+    def spy(v):
+        move(v)
+        columns.append(round(imgui.get_cursor_pos_x(), 1))
+
+    widget.control_column = spy
+    draw(widget, viz)
+    # a wide label (TensorRT, Checkpoint) used to push its control past the column
+    # and overlap the label text; every row must land on the same x
+    assert len(columns) >= 6
+    assert len(set(columns)) == 1, f"rows misaligned: {sorted(set(columns))}"
+    assert columns[0] > viz.app.label_w  # clears the label and its help icon
+
+
+def test_help_text_exists_for_every_documented_control():
+    from widgets.help_icon_widget import HelpIconWidget
+    texts, _urls = HelpIconWidget().load_help_texts("diffusion")
+    expected = {"enable", "prompt", "strength", "seed", "checkpoint",
+                "resolution", "lora", "weight", "tensorrt"}
+    assert expected <= set(texts)
+    assert all(texts[key].strip() for key in expected)
+
+
 def test_lora_checkbox_off_clears_the_path_without_losing_it(imgui_frame, monkeypatch, tmp_path):
     from utils import session_state
     monkeypatch.setattr(session_state, "cache_path", lambda *p: tmp_path.joinpath(*p))
