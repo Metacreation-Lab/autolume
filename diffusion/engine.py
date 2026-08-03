@@ -1,6 +1,7 @@
 """Headless StreamDiffusion img2img stage. UI-free so it is unit-testable
 and importable on platforms where the streamdiffusion extra is absent."""
 import importlib.util
+import os
 
 import torch
 import torch.nn.functional as F
@@ -46,9 +47,15 @@ def build_key(params):
 
 
 def _make_wrapper(params, device):
+    lora_path = params["lora_path"]
+    # the fork logs and swallows a failed LoRA load, so a bad path would otherwise
+    # build a silently un-LoRA'd pipeline
+    if lora_path and not os.path.isfile(lora_path):
+        raise FileNotFoundError(f"LoRA file not found: {lora_path}")
+
     from streamdiffusion import StreamDiffusionWrapper
 
-    lora_dict = {params["lora_path"]: params["lora_scale"]} if params["lora_path"] else None
+    lora_dict = {lora_path: params["lora_scale"]} if lora_path else None
     return StreamDiffusionWrapper(
         model_id_or_path=params["model"],
         t_index_list=t_indices_for_strength(params["strength"], NUM_INFERENCE_STEPS),

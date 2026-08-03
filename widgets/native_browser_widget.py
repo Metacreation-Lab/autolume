@@ -59,6 +59,12 @@ class NativeBrowserWidget:
             ('All files', '*.*')
         ]
 
+        # LoRA weight files
+        self.lora_extensions = [
+            ('LoRA files', '*.safetensors'),
+            ('All files', '*.*')
+        ]
+
         # Optimized extension sets for fast lookup
         self._image_extensions_set = self._build_extension_set(self.image_extensions)
         self._video_extensions_set = self._build_extension_set(self.video_extensions)
@@ -262,6 +268,11 @@ class NativeBrowserWidget:
         """Select a single pickled model file (.pkl).
         Returns the path or None if cancelled."""
         return self._open_single_file(title, self.model_extensions[0][1], initial_dir=initial_dir)
+
+    def select_lora_file(self, title="Select LoRA", initial_dir=None):
+        """Select a single LoRA weights file (.safetensors).
+        Returns the path or None if cancelled."""
+        return self._open_single_file(title, self.lora_extensions[0][1], initial_dir=initial_dir)
 
     def select_image_file(self, title="Select Image", initial_dir=None):
         """Select a single image file. Returns the path or None if cancelled."""

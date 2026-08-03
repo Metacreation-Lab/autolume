@@ -5,6 +5,7 @@ import dnnlib
 from diffusion import engine as diffusion_engine
 from utils.gui_utils import imgui_utils
 from widgets import osc_menu
+from widgets.native_browser_widget import NativeBrowserWidget
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,7 @@ class DiffusionWidget:
         self.params = dnnlib.EasyDict(diffusion_engine.default_params())
         self.custom_model = ""
         self.model_index = 0
+        self.browser = NativeBrowserWidget()
 
         funcs = dict(zip(["Prompt", "Strength", "Seed"],
                          [self.osc_handler(param) for param in ["prompt", "strength", "seed"]]))
@@ -106,6 +108,20 @@ class DiffusionWidget:
                     imgui.same_line(spacing=0)
                     imgui.text('Seed')
 
+                    _changed, self.params.lora_path = imgui_utils.input_text(
+                        '##diffusion_lora', self.params.lora_path, 1024, 0,
+                        width=-1 - viz.app.button_w * 2 - viz.app.spacing * 2, help_text="lora file")
+                    imgui.same_line()
+                    if imgui_utils.button('Find##lora', width=viz.app.button_w):
+                        lora = self.browser.select_lora_file(initial_dir=self.params.lora_path)
+                        if lora:
+                            self.params.lora_path = str(lora)
+                    imgui.same_line()
+                    with imgui_utils.item_width(viz.app.button_w):
+                        _changed, self.params.lora_scale = imgui.slider_float('##diffusion_lora_scale',
+                                                                              self.params.lora_scale, 0, 2,
+                                                                              format='LoRA %.2f')
+
                     if status:
                         imgui.text_colored(status, 1.0, 0.3, 0.3, 1.0)
                     else:
@@ -115,6 +131,7 @@ class DiffusionWidget:
 
         self.params.strength = float(min(max(self.params.strength, 0.0), 1.0))
         self.params.seed = int(self.params.seed)
+        self.params.lora_scale = float(min(max(self.params.lora_scale, 0.0), 2.0))
         viz.args.use_diffusion = bool(self.enabled and self.available)
         viz.args.diffusion = dict(self.params)
 

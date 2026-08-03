@@ -1,3 +1,6 @@
+import sys
+import types
+
 import pytest
 import torch
 
@@ -242,6 +245,79 @@ def test_frame_error_passes_through_without_raising(monkeypatch):
     res = eng.process(out, p, torch.device("cpu"))
     assert torch.equal(res, out)
     assert eng.status.startswith("Error")
+
+
+def test_lora_params_reach_wrapper(monkeypatch):
+    seen = {}
+
+    def fake_make(params, device):
+        seen.update(params)
+        return FakeWrapper()
+
+    monkeypatch.setattr(engine, "_make_wrapper", fake_make)
+    eng = engine.DiffusionEngine()
+    p = dict(engine.default_params(), lora_path="/tmp/style.safetensors", lora_scale=0.7)
+    eng.process(torch.zeros(1, 3, 64, 64), p, torch.device("cpu"))
+    assert seen["lora_path"] == "/tmp/style.safetensors" and seen["lora_scale"] == 0.7
+
+
+def fake_streamdiffusion_module(monkeypatch, built=None):
+    """Stub out the fork so the real _make_wrapper can be exercised off-GPU."""
+    module = types.ModuleType("streamdiffusion")
+
+    def constructor(**kwargs):
+        if built is not None:
+            built.append(kwargs)
+        return FakeWrapper()
+
+    module.StreamDiffusionWrapper = constructor
+    monkeypatch.setitem(sys.modules, "streamdiffusion", module)
+
+
+def test_missing_lora_file_errors_without_retry(monkeypatch, tmp_path):
+    fake_streamdiffusion_module(monkeypatch)
+    calls = []
+    real_make = engine._make_wrapper
+
+    def counting_make(params, device):
+        calls.append(params["lora_path"])
+        return real_make(params, device)
+
+    monkeypatch.setattr(engine, "_make_wrapper", counting_make)
+    eng = engine.DiffusionEngine()
+    out = torch.full((1, 3, 64, 64), 0.5)
+    p = dict(engine.default_params(), lora_path=str(tmp_path / "missing.safetensors"))
+    res1 = eng.process(out, p, torch.device("cpu"))
+    res2 = eng.process(out, p, torch.device("cpu"))
+    assert torch.equal(res1, out) and torch.equal(res2, out)
+    assert len(calls) == 1
+    assert eng.status.startswith("Error") and "missing.safetensors" in eng.status
+
+
+def test_lora_error_recovers_when_path_is_fixed(monkeypatch, tmp_path):
+    built = []
+    fake_streamdiffusion_module(monkeypatch, built)
+    eng = engine.DiffusionEngine()
+    out = torch.full((1, 3, 64, 64), 0.5)
+    p = engine.default_params()
+    eng.process(out, dict(p, lora_path=str(tmp_path / "missing.safetensors")), torch.device("cpu"))
+    assert eng.status.startswith("Error")
+    assert built == []
+    lora = tmp_path / "style.safetensors"
+    lora.write_bytes(b"")
+    res = eng.process(out, dict(p, lora_path=str(lora), lora_scale=0.7), torch.device("cpu"))
+    assert res.shape == (1, 3, 512, 512)
+    assert eng.status == ""
+    assert built[0]["lora_dict"] == {str(lora): 0.7}
+
+
+def test_empty_lora_path_builds_without_lora_dict(monkeypatch):
+    built = []
+    fake_streamdiffusion_module(monkeypatch, built)
+    eng = engine.DiffusionEngine()
+    eng.process(torch.zeros(1, 3, 64, 64), engine.default_params(), torch.device("cpu"))
+    assert eng.status == ""
+    assert built[0]["lora_dict"] is None
 
 
 def test_stage_output_survives_uint8_conversion(monkeypatch):
