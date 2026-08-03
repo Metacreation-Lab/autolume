@@ -242,3 +242,13 @@ def test_frame_error_passes_through_without_raising(monkeypatch):
     res = eng.process(out, p, torch.device("cpu"))
     assert torch.equal(res, out)
     assert eng.status.startswith("Error")
+
+
+def test_stage_output_survives_uint8_conversion(monkeypatch):
+    eng, _ = make_engine(monkeypatch)
+    out = torch.rand(1, 3, 64, 64) * 2 - 1
+    staged = eng.process(out, engine.default_params(), torch.device("cpu"))
+    img = staged[0]
+    img = (img * 127.5 + 128).clamp(0, 255).to(torch.uint8).permute(1, 2, 0)
+    assert img.shape == (512, 512, 3)
+    assert img.float().mean() > 10  # not crushed to black

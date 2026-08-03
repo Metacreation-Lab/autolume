@@ -240,6 +240,7 @@ class Renderer:
             self._start_event = time.time()
             self._end_event = time.time()
         self._net_layers = dict()  # {cache_key: [dnnlib.EasyDict, ...], ...}
+        self._diffusion_engine = None
         self.manipulation = ManipulationLayer()
         self.pkl = ""
         self.G = None
@@ -426,6 +427,8 @@ class Renderer:
                      alpha=0,
                      looping_list=[],
                      use_superres=False,
+                     use_diffusion=False,
+                     diffusion=None,
                      global_noise=1,
                      combined_layers = [],
                      mixing = True,
@@ -592,9 +595,13 @@ class Renderer:
             w += self.to_device(direction)
             out, manip_layers, = self.run_synthesis_net( w, capture_layer=layer_name, transforms=latent_transforms,
                                                  adjustments=adjustments, noise_adjustments=noise_adjustments, ratios=ratios, use_superres=use_superres,global_noise=global_noise,
+                                                 use_diffusion=use_diffusion, diffusion=diffusion,
                                                  combined_layers=combined_layers,mixing=mixing,
                                                  build_layers=cache_key not in self._net_layers,
                                                  **synthesis_kwargs)
+
+            if use_diffusion and self._diffusion_engine is not None:
+                res.diffusion_status = self._diffusion_engine.status
 
 
             # Update layer list.
@@ -652,7 +659,7 @@ class Renderer:
 
     def run_synthesis_net(self,*args, capture_layer=None, transforms=None, ratios=None, adjustments=None,
                           noise_adjustments=None, use_superres=False, global_noise=1, combined_layers=[], mixing=False,
-                          build_layers=False, **kwargs):
+                          build_layers=False, use_diffusion=False, diffusion=None, **kwargs):
         """
         Run the synthesis network and capture the output of a specific layer.
         :param net: Synthesis model
@@ -822,6 +829,11 @@ class Renderer:
                 out = net(*args, **kwargs)
                 if isinstance(out, tuple):
                     out = out[0]
+                if use_diffusion and diffusion is not None:
+                    from diffusion.engine import DiffusionEngine
+                    if self._diffusion_engine is None:
+                        self._diffusion_engine = DiffusionEngine()
+                    out = self._diffusion_engine.process(out, diffusion, self._device)
                 if use_superres:
                     if self._device.type == "mps":
                         # MPS has no autocast support; CPU autocast would corrupt
