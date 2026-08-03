@@ -15,7 +15,6 @@ from utils import session_state
 from utils.model_dir import (diffusion_checkpoints_dir, diffusion_loras_dir,
                              list_diffusion_checkpoints, list_diffusion_loras)
 from widgets import osc_menu
-from widgets.help_icon_widget import HelpIconWidget
 from widgets.model_dropdown_widget import ModelDropdownButton
 from widgets.native_browser_widget import NativeBrowserWidget
 
@@ -30,6 +29,9 @@ MODELS = ["stabilityai/sd-turbo", "KBlueLeaf/kohaku-v2.1"]
 ACCELERATIONS = ["none", "tensorrt"]
 RESOLUTIONS = [512, 768, 1024]
 SESSION_SECTION = "diffusion"
+
+TEXT_LABELS = ('Prompt', 'Strength', 'Checkpoint', 'Resolution', 'Weight')
+CHECKBOX_LABELS = ('Enable', 'LoRA', 'TensorRT')
 
 RED = (1.0, 0.3, 0.3, 1.0)
 AMBER = (1.0, 0.75, 0.3, 1.0)
@@ -77,8 +79,6 @@ class DiffusionWidget:
         self._lora_scale_ui = self.lora_scale
         self._lora_scale_dragging = False
         self.browser = NativeBrowserWidget()
-        self.help_icon = HelpIconWidget()
-        self.help_texts, self.help_urls = self.help_icon.load_help_texts(SESSION_SECTION)
         os.makedirs(diffusion_checkpoints_dir(), exist_ok=True)
         os.makedirs(diffusion_loras_dir(), exist_ok=True)
         self.model_dropdown = ModelDropdownButton(
@@ -236,20 +236,23 @@ class DiffusionWidget:
             return 'Off - configure below, then enable', GRAY
         return 'Ready', GREEN
 
-    def help(self, key):
-        """Draw the (?) icon for a control, if help_texts.csv has an entry."""
-        self.help_icon.render(self.help_texts.get(key), url=self.help_urls.get(key))
+    def column_x(self, viz):
+        """X of the control column: past the widest label the panel can draw, so
+        rows line up whatever their label says."""
+        text_w = max(imgui.calc_text_size(t).x for t in TEXT_LABELS)
+        box_w = imgui.get_frame_height() + imgui.get_style().item_spacing[0]
+        check_w = box_w + max(imgui.calc_text_size(t).x for t in CHECKBOX_LABELS)
+        return max(viz.app.label_w, text_w, check_w) + viz.app.spacing * 2
 
     def control_column(self, viz):
-        """Move to the shared control column, never overlapping a label or its icon."""
+        """Move to the shared control column, never overlapping the label."""
         imgui.same_line()
-        target = viz.app.label_w + imgui.calc_text_size('(?)').x + viz.app.spacing * 2
+        target = self.column_x(viz)
         if imgui.get_cursor_pos_x() < target:
             imgui.set_cursor_pos_x(target)
 
-    def row_label(self, viz, text, key):
+    def row_label(self, viz, text):
         imgui.text(text)
-        self.help(key)
         self.control_column(viz)
 
     def commit_prompt_history(self):
@@ -261,7 +264,7 @@ class DiffusionWidget:
             SESSION_SECTION, 'prompts', self.params.prompt)
 
     def draw_live_controls(self, viz):
-        self.row_label(viz, 'Prompt', 'prompt')
+        self.row_label(viz, 'Prompt')
         _changed, self.params.prompt = imgui_utils.input_text(
             '##diffusion_prompt', self.params.prompt, 1024, 0,
             width=-1 - viz.app.button_w - viz.app.spacing,
@@ -283,19 +286,18 @@ class DiffusionWidget:
                     self.commit_prompt_history()
             imgui.end_popup()
 
-        self.row_label(viz, 'Strength', 'strength')
+        self.row_label(viz, 'Strength')
         with imgui_utils.item_width(-1 - viz.app.button_w * 3 - viz.app.spacing * 3):
             _changed, self.params.strength = imgui.slider_float(
                 '##diffusion_strength', self.params.strength, 0, 1, format='%.2f')
         imgui.same_line()
         imgui.text('Seed')
-        self.help('seed')
         imgui.same_line()
         with imgui_utils.item_width(-1):
             _changed, self.params.seed = imgui.input_int('##diffusion_seed', self.params.seed)
 
     def draw_model_setup(self, viz):
-        self.row_label(viz, 'Checkpoint', 'checkpoint')
+        self.row_label(viz, 'Checkpoint')
         changed, model_text = imgui_utils.input_text(
             '##diffusion_model', self.params.model, 1024,
             imgui.INPUT_TEXT_AUTO_SELECT_ALL | imgui.INPUT_TEXT_ENTER_RETURNS_TRUE,
@@ -317,7 +319,7 @@ class DiffusionWidget:
         if picked is not None:
             self.params.model = picked
 
-        self.row_label(viz, 'Resolution', 'resolution')
+        self.row_label(viz, 'Resolution')
         res_index = (RESOLUTIONS.index(self.params.resolution)
                      if self.params.resolution in RESOLUTIONS else 0)
         with imgui_utils.item_width(viz.app.button_w * 1.5):
@@ -327,7 +329,6 @@ class DiffusionWidget:
             self.params.resolution = RESOLUTIONS[res_index]
 
         _clicked, self.use_lora = imgui.checkbox('LoRA##diffusion_use', self.use_lora)
-        self.help('lora')
         self.control_column(viz)
         with imgui_utils.grayed_out(not self.use_lora):
             changed, lora_text = imgui_utils.input_text(
@@ -351,7 +352,7 @@ class DiffusionWidget:
                 self.lora_path = picked
                 self.use_lora = True
 
-            self.row_label(viz, 'Weight', 'weight')
+            self.row_label(viz, 'Weight')
             # slider LoRAs (age, LECO) use weights well past 1, in both directions.
             # a scale change reloads the pipeline, so it only commits on release
             with imgui_utils.item_width(-1):
@@ -370,7 +371,6 @@ class DiffusionWidget:
     def draw_acceleration(self, viz, needs_build):
         _clicked, use_trt = imgui.checkbox('TensorRT##diffusion', self.params.acceleration == 'tensorrt')
         self.params.acceleration = 'tensorrt' if use_trt else 'none'
-        self.help('tensorrt')
         self.control_column(viz)
         if imgui_utils.button('Build engines##diffusion', width=viz.app.button_w * 1.5,
                               enabled=(needs_build and self.build_state == 'idle')):
@@ -410,7 +410,6 @@ class DiffusionWidget:
                 _clicked, enabled = imgui.checkbox('Enable##diffusion', self.enabled)
                 if self.available:
                     self.enabled = enabled
-                self.help('enable')
                 self.control_column(viz)
                 text, color = self.status_line(status, needs_build)
                 imgui.text_colored(text, *color)

@@ -118,13 +118,14 @@ def test_every_control_row_shares_one_column(imgui_frame, monkeypatch, tmp_path)
     assert columns[0] > viz.app.label_w  # clears the label and its help icon
 
 
-def test_help_text_exists_for_every_documented_control():
+def test_header_help_covers_every_control():
+    """One (?) in the header, like every other module: it has to explain the lot."""
     from widgets.help_icon_widget import HelpIconWidget
-    texts, _urls = HelpIconWidget().load_help_texts("diffusion")
-    expected = {"enable", "prompt", "strength", "seed", "checkpoint",
-                "resolution", "lora", "weight", "tensorrt"}
-    assert expected <= set(texts)
-    assert all(texts[key].strip() for key in expected)
+    texts, _urls = HelpIconWidget().load_help_texts("visualizer")
+    help_text = texts["diffusion"]
+    for label in ("Enable", "Prompt", "Strength", "Seed", "Checkpoint",
+                  "Resolution", "LoRA", "Weight", "TensorRT"):
+        assert f"{label}:" in help_text, f"header help does not mention {label}"
 
 
 def test_lora_checkbox_off_clears_the_path_without_losing_it(imgui_frame, monkeypatch, tmp_path):
