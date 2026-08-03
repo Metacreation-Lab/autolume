@@ -241,8 +241,9 @@ class DiffusionWidget:
                         self.params.lora_path = picked
                     imgui.same_line()
                     with imgui_utils.item_width(viz.app.button_w):
+                        # slider LoRAs (age, LECO) use weights well past 1, in both directions
                         _changed, self.params.lora_scale = imgui.slider_float('##diffusion_lora_scale',
-                                                                              self.params.lora_scale, 0, 2,
+                                                                              self.params.lora_scale, -5, 5,
                                                                               format='LoRA %.2f')
 
                     accel_index = (ACCELERATIONS.index(self.params.acceleration)
@@ -270,7 +271,7 @@ class DiffusionWidget:
         self.draw_build_modal()
         self.params.strength = float(min(max(self.params.strength, 0.0), 1.0))
         self.params.seed = int(self.params.seed)
-        self.params.lora_scale = float(min(max(self.params.lora_scale, 0.0), 2.0))
+        self.params.lora_scale = float(min(max(self.params.lora_scale, -5.0), 5.0))
         if self.params.acceleration not in ACCELERATIONS:
             self.params.acceleration = ACCELERATIONS[0]
         viz.args.use_diffusion = bool(self.enabled and self.available)
