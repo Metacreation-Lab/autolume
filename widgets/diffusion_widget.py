@@ -28,6 +28,18 @@ MODELS = ["stabilityai/sd-turbo", "KBlueLeaf/kohaku-v2.1"]
 ACCELERATIONS = ["none", "tensorrt"]
 ACCELERATION_LABELS = ["Standard", "TensorRT"]
 
+
+def _short_name(path_or_id):
+    if path_or_id.lower().endswith(('.safetensors', '.ckpt')):
+        return os.path.splitext(os.path.basename(path_or_id))[0]
+    return path_or_id
+
+
+def engine_label(entry):
+    lora = (f'{_short_name(entry["lora_path"])} @ {entry["lora_scale"]:g}'
+            if entry["lora_path"] else 'no LoRA')
+    return f'{_short_name(entry["model"])} | {lora} | {entry["resolution"]}'
+
 #----------------------------------------------------------------------------
 
 class DiffusionWidget:
@@ -57,6 +69,7 @@ class DiffusionWidget:
         self._ready_key = None
         self._ready_checked = 0.0
         self._ready = False
+        self._built_engines = []
 
         funcs = dict(zip(["Prompt", "Strength", "Seed"],
                          [self.osc_handler(param) for param in ["prompt", "strength", "seed"]]))
@@ -270,6 +283,24 @@ class DiffusionWidget:
                                           enabled=(self.enabled and needs_build
                                                    and self.build_state == 'idle')):
                         self.start_build()
+                    imgui.same_line()
+                    if imgui_utils.button('Engines...##diffusion', width=viz.app.button_w,
+                                          enabled=self.enabled):
+                        self._built_engines = trt.list_built_engines()
+                        imgui.open_popup('diffusion_engines_popup')
+                    if imgui.begin_popup('diffusion_engines_popup'):
+                        if not self._built_engines:
+                            imgui.menu_item('No engines built', None, False, False)
+                        for i, entry in enumerate(self._built_engines):
+                            clicked, _state = imgui.menu_item(f'{engine_label(entry)}##engine{i}')
+                            if clicked:
+                                self.params.model = entry['model']
+                                self.params.lora_path = entry['lora_path']
+                                self.params.lora_scale = float(entry['lora_scale'])
+                                self._lora_scale_ui = self.params.lora_scale
+                                self.params.resolution = int(entry['resolution'])
+                                self.params.acceleration = 'tensorrt'
+                        imgui.end_popup()
 
                     if status:
                         imgui.text_colored(status, 1.0, 0.3, 0.3, 1.0)

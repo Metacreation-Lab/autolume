@@ -419,6 +419,46 @@ def test_tensorrt_wrapper_gets_the_engine_dir_and_never_builds_inline(monkeypatc
     assert built[0]["build_engines_if_missing"] is False
 
 
+def test_trt_manifest_roundtrip_lists_the_built_set(monkeypatch, tmp_path):
+    import os
+    from diffusion import trt
+    monkeypatch.setattr(trt.user_data, "data_path", lambda *parts: tmp_path.joinpath(*parts))
+    p = trt_params(model="m.safetensors", lora_path="l.safetensors", lora_scale=2.5)
+    os.makedirs(trt.engine_dir(p))
+    for name in trt.REQUIRED_ENGINES:
+        open(os.path.join(trt.engine_dir(p), name), "w").close()
+    trt.write_manifest(p)
+    assert trt.list_built_engines() == [
+        dict(model="m.safetensors", resolution=p["resolution"],
+             lora_path="l.safetensors", lora_scale=2.5)]
+
+
+def test_trt_list_skips_incomplete_stale_and_unmanifested_sets(monkeypatch, tmp_path):
+    import json
+    import os
+    from diffusion import trt
+    monkeypatch.setattr(trt.user_data, "data_path", lambda *parts: tmp_path.joinpath(*parts))
+    manifest_only = trt_params(model="manifest-only")
+    os.makedirs(trt.engine_dir(manifest_only))
+    trt.write_manifest(manifest_only)
+    stale = trt_params(model="stale-fork")
+    os.makedirs(trt.engine_dir(stale))
+    for name in trt.REQUIRED_ENGINES:
+        open(os.path.join(trt.engine_dir(stale), name), "w").close()
+    trt.write_manifest(stale)
+    manifest_path = os.path.join(trt.engine_dir(stale), "manifest.json")
+    with open(manifest_path) as f:
+        manifest = json.load(f)
+    manifest["fork_sha"] = "old"
+    with open(manifest_path, "w") as f:
+        json.dump(manifest, f)
+    engines_only = trt_params(model="engines-only")
+    os.makedirs(trt.engine_dir(engines_only))
+    for name in trt.REQUIRED_ENGINES:
+        open(os.path.join(trt.engine_dir(engines_only), name), "w").close()
+    assert trt.list_built_engines() == []
+
+
 def test_stage_output_survives_uint8_conversion(monkeypatch):
     eng, _ = make_engine(monkeypatch)
     out = torch.rand(1, 3, 64, 64) * 2 - 1

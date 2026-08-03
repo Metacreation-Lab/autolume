@@ -2,6 +2,7 @@
 separate LoggedProcess because a first build takes 20 to 30 minutes."""
 import hashlib
 import importlib.util
+import json
 import os
 
 from utils import user_data
@@ -29,14 +30,56 @@ def engine_dir(params):
     return str(user_data.data_path("trt-engines", engine_dir_key(params)))
 
 
-def engines_ready(params):
-    root = engine_dir(params)
+def _dir_has_engines(root):
     if not os.path.isdir(root):
         return False
     found = set()
     for _dirpath, _dirnames, filenames in os.walk(root):
         found.update(filenames)
     return all(name in found for name in REQUIRED_ENGINES)
+
+
+def engines_ready(params):
+    return _dir_has_engines(engine_dir(params))
+
+
+# The engine dir name is an opaque hash, so a manifest of the build params is
+# written next to the engines to make built sets listable and re-selectable.
+MANIFEST_KEYS = ("model", "resolution", "lora_path", "lora_scale")
+
+
+def write_manifest(params):
+    manifest = {key: params[key] for key in MANIFEST_KEYS}
+    manifest["fork_sha"] = FORK_SHA
+    with open(os.path.join(engine_dir(params), "manifest.json"), "w") as f:
+        json.dump(manifest, f, indent=2)
+
+
+def list_built_engines():
+    """Build params of every complete engine set, sorted by checkpoint name.
+
+    Sets built by an older fork pin are skipped: their key no longer matches
+    what the current code would compute, so they cannot be loaded.
+    """
+    root = str(user_data.data_path("trt-engines"))
+    if not os.path.isdir(root):
+        return []
+    entries = []
+    for name in sorted(os.listdir(root)):
+        subdir = os.path.join(root, name)
+        manifest_path = os.path.join(subdir, "manifest.json")
+        if not os.path.isfile(manifest_path) or not _dir_has_engines(subdir):
+            continue
+        try:
+            with open(manifest_path) as f:
+                manifest = json.load(f)
+            entry = {key: manifest[key] for key in MANIFEST_KEYS}
+        except (OSError, ValueError, KeyError):
+            continue
+        if manifest.get("fork_sha") != FORK_SHA:
+            continue
+        entries.append(entry)
+    return sorted(entries, key=lambda e: str(e["model"]).lower())
 
 
 def run_build(cmd_queue, reply_queue):
@@ -70,6 +113,7 @@ def run_build(cmd_queue, reply_queue):
             reply_queue.put({"progress": "Exporting ONNX and building engines"})
             StreamDiffusionWrapper(**kwargs)
             reply_queue.put({"progress": "Finishing"})
+            write_manifest(params)
             reply_queue.put({"done": True})
     except Exception:
         import traceback
