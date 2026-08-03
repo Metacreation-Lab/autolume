@@ -600,7 +600,7 @@ class Visualizer:
         self.mixing_widget(header_opened)
 
         # Diffusion
-        header_opened = imgui_utils.collapsing_header('Diffusion', default=False)[0]
+        header_opened = imgui_utils.collapsing_header('Diffusion', default=True)[0]
         self._header_help_icon('diffusion')
         self.diffusion_widget(header_opened)
 
