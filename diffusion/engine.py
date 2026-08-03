@@ -109,6 +109,15 @@ class DiffusionEngine:
         self._loader = None
         self.status = ""
 
+    @property
+    def loading(self):
+        """True while a pipeline is being built on the loader thread.
+
+        The render loop renders on demand, so it has to keep producing frames
+        while this is set or the finished pipeline would never be installed.
+        """
+        return self._loader is not None
+
     def _start_load(self, params, device, key):
         box = {}
         snapshot = dict(params)

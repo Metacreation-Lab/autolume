@@ -491,6 +491,28 @@ def test_load_does_not_block_and_reports_progress(monkeypatch):
     assert eng.status == ""
 
 
+def test_loading_flag_tracks_the_background_load(monkeypatch):
+    import threading
+    release = threading.Event()
+
+    def slow_make(params, device):
+        release.wait(5)
+        return FakeWrapper()
+
+    monkeypatch.setattr(engine, "_make_wrapper", slow_make)
+    eng = engine.DiffusionEngine()
+    out = torch.zeros(1, 3, 64, 64)
+    p = engine.default_params()
+    assert eng.loading is False
+    eng.process(out, p, torch.device("cpu"))
+    # the render loop keeps producing frames while this is set, otherwise the
+    # finished pipeline would never be installed on an idle scene
+    assert eng.loading is True
+    release.set()
+    pump(eng, out, p)
+    assert eng.loading is False and eng.status == ""
+
+
 def test_load_started_for_an_abandoned_key_is_discarded(monkeypatch):
     import threading
     release = threading.Event()

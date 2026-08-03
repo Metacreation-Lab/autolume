@@ -602,6 +602,7 @@ class Renderer:
 
             if use_diffusion and self._diffusion_engine is not None:
                 res.diffusion_status = self._diffusion_engine.status
+                res.diffusion_loading = self._diffusion_engine.loading
 
 
             # Update layer list.

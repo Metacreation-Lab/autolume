@@ -1,4 +1,6 @@
 import multiprocessing
+import queue
+
 import torch
 
 from utils import device_utils
@@ -87,17 +89,29 @@ class AsyncRenderer:
         torch.set_grad_enabled(False)
         renderer_obj = renderer.Renderer()
         renders_since_flush = 0
+        last = None
+        keep_rendering = False
         with torch.inference_mode():
             while True:
                 # Block instead of polling: a hot loop pins a CPU core, which
-                # steals GPU boost headroom on power-limited machines.
-                args, stamp = args_queue.get()
+                # steals GPU boost headroom on power-limited machines. The
+                # exception is a stage loading in the background: nothing will
+                # change the args, so without frames its result never lands.
+                if keep_rendering and last is not None:
+                    try:
+                        args, stamp = args_queue.get(timeout=0.05)
+                    except queue.Empty:
+                        args, stamp = last
+                else:
+                    args, stamp = args_queue.get()
                 while not args_queue.empty():
                     args, stamp = args_queue.get()
+                last = (args, stamp)
                 with torch.no_grad():
                     result = renderer_obj.render(**args)
                 if 'error' in result:
                     result.error = renderer.CapturedException(result.error)
+                keep_rendering = bool(result.get('diffusion_loading'))
                 result_queue.put([result, stamp])
                 del result
                 renders_since_flush += 1

@@ -402,9 +402,9 @@ class DiffusionWidget:
                 text, color = self.status_line(status, needs_build)
                 imgui.text_colored(text, *color)
 
-                # setup stays editable while disabled: pick a checkpoint before spending VRAM
-                with imgui_utils.grayed_out(not self.enabled):
-                    self.draw_live_controls(viz)
+                # everything stays editable while disabled: set the look up first,
+                # then Enable starts processing with it. Nothing waits on a nudge.
+                self.draw_live_controls(viz)
                 imgui.spacing()
                 imgui.separator()
                 imgui.text_colored('Model setup', *GRAY)
