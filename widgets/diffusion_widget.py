@@ -1,6 +1,7 @@
 import logging
 import math
 import multiprocessing as mp
+import os
 import time
 
 import imgui
@@ -10,7 +11,10 @@ from diffusion import engine as diffusion_engine
 from diffusion import trt
 from utils.app_logging import LoggedProcess
 from utils.gui_utils import imgui_utils
+from utils.model_dir import (diffusion_checkpoints_dir, diffusion_loras_dir,
+                             list_diffusion_checkpoints, list_diffusion_loras)
 from widgets import osc_menu
+from widgets.model_dropdown_widget import ModelDropdownButton
 from widgets.native_browser_widget import NativeBrowserWidget
 
 logger = logging.getLogger(__name__)
@@ -32,9 +36,16 @@ class DiffusionWidget:
         self.available = diffusion_engine.is_available()
         self.enabled = False
         self.params = dnnlib.EasyDict(diffusion_engine.default_params())
-        self.custom_model = ""
-        self.model_index = 0
         self.browser = NativeBrowserWidget()
+        os.makedirs(diffusion_checkpoints_dir(), exist_ok=True)
+        os.makedirs(diffusion_loras_dir(), exist_ok=True)
+        self.model_dropdown = ModelDropdownButton(
+            label='Models##diffusion',
+            items_provider=lambda: MODELS + list_diffusion_checkpoints(),
+            include_training_runs=False)
+        self.lora_dropdown = ModelDropdownButton(
+            label='LoRAs##diffusion', items_provider=list_diffusion_loras,
+            include_training_runs=False)
         self.build_state = 'idle'  # 'idle' | 'building' | 'error'
         self.build_message = ''
         self.build_error = ''
@@ -61,15 +72,17 @@ class DiffusionWidget:
         return func
 
     def get_params(self):
-        return self.enabled, dict(self.params), self.custom_model, self.model_index, self.osc_menu.get_params()
+        return self.enabled, dict(self.params), self.osc_menu.get_params()
 
     def set_params(self, params):
-        enabled, saved, self.custom_model, self.model_index, osc_params = params
+        if len(params) == 5:  # legacy presets carried a custom-model field and combo index
+            enabled, saved, _custom_model, _model_index, osc_params = params
+        else:
+            enabled, saved, osc_params = params
         self.params = dnnlib.EasyDict(diffusion_engine.default_params())
         self.params.update(saved)
         self.params.strength = float(self.params.strength)
         self.params.seed = int(self.params.seed)
-        self.model_index = min(max(int(self.model_index), 0), len(MODELS))
         self.enabled = enabled and self.available
         self.osc_menu.set_params(osc_params)
 
@@ -171,18 +184,26 @@ class DiffusionWidget:
                     imgui.text('Requires an NVIDIA GPU. Not available on this platform.')
 
                 with imgui_utils.grayed_out(not self.enabled):
-                    with imgui_utils.item_width(viz.app.button_w * 3):
-                        _changed, self.model_index = imgui.combo('##diffusion_model', self.model_index,
-                                                                 MODELS + ['Custom'])
-                    if self.model_index == len(MODELS):
-                        imgui.same_line()
-                        _changed, self.custom_model = imgui_utils.input_text('##diffusion_custom_model',
-                                                                            self.custom_model, 256,
-                                                                            imgui.INPUT_TEXT_CHARS_NO_BLANK,
-                                                                            width=-1, help_text="model id")
-                        self.params.model = self.custom_model.strip() or self.params.model
-                    else:
-                        self.params.model = MODELS[self.model_index]
+                    changed, model_text = imgui_utils.input_text(
+                        '##diffusion_model', self.params.model, 1024,
+                        imgui.INPUT_TEXT_AUTO_SELECT_ALL | imgui.INPUT_TEXT_ENTER_RETURNS_TRUE,
+                        width=-1 - viz.app.button_w * 2 - viz.app.spacing * 2,
+                        help_text="model id or checkpoint")
+                    if changed:
+                        self.params.model = model_text.strip()
+                    if imgui.is_item_hovered() and not imgui.is_item_active() and self.params.model:
+                        imgui.set_tooltip(self.params.model)
+                    imgui.same_line()
+                    if imgui_utils.button('Find##diffusion_model', width=viz.app.button_w):
+                        model = self.browser.select_checkpoint_file(
+                            initial_dir=self.params.model
+                            if os.path.isfile(self.params.model) else diffusion_checkpoints_dir())
+                        if model:
+                            self.params.model = str(model)
+                    imgui.same_line()
+                    picked = self.model_dropdown(width=-1)
+                    if picked is not None:
+                        self.params.model = picked
 
                     _changed, self.params.prompt = imgui_utils.input_text(
                         '##diffusion_prompt', self.params.prompt, 1024, 0,
@@ -200,14 +221,24 @@ class DiffusionWidget:
                     imgui.same_line(spacing=0)
                     imgui.text('Seed')
 
-                    _changed, self.params.lora_path = imgui_utils.input_text(
-                        '##diffusion_lora', self.params.lora_path, 1024, 0,
-                        width=-1 - viz.app.button_w * 2 - viz.app.spacing * 2, help_text="lora file")
+                    changed, lora_text = imgui_utils.input_text(
+                        '##diffusion_lora', self.params.lora_path, 1024,
+                        imgui.INPUT_TEXT_AUTO_SELECT_ALL | imgui.INPUT_TEXT_ENTER_RETURNS_TRUE,
+                        width=-1 - viz.app.button_w * 3 - viz.app.spacing * 3, help_text="lora file")
+                    if changed:
+                        self.params.lora_path = lora_text.strip()
+                    if imgui.is_item_hovered() and not imgui.is_item_active() and self.params.lora_path:
+                        imgui.set_tooltip(self.params.lora_path)
                     imgui.same_line()
                     if imgui_utils.button('Find##lora', width=viz.app.button_w):
-                        lora = self.browser.select_lora_file(initial_dir=self.params.lora_path)
+                        lora = self.browser.select_lora_file(
+                            initial_dir=self.params.lora_path or diffusion_loras_dir())
                         if lora:
                             self.params.lora_path = str(lora)
+                    imgui.same_line()
+                    picked = self.lora_dropdown(width=viz.app.button_w)
+                    if picked is not None:
+                        self.params.lora_path = picked
                     imgui.same_line()
                     with imgui_utils.item_width(viz.app.button_w):
                         _changed, self.params.lora_scale = imgui.slider_float('##diffusion_lora_scale',

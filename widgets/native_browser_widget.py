@@ -65,6 +65,12 @@ class NativeBrowserWidget:
             ('All files', '*.*')
         ]
 
+        # Diffusion checkpoint files
+        self.checkpoint_extensions = [
+            ('Checkpoint files', '*.safetensors *.ckpt'),
+            ('All files', '*.*')
+        ]
+
         # Optimized extension sets for fast lookup
         self._image_extensions_set = self._build_extension_set(self.image_extensions)
         self._video_extensions_set = self._build_extension_set(self.video_extensions)
@@ -273,6 +279,11 @@ class NativeBrowserWidget:
         """Select a single LoRA weights file (.safetensors).
         Returns the path or None if cancelled."""
         return self._open_single_file(title, self.lora_extensions[0][1], initial_dir=initial_dir)
+
+    def select_checkpoint_file(self, title="Select Checkpoint", initial_dir=None):
+        """Select a single diffusion checkpoint file (.safetensors/.ckpt).
+        Returns the path or None if cancelled."""
+        return self._open_single_file(title, self.checkpoint_extensions[0][1], initial_dir=initial_dir)
 
     def select_image_file(self, title="Select Image", initial_dir=None):
         """Select a single image file. Returns the path or None if cancelled."""

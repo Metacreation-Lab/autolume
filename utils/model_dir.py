@@ -25,6 +25,33 @@ def list_model_pkls():
     return [os.path.join(path, f) for f in sorted(os.listdir(path)) if f.endswith(".pkl")]
 
 
+def diffusion_checkpoints_dir():
+    """Absolute path of the diffusion checkpoints folder under the user data root."""
+    return str(data_path("diffusion", "checkpoints"))
+
+
+def diffusion_loras_dir():
+    """Absolute path of the diffusion LoRA folder under the user data root."""
+    return str(data_path("diffusion", "loras"))
+
+
+def _list_files(path, extensions):
+    if not os.path.isdir(path):
+        return []
+    return [os.path.join(path, f) for f in sorted(os.listdir(path))
+            if f.lower().endswith(extensions)]
+
+
+def list_diffusion_checkpoints():
+    """Absolute paths of checkpoint files in the diffusion checkpoints folder."""
+    return _list_files(diffusion_checkpoints_dir(), (".safetensors", ".ckpt"))
+
+
+def list_diffusion_loras():
+    """Absolute paths of LoRA files in the diffusion LoRA folder."""
+    return _list_files(diffusion_loras_dir(), (".safetensors",))
+
+
 def list_training_run_pkls():
     """(run_folder, snapshots) tuples for training run folders with snapshot .pkl files.
 
