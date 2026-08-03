@@ -36,6 +36,8 @@ class DiffusionWidget:
         self.available = diffusion_engine.is_available()
         self.enabled = False
         self.params = dnnlib.EasyDict(diffusion_engine.default_params())
+        self._lora_scale_ui = self.params.lora_scale
+        self._lora_scale_dragging = False
         self.browser = NativeBrowserWidget()
         os.makedirs(diffusion_checkpoints_dir(), exist_ok=True)
         os.makedirs(diffusion_loras_dir(), exist_ok=True)
@@ -241,10 +243,20 @@ class DiffusionWidget:
                         self.params.lora_path = picked
                     imgui.same_line()
                     with imgui_utils.item_width(viz.app.button_w):
-                        # slider LoRAs (age, LECO) use weights well past 1, in both directions
-                        _changed, self.params.lora_scale = imgui.slider_float('##diffusion_lora_scale',
-                                                                              self.params.lora_scale, -5, 5,
-                                                                              format='LoRA %.2f')
+                        # slider LoRAs (age, LECO) use weights well past 1, in both directions.
+                        # scale changes rebuild the whole pipeline, so only commit on release
+                        changed, scale_ui = imgui.slider_float('##diffusion_lora_scale',
+                                                               self._lora_scale_ui, -5, 5,
+                                                               format='LoRA %.2f')
+                    if changed:
+                        self._lora_scale_ui = scale_ui
+                    if imgui.is_item_active():
+                        self._lora_scale_dragging = True
+                    elif self._lora_scale_dragging:
+                        self._lora_scale_dragging = False
+                        self.params.lora_scale = self._lora_scale_ui
+                    else:
+                        self._lora_scale_ui = self.params.lora_scale
 
                     accel_index = (ACCELERATIONS.index(self.params.acceleration)
                                    if self.params.acceleration in ACCELERATIONS else 0)
