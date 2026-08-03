@@ -68,7 +68,6 @@ class DiffusionWidget:
         self.use_lora = False
         self.lora_path = self.params.lora_path
         self.lora_scale = self.params.lora_scale
-        self.show_setup = True
         self.prompt_history = session_state.get_recent(SESSION_SECTION, 'prompts')
         if self.prompt_history:
             self.params.prompt = self.prompt_history[0]
@@ -407,15 +406,11 @@ class DiffusionWidget:
                 with imgui_utils.grayed_out(not self.enabled):
                     self.draw_live_controls(viz)
                 imgui.spacing()
-                _expanded, self.show_setup = imgui.collapsing_header(
-                    'Model setup##diffusion', flags=imgui.TREE_NODE_DEFAULT_OPEN if self.show_setup
-                    else 0)
-                if self.show_setup:
-                    imgui.indent(viz.app.spacing * 2)
-                    self.draw_model_setup(viz)
-                    imgui.spacing()
-                    self.draw_acceleration(viz, needs_build)
-                    imgui.unindent(viz.app.spacing * 2)
+                imgui.separator()
+                imgui.text_colored('Model setup', *GRAY)
+                self.draw_model_setup(viz)
+                imgui.spacing()
+                self.draw_acceleration(viz, needs_build)
 
             self.osc_menu()
 
