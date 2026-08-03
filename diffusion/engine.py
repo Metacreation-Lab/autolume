@@ -64,6 +64,9 @@ def wrapper_kwargs(params, device):
         seed=int(params["seed"]),
         # the fork's default cfg_type "self" diverges to NaN after ~45 frames and never recovers
         cfg_type="none",
+        # non-distilled checkpoints produce half-denoised mush at the few steps this
+        # stage runs; the fork fuses lcm-lora-sdv1-5 for them and skips sd-turbo itself
+        use_lcm_lora=True,
     )
     if params["acceleration"] == "tensorrt":
         from diffusion import trt
