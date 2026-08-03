@@ -63,6 +63,19 @@ def draw(widget, viz):
     return height
 
 
+@pytest.fixture
+def widget_factory(monkeypatch, tmp_path):
+    from utils import session_state
+    monkeypatch.setattr(session_state, "cache_path", lambda *p: tmp_path.joinpath(*p))
+    monkeypatch.setattr(session_state, "_state", None)
+    return DiffusionWidget
+
+
+def indicators(widget, status="", loaded=None, loading=False):
+    return {name: (color, tip)
+            for name, color, tip in widget.status_indicators(status, loaded, loading)}
+
+
 def test_panel_draws_every_control(imgui_frame, monkeypatch, tmp_path):
     from utils import session_state
     monkeypatch.setattr(session_state, "cache_path", lambda *p: tmp_path.joinpath(*p))
@@ -70,8 +83,8 @@ def test_panel_draws_every_control(imgui_frame, monkeypatch, tmp_path):
     viz = make_viz()
     widget = DiffusionWidget(viz)
     height = draw(widget, viz)
-    # enable + status, prompt, strength/seed, separator, checkpoint, resolution,
-    # lora, weight, tensorrt and the osc child: a skipped section is far shorter
+    # enable + status dots + message, prompt, strength/seed, separator, checkpoint,
+    # resolution, lora, weight, tensorrt and the osc child: a skipped section is far shorter
     assert height > 150
     assert viz.args.use_diffusion is False
     assert viz.args.diffusion["model"]
@@ -118,12 +131,77 @@ def test_every_control_row_shares_one_column(imgui_frame, monkeypatch, tmp_path)
     assert columns[0] > viz.app.label_w  # clears the label and its help icon
 
 
+def test_status_is_gray_while_the_module_is_off(imgui_frame, widget_factory):
+    from widgets.diffusion_widget import GRAY
+    widget = widget_factory(make_viz())
+    widget.available = True
+    dots = indicators(widget)
+    assert [color for color, _tip in dots.values()] == [GRAY, GRAY, GRAY]
+
+
+def test_checkpoint_and_lora_only_go_green_once_actually_live(imgui_frame, widget_factory):
+    from widgets.diffusion_widget import AMBER, GREEN
+    widget = widget_factory(make_viz())
+    widget.available = True
+    widget.enabled = True
+    widget.params.model = "stabilityai/sd-turbo"
+    widget.use_lora = True
+    widget.lora_path = "age.safetensors"
+    widget.lora_scale = 3.0
+
+    # selected but nothing loaded yet
+    dots = indicators(widget, loading=True)
+    assert dots["Checkpoint"][0] is AMBER
+    assert dots["LoRA"][0] is AMBER
+
+    live = dict(model="stabilityai/sd-turbo", lora_path="age.safetensors",
+                lora_scale=3.0, acceleration="none")
+    dots = indicators(widget, loaded=live)
+    assert dots["Checkpoint"][0] is GREEN
+    assert dots["LoRA"][0] is GREEN
+    assert "3" in dots["LoRA"][1]
+
+    # a weight change reloads the pipeline, so the live one no longer matches
+    widget.lora_scale = 4.0
+    assert indicators(widget, loaded=live)["LoRA"][0] is AMBER
+
+
+def test_tensorrt_reports_built_versus_running(imgui_frame, widget_factory, monkeypatch):
+    from widgets import diffusion_widget
+    from widgets.diffusion_widget import AMBER, GRAY, GREEN, RED
+    widget = widget_factory(make_viz())
+    widget.available = True
+    widget.enabled = True
+    assert indicators(widget)["TensorRT"][0] is GRAY
+
+    widget.params.acceleration = "tensorrt"
+    monkeypatch.setattr(diffusion_widget.trt, "engines_ready", lambda params: False)
+    widget._ready_key = None
+    assert indicators(widget)["TensorRT"][0] is RED
+
+    monkeypatch.setattr(diffusion_widget.trt, "engines_ready", lambda params: True)
+    widget._ready_key = None
+    # built is not the same as loaded: the pipeline swap takes seconds
+    assert indicators(widget)["TensorRT"][0] is AMBER
+    live = dict(model=widget.params.model, lora_path="", lora_scale=1.0,
+                acceleration="tensorrt")
+    assert indicators(widget, loaded=live)["TensorRT"][0] is GREEN
+
+
+def test_loading_message_does_not_editorialise(imgui_frame, widget_factory):
+    widget = widget_factory(make_viz())
+    widget.available = True
+    widget.enabled = True
+    text, _color = widget.status_line("Loading pipeline (4 s)", needs_build=False)
+    assert text == "Loading pipeline (4 s)"
+
+
 def test_header_help_covers_every_control():
     """One (?) in the header, like every other module: it has to explain the lot."""
     from widgets.help_icon_widget import HelpIconWidget
     texts, _urls = HelpIconWidget().load_help_texts("visualizer")
     help_text = texts["diffusion"]
-    for label in ("Enable", "Prompt", "Strength", "Seed", "Checkpoint",
+    for label in ("Enable", "Status", "Prompt", "Strength", "Seed", "Checkpoint",
                   "Resolution", "LoRA", "Weight", "TensorRT"):
         assert f"{label}:" in help_text, f"header help does not mention {label}"
 

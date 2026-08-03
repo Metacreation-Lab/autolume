@@ -513,6 +513,50 @@ def test_loading_flag_tracks_the_background_load(monkeypatch):
     assert eng.loading is False and eng.status == ""
 
 
+def test_loaded_reports_what_is_actually_in_vram(monkeypatch):
+    eng, _calls = make_engine(monkeypatch)
+    out = torch.zeros(1, 3, 64, 64)
+    p = dict(engine.default_params(), lora_path="age.safetensors", lora_scale=3.0)
+    assert eng.loaded is None
+    pump(eng, out, p)
+    # the UI reports checkpoint and LoRA separately, so it needs the live params
+    assert eng.loaded["model"] == p["model"]
+    assert eng.loaded["lora_path"] == "age.safetensors"
+    assert eng.loaded["lora_scale"] == 3.0
+
+
+def test_loaded_clears_the_moment_the_setup_changes(monkeypatch):
+    import threading
+    release = threading.Event()
+
+    def slow_make(params, device):
+        release.wait(5)
+        return FakeWrapper()
+
+    monkeypatch.setattr(engine, "_make_wrapper", slow_make)
+    eng = engine.DiffusionEngine()
+    out = torch.zeros(1, 3, 64, 64)
+    p = engine.default_params()
+    release.set()
+    pump(eng, out, p)
+    assert eng.loaded is not None
+    release.clear()
+    eng.process(out, dict(p, model="other/model"), torch.device("cpu"))
+    # the old pipeline is gone and the new one is not up: nothing is live
+    assert eng.loaded is None
+    release.set()
+
+
+def test_loaded_stays_none_when_the_load_fails(monkeypatch):
+    def failing_make(params, device):
+        raise RuntimeError("no such checkpoint")
+
+    monkeypatch.setattr(engine, "_make_wrapper", failing_make)
+    eng = engine.DiffusionEngine()
+    pump(eng, torch.zeros(1, 3, 64, 64), engine.default_params())
+    assert eng.loaded is None and eng.status.startswith("Error")
+
+
 def test_load_started_for_an_abandoned_key_is_discarded(monkeypatch):
     import threading
     release = threading.Event()

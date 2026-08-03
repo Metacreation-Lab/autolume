@@ -107,7 +107,17 @@ class DiffusionEngine:
         self._key = None
         self._applied = None
         self._loader = None
+        self._loaded = None
         self.status = ""
+
+    @property
+    def loaded(self):
+        """Params of the pipeline currently in VRAM, or None.
+
+        The UI reports checkpoint, LoRA and TensorRT separately, and only this
+        snapshot says what is actually live rather than merely selected.
+        """
+        return self._loaded
 
     @property
     def loading(self):
@@ -129,7 +139,8 @@ class DiffusionEngine:
                 box["error"] = e
 
         thread = threading.Thread(target=work, daemon=True, name="diffusion-load")
-        self._loader = dict(key=key, thread=thread, box=box, started=time.time())
+        self._loader = dict(key=key, thread=thread, box=box, params=snapshot,
+                            started=time.time())
         thread.start()
 
     def _sweep_loader(self, key):
@@ -146,6 +157,7 @@ class DiffusionEngine:
             self.status = _error_status(loader["box"]["error"])
         else:
             self._wrapper = loader["box"]["wrapper"]
+            self._loaded = loader["params"]
             self._applied = None
             self.status = ""
 
@@ -158,6 +170,7 @@ class DiffusionEngine:
             # the speed they asked for, so the stage passes frames through instead
             if not trt.engines_ready(params):
                 self._wrapper = None
+                self._loaded = None
                 self._applied = None
                 self._key = None
                 self.status = TRT_NOT_BUILT
@@ -165,6 +178,7 @@ class DiffusionEngine:
         if key != self._key and self._loader is None:
             # release the old pipeline first so the load never doubles VRAM
             self._wrapper = None
+            self._loaded = None
             self._applied = None
             self.status = f"{LOADING_PREFIX} (0 s)"
             self._start_load(params, device, key)

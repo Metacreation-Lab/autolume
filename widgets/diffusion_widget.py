@@ -229,12 +229,79 @@ class DiffusionWidget:
         if status.startswith('Error'):
             return status, RED
         if status.startswith(diffusion_engine.LOADING_PREFIX):
-            return status + ' - the image keeps playing until it is ready', AMBER
+            return status, AMBER
         if needs_build:
             return 'TensorRT selected but engines are not built for this setup.', AMBER
         if not self.enabled:
             return 'Off - configure below, then enable', GRAY
         return 'Ready', GREEN
+
+    def status_indicators(self, status, loaded, loading):
+        """(label, rgba, tooltip) for checkpoint, LoRA and TensorRT.
+
+        Selected is not running: only `loaded`, the params of the pipeline
+        actually in VRAM, can say what is really in effect.
+        """
+        live = loaded or {}
+        errored = status.startswith('Error')
+        off = not (self.available and self.enabled)
+
+        if off:
+            checkpoint = (GRAY, 'Not running')
+        elif errored:
+            checkpoint = (RED, status)
+        elif live.get('model') == self.params.model:
+            checkpoint = (GREEN, f'{_short_name(self.params.model)} loaded')
+        else:
+            checkpoint = (AMBER, f'Loading {_short_name(self.params.model)}'
+                          if loading else 'Not loaded')
+
+        if not self.use_lora:
+            lora = (GRAY, 'Off - the checkpoint runs unmodified')
+        elif not self.lora_path:
+            lora = (AMBER, 'No LoRA file selected')
+        elif off:
+            lora = (GRAY, f'{_short_name(self.lora_path)} - not running')
+        elif errored:
+            lora = (RED, status)
+        elif (live.get('lora_path') == self.lora_path
+              and float(live.get('lora_scale', 0.0)) == float(self.lora_scale)):
+            lora = (GREEN, f'{_short_name(self.lora_path)} fused at {self.lora_scale:g}')
+        else:
+            lora = (AMBER, 'Fusing' if loading else 'Not fused')
+
+        if self.params.acceleration != 'tensorrt':
+            tensorrt = (GRAY, 'Off - running the unaccelerated pipeline')
+        elif self.build_state == 'building':
+            tensorrt = (AMBER, self.build_message or 'Building engines')
+        elif not self.engines_ready():
+            tensorrt = (RED, 'No engines for this setup yet. Use Build engines.')
+        elif live.get('acceleration') == 'tensorrt':
+            tensorrt = (GREEN, 'Engines built and running')
+        else:
+            tensorrt = (AMBER, 'Engines built, not loaded yet')
+
+        return [('Checkpoint',) + checkpoint, ('LoRA',) + lora, ('TensorRT',) + tensorrt]
+
+    def status_dot(self, color):
+        """Font-independent bullet: the bundled font carries no dot glyph."""
+        size = imgui.get_text_line_height()
+        x, y = imgui.get_cursor_screen_pos()
+        imgui.get_window_draw_list().add_circle_filled(
+            x + size * 0.5, y + size * 0.5, size * 0.28, imgui.get_color_u32_rgba(*color))
+        imgui.dummy(size, size)
+
+    def draw_status(self, viz, status, loaded, loading):
+        for i, (label, color, tooltip) in enumerate(self.status_indicators(status, loaded, loading)):
+            if i:
+                imgui.same_line(spacing=viz.app.spacing * 3)
+            imgui.begin_group()
+            self.status_dot(color)
+            imgui.same_line()
+            imgui.text_colored(label, *color)
+            imgui.end_group()
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(tooltip)
 
     def column_x(self, viz):
         """X of the control column: past the widest label the panel can draw, so
@@ -398,6 +465,8 @@ class DiffusionWidget:
     def __call__(self, show=True):
         viz = self.viz
         status = viz.result.get('diffusion_status', '')
+        loaded = viz.result.get('diffusion_loaded')
+        loading = bool(viz.result.get('diffusion_loading'))
         self.poll_build()
         # the LoRA checkbox keeps the path while off, so params carry the effective value
         self.params.lora_path = self.lora_path if self.use_lora else ''
@@ -411,6 +480,9 @@ class DiffusionWidget:
                 if self.available:
                     self.enabled = enabled
                 self.control_column(viz)
+                self.draw_status(viz, status, loaded, loading)
+                # end_group() already broke the line, so no same_line() here
+                imgui.set_cursor_pos_x(self.column_x(viz))
                 text, color = self.status_line(status, needs_build)
                 imgui.text_colored(text, *color)
 
