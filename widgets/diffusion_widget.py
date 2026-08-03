@@ -1,8 +1,14 @@
 import logging
+import math
+import multiprocessing as mp
+import time
+
 import imgui
 
 import dnnlib
 from diffusion import engine as diffusion_engine
+from diffusion import trt
+from utils.app_logging import LoggedProcess
 from utils.gui_utils import imgui_utils
 from widgets import osc_menu
 from widgets.native_browser_widget import NativeBrowserWidget
@@ -15,6 +21,8 @@ except ModuleNotFoundError:
     import pickle
 
 MODELS = ["stabilityai/sd-turbo", "KBlueLeaf/kohaku-v2.1"]
+ACCELERATIONS = ["none", "tensorrt"]
+ACCELERATION_LABELS = ["Standard", "TensorRT"]
 
 #----------------------------------------------------------------------------
 
@@ -27,6 +35,15 @@ class DiffusionWidget:
         self.custom_model = ""
         self.model_index = 0
         self.browser = NativeBrowserWidget()
+        self.build_state = 'idle'  # 'idle' | 'building' | 'error'
+        self.build_message = ''
+        self.build_error = ''
+        self.build_process = None
+        self.build_queue = None
+        self.build_reply = None
+        self._ready_key = None
+        self._ready_checked = 0.0
+        self._ready = False
 
         funcs = dict(zip(["Prompt", "Strength", "Seed"],
                          [self.osc_handler(param) for param in ["prompt", "strength", "seed"]]))
@@ -64,10 +81,85 @@ class DiffusionWidget:
         with open(path, "rb") as f:
             self.set_params(pickle.load(f))
 
+    def engines_ready(self):
+        # the probe hits the disk, so it is only repeated once a second
+        key = trt.engine_dir_key(self.params)
+        now = time.time()
+        if key != self._ready_key or now - self._ready_checked > 1.0:
+            self._ready_key = key
+            self._ready_checked = now
+            self._ready = trt.engines_ready(self.params)
+        return self._ready
+
+    def start_build(self):
+        self.build_message = 'Starting'
+        self.build_error = ''
+        self.build_state = 'building'
+        self.build_queue = mp.Queue()
+        self.build_reply = mp.Queue()
+        self.build_process = LoggedProcess(target=trt.run_build, args=(self.build_queue, self.build_reply),
+                                           daemon=True, name='trt-build')
+        self.build_process.start()
+        self.build_queue.put({'cmd': 'build', 'params': dict(self.params)})
+
+    def stop_build(self):
+        if self.build_process is not None and self.build_process.is_alive():
+            self.build_process.terminate()
+        self.build_process = None
+        self.build_queue = None
+        self.build_reply = None
+        self._ready_key = None
+
+    def poll_build(self):
+        while self.build_reply is not None and not self.build_reply.empty():
+            message = self.build_reply.get()
+            if 'error' in message:
+                lines = str(message['error']).strip().splitlines()
+                self.build_error = lines[-1] if lines else 'Unknown error'
+                self.build_state = 'error'
+                self.stop_build()
+            elif message.get('done'):
+                self.build_state = 'idle'
+                self.stop_build()
+            elif 'progress' in message:
+                self.build_message = message['progress']
+
+    def draw_build_modal(self):
+        app = self.viz.app
+        width = app.content_width // 2.5
+        if self.build_state in ('building', 'error'):
+            imgui.open_popup('diffusion_build_modal')
+            imgui.set_next_window_position(app.content_width / 2 - width / 2, app.content_height / 3)
+            imgui.set_next_window_size(width, 0)
+        if imgui.begin_popup_modal('diffusion_build_modal',
+                                   flags=imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_MOVE)[0]:
+            if self.build_state == 'building':
+                imgui.text('First build takes 20 to 30 minutes. The app stays usable.')
+                imgui.separator()
+                imgui.spacing()
+                imgui.text(self.build_message)
+                imgui.progress_bar(math.fmod(time.time(), 1.0), (width - 40, 20))
+                imgui.spacing()
+                if imgui_utils.button('Cancel##diffusion_build', width=app.button_w):
+                    self.stop_build()
+                    self.build_state = 'idle'
+                    imgui.close_current_popup()
+            elif self.build_state == 'error':
+                imgui.text('Engine build failed.')
+                imgui.text_colored(self.build_error, 1.0, 0.3, 0.3, 1.0)
+                imgui.spacing()
+                if imgui_utils.button('Close##diffusion_build', width=app.button_w):
+                    self.build_state = 'idle'
+                    imgui.close_current_popup()
+            else:
+                imgui.close_current_popup()
+            imgui.end_popup()
+
     @imgui_utils.scoped_by_object_id
     def __call__(self, show=True):
         viz = self.viz
         status = viz.result.get('diffusion_status', '')
+        self.poll_build()
 
         if show:
             with imgui_utils.grayed_out(not self.available):
@@ -122,16 +214,34 @@ class DiffusionWidget:
                                                                               self.params.lora_scale, 0, 2,
                                                                               format='LoRA %.2f')
 
+                    accel_index = (ACCELERATIONS.index(self.params.acceleration)
+                                   if self.params.acceleration in ACCELERATIONS else 0)
+                    with imgui_utils.item_width(viz.app.button_w * 2):
+                        _changed, accel_index = imgui.combo('##diffusion_acceleration', accel_index,
+                                                            ACCELERATION_LABELS)
+                    self.params.acceleration = ACCELERATIONS[accel_index]
+                    needs_build = self.params.acceleration == 'tensorrt' and not self.engines_ready()
+                    imgui.same_line(spacing=viz.app.spacing * 2)
+                    if imgui_utils.button('Build engines##diffusion', width=viz.app.button_w * 1.5,
+                                          enabled=(self.enabled and needs_build
+                                                   and self.build_state == 'idle')):
+                        self.start_build()
+
                     if status:
                         imgui.text_colored(status, 1.0, 0.3, 0.3, 1.0)
+                    elif needs_build:
+                        imgui.text_colored(diffusion_engine.TRT_NOT_BUILT, 1.0, 0.3, 0.3, 1.0)
                     else:
                         imgui.text('Ready' if self.enabled else 'Off')
 
             self.osc_menu()
 
+        self.draw_build_modal()
         self.params.strength = float(min(max(self.params.strength, 0.0), 1.0))
         self.params.seed = int(self.params.seed)
         self.params.lora_scale = float(min(max(self.params.lora_scale, 0.0), 2.0))
+        if self.params.acceleration not in ACCELERATIONS:
+            self.params.acceleration = ACCELERATIONS[0]
         viz.args.use_diffusion = bool(self.enabled and self.available)
         viz.args.diffusion = dict(self.params)
 

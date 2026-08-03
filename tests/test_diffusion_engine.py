@@ -320,6 +320,105 @@ def test_empty_lora_path_builds_without_lora_dict(monkeypatch):
     assert built[0]["lora_dict"] is None
 
 
+def test_trt_engine_dir_key_stable_and_sensitive():
+    from diffusion import trt
+    p = engine.default_params()
+    assert trt.engine_dir_key(p) == trt.engine_dir_key(dict(p, prompt="x", seed=9))
+    assert trt.engine_dir_key(p) != trt.engine_dir_key(dict(p, resolution=768))
+    assert trt.engine_dir_key(p) != trt.engine_dir_key(dict(p, lora_path="a.safetensors"))
+
+
+def test_trt_engine_dir_is_a_string_under_the_key():
+    from diffusion import trt
+    p = engine.default_params()
+    path = trt.engine_dir(p)
+    assert isinstance(path, str) and path.endswith(trt.engine_dir_key(p))
+
+
+def test_trt_engines_ready_needs_the_full_set(monkeypatch, tmp_path):
+    from diffusion import trt
+    monkeypatch.setattr(trt, "engine_dir", lambda params: str(tmp_path))
+    p = engine.default_params()
+    assert not trt.engines_ready(p)
+    nested = tmp_path / "stabilityai" / "sd-turbo--mode-img2img"
+    nested.mkdir(parents=True)
+    (nested / "unet.engine").write_bytes(b"")
+    assert not trt.engines_ready(p)
+    (nested / "vae_encoder.engine").write_bytes(b"")
+    (nested / "vae_decoder.engine").write_bytes(b"")
+    assert trt.engines_ready(p)
+
+
+def trt_params(**kwargs):
+    return dict(engine.default_params(), acceleration="tensorrt", **kwargs)
+
+
+def test_tensorrt_without_engines_passes_through_and_never_builds(monkeypatch):
+    from diffusion import trt
+    monkeypatch.setattr(trt, "engines_ready", lambda params: False)
+    calls = []
+
+    def fake_make(params, device):
+        calls.append(1)
+        return FakeWrapper()
+
+    monkeypatch.setattr(engine, "_make_wrapper", fake_make)
+    eng = engine.DiffusionEngine()
+    out = torch.full((1, 3, 64, 64), 0.5)
+    res = eng.process(out, trt_params(), torch.device("cpu"))
+    assert torch.equal(res, out)
+    assert eng.status == "TensorRT engines not built. Use Build engines."
+    assert calls == []
+
+
+def test_tensorrt_check_applies_when_a_wrapper_already_exists(monkeypatch):
+    from diffusion import trt
+    monkeypatch.setattr(trt, "engines_ready", lambda params: False)
+    eng, calls = make_engine(monkeypatch)
+    eng.process(torch.zeros(1, 3, 64, 64), engine.default_params(), torch.device("cpu"))
+    out = torch.full((1, 3, 64, 64), 0.5)
+    res = eng.process(out, trt_params(), torch.device("cpu"))
+    assert torch.equal(res, out)
+    assert len(calls) == 1
+    assert eng.status == "TensorRT engines not built. Use Build engines."
+
+
+def test_tensorrt_builds_when_engines_are_ready(monkeypatch):
+    from diffusion import trt
+    monkeypatch.setattr(trt, "engines_ready", lambda params: True)
+    eng, calls = make_engine(monkeypatch)
+    res = eng.process(torch.zeros(1, 3, 64, 64), trt_params(), torch.device("cpu"))
+    assert res.shape == (1, 3, 512, 512)
+    assert eng.status == "" and len(calls) == 1
+
+
+def test_engines_appearing_trigger_a_build_without_a_param_change(monkeypatch):
+    from diffusion import trt
+    state = {"ready": False}
+    monkeypatch.setattr(trt, "engines_ready", lambda params: state["ready"])
+    eng, calls = make_engine(monkeypatch)
+    p = trt_params()
+    eng.process(torch.zeros(1, 3, 64, 64), p, torch.device("cpu"))
+    assert calls == []
+    state["ready"] = True
+    res = eng.process(torch.zeros(1, 3, 64, 64), p, torch.device("cpu"))
+    assert len(calls) == 1
+    assert eng.status == "" and res.shape == (1, 3, 512, 512)
+
+
+def test_tensorrt_wrapper_gets_the_engine_dir_and_never_builds_inline(monkeypatch):
+    from diffusion import trt
+    monkeypatch.setattr(trt, "engines_ready", lambda params: True)
+    built = []
+    fake_streamdiffusion_module(monkeypatch, built)
+    eng = engine.DiffusionEngine()
+    p = trt_params()
+    eng.process(torch.zeros(1, 3, 64, 64), p, torch.device("cpu"))
+    assert eng.status == ""
+    assert built[0]["engine_dir"] == trt.engine_dir(p)
+    assert built[0]["build_engines_if_missing"] is False
+
+
 def test_stage_output_survives_uint8_conversion(monkeypatch):
     eng, _ = make_engine(monkeypatch)
     out = torch.rand(1, 3, 64, 64) * 2 - 1

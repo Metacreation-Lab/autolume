@@ -8,6 +8,8 @@ import torch.nn.functional as F
 
 NUM_INFERENCE_STEPS = 50
 
+TRT_NOT_BUILT = "TensorRT engines not built. Use Build engines."
+
 
 def is_available():
     return importlib.util.find_spec("streamdiffusion") is not None
@@ -46,6 +48,31 @@ def build_key(params):
             params["lora_path"], params["lora_scale"])
 
 
+def wrapper_kwargs(params, device):
+    lora_path = params["lora_path"]
+    kwargs = dict(
+        model_id_or_path=params["model"],
+        t_index_list=t_indices_for_strength(params["strength"], NUM_INFERENCE_STEPS),
+        mode="img2img",
+        acceleration=params["acceleration"],
+        output_type="pt",
+        width=params["resolution"],
+        height=params["resolution"],
+        frame_buffer_size=1,
+        lora_dict={lora_path: params["lora_scale"]} if lora_path else None,
+        device=str(device),
+        seed=int(params["seed"]),
+        # the fork's default cfg_type "self" diverges to NaN after ~45 frames and never recovers
+        cfg_type="none",
+    )
+    if params["acceleration"] == "tensorrt":
+        from diffusion import trt
+        kwargs["engine_dir"] = trt.engine_dir(params)
+        # a 20 to 30 minute build must never happen inside the render worker
+        kwargs["build_engines_if_missing"] = False
+    return kwargs
+
+
 def _make_wrapper(params, device):
     lora_path = params["lora_path"]
     # the fork logs and swallows a failed LoRA load, so a bad path would otherwise
@@ -55,22 +82,7 @@ def _make_wrapper(params, device):
 
     from streamdiffusion import StreamDiffusionWrapper
 
-    lora_dict = {lora_path: params["lora_scale"]} if lora_path else None
-    return StreamDiffusionWrapper(
-        model_id_or_path=params["model"],
-        t_index_list=t_indices_for_strength(params["strength"], NUM_INFERENCE_STEPS),
-        mode="img2img",
-        acceleration=params["acceleration"],
-        output_type="pt",
-        width=params["resolution"],
-        height=params["resolution"],
-        frame_buffer_size=1,
-        lora_dict=lora_dict,
-        device=str(device),
-        seed=int(params["seed"]),
-        # the fork's default cfg_type "self" diverges to NaN after ~45 frames and never recovers
-        cfg_type="none",
-    )
+    return StreamDiffusionWrapper(**wrapper_kwargs(params, device))
 
 
 def _error_status(exc):
@@ -86,6 +98,16 @@ class DiffusionEngine:
         self.status = ""
 
     def process(self, out, params, device):
+        if params["acceleration"] == "tensorrt":
+            from diffusion import trt
+            # falling back to the eager pipeline here would silently cost the user
+            # the speed they asked for, so the stage passes frames through instead
+            if not trt.engines_ready(params):
+                self._wrapper = None
+                self._applied = None
+                self._key = None
+                self.status = TRT_NOT_BUILT
+                return out
         key = build_key(params)
         if key != self._key:
             self._wrapper = None

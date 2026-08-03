@@ -54,6 +54,14 @@ diffusion = [
     "streamdiffusion[controlnet] ; sys_platform != 'darwin'",
     "peft ; sys_platform != 'darwin'",
 ]
+# Installed next to the diffusion extra. The tensorrt package itself is not here:
+# streamdiffusion installs it with its own tool. ipadapter is not optional, the
+# fork's tensorrt modules import it. onnx-graphsurgeon needs onnx 1.18, newer
+# onnx drops an API it calls.
+diffusion-trt = [
+    "streamdiffusion[tensorrt,ipadapter] ; sys_platform == 'win32'",
+    "onnx==1.18.0 ; sys_platform == 'win32'",
+]
 
 [tool.uv]
 # Homebrew/system interpreters bake the build machine's OS version into
