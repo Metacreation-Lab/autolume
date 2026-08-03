@@ -29,6 +29,7 @@ from widgets import preset_widget
 from widgets import audio_widget
 from widgets import mixing_widget
 from widgets import collapsable_layer
+from widgets import diffusion_widget
 from widgets.help_icon_widget import HelpIconWidget
 
 from pythonosc.osc_server import BlockingOSCUDPServer
@@ -117,6 +118,7 @@ class Visualizer:
         self.mixing_widget = mixing_widget.MixingWidget(self)
         self.collapsed_widget = collapsable_layer.LayerWidget(self)
         self.audio_widget = audio_widget.AudioWidget(self)
+        self.diffusion_widget = diffusion_widget.DiffusionWidget(self)
 
     #Screen capture and screen recording
         self.is_recording = False
@@ -596,6 +598,11 @@ class Visualizer:
         header_opened = imgui_utils.collapsing_header('Model Mixing', default=True)[0]
         self._header_help_icon('model_mixing')
         self.mixing_widget(header_opened)
+
+        # Diffusion
+        header_opened = imgui_utils.collapsing_header('Diffusion', default=False)[0]
+        self._header_help_icon('diffusion')
+        self.diffusion_widget(header_opened)
 
         # Presets
         header_opened = imgui_utils.collapsing_header('Presets', default=True)[0]

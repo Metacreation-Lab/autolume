@@ -167,6 +167,7 @@ class PresetWidget:
             self.viz.pickle_widget.save(os.path.join(path, "pickle.pkl"))
             self.viz.collapsed_widget.save(os.path.join(path, "collap.pkl"))
             self.viz.mixing_widget.save(os.path.join(path, "mix.pkl"))
+            self.viz.diffusion_widget.save(os.path.join(path, "diffusion.pkl"))
             self.assigned[np.where(self.active)] = 0
         except Exception:
             logger.exception("Failed to save preset to %s", path)
@@ -193,6 +194,10 @@ class PresetWidget:
                 logger.warning("Ignored error while loading pickle.pkl: %s", e)
             self.viz.collapsed_widget.load(f"{path}/collap.pkl")
             self.viz.mixing_widget.load(os.path.join(path, "mix.pkl"))
+            try:
+                self.viz.diffusion_widget.load(os.path.join(path, "diffusion.pkl"))
+            except Exception as e:
+                logger.warning("Ignored error while loading diffusion.pkl: %s", e)
             self.viz.app.skip_frame()
         except Exception:
             logger.exception("Failed to load preset from %s", path)
