@@ -11,6 +11,7 @@ from diffusion import engine as diffusion_engine
 from diffusion import trt
 from utils.app_logging import LoggedProcess
 from utils.gui_utils import imgui_utils
+from utils import session_state
 from utils.model_dir import (diffusion_checkpoints_dir, diffusion_loras_dir,
                              list_diffusion_checkpoints, list_diffusion_loras)
 from widgets import osc_menu
@@ -27,6 +28,7 @@ except ModuleNotFoundError:
 MODELS = ["stabilityai/sd-turbo", "KBlueLeaf/kohaku-v2.1"]
 ACCELERATIONS = ["none", "tensorrt"]
 RESOLUTIONS = [512, 768, 1024]
+SESSION_SECTION = "diffusion"
 
 RED = (1.0, 0.3, 0.3, 1.0)
 AMBER = (1.0, 0.75, 0.3, 1.0)
@@ -67,6 +69,11 @@ class DiffusionWidget:
         self.lora_path = self.params.lora_path
         self.lora_scale = self.params.lora_scale
         self.show_setup = True
+        self.prompt_history = session_state.get_recent(SESSION_SECTION, 'prompts')
+        if self.prompt_history:
+            self.params.prompt = self.prompt_history[0]
+        self._prompt_committed = self.params.prompt
+        self._prompt_editing = False
         self._lora_scale_ui = self.lora_scale
         self._lora_scale_dragging = False
         self.browser = NativeBrowserWidget()
@@ -227,12 +234,37 @@ class DiffusionWidget:
             return 'Off - configure below, then enable', GRAY
         return 'Ready', GREEN
 
+    def commit_prompt_history(self):
+        """Record the prompt once the user is done typing, never per keystroke."""
+        if self.params.prompt == self._prompt_committed:
+            return
+        self._prompt_committed = self.params.prompt
+        self.prompt_history = session_state.push_recent(
+            SESSION_SECTION, 'prompts', self.params.prompt)
+
     def draw_live_controls(self, viz):
         imgui.text('Prompt')
         imgui.same_line(viz.app.label_w)
         _changed, self.params.prompt = imgui_utils.input_text(
             '##diffusion_prompt', self.params.prompt, 1024, 0,
-            width=-1, help_text="what the image should become")
+            width=-1 - viz.app.button_w - viz.app.spacing,
+            help_text="what the image should become")
+        if imgui.is_item_active():
+            self._prompt_editing = True
+        elif self._prompt_editing:
+            self._prompt_editing = False
+            self.commit_prompt_history()
+        imgui.same_line()
+        if imgui_utils.button('Recent##diffusion_prompt', width=viz.app.button_w,
+                              enabled=bool(self.prompt_history)):
+            imgui.open_popup('diffusion_prompt_history')
+        if imgui.begin_popup('diffusion_prompt_history'):
+            for i, prompt in enumerate(self.prompt_history):
+                clicked, _state = imgui.menu_item(f'{prompt[:80]}##prompt{i}')
+                if clicked:
+                    self.params.prompt = prompt
+                    self.commit_prompt_history()
+            imgui.end_popup()
 
         imgui.text('Strength')
         imgui.same_line(viz.app.label_w)
