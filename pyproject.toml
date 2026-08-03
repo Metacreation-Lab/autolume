@@ -49,11 +49,23 @@ dependencies = [
     "zensical==0.0.23",
 ]
 
+[project.optional-dependencies]
+diffusion = [
+    "streamdiffusion[controlnet] ; sys_platform != 'darwin'",
+    "peft ; sys_platform != 'darwin'",
+]
+
 [tool.uv]
 # Homebrew/system interpreters bake the build machine's OS version into
 # compiled stdlib modules and linked libs, breaking the release's declared
 # minimum OS. Managed (python-build-standalone) interpreters target macOS 11+.
 python-preference = "only-managed"
+
+# The streamdiffusion fork pins pillow==11.0.0, Autolume pins 10.4.0. The
+# override keeps the base tree unchanged and is verified working with the fork.
+override-dependencies = [
+    "pillow==10.4.0",
+]
 
 [[tool.uv.index]]
 name = "pytorch-cu128"
@@ -65,6 +77,7 @@ explicit = true
 torch = [{ index = "pytorch-cu128", marker = "sys_platform != 'darwin'" }]
 torchvision = [{ index = "pytorch-cu128", marker = "sys_platform != 'darwin'" }]
 filedialpy = { git = "https://github.com/ucodia/filedialpy.git", tag = "v1.3.4-fixes" }
+streamdiffusion = { git = "https://github.com/daydreamlive/StreamDiffusion", rev = "4c90d9e437aa28cca7cae1acfab1e52157261939" }
 
 [dependency-groups]
 dev = [
