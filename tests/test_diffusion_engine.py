@@ -57,3 +57,188 @@ def test_build_key_changes_on_model_and_lora():
     a = engine.default_params()
     assert engine.build_key(a) != engine.build_key(dict(a, model="other/model"))
     assert engine.build_key(a) != engine.build_key(dict(a, lora_path="x.safetensors"))
+
+
+class FakeWrapper:
+    def __init__(self):
+        self.prompts, self.prepares, self.stream_params, self.calls = [], [], [], []
+        self.frames = 0
+        self.fail_on_frame = False
+
+    def prepare(self, prompt, negative_prompt="", num_inference_steps=50, **kwargs):
+        self.calls.append("prepare")
+        self.prepares.append((prompt, num_inference_steps))
+
+    def update_prompt(self, prompt, **kwargs):
+        self.calls.append("update_prompt")
+        self.prompts.append(prompt)
+
+    def update_stream_params(self, **kwargs):
+        self.calls.append("update_stream_params")
+        self.stream_params.append(kwargs)
+
+    def __call__(self, image=None, prompt=None):
+        self.calls.append("frame")
+        self.frames += 1
+        if self.fail_on_frame:
+            raise RuntimeError("boom on frame")
+        return torch.rand(1, 3, image.shape[-2], image.shape[-1], dtype=torch.float16)
+
+
+def make_engine(monkeypatch, factory=None):
+    calls = []
+
+    def fake_make(params, device):
+        calls.append(engine.build_key(params))
+        if factory:
+            return factory(params, device)
+        return FakeWrapper()
+
+    monkeypatch.setattr(engine, "_make_wrapper", fake_make)
+    return engine.DiffusionEngine(), calls
+
+
+def holding_engine(monkeypatch):
+    holder = {}
+
+    def factory(params, device):
+        holder["w"] = FakeWrapper()
+        return holder["w"]
+
+    eng, calls = make_engine(monkeypatch, factory)
+    return eng, holder, calls
+
+
+def test_process_returns_diffused_frame_in_stylegan_range(monkeypatch):
+    eng, _ = make_engine(monkeypatch)
+    out = torch.zeros(1, 3, 64, 64)
+    res = eng.process(out, engine.default_params(), torch.device("cpu"))
+    assert res.shape == (1, 3, 512, 512)
+    assert res.min() >= -1.0001 and res.max() <= 1.0001
+    assert eng.status == ""
+
+
+def test_no_rebuild_on_prompt_or_strength_change(monkeypatch):
+    eng, calls = make_engine(monkeypatch)
+    p = engine.default_params()
+    eng.process(torch.zeros(1, 3, 64, 64), p, torch.device("cpu"))
+    eng.process(torch.zeros(1, 3, 64, 64), dict(p, prompt="new", strength=0.9), torch.device("cpu"))
+    assert len(calls) == 1
+
+
+def test_no_rebuild_on_seed_change(monkeypatch):
+    eng, calls = make_engine(monkeypatch)
+    p = engine.default_params()
+    eng.process(torch.zeros(1, 3, 64, 64), p, torch.device("cpu"))
+    eng.process(torch.zeros(1, 3, 64, 64), dict(p, seed=7), torch.device("cpu"))
+    assert len(calls) == 1
+
+
+def test_rebuild_on_model_change(monkeypatch):
+    eng, calls = make_engine(monkeypatch)
+    p = engine.default_params()
+    eng.process(torch.zeros(1, 3, 64, 64), p, torch.device("cpu"))
+    eng.process(torch.zeros(1, 3, 64, 64), dict(p, model="other/model"), torch.device("cpu"))
+    assert len(calls) == 2
+
+
+def test_first_frame_prepares_before_the_first_call(monkeypatch):
+    eng, holder, _ = holding_engine(monkeypatch)
+    p = dict(engine.default_params(), prompt="a", strength=0.4, seed=3)
+    eng.process(torch.zeros(1, 3, 64, 64), p, torch.device("cpu"))
+    w = holder["w"]
+    assert w.prepares == [("a", 50)]
+    assert w.calls.index("prepare") < w.calls.index("frame")
+    assert w.calls.index("update_stream_params") < w.calls.index("frame")
+    assert w.stream_params[0]["seed"] == 3
+    assert w.stream_params[0]["t_index_list"] == engine.t_indices_for_strength(0.4)
+    assert w.frames == 1
+
+
+def test_prompt_change_reaches_wrapper_once(monkeypatch):
+    eng, holder, _ = holding_engine(monkeypatch)
+    p = engine.default_params()
+    eng.process(torch.zeros(1, 3, 64, 64), dict(p, prompt="a"), torch.device("cpu"))
+    eng.process(torch.zeros(1, 3, 64, 64), dict(p, prompt="a"), torch.device("cpu"))
+    eng.process(torch.zeros(1, 3, 64, 64), dict(p, prompt="b"), torch.device("cpu"))
+    assert holder["w"].prompts.count("b") == 1
+
+
+def test_prompt_change_does_not_re_prepare_or_touch_stream_params(monkeypatch):
+    eng, holder, _ = holding_engine(monkeypatch)
+    p = engine.default_params()
+    eng.process(torch.zeros(1, 3, 64, 64), dict(p, prompt="a"), torch.device("cpu"))
+    w = holder["w"]
+    before = len(w.stream_params)
+    eng.process(torch.zeros(1, 3, 64, 64), dict(p, prompt="b"), torch.device("cpu"))
+    assert len(w.prepares) == 1
+    assert len(w.stream_params) == before
+
+
+def test_strength_and_seed_changes_update_stream_params(monkeypatch):
+    eng, holder, _ = holding_engine(monkeypatch)
+    p = engine.default_params()
+    eng.process(torch.zeros(1, 3, 64, 64), p, torch.device("cpu"))
+    eng.process(torch.zeros(1, 3, 64, 64), dict(p, strength=0.9, seed=11), torch.device("cpu"))
+    w = holder["w"]
+    assert len(w.stream_params) == 2
+    assert w.stream_params[-1]["seed"] == 11
+    assert w.stream_params[-1]["t_index_list"] == engine.t_indices_for_strength(0.9)
+    assert len(w.prepares) == 1
+
+
+def test_unchanged_params_do_not_re_send_updates(monkeypatch):
+    eng, holder, _ = holding_engine(monkeypatch)
+    p = engine.default_params()
+    for _ in range(3):
+        eng.process(torch.zeros(1, 3, 64, 64), p, torch.device("cpu"))
+    w = holder["w"]
+    assert len(w.prepares) == 1 and len(w.stream_params) == 1 and w.prompts == []
+    assert w.frames == 3
+
+
+def test_build_error_latches_passthrough_and_no_retry(monkeypatch):
+    calls = []
+
+    def fake_make(params, device):
+        calls.append(1)
+        raise RuntimeError("boom on load")
+
+    monkeypatch.setattr(engine, "_make_wrapper", fake_make)
+    eng = engine.DiffusionEngine()
+    out = torch.full((1, 3, 64, 64), 0.5)
+    p = engine.default_params()
+    res1 = eng.process(out, p, torch.device("cpu"))
+    res2 = eng.process(out, p, torch.device("cpu"))
+    assert torch.equal(res1, out) and torch.equal(res2, out)
+    assert len(calls) == 1
+    assert eng.status.startswith("Error")
+
+
+def test_error_clears_when_build_key_changes(monkeypatch):
+    state = {"fail": True}
+
+    def fake_make(params, device):
+        if state["fail"]:
+            raise RuntimeError("boom")
+        return FakeWrapper()
+
+    monkeypatch.setattr(engine, "_make_wrapper", fake_make)
+    eng = engine.DiffusionEngine()
+    p = engine.default_params()
+    eng.process(torch.zeros(1, 3, 64, 64), p, torch.device("cpu"))
+    state["fail"] = False
+    res = eng.process(torch.zeros(1, 3, 64, 64), dict(p, model="other/model"), torch.device("cpu"))
+    assert res.shape == (1, 3, 512, 512)
+    assert eng.status == ""
+
+
+def test_frame_error_passes_through_without_raising(monkeypatch):
+    eng, holder, _ = holding_engine(monkeypatch)
+    p = engine.default_params()
+    eng.process(torch.zeros(1, 3, 64, 64), p, torch.device("cpu"))
+    holder["w"].fail_on_frame = True
+    out = torch.full((1, 3, 64, 64), 0.5)
+    res = eng.process(out, p, torch.device("cpu"))
+    assert torch.equal(res, out)
+    assert eng.status.startswith("Error")
