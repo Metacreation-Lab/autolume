@@ -14,10 +14,12 @@ FORK_SHA = "4c90d9e437aa28cca7cae1acfab1e52157261939"
 # under this key instead.
 REQUIRED_ENGINES = ("unet.engine", "vae_encoder.engine", "vae_decoder.engine")
 
-# tensorrt itself is installed by streamdiffusion.tools.install-tensorrt, which
-# shells out to uv pip and mutates the venv behind uv's back. Autolume never runs
-# it, so a missing tensorrt is reported instead of worked around.
-NOT_INSTALLED = "TensorRT is not installed. Run the install tool first."
+# tensorrt is a locked dependency like any other, so a missing one is a broken
+# install rather than a step the user forgot. streamdiffusion ships its own
+# install-tensorrt tool, which shells out to uv pip and mutates the venv behind
+# uv's back; Autolume never runs it.
+NOT_INSTALLED = ("TensorRT is missing from this install. Reinstall Autolume, "
+                 "or run uv sync from a source checkout.")
 
 
 def engine_dir_key(params):

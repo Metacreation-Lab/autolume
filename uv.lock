@@ -4,7 +4,8 @@ requires-python = "==3.12.*"
 resolution-markers = [
     "sys_platform == 'darwin'",
     "platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux')",
+    "sys_platform == 'win32'",
+    "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux' and sys_platform != 'win32')",
 ]
 
 [manifest]
@@ -158,6 +159,8 @@ dependencies = [
     { name = "ndi-python" },
     { name = "ninja" },
     { name = "numpy" },
+    { name = "nvidia-cudnn-cu12", version = "9.7.1.26", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'win32'" },
+    { name = "onnx", marker = "sys_platform == 'win32'" },
     { name = "openai-clip" },
     { name = "opencv-python-headless" },
     { name = "opensimplex" },
@@ -177,19 +180,18 @@ dependencies = [
     { name = "setuptools" },
     { name = "sounddevice" },
     { name = "streamdiffusion", extra = ["controlnet"], marker = "sys_platform != 'darwin'" },
+    { name = "streamdiffusion", extra = ["ipadapter", "tensorrt"], marker = "sys_platform == 'win32'" },
+    { name = "tensorrt-cu12", marker = "sys_platform == 'win32'" },
+    { name = "tensorrt-cu12-bindings", marker = "sys_platform == 'win32'" },
+    { name = "tensorrt-cu12-libs", marker = "sys_platform == 'win32'" },
     { name = "timm" },
     { name = "torch", version = "2.8.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin'" },
     { name = "torch", version = "2.8.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "sys_platform != 'darwin'" },
     { name = "torchvision", version = "0.23.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin'" },
     { name = "torchvision", version = "0.23.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "sys_platform != 'darwin'" },
     { name = "tqdm" },
+    { name = "triton-windows", marker = "sys_platform == 'win32'" },
     { name = "zensical" },
-]
-
-[package.optional-dependencies]
-diffusion-trt = [
-    { name = "onnx", marker = "sys_platform == 'win32'" },
-    { name = "streamdiffusion", extra = ["ipadapter", "tensorrt"], marker = "sys_platform == 'win32'" },
 ]
 
 [package.dev-dependencies]
@@ -217,7 +219,8 @@ requires-dist = [
     { name = "ndi-python", specifier = "==6.3.2.3" },
     { name = "ninja", specifier = "==1.11.1.1" },
     { name = "numpy", specifier = "==1.26.4" },
-    { name = "onnx", marker = "sys_platform == 'win32' and extra == 'diffusion-trt'", specifier = "==1.18.0" },
+    { name = "nvidia-cudnn-cu12", marker = "sys_platform == 'win32'", specifier = "==9.7.1.26" },
+    { name = "onnx", marker = "sys_platform == 'win32'", specifier = "==1.18.0" },
     { name = "openai-clip", specifier = "==1.0.1" },
     { name = "opencv-python-headless", specifier = "==4.8.1.78" },
     { name = "opensimplex", specifier = "==0.4.5" },
@@ -237,16 +240,19 @@ requires-dist = [
     { name = "setuptools", specifier = "<70" },
     { name = "sounddevice", specifier = "==0.5.5" },
     { name = "streamdiffusion", extras = ["controlnet"], marker = "sys_platform != 'darwin'", git = "https://github.com/daydreamlive/StreamDiffusion?rev=4c90d9e437aa28cca7cae1acfab1e52157261939" },
-    { name = "streamdiffusion", extras = ["tensorrt", "ipadapter"], marker = "sys_platform == 'win32' and extra == 'diffusion-trt'", git = "https://github.com/daydreamlive/StreamDiffusion?rev=4c90d9e437aa28cca7cae1acfab1e52157261939" },
+    { name = "streamdiffusion", extras = ["tensorrt", "ipadapter"], marker = "sys_platform == 'win32'", git = "https://github.com/daydreamlive/StreamDiffusion?rev=4c90d9e437aa28cca7cae1acfab1e52157261939" },
+    { name = "tensorrt-cu12", marker = "sys_platform == 'win32'", specifier = "==10.12.0.36", index = "https://pypi.nvidia.com/" },
+    { name = "tensorrt-cu12-bindings", marker = "sys_platform == 'win32'", specifier = "==10.12.0.36", index = "https://pypi.nvidia.com/" },
+    { name = "tensorrt-cu12-libs", marker = "sys_platform == 'win32'", specifier = "==10.12.0.36", index = "https://pypi.nvidia.com/" },
     { name = "timm", specifier = "==0.5.4" },
     { name = "torch", marker = "sys_platform != 'darwin'", specifier = "==2.8.0+cu128", index = "https://download.pytorch.org/whl/cu128" },
     { name = "torch", marker = "sys_platform == 'darwin'", specifier = "==2.8.0" },
     { name = "torchvision", marker = "sys_platform != 'darwin'", specifier = "==0.23.0+cu128", index = "https://download.pytorch.org/whl/cu128" },
     { name = "torchvision", marker = "sys_platform == 'darwin'", specifier = "==0.23.0" },
     { name = "tqdm", specifier = "==4.66.1" },
+    { name = "triton-windows", marker = "sys_platform == 'win32'", specifier = "==3.4.0.post21" },
     { name = "zensical", specifier = "==0.0.23" },
 ]
-provides-extras = ["diffusion-trt"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=9.1.1" }]
@@ -1230,6 +1236,7 @@ version = "12.8.4.1"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/dc/61/e24b560ab2e2eaeb3c839129175fb330dfcfc29e5203196e5541a4c44682/nvidia_cublas_cu12-12.8.4.1-py3-none-manylinux_2_27_x86_64.whl", hash = "sha256:8ac4e771d5a348c551b2a426eda6193c19aa630236b418086020df5ba9667142", size = 594346921, upload-time = "2025-03-07T01:44:31.254Z" },
+    { url = "https://files.pythonhosted.org/packages/70/61/7d7b3c70186fb651d0fbd35b01dbfc8e755f69fd58f817f3d0f642df20c3/nvidia_cublas_cu12-12.8.4.1-py3-none-win_amd64.whl", hash = "sha256:47e9b82132fa8d2b4944e708049229601448aaad7e6f296f630f2d1a32de35af", size = 567544208, upload-time = "2025-03-07T01:53:30.535Z" },
 ]
 
 [[package]]
@@ -1254,12 +1261,30 @@ version = "12.8.90"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/0d/9b/a997b638fcd068ad6e4d53b8551a7d30fe8b404d6f1804abf1df69838932/nvidia_cuda_runtime_cu12-12.8.90-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:adade8dcbd0edf427b7204d480d6066d33902cab2a4707dcfc48a2d0fd44ab90", size = 954765, upload-time = "2025-03-07T01:40:01.615Z" },
+    { url = "https://files.pythonhosted.org/packages/30/a5/a515b7600ad361ea14bfa13fb4d6687abf500adc270f19e89849c0590492/nvidia_cuda_runtime_cu12-12.8.90-py3-none-win_amd64.whl", hash = "sha256:c0c6027f01505bfed6c3b21ec546f69c687689aad5f1a377554bc6ca4aa993a8", size = 944318, upload-time = "2025-03-07T01:51:01.794Z" },
+]
+
+[[package]]
+name = "nvidia-cudnn-cu12"
+version = "9.7.1.26"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "sys_platform == 'win32'",
+]
+dependencies = [
+    { name = "nvidia-cublas-cu12" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d0/ea/636cda41b3865caa0d43c34f558167304acde3d2c5f6c54c00a550e69ecd/nvidia_cudnn_cu12-9.7.1.26-py3-none-win_amd64.whl", hash = "sha256:7b805b9a4cf9f3da7c5f4ea4a9dff7baf62d1a612d6154a7e0d2ea51ed296241", size = 715962100, upload-time = "2025-02-06T22:21:32.431Z" },
 ]
 
 [[package]]
 name = "nvidia-cudnn-cu12"
 version = "9.10.2.21"
 source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux' and sys_platform != 'win32')",
+]
 dependencies = [
     { name = "nvidia-cublas-cu12" },
 ]
@@ -2228,6 +2253,35 @@ wheels = [
 ]
 
 [[package]]
+name = "tensorrt-cu12"
+version = "10.12.0.36"
+source = { registry = "https://pypi.nvidia.com/" }
+dependencies = [
+    { name = "tensorrt-cu12-bindings" },
+    { name = "tensorrt-cu12-libs" },
+]
+sdist = { url = "https://pypi.nvidia.com/tensorrt-cu12/tensorrt_cu12-10.12.0.36.tar.gz", hash = "sha256:aedeee0195c042592ac6b0536b19bc8cdbb1a548f35e09d24fbe78e1c76217c5" }
+
+[[package]]
+name = "tensorrt-cu12-bindings"
+version = "10.12.0.36"
+source = { registry = "https://pypi.nvidia.com/" }
+wheels = [
+    { url = "https://pypi.nvidia.com/tensorrt-cu12-bindings/tensorrt_cu12_bindings-10.12.0.36-cp312-none-win_amd64.whl", hash = "sha256:408af91113c22f58f2f08404bfc1548baa8d78ce6126bd543acdc9d5819662ff" },
+]
+
+[[package]]
+name = "tensorrt-cu12-libs"
+version = "10.12.0.36"
+source = { registry = "https://pypi.nvidia.com/" }
+dependencies = [
+    { name = "nvidia-cuda-runtime-cu12" },
+]
+wheels = [
+    { url = "https://pypi.nvidia.com/tensorrt-cu12-libs/tensorrt_cu12_libs-10.12.0.36-py2.py3-none-win_amd64.whl", hash = "sha256:d0e22a1fc312486ab980c2b19ccaadb74123829a51a56c69f6dd2b6d356a74e9" },
+]
+
+[[package]]
 name = "termcolor"
 version = "3.3.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2322,7 +2376,8 @@ version = "2.8.0+cu128"
 source = { registry = "https://download.pytorch.org/whl/cu128" }
 resolution-markers = [
     "platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux')",
+    "sys_platform == 'win32'",
+    "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux' and sys_platform != 'win32')",
 ]
 dependencies = [
     { name = "filelock" },
@@ -2333,7 +2388,7 @@ dependencies = [
     { name = "nvidia-cuda-cupti-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "nvidia-cuda-nvrtc-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "nvidia-cuda-runtime-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "nvidia-cudnn-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "nvidia-cudnn-cu12", version = "9.10.2.21", source = { registry = "https://pypi.org/simple" }, marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "nvidia-cufft-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "nvidia-cufile-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "nvidia-curand-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
@@ -2375,7 +2430,8 @@ version = "0.23.0+cu128"
 source = { registry = "https://download.pytorch.org/whl/cu128" }
 resolution-markers = [
     "platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux')",
+    "sys_platform == 'win32'",
+    "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux' and sys_platform != 'win32')",
 ]
 dependencies = [
     { name = "numpy" },
@@ -2429,6 +2485,17 @@ dependencies = [
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d0/66/b1eb52839f563623d185f0927eb3530ee4d5ffe9d377cdaf5346b306689e/triton-3.4.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:31c1d84a5c0ec2c0f8e8a072d7fd150cab84a9c239eaddc6706c081bfae4eb04", size = 155560068, upload-time = "2025-07-30T19:58:37.081Z" },
+]
+
+[[package]]
+name = "triton-windows"
+version = "3.4.0.post21"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "setuptools" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a1/e4/5e4886409737e9ac0f818604e5c50e5374b6abed10fbabec8599a2b20287/triton_windows-3.4.0.post21-cp312-cp312-win_amd64.whl", hash = "sha256:de50245877bb8693e23a02f8065309347828529ce9a934b363f856aa455e70ac", size = 42676032, upload-time = "2025-10-17T05:09:18.072Z" },
 ]
 
 [[package]]

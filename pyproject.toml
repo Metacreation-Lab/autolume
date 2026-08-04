@@ -44,6 +44,19 @@ dependencies = [
     # no macOS build exists, so the diffusion panel is absent there rather than
     # present and permanently disabled
     "streamdiffusion[controlnet] ; sys_platform != 'darwin'",
+    # TensorRT, Windows only, where the acceleration is offered. ipadapter is
+    # not optional, the fork's tensorrt modules import it. onnx-graphsurgeon
+    # needs onnx 1.18, newer onnx drops an API it calls. The three tensorrt-cu12
+    # packages are pinned to NVIDIA's index in tool.uv.sources: on PyPI the libs
+    # package is an empty source stub that downloads the real binaries at build
+    # time, which cannot be locked.
+    "streamdiffusion[tensorrt,ipadapter] ; sys_platform == 'win32'",
+    "onnx==1.18.0 ; sys_platform == 'win32'",
+    "tensorrt-cu12==10.12.0.36 ; sys_platform == 'win32'",
+    "tensorrt-cu12-bindings==10.12.0.36 ; sys_platform == 'win32'",
+    "tensorrt-cu12-libs==10.12.0.36 ; sys_platform == 'win32'",
+    "nvidia-cudnn-cu12==9.7.1.26 ; sys_platform == 'win32'",
+    "triton-windows==3.4.0.post21 ; sys_platform == 'win32'",
     "timm==0.5.4",
     "torch==2.8.0 ; sys_platform == 'darwin'",
     "torch==2.8.0+cu128 ; sys_platform != 'darwin'",
@@ -51,17 +64,6 @@ dependencies = [
     "torchvision==0.23.0+cu128 ; sys_platform != 'darwin'",
     "tqdm==4.66.1",
     "zensical==0.0.23",
-]
-
-[project.optional-dependencies]
-# Opt-in because TensorRT only pays off once engines are built, and the panel
-# says so itself when it is missing. The tensorrt package is not here:
-# streamdiffusion installs it with its own tool. ipadapter is not optional, the
-# fork's tensorrt modules import it. onnx-graphsurgeon needs onnx 1.18, newer
-# onnx drops an API it calls.
-diffusion-trt = [
-    "streamdiffusion[tensorrt,ipadapter] ; sys_platform == 'win32'",
-    "onnx==1.18.0 ; sys_platform == 'win32'",
 ]
 
 [tool.uv]
@@ -81,10 +83,22 @@ name = "pytorch-cu128"
 url = "https://download.pytorch.org/whl/cu128"
 explicit = true
 
+# NVIDIA ships tensorrt as real wheels here. The same names on PyPI are source
+# stubs that fetch the binaries during the build, so they are pinned to this
+# index by name: uv picks the first index a package is found in, and PyPI would
+# win. Explicit keeps everything else off it.
+[[tool.uv.index]]
+name = "nvidia"
+url = "https://pypi.nvidia.com"
+explicit = true
+
 # On macOS there are no CUDA builds; torch comes from PyPI (arm64 wheels with MPS).
 [tool.uv.sources]
 torch = [{ index = "pytorch-cu128", marker = "sys_platform != 'darwin'" }]
 torchvision = [{ index = "pytorch-cu128", marker = "sys_platform != 'darwin'" }]
+tensorrt-cu12 = [{ index = "nvidia", marker = "sys_platform == 'win32'" }]
+tensorrt-cu12-bindings = [{ index = "nvidia", marker = "sys_platform == 'win32'" }]
+tensorrt-cu12-libs = [{ index = "nvidia", marker = "sys_platform == 'win32'" }]
 filedialpy = { git = "https://github.com/ucodia/filedialpy.git", tag = "v1.3.4-fixes" }
 streamdiffusion = { git = "https://github.com/daydreamlive/StreamDiffusion", rev = "4c90d9e437aa28cca7cae1acfab1e52157261939" }
 
