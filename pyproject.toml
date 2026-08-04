@@ -12,8 +12,8 @@ dependencies = [
     "ffmpeg-python==0.2.0",
     "filedialpy==1.3.4",
     "glfw>=2.8.0",
-    "imageio-ffmpeg==0.4.9",
     "imageio==2.31.5",
+    "imageio-ffmpeg==0.4.9",
     "imgui==1.4.1",
     "kmeans-pytorch==0.3",
     "kornia==0.7.0",
@@ -23,6 +23,8 @@ dependencies = [
     "ndi-python==6.3.2.3",
     "ninja==1.11.1.1",
     "numpy==1.26.4",
+    "nvidia-cudnn-cu12==9.7.1.26 ; sys_platform == 'win32'",
+    "onnx==1.18.0 ; sys_platform == 'win32'",
     "openai-clip==1.0.1",
     "opencv-python-headless==4.8.1.78",
     "opensimplex==0.4.5",
@@ -41,28 +43,18 @@ dependencies = [
     "scipy==1.11.3",
     "setuptools<70",
     "sounddevice==0.5.5",
-    # no macOS build exists, so the diffusion panel is absent there rather than
-    # present and permanently disabled
     "streamdiffusion[controlnet] ; sys_platform != 'darwin'",
-    # TensorRT, Windows only, where the acceleration is offered. ipadapter is
-    # not optional, the fork's tensorrt modules import it. onnx-graphsurgeon
-    # needs onnx 1.18, newer onnx drops an API it calls. The three tensorrt-cu12
-    # packages are pinned to NVIDIA's index in tool.uv.sources: on PyPI the libs
-    # package is an empty source stub that downloads the real binaries at build
-    # time, which cannot be locked.
     "streamdiffusion[tensorrt,ipadapter] ; sys_platform == 'win32'",
-    "onnx==1.18.0 ; sys_platform == 'win32'",
     "tensorrt-cu12==10.12.0.36 ; sys_platform == 'win32'",
     "tensorrt-cu12-bindings==10.12.0.36 ; sys_platform == 'win32'",
     "tensorrt-cu12-libs==10.12.0.36 ; sys_platform == 'win32'",
-    "nvidia-cudnn-cu12==9.7.1.26 ; sys_platform == 'win32'",
-    "triton-windows==3.4.0.post21 ; sys_platform == 'win32'",
     "timm==0.5.4",
     "torch==2.8.0 ; sys_platform == 'darwin'",
     "torch==2.8.0+cu128 ; sys_platform != 'darwin'",
     "torchvision==0.23.0 ; sys_platform == 'darwin'",
     "torchvision==0.23.0+cu128 ; sys_platform != 'darwin'",
     "tqdm==4.66.1",
+    "triton-windows==3.4.0.post21 ; sys_platform == 'win32'",
     "zensical==0.0.23",
 ]
 
@@ -83,10 +75,8 @@ name = "pytorch-cu128"
 url = "https://download.pytorch.org/whl/cu128"
 explicit = true
 
-# NVIDIA ships tensorrt as real wheels here. The same names on PyPI are source
-# stubs that fetch the binaries during the build, so they are pinned to this
-# index by name: uv picks the first index a package is found in, and PyPI would
-# win. Explicit keeps everything else off it.
+# The tensorrt packages on PyPI are stubs that download the real binaries during
+# the build, which cannot be locked. NVIDIA ships them here as ordinary wheels.
 [[tool.uv.index]]
 name = "nvidia"
 url = "https://pypi.nvidia.com"
