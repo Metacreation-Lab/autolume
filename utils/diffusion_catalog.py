@@ -107,9 +107,14 @@ def local_name(path, variant):
 
 
 def resolve_files(entry, session=None):
-    """[(url, relative destination)] for an entry, weights-only and pickle-free."""
+    """[(url, path relative to the model root)] for an entry, pickle-free.
+
+    Relative to the model root, not to the checkpoints folder: the caller owns
+    where the model lands, and it downloads into a staging folder already named
+    for the entry. Prefixing dest here would nest the model inside itself.
+    """
     if entry["source"] == "file":
-        return [(entry["ref"], entry["dest"])]
+        return [(entry["ref"], os.path.basename(entry["dest"]))]
 
     get = (session or requests).get
     response = get(HF_API.format(ref=entry["ref"]), timeout=(10, 30))
@@ -122,7 +127,7 @@ def resolve_files(entry, session=None):
         raise ValueError(f"{entry['ref']} has no safetensors weights for variant "
                          f"{variant or 'default'}; it must not be in the catalog")
     return [(HF_FILE.format(ref=entry["ref"], path=f),
-             os.path.join(entry["dest"], *local_name(f, variant).split("/")))
+             os.path.join(*local_name(f, variant).split("/")))
             for f in wanted]
 
 

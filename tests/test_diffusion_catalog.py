@@ -81,7 +81,7 @@ def test_no_pickle_ever_reaches_the_download_list():
 def test_default_variant_takes_the_plain_weights():
     files = cat.resolve_files(entry(), session=FakeSession(HF_FILES))
     names = [d for _u, d in files]
-    assert os.path.join("model", "unet", "diffusion_pytorch_model.safetensors") in names
+    assert os.path.join("unet", "diffusion_pytorch_model.safetensors") in names
     assert not any("fp16" in n for n in names)
 
 
@@ -94,7 +94,7 @@ def test_fp16_variant_takes_half_precision_and_stores_it_unsuffixed():
     # ...but stored plain, because from_pretrained only looks for the plain name
     # and the wrapper gives us no way to pass variant="fp16" through
     assert not any("fp16" in n for n in names)
-    assert os.path.join("model", "unet", "diffusion_pytorch_model.safetensors") in names
+    assert os.path.join("unet", "diffusion_pytorch_model.safetensors") in names
 
 
 def test_the_redundant_root_checkpoint_is_not_downloaded():
@@ -102,15 +102,14 @@ def test_the_redundant_root_checkpoint_is_not_downloaded():
     Fetching it alongside the folder layout doubles the download for nothing."""
     files = cat.resolve_files(entry(), session=FakeSession(HF_FILES + ["whole_model.safetensors"]))
     names = [d for _u, d in files]
-    assert os.path.join("model", "whole_model.safetensors") not in names
-    assert os.path.join("model", "unet", "diffusion_pytorch_model.safetensors") in names
+    assert "whole_model.safetensors" not in names
+    assert os.path.join("unet", "diffusion_pytorch_model.safetensors") in names
 
 
 def test_a_single_file_repo_still_yields_its_weights():
     """Without model_index.json the root file is the model, not a duplicate."""
     files = cat.resolve_files(entry(), session=FakeSession(["config.json", "model.safetensors"]))
-    assert [d for _u, d in files if d.endswith(".safetensors")] == \
-        [os.path.join("model", "model.safetensors")]
+    assert [d for _u, d in files if d.endswith(".safetensors")] == ["model.safetensors"]
 
 
 def test_a_pickle_only_repo_is_rejected_loudly():
@@ -161,3 +160,27 @@ def test_listing_finds_both_files_and_diffusers_folders(tmp_path, monkeypatch):
     found = [os.path.basename(p) for p in model_dir.list_diffusion_checkpoints()]
     assert found == ["adiffusersrepo", "single.safetensors"]
     assert "notamodel" not in found
+
+
+def test_paths_are_relative_to_the_model_root_not_the_checkpoints_folder():
+    """The downloader joins these onto a staging folder already named for the
+    entry. A dest prefix here nests the model inside itself, and the result has
+    no model_index.json where the loader looks for it."""
+    files = cat.resolve_files(entry(dest="mymodel"), session=FakeSession(HF_FILES))
+    for _url, dest in files:
+        assert not dest.startswith("mymodel"), dest
+    assert os.path.join("unet", "diffusion_pytorch_model.safetensors") in [d for _u, d in files]
+
+
+def test_a_downloaded_entry_lands_where_is_installed_looks_for_it(tmp_path):
+    """Ties resolve_files to the staging layout the widget uses, which is the
+    seam the per-function tests fell through."""
+    e = entry(dest="mymodel")
+    staging = tmp_path / (e["dest"] + ".part")
+    for _url, relative in cat.resolve_files(e, session=FakeSession(HF_FILES)):
+        target = staging / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"")
+    staging.rename(tmp_path / e["dest"])
+    assert cat.is_installed(e, str(tmp_path))
+    assert (tmp_path / e["dest"] / "model_index.json").is_file()
