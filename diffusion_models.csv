@@ -1,0 +1,3 @@
+name,style,base_model,source,ref,dest,variant,size_mb,trigger_words,author,license,rating
+SD-Turbo,Neutral restyle,SD 2.1,hf,stabilityai/sd-turbo,sd-turbo,,2500,,Stability AI,Stability AI Community,-
+DreamShaper 8,General purpose,SD 1.5,hf,Lykon/dreamshaper-8,dreamshaper-8,fp16,2100,,Lykon,CreativeML OpenRAIL-M,X
