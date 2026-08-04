@@ -15,6 +15,9 @@ NUM_INFERENCE_STEPS = 50
 
 LOADING_PREFIX = "Loading pipeline"
 
+# at 1.0 the output would freeze on the first frame and never update again
+MAX_SMOOTHING = 0.95
+
 
 def is_available():
     return importlib.util.find_spec("streamdiffusion") is not None
@@ -22,7 +25,8 @@ def is_available():
 
 def default_params():
     return dict(model="stabilityai/sd-turbo", prompt="", strength=0.5, seed=0,
-                lora_path="", lora_scale=1.0, acceleration="none", resolution=512)
+                smoothing=0.0, lora_path="", lora_scale=1.0,
+                acceleration="none", resolution=512)
 
 
 def t_indices_for_strength(strength, num_steps=50, steps=1):
@@ -112,6 +116,7 @@ class DiffusionEngine:
         self._applied = None
         self._loader = None
         self._loaded = None
+        self._previous = None
         self.status = ""
 
     @property
@@ -183,6 +188,7 @@ class DiffusionEngine:
             self._wrapper = None
             self._loaded = None
             self._applied = None
+            self._previous = None  # a frame from the old pipeline must not bleed into the new one
             self.status = f"{LOADING_PREFIX} (0 s)"
             self._start_load(params, device, key)
             return out
@@ -196,7 +202,7 @@ class DiffusionEngine:
             x = to_diffusion_input(out, params["resolution"]).to(device)
             img = self._wrapper(image=x)
             self.status = ""
-            return from_diffusion_output(img).to(out.dtype)
+            return self._smooth(from_diffusion_output(img).to(out.dtype), params)
         except Exception as e:
             status = _error_status(e)
             # frames fail at frame rate, so only the first of each distinct
@@ -205,6 +211,24 @@ class DiffusionEngine:
                 logger.exception("Diffusion frame failed")
             self.status = status
             return out
+
+    def _smooth(self, frame, params):
+        """Exponential blend with the frames before it.
+
+        Every frame is denoised independently, so the stream shimmers even when
+        the input barely moves. This is the only temporal state the stage keeps,
+        and it buys steadiness with smear on fast motion. Fully off at 0.
+        """
+        amount = min(max(float(params.get("smoothing", 0.0)), 0.0), MAX_SMOOTHING)
+        previous = self._previous
+        # a resolution change or a reload leaves nothing valid to blend against
+        if amount <= 0.0 or previous is None or previous.shape != frame.shape:
+            self._previous = frame
+            return frame
+        # the blended frame is what carries forward, which is what makes this an
+        # average over many frames rather than a blend with just the last one
+        self._previous = torch.lerp(frame, previous, amount)
+        return self._previous
 
     def _apply(self, params):
         applied = (params["prompt"], params["strength"], params["seed"])

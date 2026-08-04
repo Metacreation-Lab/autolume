@@ -242,8 +242,8 @@ def test_header_help_covers_every_control():
     from widgets.help_icon_widget import HelpIconWidget
     texts, _urls = HelpIconWidget().load_help_texts("visualizer")
     help_text = texts["diffusion"]
-    for label in ("Enable", "Status", "Prompt", "Strength", "Seed", "Checkpoint",
-                  "Resolution", "LoRA", "Weight", "TensorRT"):
+    for label in ("Enable", "Status", "Prompt", "Strength", "Seed", "Smoothing",
+                  "Checkpoint", "Resolution", "LoRA", "Weight", "TensorRT"):
         assert f"{label}:" in help_text, f"header help does not mention {label}"
 
 

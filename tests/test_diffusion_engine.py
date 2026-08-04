@@ -577,6 +577,70 @@ def test_a_failing_frame_is_logged_once_not_every_frame(monkeypatch, caplog):
     assert "boom on frame" in caplog.text
 
 
+def test_smoothing_off_returns_the_frame_untouched(monkeypatch):
+    eng, holder, _calls = holding_engine(monkeypatch)
+    out = torch.zeros(1, 3, 64, 64)
+    p = dict(engine.default_params(), smoothing=0.0)
+    first = pump(eng, out, p).clone()
+    second = eng.process(out, p, torch.device("cpu"))
+    # the fake wrapper returns fresh noise every frame, so an untouched second
+    # frame must not resemble the first
+    assert not torch.allclose(first, second)
+
+
+def test_smoothing_pulls_each_frame_towards_the_last(monkeypatch):
+    eng, _holder, _calls = holding_engine(monkeypatch)
+    out = torch.zeros(1, 3, 64, 64)
+    p = dict(engine.default_params(), smoothing=0.8)
+    first = pump(eng, out, p).clone()
+    second = eng.process(out, p, torch.device("cpu"))
+    # 0.8 of the previous frame survives, so consecutive frames move less than
+    # the raw pipeline output does
+    moved = (second - first).abs().mean()
+    eng._previous = None
+    raw_a = eng.process(out, dict(p, smoothing=0.0), torch.device("cpu")).clone()
+    raw_b = eng.process(out, dict(p, smoothing=0.0), torch.device("cpu"))
+    assert moved < (raw_b - raw_a).abs().mean()
+
+
+def test_smoothing_never_freezes_the_output(monkeypatch):
+    eng, _holder, _calls = holding_engine(monkeypatch)
+    out = torch.zeros(1, 3, 64, 64)
+    p = dict(engine.default_params(), smoothing=1.0)  # clamped below 1
+    first = pump(eng, out, p).clone()
+    second = eng.process(out, p, torch.device("cpu"))
+    assert not torch.equal(first, second)
+
+
+def test_smoothing_is_a_live_control_not_a_rebuild(monkeypatch):
+    eng, calls = make_engine(monkeypatch)
+    p = engine.default_params()
+    pump(eng, torch.zeros(1, 3, 64, 64), p)
+    eng.process(torch.zeros(1, 3, 64, 64), dict(p, smoothing=0.7), torch.device("cpu"))
+    assert len(calls) == 1
+    assert engine.build_key(p) == engine.build_key(dict(p, smoothing=0.7))
+
+
+def test_smoothing_history_is_dropped_when_the_pipeline_changes(monkeypatch):
+    eng, _holder, _calls = holding_engine(monkeypatch)
+    out = torch.zeros(1, 3, 64, 64)
+    p = dict(engine.default_params(), smoothing=0.8)
+    pump(eng, out, p)
+    assert eng._previous is not None
+    # a frame from the old pipeline must not bleed into the new one
+    eng.process(out, dict(p, model="other/model"), torch.device("cpu"))
+    assert eng._previous is None
+
+
+def test_smoothing_survives_a_resolution_change(monkeypatch):
+    eng, _holder, _calls = holding_engine(monkeypatch)
+    out = torch.zeros(1, 3, 64, 64)
+    p = dict(engine.default_params(), smoothing=0.8)
+    pump(eng, out, p)
+    res = pump(eng, out, dict(p, resolution=768))
+    assert res.shape == (1, 3, 768, 768)  # no blend against a mismatched shape
+
+
 def test_loaded_reports_what_is_actually_in_vram(monkeypatch):
     eng, _calls = make_engine(monkeypatch)
     out = torch.zeros(1, 3, 64, 64)

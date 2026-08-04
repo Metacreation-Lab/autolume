@@ -30,7 +30,7 @@ ACCELERATIONS = ["none", "tensorrt"]
 RESOLUTIONS = [512, 768, 1024]
 SESSION_SECTION = "diffusion"
 
-TEXT_LABELS = ('Prompt', 'Strength', 'Checkpoint', 'Resolution', 'Weight')
+TEXT_LABELS = ('Prompt', 'Strength', 'Smoothing', 'Checkpoint', 'Resolution', 'Weight')
 CHECKBOX_LABELS = ('Enable', 'LoRA', 'TensorRT')
 PROMPT_LINES = 3
 
@@ -131,6 +131,7 @@ class DiffusionWidget:
         self.params = dnnlib.EasyDict(diffusion_engine.default_params())
         self.params.update(saved)
         self.params.strength = float(self.params.strength)
+        self.params.smoothing = float(self.params.smoothing)
         self.params.seed = int(self.params.seed)
         # older presets encoded "LoRA off" as an empty path
         self.lora_path = self.params.lora_path if lora_path is None else lora_path
@@ -384,6 +385,12 @@ class DiffusionWidget:
         with imgui_utils.item_width(-1):
             _changed, self.params.seed = imgui.input_int('##diffusion_seed', self.params.seed)
 
+        self.row_label(viz, 'Smoothing')
+        with imgui_utils.item_width(-1):
+            _changed, self.params.smoothing = imgui.slider_float(
+                '##diffusion_smoothing', self.params.smoothing, 0,
+                diffusion_engine.MAX_SMOOTHING, format='%.2f')
+
     def draw_model_setup(self, viz):
         self.row_label(viz, 'Checkpoint')
         changed, model_text = imgui_utils.input_text(
@@ -521,6 +528,8 @@ class DiffusionWidget:
 
         self.draw_build_modal()
         self.params.strength = float(min(max(self.params.strength, 0.0), 1.0))
+        self.params.smoothing = float(min(max(self.params.smoothing, 0.0),
+                                          diffusion_engine.MAX_SMOOTHING))
         self.params.seed = int(self.params.seed)
         self.params.lora_scale = float(min(max(self.params.lora_scale, -5.0), 5.0))
         if self.params.acceleration not in ACCELERATIONS:
