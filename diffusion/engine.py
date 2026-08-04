@@ -52,6 +52,13 @@ def build_key(params):
 
 def wrapper_kwargs(params, device):
     lora_path = params["lora_path"]
+    # The fork logs and swallows a failed LoRA load, so a bad path yields a
+    # silently un-LoRA'd pipeline. Checked here rather than at the call sites
+    # because every path to a wrapper goes through these kwargs, including the
+    # TensorRT build worker, where the cost of missing it is a 20 to 30 minute
+    # build filed under a key that claims a LoRA it never fused.
+    if lora_path and not os.path.isfile(lora_path):
+        raise FileNotFoundError(f"LoRA file not found: {lora_path}")
     kwargs = dict(
         model_id_or_path=params["model"],
         t_index_list=t_indices_for_strength(params["strength"], NUM_INFERENCE_STEPS),
@@ -79,15 +86,11 @@ def wrapper_kwargs(params, device):
 
 
 def _make_wrapper(params, device):
-    lora_path = params["lora_path"]
-    # the fork logs and swallows a failed LoRA load, so a bad path would otherwise
-    # build a silently un-LoRA'd pipeline
-    if lora_path and not os.path.isfile(lora_path):
-        raise FileNotFoundError(f"LoRA file not found: {lora_path}")
+    kwargs = wrapper_kwargs(params, device)
 
     from streamdiffusion import StreamDiffusionWrapper
 
-    return StreamDiffusionWrapper(**wrapper_kwargs(params, device))
+    return StreamDiffusionWrapper(**kwargs)
 
 
 def _error_status(exc):

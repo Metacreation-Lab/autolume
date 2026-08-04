@@ -139,9 +139,11 @@ def run_build(cmd_queue, reply_queue):
             from diffusion.engine import wrapper_kwargs
             from utils import device_utils
 
-            os.makedirs(engine_dir(params), exist_ok=True)
+            # kwargs first: it validates the params, and a rejected build should
+            # not leave an empty engine dir behind
             kwargs = wrapper_kwargs(params, device_utils.get_device())
             kwargs.update(build_engines_if_missing=True, compile_engines_only=True)
+            os.makedirs(engine_dir(params), exist_ok=True)
 
             from streamdiffusion import StreamDiffusionWrapper
 

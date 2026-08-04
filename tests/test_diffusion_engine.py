@@ -305,6 +305,41 @@ def test_missing_lora_file_errors_without_retry(monkeypatch, tmp_path):
     assert eng.status.startswith("Error") and "missing.safetensors" in eng.status
 
 
+def test_a_missing_lora_is_rejected_before_a_tensorrt_build_starts(monkeypatch, tmp_path):
+    """The 20 to 30 minute build must not run for a LoRA that is not there.
+
+    The fork swallows a failed LoRA load, so the build would finish and write a
+    manifest claiming a LoRA it never fused, poisoning the engine cache under a
+    key the user cannot tell apart from a good one.
+    """
+    import importlib.util
+    import os
+    import queue
+    from diffusion import trt
+
+    monkeypatch.setattr(trt.user_data, "data_path", lambda *parts: tmp_path.joinpath(*parts))
+    real_find_spec = importlib.util.find_spec
+    monkeypatch.setattr(importlib.util, "find_spec",
+                        lambda name, *a, **k: (object() if name == "tensorrt"
+                                               else real_find_spec(name, *a, **k)))
+    # left unstubbed on purpose: reaching the fork import at all is the failure
+    monkeypatch.delitem(sys.modules, "streamdiffusion", raising=False)
+
+    cmd, reply = queue.Queue(), queue.Queue()
+    params = dict(engine.default_params(), acceleration="tensorrt",
+                  lora_path=str(tmp_path / "gone.safetensors"))
+    cmd.put({"cmd": "build", "params": params})
+    trt.run_build(cmd, reply)
+
+    messages = []
+    while not reply.empty():
+        messages.append(reply.get())
+    errors = [m["error"] for m in messages if "error" in m]
+    assert errors and "gone.safetensors" in errors[-1]
+    assert not any(m.get("done") for m in messages)
+    assert not os.path.isdir(trt.engine_dir(params))  # no empty dir left behind
+
+
 def test_lora_error_recovers_when_path_is_fixed(monkeypatch, tmp_path):
     built = []
     fake_streamdiffusion_module(monkeypatch, built)
