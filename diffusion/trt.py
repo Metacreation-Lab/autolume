@@ -1,5 +1,5 @@
 """TensorRT engine management for the diffusion stage. Builds run in a
-separate LoggedProcess because a first build takes 20 to 30 minutes."""
+separate LoggedProcess because a first build takes 10 to 20 minutes."""
 import hashlib
 import importlib.util
 import json

@@ -1,12 +1,15 @@
 """Headless StreamDiffusion img2img stage. UI-free so it is unit-testable
 and importable on platforms where the streamdiffusion extra is absent."""
 import importlib.util
+import logging
 import os
 import threading
 import time
 
 import torch
 import torch.nn.functional as F
+
+logger = logging.getLogger(__name__)
 
 NUM_INFERENCE_STEPS = 50
 
@@ -137,6 +140,9 @@ class DiffusionEngine:
             try:
                 box["wrapper"] = _make_wrapper(snapshot, device)
             except Exception as e:
+                # only the status line would otherwise show this, and a load
+                # that failed then looks exactly like one that never ran
+                logger.exception("Diffusion pipeline failed to load")
                 box["error"] = e
 
         thread = threading.Thread(target=work, daemon=True, name="diffusion-load")
@@ -192,7 +198,12 @@ class DiffusionEngine:
             self.status = ""
             return from_diffusion_output(img).to(out.dtype)
         except Exception as e:
-            self.status = _error_status(e)
+            status = _error_status(e)
+            # frames fail at frame rate, so only the first of each distinct
+            # error is logged rather than thirty a second
+            if status != self.status:
+                logger.exception("Diffusion frame failed")
+            self.status = status
             return out
 
     def _apply(self, params):

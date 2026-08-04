@@ -26,8 +26,11 @@ class FakeDispatcher:
 def make_viz():
     app = dnnlib.EasyDict(button_w=80.0, spacing=4.0, label_w=100.0, font_size=14.0,
                           content_width=1200, content_height=800)
-    return dnnlib.EasyDict(app=app, pane_w=1000.0, result=dnnlib.EasyDict(),
-                           args=dnnlib.EasyDict(), osc_dispatcher=FakeDispatcher())
+    viz = dnnlib.EasyDict(app=app, pane_w=1000.0, result=dnnlib.EasyDict(),
+                          args=dnnlib.EasyDict(), osc_dispatcher=FakeDispatcher())
+    viz.cleared = []
+    viz.clear_result = lambda: viz.cleared.append(True)
+    return viz
 
 
 @pytest.fixture
@@ -201,6 +204,37 @@ def test_status_line_only_reports_loading_and_ready(imgui_frame, widget_factory,
     monkeypatch.setattr(diffusion_widget.trt, "engines_ready", lambda params: False)
     widget._ready_key = None
     assert widget.status_line("") == ("Ready", GREEN)
+
+
+def test_a_finished_build_wakes_the_render_worker(imgui_frame, widget_factory):
+    """A build changes nothing in viz.args, and the worker only renders on an
+    args change, so without this the new engines sit unused until restart."""
+    import queue
+    viz = make_viz()
+    widget = widget_factory(viz)
+    widget.build_state = 'building'
+    widget.build_reply = queue.Queue()
+    widget.build_reply.put({'progress': 'Compiling unet (2 of 3)'})
+    widget.poll_build()
+    assert widget.build_message == 'Compiling unet (2 of 3)'
+    assert viz.cleared == []  # nothing to pick up yet
+    widget.build_reply = queue.Queue()
+    widget.build_reply.put({'done': True})
+    widget.poll_build()
+    assert widget.build_state == 'idle'
+    assert viz.cleared == [True]
+
+
+def test_a_failed_build_does_not_wake_the_render_worker(imgui_frame, widget_factory):
+    import queue
+    viz = make_viz()
+    widget = widget_factory(viz)
+    widget.build_state = 'building'
+    widget.build_reply = queue.Queue()
+    widget.build_reply.put({'error': 'RuntimeError: out of memory'})
+    widget.poll_build()
+    assert widget.build_state == 'error'
+    assert viz.cleared == []  # there is nothing new to load
 
 
 def test_header_help_covers_every_control():

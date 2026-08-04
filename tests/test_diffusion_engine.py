@@ -548,6 +548,35 @@ def test_loading_flag_tracks_the_background_load(monkeypatch):
     assert eng.loading is False and eng.status == ""
 
 
+def test_a_failed_load_is_logged_with_its_traceback(monkeypatch, caplog):
+    """Without this a load that failed is indistinguishable in the log from one
+    that was never attempted, which is exactly what a diagnosis needs to tell
+    apart."""
+    def failing_make(params, device):
+        raise RuntimeError("no such checkpoint")
+
+    monkeypatch.setattr(engine, "_make_wrapper", failing_make)
+    eng = engine.DiffusionEngine()
+    with caplog.at_level("ERROR"):
+        pump(eng, torch.zeros(1, 3, 64, 64), engine.default_params())
+    assert "Diffusion pipeline failed to load" in caplog.text
+    assert "no such checkpoint" in caplog.text  # the traceback, not just a label
+
+
+def test_a_failing_frame_is_logged_once_not_every_frame(monkeypatch, caplog):
+    eng, holder, _calls = holding_engine(monkeypatch)
+    out = torch.zeros(1, 3, 64, 64)
+    p = engine.default_params()
+    pump(eng, out, p)
+    holder["w"].fail_on_frame = True
+    with caplog.at_level("ERROR"):
+        for _ in range(5):
+            eng.process(out, p, torch.device("cpu"))
+    # a frame fails at frame rate: one entry, not one per frame
+    assert caplog.text.count("Diffusion frame failed") == 1
+    assert "boom on frame" in caplog.text
+
+
 def test_loaded_reports_what_is_actually_in_vram(monkeypatch):
     eng, _calls = make_engine(monkeypatch)
     out = torch.zeros(1, 3, 64, 64)

@@ -188,6 +188,11 @@ class DiffusionWidget:
             elif message.get('done'):
                 self.build_state = 'idle'
                 self.stop_build()
+                # The render worker only wakes on an args change, and a finished
+                # build changes none. Without a nudge the new engines sit unused
+                # until something else moves the scene. One frame is enough: the
+                # stage then starts loading them and keeps frames coming itself.
+                self.viz.clear_result()
             elif 'progress' in message:
                 self.build_message = message['progress']
                 self.build_fraction = build_fraction(message['progress'])
@@ -202,7 +207,8 @@ class DiffusionWidget:
         if imgui.begin_popup_modal('diffusion_build_modal',
                                    flags=imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_MOVE)[0]:
             if self.build_state == 'building':
-                imgui.text('First build takes 20 to 30 minutes. The app stays usable.')
+                imgui.text('Usually 10 to 20 minutes, longer on a slower GPU.')
+                imgui.text('The app stays usable. Closing Autolume cancels the build.')
                 imgui.separator()
                 imgui.spacing()
                 imgui.text(self.build_message)
