@@ -19,6 +19,9 @@ class FakeDispatcher:
     def map_val_to_func(self, *args, **kwargs):
         pass
 
+    def map(self, *args, **kwargs):
+        pass
+
     def unmap(self, *args, **kwargs):
         pass
 
@@ -52,6 +55,9 @@ def draw(widget, viz):
     the cursor nearly where it started.
     """
     imgui.new_frame()
+    # size the window like the real pane, or every width computed from the
+    # available content region is measured against a window nobody will see
+    imgui.set_next_window_size(viz.pane_w, 800)
     imgui.begin("test")
     start = imgui.get_cursor_pos_y()
     height = 0.0
@@ -235,6 +241,51 @@ def test_a_failed_build_does_not_wake_the_render_worker(imgui_frame, widget_fact
     widget.poll_build()
     assert widget.build_state == 'error'
     assert viz.cleared == []  # there is nothing new to load
+
+
+def test_strength_and_smoothing_share_the_row_evenly_with_a_small_seed(
+        imgui_frame, widget_factory, monkeypatch):
+    viz = make_viz()
+    viz.pane_w = 720.0  # the real pane is font_size * 45, not the test default
+    widget = widget_factory(viz)
+    sizes = {}
+    real_slider, real_input = imgui.slider_float, imgui.input_int
+
+    def record(call):
+        def wrapper(label, *args, **kwargs):
+            result = call(label, *args, **kwargs)
+            sizes[label] = imgui.get_item_rect_size()[0]
+            return result
+        return wrapper
+
+    monkeypatch.setattr(imgui, "slider_float", record(real_slider))
+    monkeypatch.setattr(imgui, "input_int", record(real_input))
+    draw(widget, viz)
+    strength = sizes['##diffusion_strength']
+    smoothing = sizes['##diffusion_smoothing']
+    seed = sizes['##diffusion_seed']
+    assert abs(strength - smoothing) < 1.0, (strength, smoothing)
+    assert seed < strength * 0.7, (seed, strength)  # a number, not a range
+    assert strength > 60, strength  # still usable, not squeezed to nothing
+
+
+def test_an_osc_preset_saved_before_a_control_existed_still_loads(imgui_frame, widget_factory):
+    """Adding an OSC control must not break presets that predate it: the menu
+    draw reads every key in funcs directly and would raise KeyError."""
+    viz = make_viz()
+    widget = widget_factory(viz)
+    old_style = ({'Prompt': True, 'Strength': True, 'Seed': True},
+                 {'Prompt': False, 'Strength': True, 'Seed': False},
+                 {'Prompt': '...', 'Strength': 'str', 'Seed': '...'},
+                 {'Prompt': '...', 'Strength': '...', 'Seed': '...'},
+                 {'Prompt': 'x', 'Strength': 'x', 'Seed': 'x'})
+    widget.osc_menu.set_params(old_style)
+    for key in widget.osc_menu.funcs:
+        assert key in widget.osc_menu.use_osc, key
+        assert key in widget.osc_menu.osc_addresses, key
+        assert key in widget.osc_menu.mappings, key
+    assert widget.osc_menu.use_osc['Strength'] is True  # saved values still win
+    draw(widget, viz)  # the panel must render without a KeyError
 
 
 def test_header_help_covers_every_control():

@@ -30,7 +30,7 @@ ACCELERATIONS = ["none", "tensorrt"]
 RESOLUTIONS = [512, 768, 1024]
 SESSION_SECTION = "diffusion"
 
-TEXT_LABELS = ('Prompt', 'Strength', 'Smoothing', 'Checkpoint', 'Resolution', 'Weight')
+TEXT_LABELS = ('Prompt', 'Strength', 'Checkpoint', 'Resolution', 'Weight')
 CHECKBOX_LABELS = ('Enable', 'LoRA', 'TensorRT')
 PROMPT_LINES = 3
 
@@ -101,8 +101,9 @@ class DiffusionWidget:
         self._ready = False
         self._built_engines = []
 
-        funcs = dict(zip(["Prompt", "Strength", "Seed"],
-                         [self.osc_handler(param) for param in ["prompt", "strength", "seed"]]))
+        funcs = dict(zip(["Prompt", "Strength", "Smoothing", "Seed"],
+                         [self.osc_handler(param)
+                          for param in ["prompt", "strength", "smoothing", "seed"]]))
 
         self.osc_menu = osc_menu.OscMenu(self.viz, funcs,
                                          label="##DiffusionOSC")
@@ -376,20 +377,28 @@ class DiffusionWidget:
             imgui.end_popup()
 
         self.row_label(viz, 'Strength')
-        with imgui_utils.item_width(-1 - viz.app.button_w * 3 - viz.app.spacing * 3):
+        # the two sliders share the row evenly; seed is a number, not a range,
+        # so it only needs room for its digits and its two step buttons
+        seed_w = (imgui.get_frame_height() * 2  # the two step buttons
+                  + imgui.calc_text_size('000000').x + viz.app.spacing * 3)
+        inline_labels = imgui.calc_text_size('Smoothing').x + imgui.calc_text_size('Seed').x
+        slider_w = max(60.0, (imgui.get_content_region_available_width()
+                              - seed_w - inline_labels - viz.app.spacing * 4) / 2)
+        with imgui_utils.item_width(slider_w):
             _changed, self.params.strength = imgui.slider_float(
                 '##diffusion_strength', self.params.strength, 0, 1, format='%.2f')
         imgui.same_line()
-        imgui.text('Seed')
+        imgui.text('Smoothing')
         imgui.same_line()
-        with imgui_utils.item_width(-1):
-            _changed, self.params.seed = imgui.input_int('##diffusion_seed', self.params.seed)
-
-        self.row_label(viz, 'Smoothing')
-        with imgui_utils.item_width(-1):
+        with imgui_utils.item_width(slider_w):
             _changed, self.params.smoothing = imgui.slider_float(
                 '##diffusion_smoothing', self.params.smoothing, 0,
                 diffusion_engine.MAX_SMOOTHING, format='%.2f')
+        imgui.same_line()
+        imgui.text('Seed')
+        imgui.same_line()
+        with imgui_utils.item_width(seed_w):
+            _changed, self.params.seed = imgui.input_int('##diffusion_seed', self.params.seed)
 
     def draw_model_setup(self, viz):
         self.row_label(viz, 'Checkpoint')

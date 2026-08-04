@@ -32,6 +32,13 @@ def osc_address_picker(viz, tag, current_address, enabled=True):
     return changed, address
 
 
+def _merged(defaults, saved):
+    """Saved values over the current defaults, keeping keys the save predates."""
+    merged = type(defaults)(defaults)
+    merged.update(saved or {})
+    return merged
+
+
 class OscMenu:
     def __init__(self, viz, funcs, use_map=None, label="##OSC"):
         self.viz = viz
@@ -57,7 +64,14 @@ class OscMenu:
         return self.use_map, self.use_osc, self.osc_addresses, self.cached_osc_addresses, self.mappings
 
     def set_params(self, params):
-        self.use_map, self.use_osc, self.osc_addresses, self.cached_osc_addresses, self.mappings = params
+        # A preset saved before a control existed carries no entry for it, and
+        # the draw reads every key in funcs directly. Merge over the defaults
+        # rather than replacing them, so an older preset cannot leave a hole.
+        self.use_map = _merged(self.use_map, params[0])
+        self.use_osc = _merged(self.use_osc, params[1])
+        self.osc_addresses = _merged(self.osc_addresses, params[2])
+        self.cached_osc_addresses = _merged(self.cached_osc_addresses, params[3])
+        self.mappings = _merged(self.mappings, params[4])
         for key, func in self.funcs.items():
             self.funcs[key] = self.check_osc(func, key)
         for key, func in self.funcs.items():
