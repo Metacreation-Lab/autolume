@@ -101,7 +101,10 @@ def _make_wrapper(params, device):
 
     from streamdiffusion import StreamDiffusionWrapper
 
-    return StreamDiffusionWrapper(**kwargs)
+    from diffusion.single_file import config_override
+
+    with config_override(params["model"]):
+        return StreamDiffusionWrapper(**kwargs)
 
 
 def _error_status(exc):
