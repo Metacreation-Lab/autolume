@@ -32,6 +32,7 @@ SESSION_SECTION = "diffusion"
 
 TEXT_LABELS = ('Prompt', 'Strength', 'Checkpoint', 'Resolution', 'Weight')
 CHECKBOX_LABELS = ('Enable', 'LoRA', 'TensorRT')
+PROMPT_LINES = 3
 
 RED = (1.0, 0.3, 0.3, 1.0)
 AMBER = (1.0, 0.75, 0.3, 1.0)
@@ -342,10 +343,14 @@ class DiffusionWidget:
 
     def draw_live_controls(self, viz):
         self.row_label(viz, 'Prompt')
-        _changed, self.params.prompt = imgui_utils.input_text(
-            '##diffusion_prompt', self.params.prompt, 1024, 0,
-            width=-1 - viz.app.button_w - viz.app.spacing,
-            help_text="what the image should become")
+        # multiline so a long prompt is readable at a glance. imgui has no word
+        # wrap in a text box, so a line breaks where the user presses Enter and
+        # anything longer scrolls. The tokenizer collapses whitespace, so a line
+        # break reads to the model exactly like a space.
+        height = imgui.get_text_line_height() * PROMPT_LINES + imgui.get_style().frame_padding[1] * 2
+        _changed, self.params.prompt = imgui.input_text_multiline(
+            '##diffusion_prompt', self.params.prompt, 4096,
+            width=-1 - viz.app.button_w - viz.app.spacing, height=height)
         if imgui.is_item_active():
             self._prompt_editing = True
         elif self._prompt_editing:
