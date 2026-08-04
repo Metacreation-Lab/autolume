@@ -428,7 +428,9 @@ class DiffusionWidget:
             '##diffusion_model', self.params.model, 1024,
             imgui.INPUT_TEXT_AUTO_SELECT_ALL | imgui.INPUT_TEXT_ENTER_RETURNS_TRUE,
             width=-1 - viz.app.button_w * 2 - viz.app.spacing * 2,
-            help_text="model id or checkpoint file")
+            # only ever seen when the field is empty, and then the useful thing
+            # to say is the one input the buttons beside it cannot provide
+            help_text="HuggingFace model ID, e.g. stabilityai/sd-turbo")
         if changed:
             self.params.model = model_text.strip()
         if imgui.is_item_hovered() and not imgui.is_item_active() and self.params.model:
