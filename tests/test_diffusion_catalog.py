@@ -44,7 +44,7 @@ HF_FILES = ["model_index.json",
 def entry(**overrides):
     base = dict(name="X", style="s", base_model="SD 1.5", source="hf",
                 ref="owner/model", dest="model", variant="", size_mb="2100",
-                author="a", license="l", trigger_words="", rating="-")
+                author="a", license="l", trigger_words="")
     base.update(overrides)
     return base
 

@@ -26,7 +26,7 @@ CATALOG_URL = ("https://raw.githubusercontent.com/Metacreation-Lab/autolume/main
 
 REQUIRED_COLUMNS = ("name", "style", "base_model", "source", "ref", "dest",
                     "size_mb", "author", "license")
-OPTIONAL_COLUMNS = ("variant", "trigger_words", "rating")
+OPTIONAL_COLUMNS = ("variant", "trigger_words")
 
 # Pickles execute arbitrary code on load, so no format that can carry one is
 # ever fetched. A repo offering nothing else is not shippable.

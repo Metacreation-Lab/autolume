@@ -145,12 +145,11 @@ class DiffusionDownloadWidget:
 
     def _set_columns(self, name):
         cw = imgui.get_content_region_available_width()
-        imgui.columns(6, name, border=False)
-        imgui.set_column_width(0, int(cw * 0.24))
-        imgui.set_column_width(1, int(cw * 0.20))
-        imgui.set_column_width(2, int(cw * 0.12))
-        imgui.set_column_width(3, int(cw * 0.10))
-        imgui.set_column_width(4, int(cw * 0.16))
+        imgui.columns(5, name, border=False)
+        imgui.set_column_width(0, int(cw * 0.26))
+        imgui.set_column_width(1, int(cw * 0.24))
+        imgui.set_column_width(2, int(cw * 0.14))
+        imgui.set_column_width(3, int(cw * 0.12))
 
     def _draw_catalog_popup(self):
         imgui.set_next_window_size(self.app.content_width // 2, 0)
@@ -162,7 +161,7 @@ class DiffusionDownloadWidget:
                 imgui.text('Could not load the model list')
             else:
                 self._set_columns('##diffusion_catalog_header')
-                for label in ('Name', 'Style', 'Base', 'Rating', 'Size', ''):
+                for label in ('Name', 'Style', 'Base', 'Size', ''):
                     imgui.text(label)
                     imgui.next_column()
                 imgui.columns(1)
@@ -175,8 +174,6 @@ class DiffusionDownloadWidget:
                     imgui.text(entry['style'])
                     imgui.next_column()
                     imgui.text(entry['base_model'])
-                    imgui.next_column()
-                    imgui.text(entry.get('rating') or '-')
                     imgui.next_column()
                     imgui.text(f"{int(entry['size_mb']) / 1024:.1f} GB")
                     imgui.next_column()
