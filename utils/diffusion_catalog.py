@@ -13,6 +13,8 @@ import csv
 import io
 import logging
 import os
+import re
+from urllib.parse import unquote, urlparse
 
 import requests
 
@@ -30,6 +32,8 @@ OPTIONAL_COLUMNS = ("trigger_words",)
 
 # Pickles execute arbitrary code on load, so nothing else is ever listed.
 WEIGHT_SUFFIX = ".safetensors"
+# weights formats that carry a pickle, recognisable from a link alone
+REFUSED_SUFFIXES = (".ckpt", ".bin", ".pt", ".pth", ".pkl")
 
 
 def _parse(handle):
@@ -69,6 +73,45 @@ def load_catalog():
     except OSError as e:
         logger.error("Could not load %s: %s", CATALOG_FILE, e)
         return []
+
+
+def filename_from_response(response):
+    """Filename a server offers, from Content-Disposition."""
+    disposition = response.headers.get("Content-Disposition", "")
+    match = re.search(r'filename\*?=(?:UTF-8\'\')?"?([^";]+)"?', disposition)
+    return unquote(match.group(1)).strip() if match else ""
+
+
+def entry_from_url(url, session=None):
+    """A catalog-shaped entry for a pasted link, or ValueError explaining why not.
+
+    Civitai download links carry no filename in the path, so the server is asked
+    for one. Anything that is not safetensors is refused: pickles execute
+    arbitrary code on load, and that rule cannot depend on where a file came
+    from.
+    """
+    url = url.strip()
+    if not url.lower().startswith(("http://", "https://")):
+        raise ValueError("That is not a link. Paste a direct link to a .safetensors file.")
+
+    name = os.path.basename(urlparse(url).path)
+    size = 0
+    if name.lower().endswith(REFUSED_SUFFIXES):
+        # the link already says what it is, so say no without asking the server
+        raise ValueError("That link is not a .safetensors checkpoint.")
+    if not name.lower().endswith(WEIGHT_SUFFIX):
+        get = (session or requests).get
+        with get(url, stream=True, timeout=(10, 30)) as response:
+            response.raise_for_status()
+            name = filename_from_response(response) or name
+            size = int(response.headers.get("Content-Length") or 0)
+    if not name.lower().endswith(WEIGHT_SUFFIX):
+        raise ValueError("That link is not a .safetensors checkpoint.")
+
+    return dict(name=os.path.splitext(name)[0], style="Added from a link",
+                base_model="unknown", filename=os.path.basename(name), url=url,
+                size_mb=str(max(1, size // (1024 * 1024))), trigger_words="",
+                author="", license="")
 
 
 def destination(entry, checkpoints_dir):

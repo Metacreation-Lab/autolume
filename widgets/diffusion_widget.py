@@ -424,16 +424,17 @@ class DiffusionWidget:
 
     def draw_model_setup(self, viz):
         self.row_label(viz, 'Checkpoint')
-        changed, model_text = imgui_utils.input_text(
-            '##diffusion_model', self.params.model, 1024,
-            imgui.INPUT_TEXT_AUTO_SELECT_ALL | imgui.INPUT_TEXT_ENTER_RETURNS_TRUE,
+        # Shows what is selected rather than accepting one. A typed model id
+        # would be handed to diffusers, which downloads a whole repo into its
+        # own cache with no progress, no resume and no safetensors guarantee.
+        # Models arrive through Browse or the catalog, both of which produce a
+        # single file in the checkpoints folder.
+        imgui_utils.input_text(
+            '##diffusion_model', _short_name(self.params.model), 1024,
+            imgui.INPUT_TEXT_READ_ONLY,
             width=-1 - viz.app.button_w * 2 - viz.app.spacing * 2,
-            # only ever seen when the field is empty, and then the useful thing
-            # to say is the one input the buttons beside it cannot provide
-            help_text="HuggingFace model ID, e.g. stabilityai/sd-turbo")
-        if changed:
-            self.params.model = model_text.strip()
-        if imgui.is_item_hovered() and not imgui.is_item_active() and self.params.model:
+            help_text="No checkpoint selected")
+        if imgui.is_item_hovered() and self.params.model:
             imgui.set_tooltip(self.params.model)
         imgui.same_line()
         if imgui_utils.button('Browse##diffusion_model', width=viz.app.button_w):

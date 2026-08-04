@@ -72,3 +72,68 @@ def test_every_catalog_entry_lands_where_the_dropdown_looks(tmp_path, monkeypatc
         open(cat.destination(e, str(tmp_path)), "wb").close()
     listed = {os.path.basename(p) for p in model_dir.list_diffusion_checkpoints()}
     assert listed == {e["filename"] for e in cat.load_catalog()}
+
+
+class LinkResponse:
+    def __init__(self, disposition="", length=0):
+        self.headers = {"Content-Disposition": disposition, "Content-Length": str(length)}
+
+    def raise_for_status(self):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+class LinkSession:
+    def __init__(self, response):
+        self.response = response
+
+    def get(self, url, stream=None, timeout=None):
+        return self.response
+
+
+def test_a_direct_safetensors_link_needs_no_round_trip():
+    e = cat.entry_from_url("https://huggingface.co/o/m/resolve/main/model.safetensors")
+    assert e["filename"] == "model.safetensors"
+    assert e["url"].endswith("model.safetensors")
+
+
+def test_a_civitai_link_takes_its_filename_from_the_server():
+    """Civitai download urls carry no filename, so the server is asked."""
+    session = LinkSession(LinkResponse('attachment; filename="dreamshaper_8.safetensors"',
+                                       2_136_000_000))
+    e = cat.entry_from_url("https://civitai.com/api/download/models/128713", session=session)
+    assert e["filename"] == "dreamshaper_8.safetensors"
+    assert int(e["size_mb"]) == 2_136_000_000 // (1024 * 1024)
+
+
+def test_a_link_to_something_that_is_not_safetensors_is_refused():
+    session = LinkSession(LinkResponse('attachment; filename="model.ckpt"'))
+    for url, kwargs in [("https://host/model.ckpt", {}),
+                        ("https://civitai.com/api/download/models/1", {"session": session})]:
+        try:
+            cat.entry_from_url(url, **kwargs)
+        except ValueError as e:
+            assert "safetensors" in str(e)
+        else:
+            raise AssertionError(f"{url} should have been refused")
+
+
+def test_a_link_that_is_not_a_link_says_so():
+    for text in ("stabilityai/sd-turbo", "", "   ", "just some words"):
+        try:
+            cat.entry_from_url(text)
+        except ValueError as e:
+            assert "link" in str(e).lower()
+        else:
+            raise AssertionError(f"{text!r} should have been refused")
+
+
+def test_a_pasted_entry_downloads_like_a_catalog_entry(tmp_path):
+    e = cat.entry_from_url("https://host/x.safetensors")
+    assert cat.destination(e, str(tmp_path)) == os.path.join(str(tmp_path), "x.safetensors")
+    assert not cat.is_installed(e, str(tmp_path))

@@ -6,7 +6,8 @@ import time
 
 import imgui
 
-from utils.diffusion_catalog import destination, is_installed, load_catalog
+from utils.diffusion_catalog import (destination, entry_from_url, is_installed,
+                                     load_catalog)
 from utils.downloads import download_file
 from utils.gui_utils import imgui_utils
 
@@ -42,6 +43,8 @@ class DiffusionDownloadWidget:
         self._cancel_event = None
         self._thread = None
         self._finished_ok = False
+        self._link = ''
+        self._link_error = ''
 
         # a partial left by a killed app cannot be resumed across runs
         self._clear_partials()
@@ -150,9 +153,37 @@ class DiffusionDownloadWidget:
                 imgui.columns(1)
             imgui.separator()
             imgui.spacing()
+            self._draw_link_row()
+            imgui.spacing()
             if imgui_utils.button('Close', width=self.app.button_w):
                 imgui.close_current_popup()
             imgui.end_popup()
+
+    def _draw_link_row(self):
+        """Paste a direct link to a checkpoint found elsewhere.
+
+        The same downloader as the curated rows, so a pasted model gets the
+        progress, resume and safetensors-only rules the catalog gets.
+        """
+        imgui.text('Or paste a link to a .safetensors checkpoint')
+        _changed, self._link = imgui_utils.input_text(
+            '##diffusion_link', self._link, 1024, 0,
+            width=-1 - self.app.button_w - 8,
+            help_text='https://civitai.com/api/download/models/...')
+        imgui.same_line()
+        if imgui_utils.button('Add##diffusion_link', width=self.app.button_w,
+                              enabled=(bool(self._link.strip()) and self._state == 'idle')):
+            try:
+                entry = entry_from_url(self._link)
+            except Exception as e:
+                self._link_error = str(e)
+            else:
+                self._link = ''
+                self._link_error = ''
+                self.start_download(entry)
+                imgui.close_current_popup()
+        if self._link_error:
+            imgui.text_colored(self._link_error, 1.0, 0.4, 0.4, 1.0)
 
     def _draw_progress_modal(self):
         width = self.app.content_width // 2.5
