@@ -4,6 +4,8 @@ Renders the widget in a real imgui context with no backend, which catches
 pyimgui API misuse (wrong return-value unpacking, unbalanced begin/end,
 missing pops) that unit tests on the params alone cannot see.
 """
+import os
+
 import pytest
 
 imgui = pytest.importorskip("imgui")
@@ -74,9 +76,14 @@ def draw(widget, viz):
 
 @pytest.fixture
 def widget_factory(monkeypatch, tmp_path):
-    from utils import session_state
+    from utils import session_state, model_dir
     monkeypatch.setattr(session_state, "cache_path", lambda *p: tmp_path.joinpath(*p))
     monkeypatch.setattr(session_state, "_state", None)
+    # the panel picks its starting checkpoint from this folder, so tests must
+    # not read whatever the developer happens to have installed
+    checkpoints = tmp_path / "checkpoints"
+    checkpoints.mkdir()
+    monkeypatch.setattr(model_dir, "diffusion_checkpoints_dir", lambda: str(checkpoints))
     return DiffusionWidget
 
 
@@ -85,26 +92,20 @@ def indicators(widget, status="", loaded=None, loading=False):
             for name, color, tip in widget.status_indicators(status, loaded, loading)}
 
 
-def test_panel_draws_every_control(imgui_frame, monkeypatch, tmp_path):
-    from utils import session_state
-    monkeypatch.setattr(session_state, "cache_path", lambda *p: tmp_path.joinpath(*p))
-    monkeypatch.setattr(session_state, "_state", None)
+def test_panel_draws_every_control(imgui_frame, widget_factory):
     viz = make_viz()
-    widget = DiffusionWidget(viz)
+    widget = widget_factory(viz)
     height = draw(widget, viz)
     # enable + status dots + message, prompt, strength/seed, separator, checkpoint,
     # resolution, lora, weight, tensorrt and the osc child: a skipped section is far shorter
     assert height > 150
     assert viz.args.use_diffusion is False
-    assert viz.args.diffusion["model"]
+    assert "model" in viz.args.diffusion
 
 
-def test_panel_draws_while_enabled_and_erroring(imgui_frame, monkeypatch, tmp_path):
-    from utils import session_state
-    monkeypatch.setattr(session_state, "cache_path", lambda *p: tmp_path.joinpath(*p))
-    monkeypatch.setattr(session_state, "_state", None)
+def test_panel_draws_while_enabled_and_erroring(imgui_frame, widget_factory):
     viz = make_viz()
-    widget = DiffusionWidget(viz)
+    widget = widget_factory(viz)
     widget.available = True
     widget.enabled = True
     widget.use_lora = True
@@ -115,12 +116,9 @@ def test_panel_draws_while_enabled_and_erroring(imgui_frame, monkeypatch, tmp_pa
     assert viz.args.diffusion["lora_path"] == "x.safetensors"
 
 
-def test_every_control_row_shares_one_column(imgui_frame, monkeypatch, tmp_path):
-    from utils import session_state
-    monkeypatch.setattr(session_state, "cache_path", lambda *p: tmp_path.joinpath(*p))
-    monkeypatch.setattr(session_state, "_state", None)
+def test_every_control_row_shares_one_column(imgui_frame, widget_factory):
     viz = make_viz()
-    widget = DiffusionWidget(viz)
+    widget = widget_factory(viz)
     widget.available = True
     widget.enabled = True
     widget.use_lora = True
@@ -204,6 +202,7 @@ def test_status_line_only_reports_loading_and_ready(imgui_frame, widget_factory,
     widget = widget_factory(make_viz())
     widget.available = True
     widget.enabled = True
+    widget.params.model = "some/checkpoint"
     assert widget.status_line("Loading pipeline (4 s)")[0] == "Loading pipeline (4 s)"
     # unbuilt engines are the TensorRT indicator's business, not this line's
     widget.params.acceleration = "tensorrt"
@@ -314,3 +313,37 @@ def test_lora_checkbox_off_clears_the_path_without_losing_it(imgui_frame, monkey
     draw(widget, viz)
     assert viz.args.diffusion["lora_path"] == "keep/me.safetensors"
     assert viz.args.diffusion["lora_scale"] == 3.5
+
+
+def test_no_checkpoint_is_offered_when_none_is_installed(imgui_frame, widget_factory):
+    """The field used to open on stabilityai/sd-turbo whether or not the user
+    had it, which meant Enable silently downloaded gigabytes with no progress
+    anywhere."""
+    viz = make_viz()
+    widget = widget_factory(viz)
+    assert widget.params.model == ""
+    draw(widget, viz)
+    assert viz.args.diffusion["model"] == ""
+    assert "No checkpoint" in widget.status_line("")[0]
+
+
+def test_the_first_installed_checkpoint_is_offered(imgui_frame, widget_factory, monkeypatch):
+    from utils import model_dir
+    open(os.path.join(model_dir.diffusion_checkpoints_dir(), "a.safetensors"), "wb").close()
+    widget = widget_factory(make_viz())
+    assert os.path.basename(widget.params.model) == "a.safetensors"
+
+
+def test_the_last_used_checkpoint_comes_back(imgui_frame, widget_factory, monkeypatch):
+    from utils import model_dir, session_state
+    ck = model_dir.diffusion_checkpoints_dir()
+    for name in ("a.safetensors", "z.safetensors"):
+        open(os.path.join(ck, name), "wb").close()
+    viz = make_viz()
+    widget = widget_factory(viz)
+    widget.params.model = os.path.join(ck, "z.safetensors")
+    draw(widget, viz)  # committing happens on the frame that sees the change
+    assert session_state.get("diffusion", "model", "").endswith("z.safetensors")
+    # a new panel in a new session starts where the last one left off, not at
+    # the alphabetically first file
+    assert widget_factory(make_viz()).params.model.endswith("z.safetensors")

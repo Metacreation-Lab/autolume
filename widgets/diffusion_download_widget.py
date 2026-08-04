@@ -1,21 +1,20 @@
 import logging
 import math
 import os
-import shutil
 import threading
 import time
 
 import imgui
 
-from utils.diffusion_catalog import is_installed, load_catalog, resolve_files
+from utils.diffusion_catalog import destination, is_installed, load_catalog
 from utils.downloads import download_file
 from utils.gui_utils import imgui_utils
 
 logger = logging.getLogger(__name__)
 
-# Both hosts drop multi-gigabyte transfers, so every file gets several chances
-# to resume before the entry is called a failure.
-TRIES_PER_FILE = 6
+# Civitai and HuggingFace both drop multi-gigabyte transfers, so a download gets
+# several chances to resume before it is called a failure.
+DOWNLOAD_TRIES = 6
 
 #----------------------------------------------------------------------------
 
@@ -23,8 +22,8 @@ class DiffusionDownloadWidget:
     """Catalog popup and download modal for diffusion checkpoints.
 
     Same surface as ModelDownloadWidget so ModelDropdownButton can drive either
-    one, but an entry here is a list of files rather than a single URL: most of
-    the catalog is HuggingFace repos, which are directories.
+    one. Entries are single .safetensors files, as every other tool in this
+    ecosystem uses, so a checkpoint is one download into the checkpoints folder.
     """
 
     def __init__(self, app, checkpoints_dir, on_complete=None):
@@ -38,38 +37,30 @@ class DiffusionDownloadWidget:
         self._state = 'idle'  # 'idle' | 'downloading' | 'error'
         self._bytes_done = 0
         self._total_bytes = 0
-        self._file_index = 0
-        self._file_count = 0
         self._error_msg = ''
         self._active_entry = None
         self._cancel_event = None
         self._thread = None
         self._finished_ok = False
 
-        # A staging folder left by a killed app is not resumable across runs:
-        # the file list may have changed, so it is cheaper to start over.
-        self._clear_staging()
+        # a partial left by a killed app cannot be resumed across runs
+        self._clear_partials()
 
-    def _staging_path(self, entry):
-        return os.path.join(self.checkpoints_dir, entry['dest'] + '.part')
-
-    def _clear_staging(self):
+    def _clear_partials(self):
         if not os.path.isdir(self.checkpoints_dir):
             return
         for name in os.listdir(self.checkpoints_dir):
             if name.endswith('.part'):
-                path = os.path.join(self.checkpoints_dir, name)
                 try:
-                    shutil.rmtree(path) if os.path.isdir(path) else os.remove(path)
+                    os.remove(os.path.join(self.checkpoints_dir, name))
                 except OSError:
-                    logger.warning('Could not remove stale staging path %s', path)
+                    logger.warning('Could not remove stale partial %s', name)
 
     def start_download(self, entry):
         if self._state != 'idle':
             return
         self._active_entry = entry
         self._bytes_done = self._total_bytes = 0
-        self._file_index = self._file_count = 0
         self._error_msg = ''
         self._cancel_event = threading.Event()
         self._state = 'downloading'
@@ -78,58 +69,30 @@ class DiffusionDownloadWidget:
         self._thread.start()
 
     def _worker(self, entry, cancel_event):
-        staging = self._staging_path(entry)
+        def progress(done, total):
+            self._bytes_done, self._total_bytes = done, total
+
         try:
-            files = resolve_files(entry)
-            self._file_count = len(files)
-            for index, (url, relative) in enumerate(files):
-                if cancel_event.is_set():
-                    break
-                self._file_index = index + 1
-                self._bytes_done = self._total_bytes = 0
-                dest = os.path.join(staging, relative) if entry['source'] == 'hf' else staging
-
-                def progress(done, total):
-                    self._bytes_done, self._total_bytes = done, total
-
-                if not download_file(url, dest, cancel_event, progress,
-                                     resume=True, tries=TRIES_PER_FILE):
-                    break  # cancelled
-            else:
-                # Only now does the folder become visible under its real name.
-                # A half-downloaded diffusers folder has an index and no
-                # weights, which reads as installed and refuses to load.
-                final = os.path.join(self.checkpoints_dir, entry['dest'])
-                if os.path.exists(final):
-                    shutil.rmtree(final) if os.path.isdir(final) else os.remove(final)
-                os.replace(staging, final)
-                self._finished_ok = True
-                return
+            # download_file writes to a .part and renames on success, so the
+            # checkpoint only ever appears once it is whole
+            ok = download_file(entry['url'], destination(entry, self.checkpoints_dir),
+                               cancel_event, progress, resume=True, tries=DOWNLOAD_TRIES)
         except Exception as e:
             logger.exception('Download of %s failed', entry['name'])
             self._error_msg = f'{type(e).__name__}: {e}'
             self._state = 'error'
-            self._remove(staging)
             return
-        self._remove(staging)
-        self._state = 'idle'
-
-    @staticmethod
-    def _remove(path):
-        try:
-            if os.path.isdir(path):
-                shutil.rmtree(path)
-            elif os.path.exists(path):
-                os.remove(path)
-        except OSError:
-            logger.warning('Could not remove %s', path)
+        if ok:
+            self._finished_ok = True
+        else:
+            self._state = 'idle'
 
     @imgui_utils.scoped_by_object_id
     def __call__(self):
         if self._finished_ok:
             self._finished_ok = False
             self._state = 'idle'
-            completed = os.path.join(self.checkpoints_dir, self._active_entry['dest'])
+            completed = destination(self._active_entry, self.checkpoints_dir)
             if self.requester is not None:
                 self.requester.notify_downloaded(completed)
                 self.requester = None
@@ -178,8 +141,8 @@ class DiffusionDownloadWidget:
                     imgui.text(f"{int(entry['size_mb']) / 1024:.1f} GB")
                     imgui.next_column()
                     if is_installed(entry, self.checkpoints_dir):
-                        imgui_utils.button(f"Downloaded##{entry['dest']}", width=-1, enabled=False)
-                    elif imgui_utils.button(f"Download##{entry['dest']}", width=-1,
+                        imgui_utils.button(f"Downloaded##{entry['filename']}", width=-1, enabled=False)
+                    elif imgui_utils.button(f"Download##{entry['filename']}", width=-1,
                                             enabled=(self._state == 'idle')):
                         self.start_download(entry)
                         imgui.close_current_popup()
@@ -202,8 +165,6 @@ class DiffusionDownloadWidget:
                                    flags=imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_MOVE)[0]:
             if self._state == 'downloading':
                 imgui.text(f"Downloading {self._active_entry['name']}...")
-                if self._file_count:
-                    imgui.text(f'File {self._file_index} of {self._file_count}')
                 imgui.separator()
                 imgui.spacing()
                 done_mb = self._bytes_done / (1024 * 1024)

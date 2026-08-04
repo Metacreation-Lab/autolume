@@ -15,6 +15,8 @@ NUM_INFERENCE_STEPS = 50
 
 LOADING_PREFIX = "Loading pipeline"
 
+NO_CHECKPOINT = "No checkpoint. Pick one from Models or download one."
+
 # at 1.0 the output would freeze on the first frame and never update again
 MAX_SMOOTHING = 0.95
 
@@ -24,7 +26,9 @@ def is_available():
 
 
 def default_params():
-    return dict(model="stabilityai/sd-turbo", prompt="", strength=0.5, seed=0,
+    # no default checkpoint: the panel fills this from the last one used or the
+    # first one installed, and leaves it empty when there is nothing to pick
+    return dict(model="", prompt="", strength=0.5, seed=0,
                 smoothing=0.0, lora_path="", lora_scale=1.0,
                 acceleration="none", resolution=512)
 
@@ -174,6 +178,13 @@ class DiffusionEngine:
             self.status = ""
 
     def process(self, out, params, device):
+        if not params["model"]:
+            self._wrapper = None
+            self._loaded = None
+            self._previous = None
+            self._key = None
+            self.status = NO_CHECKPOINT
+            return out
         if params["acceleration"] == "tensorrt":
             from diffusion import trt
             # No engines yet: run unaccelerated rather than withholding the

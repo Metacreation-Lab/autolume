@@ -55,6 +55,17 @@ def build_fraction(message):
     return min(1.0, (index - 1 + (0.5 if message.startswith('Compiling') else 0.0)) / total)
 
 
+def remembered_checkpoint():
+    """The checkpoint to start with: the last one used if it is still there,
+    else whatever is installed, else nothing. Never a model id the user has not
+    got, which would stall for minutes on enable with no way to see why."""
+    last = session_state.get(SESSION_SECTION, 'model', '')
+    if last and (os.path.exists(last) or not os.path.isabs(last)):
+        return last
+    local = list_diffusion_checkpoints()
+    return local[0] if local else ''
+
+
 def engine_label(entry):
     lora = (f'{_short_name(entry["lora_path"])} @ {entry["lora_scale"]:g}'
             if entry["lora_path"] else 'no LoRA')
@@ -72,6 +83,8 @@ class DiffusionWidget:
         self.use_lora = False
         self.lora_path = self.params.lora_path
         self.lora_scale = self.params.lora_scale
+        self.params.model = remembered_checkpoint()
+        self._model_committed = self.params.model
         self.prompt_history = session_state.get_recent(SESSION_SECTION, 'prompts')
         if self.prompt_history:
             self.params.prompt = self.prompt_history[0]
@@ -249,6 +262,8 @@ class DiffusionWidget:
             return status, RED
         if status.startswith(diffusion_engine.LOADING_PREFIX):
             return status, AMBER
+        if not self.params.model:
+            return diffusion_engine.NO_CHECKPOINT, AMBER
         if not self.enabled:
             return 'Off - configure below, then enable', GRAY
         return 'Ready', GREEN
@@ -515,6 +530,9 @@ class DiffusionWidget:
         # the LoRA checkbox keeps the path while off, so params carry the effective value
         self.params.lora_path = self.lora_path if self.use_lora else ''
         self.params.lora_scale = self.lora_scale
+        if self.params.model != self._model_committed:
+            self._model_committed = self.params.model
+            session_state.set(SESSION_SECTION, 'model', self.params.model)
         needs_build = (self.params.acceleration == 'tensorrt' and self.available
                        and not self.engines_ready())
 
