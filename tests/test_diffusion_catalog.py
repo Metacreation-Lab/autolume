@@ -146,3 +146,18 @@ def test_single_file_installed_check(tmp_path):
     assert not cat.is_installed(e, str(tmp_path))
     (tmp_path / "x.safetensors").write_bytes(b"")
     assert cat.is_installed(e, str(tmp_path))
+
+
+def test_listing_finds_both_files_and_diffusers_folders(tmp_path, monkeypatch):
+    """A HuggingFace model is a directory, so a file-only listing would make
+    every catalog download invisible in the dropdown."""
+    from utils import model_dir
+    monkeypatch.setattr(model_dir, "diffusion_checkpoints_dir", lambda: str(tmp_path))
+    (tmp_path / "single.safetensors").write_bytes(b"")
+    (tmp_path / "notamodel").mkdir()
+    repo = tmp_path / "adiffusersrepo"
+    (repo / "unet").mkdir(parents=True)
+    (repo / "model_index.json").write_text("{}")
+    found = [os.path.basename(p) for p in model_dir.list_diffusion_checkpoints()]
+    assert found == ["adiffusersrepo", "single.safetensors"]
+    assert "notamodel" not in found

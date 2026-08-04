@@ -15,6 +15,7 @@ from utils import session_state
 from utils.model_dir import (diffusion_checkpoints_dir, diffusion_loras_dir,
                              list_diffusion_checkpoints, list_diffusion_loras)
 from widgets import osc_menu
+from widgets.diffusion_download_widget import DiffusionDownloadWidget
 from widgets.model_dropdown_widget import ModelDropdownButton
 from widgets.native_browser_widget import NativeBrowserWidget
 
@@ -25,7 +26,6 @@ try:
 except ModuleNotFoundError:
     import pickle
 
-MODELS = ["stabilityai/sd-turbo", "KBlueLeaf/kohaku-v2.1"]
 ACCELERATIONS = ["none", "tensorrt"]
 RESOLUTIONS = [512, 768, 1024]
 SESSION_SECTION = "diffusion"
@@ -82,10 +82,17 @@ class DiffusionWidget:
         self.browser = NativeBrowserWidget()
         os.makedirs(diffusion_checkpoints_dir(), exist_ok=True)
         os.makedirs(diffusion_loras_dir(), exist_ok=True)
+        self.model_downloader = DiffusionDownloadWidget(
+            viz.app, checkpoints_dir=diffusion_checkpoints_dir())
+        # local content only: a dropdown listing model ids the user has not got
+        # offers a several-minute stall on selection with nothing to show for it.
+        # Typing an id into the field still works, and Download Models... is how
+        # anything new arrives.
         self.model_dropdown = ModelDropdownButton(
             label='Models##diffusion',
-            items_provider=lambda: MODELS + list_diffusion_checkpoints(),
-            include_training_runs=False)
+            items_provider=list_diffusion_checkpoints,
+            include_training_runs=False,
+            show_download=True, downloader=self.model_downloader)
         self.lora_dropdown = ModelDropdownButton(
             label='LoRAs##diffusion', items_provider=list_diffusion_loras,
             include_training_runs=False)
@@ -534,6 +541,10 @@ class DiffusionWidget:
                 self.draw_acceleration(viz, needs_build)
 
             self.osc_menu()
+
+        # outside the show guard: a download in flight must keep drawing its
+        # modal even if the panel is collapsed
+        self.model_downloader()
 
         self.draw_build_modal()
         self.params.strength = float(min(max(self.params.strength, 0.0), 1.0))

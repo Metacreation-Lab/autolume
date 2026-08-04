@@ -43,8 +43,18 @@ def _list_files(path, extensions):
 
 
 def list_diffusion_checkpoints():
-    """Absolute paths of checkpoint files in the diffusion checkpoints folder."""
-    return _list_files(diffusion_checkpoints_dir(), (".safetensors", ".ckpt"))
+    """Absolute paths of checkpoints in the diffusion checkpoints folder.
+
+    Both single files and diffusers folders, since a HuggingFace model is a
+    directory: catalog downloads would otherwise be invisible in the dropdown.
+    """
+    path = diffusion_checkpoints_dir()
+    if not os.path.isdir(path):
+        return []
+    items = _list_files(path, (".safetensors", ".ckpt"))
+    items += [os.path.join(path, name) for name in os.listdir(path)
+              if os.path.isfile(os.path.join(path, name, "model_index.json"))]
+    return sorted(items, key=lambda p: os.path.basename(p).lower())
 
 
 def list_diffusion_loras():
