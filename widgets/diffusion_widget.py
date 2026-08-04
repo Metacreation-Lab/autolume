@@ -76,7 +76,7 @@ def engine_label(entry):
 class DiffusionWidget:
     def __init__(self, viz):
         self.viz = viz
-        self.available = diffusion_engine.is_available()
+        self.unavailable = diffusion_engine.unavailable_reason()
         self.enabled = False
         self.params = dnnlib.EasyDict(diffusion_engine.default_params())
         # kept outside params so unticking LoRA does not lose the path or weight
@@ -127,6 +127,11 @@ class DiffusionWidget:
 
         self.osc_menu = osc_menu.OscMenu(self.viz, funcs,
                                          label="##DiffusionOSC")
+
+    @property
+    def available(self):
+        """Derived so it can never disagree with the reason it is unavailable."""
+        return not self.unavailable
 
     def osc_handler(self, param):
         def func(address, *args):
@@ -256,8 +261,10 @@ class DiffusionWidget:
 
         Loading and ready only: what is wrong with a specific part of the setup
         belongs on that part's indicator."""
-        if not self.available:
-            return 'Requires an NVIDIA GPU. Not available on this platform.', GRAY
+        if self.unavailable:
+            # a broken install is worth acting on, a machine without a card is not
+            fixable = self.unavailable == diffusion_engine.NOT_INSTALLED
+            return self.unavailable, (RED if fixable else GRAY)
         if status.startswith('Error'):
             return status, RED
         if status.startswith(diffusion_engine.LOADING_PREFIX):

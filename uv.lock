@@ -162,6 +162,7 @@ dependencies = [
     { name = "opencv-python-headless" },
     { name = "opensimplex" },
     { name = "packaging" },
+    { name = "peft", marker = "sys_platform != 'darwin'" },
     { name = "pillow" },
     { name = "psutil" },
     { name = "pyinstaller" },
@@ -175,6 +176,7 @@ dependencies = [
     { name = "scipy" },
     { name = "setuptools" },
     { name = "sounddevice" },
+    { name = "streamdiffusion", extra = ["controlnet"], marker = "sys_platform != 'darwin'" },
     { name = "timm" },
     { name = "torch", version = "2.8.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin'" },
     { name = "torch", version = "2.8.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "sys_platform != 'darwin'" },
@@ -185,10 +187,6 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-diffusion = [
-    { name = "peft", marker = "sys_platform != 'darwin'" },
-    { name = "streamdiffusion", extra = ["controlnet"], marker = "sys_platform != 'darwin'" },
-]
 diffusion-trt = [
     { name = "onnx", marker = "sys_platform == 'win32'" },
     { name = "streamdiffusion", extra = ["ipadapter", "tensorrt"], marker = "sys_platform == 'win32'" },
@@ -224,7 +222,7 @@ requires-dist = [
     { name = "opencv-python-headless", specifier = "==4.8.1.78" },
     { name = "opensimplex", specifier = "==0.4.5" },
     { name = "packaging", specifier = ">=26.2" },
-    { name = "peft", marker = "sys_platform != 'darwin' and extra == 'diffusion'" },
+    { name = "peft", marker = "sys_platform != 'darwin'" },
     { name = "pillow", specifier = "==10.4.0" },
     { name = "psutil", specifier = ">=6.0.0" },
     { name = "pyinstaller", specifier = "==6.16.0" },
@@ -238,7 +236,7 @@ requires-dist = [
     { name = "scipy", specifier = "==1.11.3" },
     { name = "setuptools", specifier = "<70" },
     { name = "sounddevice", specifier = "==0.5.5" },
-    { name = "streamdiffusion", extras = ["controlnet"], marker = "sys_platform != 'darwin' and extra == 'diffusion'", git = "https://github.com/daydreamlive/StreamDiffusion?rev=4c90d9e437aa28cca7cae1acfab1e52157261939" },
+    { name = "streamdiffusion", extras = ["controlnet"], marker = "sys_platform != 'darwin'", git = "https://github.com/daydreamlive/StreamDiffusion?rev=4c90d9e437aa28cca7cae1acfab1e52157261939" },
     { name = "streamdiffusion", extras = ["tensorrt", "ipadapter"], marker = "sys_platform == 'win32' and extra == 'diffusion-trt'", git = "https://github.com/daydreamlive/StreamDiffusion?rev=4c90d9e437aa28cca7cae1acfab1e52157261939" },
     { name = "timm", specifier = "==0.5.4" },
     { name = "torch", marker = "sys_platform != 'darwin'", specifier = "==2.8.0+cu128", index = "https://download.pytorch.org/whl/cu128" },
@@ -248,7 +246,7 @@ requires-dist = [
     { name = "tqdm", specifier = "==4.66.1" },
     { name = "zensical", specifier = "==0.0.23" },
 ]
-provides-extras = ["diffusion", "diffusion-trt"]
+provides-extras = ["diffusion-trt"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=9.1.1" }]

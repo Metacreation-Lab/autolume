@@ -33,6 +33,26 @@ def test_availability_probe_is_bool():
     assert isinstance(engine.is_available(), bool)
 
 
+def test_a_missing_package_is_not_reported_as_a_missing_gpu(monkeypatch):
+    """The panel once blamed the GPU for both, so a machine with a working card
+    was told it had none."""
+    monkeypatch.setattr(engine, "is_available", lambda: False)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    assert engine.unavailable_reason() == engine.NOT_INSTALLED
+
+
+def test_a_machine_without_cuda_is_told_so(monkeypatch):
+    monkeypatch.setattr(engine, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    assert engine.unavailable_reason() == engine.NO_GPU
+
+
+def test_nothing_to_report_when_the_stage_can_run(monkeypatch):
+    monkeypatch.setattr(engine, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    assert engine.unavailable_reason() == ""
+
+
 def test_strength_maps_monotonically_and_in_bounds():
     prev = None
     for s in [0.0, 0.25, 0.5, 0.75, 1.0]:

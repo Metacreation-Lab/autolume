@@ -106,7 +106,7 @@ def test_panel_draws_every_control(imgui_frame, widget_factory):
 def test_panel_draws_while_enabled_and_erroring(imgui_frame, widget_factory):
     viz = make_viz()
     widget = widget_factory(viz)
-    widget.available = True
+    widget.unavailable = ''
     widget.enabled = True
     widget.use_lora = True
     widget.lora_path = "x.safetensors"
@@ -119,7 +119,7 @@ def test_panel_draws_while_enabled_and_erroring(imgui_frame, widget_factory):
 def test_every_control_row_shares_one_column(imgui_frame, widget_factory):
     viz = make_viz()
     widget = widget_factory(viz)
-    widget.available = True
+    widget.unavailable = ''
     widget.enabled = True
     widget.use_lora = True
     columns = []
@@ -141,7 +141,7 @@ def test_every_control_row_shares_one_column(imgui_frame, widget_factory):
 def test_status_is_gray_while_the_module_is_off(imgui_frame, widget_factory):
     from widgets.diffusion_widget import GRAY
     widget = widget_factory(make_viz())
-    widget.available = True
+    widget.unavailable = ''
     dots = indicators(widget)
     assert [color for color, _tip in dots.values()] == [GRAY, GRAY, GRAY]
 
@@ -149,7 +149,7 @@ def test_status_is_gray_while_the_module_is_off(imgui_frame, widget_factory):
 def test_checkpoint_and_lora_only_go_green_once_actually_live(imgui_frame, widget_factory):
     from widgets.diffusion_widget import AMBER, GREEN
     widget = widget_factory(make_viz())
-    widget.available = True
+    widget.unavailable = ''
     widget.enabled = True
     widget.params.model = "stabilityai/sd-turbo"
     widget.use_lora = True
@@ -177,7 +177,7 @@ def test_tensorrt_reports_built_versus_running(imgui_frame, widget_factory, monk
     from widgets import diffusion_widget
     from widgets.diffusion_widget import AMBER, GRAY, GREEN, RED
     widget = widget_factory(make_viz())
-    widget.available = True
+    widget.unavailable = ''
     widget.enabled = True
     assert indicators(widget)["TensorRT"][0] is GRAY
 
@@ -200,7 +200,7 @@ def test_status_line_only_reports_loading_and_ready(imgui_frame, widget_factory,
     from widgets import diffusion_widget
     from widgets.diffusion_widget import GREEN
     widget = widget_factory(make_viz())
-    widget.available = True
+    widget.unavailable = ''
     widget.enabled = True
     widget.params.model = "some/checkpoint"
     assert widget.status_line("Loading pipeline (4 s)")[0] == "Loading pipeline (4 s)"
@@ -209,6 +209,30 @@ def test_status_line_only_reports_loading_and_ready(imgui_frame, widget_factory,
     monkeypatch.setattr(diffusion_widget.trt, "engines_ready", lambda params: False)
     widget._ready_key = None
     assert widget.status_line("") == ("Ready", GREEN)
+
+
+def test_the_status_line_names_why_the_stage_cannot_run(imgui_frame, widget_factory):
+    """A broken install and a machine with no card are different problems, and
+    only one of them is worth acting on."""
+    from diffusion import engine as diffusion_engine
+    from widgets.diffusion_widget import GRAY, RED
+    widget = widget_factory(make_viz())
+
+    widget.unavailable = diffusion_engine.NOT_INSTALLED
+    assert widget.status_line("") == (diffusion_engine.NOT_INSTALLED, RED)
+
+    widget.unavailable = diffusion_engine.NO_GPU
+    assert widget.status_line("") == (diffusion_engine.NO_GPU, GRAY)
+
+
+def test_the_panel_stays_off_while_the_stage_cannot_run(imgui_frame, widget_factory):
+    from diffusion import engine as diffusion_engine
+    viz = make_viz()
+    widget = widget_factory(viz)
+    widget.unavailable = diffusion_engine.NO_GPU
+    widget.enabled = True
+    draw(widget, viz)
+    assert viz.args.use_diffusion is False
 
 
 def test_a_finished_build_wakes_the_render_worker(imgui_frame, widget_factory):

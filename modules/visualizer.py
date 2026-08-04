@@ -14,6 +14,7 @@ import imgui
 import cv2
 
 import dnnlib
+from utils import device_utils
 from utils.gui_utils import imgui_utils
 from utils.gui_utils import gl_utils
 from utils.gui_utils import text_utils
@@ -599,10 +600,13 @@ class Visualizer:
         self._header_help_icon('model_mixing')
         self.mixing_widget(header_opened)
 
-        # Diffusion
-        header_opened = imgui_utils.collapsing_header('Diffusion', default=True)[0]
-        self._header_help_icon('diffusion')
-        self.diffusion_widget(header_opened)
+        # Diffusion. streamdiffusion has no macOS build and is not installed
+        # there, so the section is absent rather than permanently disabled.
+        # The widget is still constructed, because presets save and load it.
+        if not device_utils.is_macos():
+            header_opened = imgui_utils.collapsing_header('Diffusion', default=True)[0]
+            self._header_help_icon('diffusion')
+            self.diffusion_widget(header_opened)
 
         # Presets
         header_opened = imgui_utils.collapsing_header('Presets', default=True)[0]

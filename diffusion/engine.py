@@ -17,12 +17,31 @@ LOADING_PREFIX = "Loading pipeline"
 
 NO_CHECKPOINT = "No checkpoint. Pick one from Models or download one."
 
+NOT_INSTALLED = ("Diffusion is missing from this install. Reinstall Autolume, "
+                 "or run uv sync from a source checkout.")
+
+NO_GPU = "Requires an NVIDIA GPU. No CUDA device was found."
+
 # at 1.0 the output would freeze on the first frame and never update again
 MAX_SMOOTHING = 0.95
 
 
 def is_available():
     return importlib.util.find_spec("streamdiffusion") is not None
+
+
+def unavailable_reason():
+    """Why this stage cannot run here, or '' when it can.
+
+    Two separate conditions, and the panel used to blame the GPU for both:
+    a machine with a perfectly good card was told it had none, because the
+    only thing ever checked was whether the package was importable.
+    """
+    if not is_available():
+        return NOT_INSTALLED
+    if not torch.cuda.is_available():
+        return NO_GPU
+    return ""
 
 
 def default_params():

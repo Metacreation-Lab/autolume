@@ -27,6 +27,7 @@ dependencies = [
     "opencv-python-headless==4.8.1.78",
     "opensimplex==0.4.5",
     "packaging>=26.2",
+    "peft ; sys_platform != 'darwin'",
     "pillow==10.4.0",
     "psutil>=6.0.0",
     "pyinstaller==6.16.0",
@@ -40,6 +41,9 @@ dependencies = [
     "scipy==1.11.3",
     "setuptools<70",
     "sounddevice==0.5.5",
+    # no macOS build exists, so the diffusion panel is absent there rather than
+    # present and permanently disabled
+    "streamdiffusion[controlnet] ; sys_platform != 'darwin'",
     "timm==0.5.4",
     "torch==2.8.0 ; sys_platform == 'darwin'",
     "torch==2.8.0+cu128 ; sys_platform != 'darwin'",
@@ -50,11 +54,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-diffusion = [
-    "streamdiffusion[controlnet] ; sys_platform != 'darwin'",
-    "peft ; sys_platform != 'darwin'",
-]
-# Installed next to the diffusion extra. The tensorrt package itself is not here:
+# Opt-in because TensorRT only pays off once engines are built, and the panel
+# says so itself when it is missing. The tensorrt package is not here:
 # streamdiffusion installs it with its own tool. ipadapter is not optional, the
 # fork's tensorrt modules import it. onnx-graphsurgeon needs onnx 1.18, newer
 # onnx drops an API it calls.
