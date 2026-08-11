@@ -1,6 +1,8 @@
 # AGENTS.md
 
-Guidance for AI coding assistants working on Autolume. Humans should read [CONTRIBUTING.md](CONTRIBUTING.md) instead — most of this file is the same information distilled into a denser form.
+Guidance for AI coding assistants working on Autolume. Humans should read [CONTRIBUTING.md](CONTRIBUTING.md) instead.
+
+**Maintenance principle**: only instructions an agent cannot discover from the repo — constraints, conventions, gotchas, commands. No overviews or restated docs; they add cost without helping ([arXiv:2602.11988](https://arxiv.org/abs/2602.11988)).
 
 ## Project snapshot
 
@@ -12,39 +14,14 @@ Autolume is a no-coding generative AI system for real-time visual performances u
 |---------|---------|
 | `uv sync` | Install or update the locked dependency set |
 | `uv run main.py` | Launch the application |
+| `uv run pytest` | Run the unit test suite (headless logic only) |
 | `uv run zensical build` | Build the documentation site to `site/` |
 | `uv run zensical serve` | Serve docs locally at http://127.0.0.1:8000 |
 | `uv run release.py` | Build the PyInstaller release (cross-platform): `dist/Autolume/` on Windows/Linux, `dist/Autolume.app` on macOS. Run it on the target OS — PyInstaller cannot cross-compile |
 
 Initial setup also requires CUDA 12.8, MSVC build tools (Windows), `ffmpeg` (Linux), pre-trained Real-ESRGAN/face-parsing models, and an FFmpeg binary on Windows. Full details in the [README](README.md#development-instructions).
 
-## Architecture
-
-```
-autolume/
-  main.py                     # Application entry point
-  pyproject.toml              # Dependencies, Python pin (3.12), CUDA torch index
-  release.py                  # Cross-platform release script (drives PyInstaller)
-
-  architectures/              # Generator/discriminator network definitions
-  audio/                      # Audio capture and analysis (sounddevice, numpy)
-  bending/                    # Network bending operators applied at inference
-  dnnlib/                     # Vendored NVIDIA dnnlib (StyleGAN2/3)
-  features/                   # Latent feature extraction, storage, worker (GANSpace method)
-  metrics/                    # FID, KID, and related quality metrics
-  modules/                    # UI modules and live-performance widgets
-  widgets/                    # Reusable imgui widgets
-  projection/                 # Image-to-latent projection
-  sr_models/                  # Super-resolution model weights (gitignored)
-  super_res/                  # Real-ESRGAN super-resolution wrappers
-  torch_utils/                # Vendored NVIDIA torch utilities (custom ops, persistence)
-  training/                   # Model training and distillation
-  utils/                      # Shared helpers (datasets, GUI, paths, version)
-  assets/                     # Bundled images and icons
-
-  docs/                       # User documentation (zensical, versioned with mike)
-  .github/                    # Issue/PR templates, workflows
-```
+There is no architecture overview here on purpose (see the maintenance principle above) — explore the tree directly; [CONTRIBUTING.md](CONTRIBUTING.md#project-layout) has a directory table if you want one.
 
 ## Key Files
 
@@ -53,7 +30,7 @@ autolume/
 - [release.py](release.py) — cross-platform release script (`uv run release.py`); detects the host OS, resolves package locations via `importlib`, and assembles the PyInstaller `--add-binary`/`--add-data` flags per platform, then copies `sr_models/` and creates runtime dirs. **This is where to add new runtime files** — the auto-generated `Autolume.spec` is gitignored and rebuilt every release. Windows/Linux bundle the runtime JIT toolchain (torch headers/libs, ninja); macOS skips it (ops fall back to reference PyTorch on MPS) and produces `Autolume.app`. Requires a repo-root `.env` with the crash report endpoint values (baked in at build time) or it fails fast — see `.env.example` and [tools/crash_endpoint/README.md](tools/crash_endpoint/README.md); `--disable-crash-reporting` builds without one (for forks).
 - [utils/user_data.py](utils/user_data.py) — user preferences and writable data paths. Preferences (data root, UI font size, …) persist to a JSON file at `~/.config/autolume/config.json` (`XDG_CONFIG_HOME` honored); the Settings modal ([modules/settings.py](modules/settings.py)) is their UI. **Add new user-facing preferences here** (a `pref()`/`set_pref()` accessor pair following the existing ones), not as ad-hoc files.
 - [utils/gui_utils/dpi.py](utils/gui_utils/dpi.py) — all display-scale math (monitor DPI scale, font atlas raster scale, 1x text sharpening). The UI is sized in DPI-independent units so it keeps the same physical size and layout on every monitor and platform; start here for any scaling/blurriness issue.
-- [.github/workflows/docs.yml](.github/workflows/docs.yml) — only CI workflow; publishes versioned docs.
+- [.github/workflows/](.github/workflows/) — `docs.yml` publishes versioned docs; `tests.yml` runs the pytest suite on every PR.
 - [zensical.toml](zensical.toml) — docs site config (Material theme variant).
 
 ## Code Style
@@ -65,16 +42,20 @@ autolume/
 
 ## Testing
 
-A pytest suite exists in `tests/` and runs via `uv run pytest`. It covers headless logic only. Autolume is a desktop GUI app (imgui + GLFW + GPU), and an agent cannot drive the UI, see rendered frames, or verify visual output. Be explicit about this limit instead of pretending to have tested.
+A pytest suite exists in `tests/` and runs via `uv run pytest`; CI ([.github/workflows/tests.yml](.github/workflows/tests.yml)) runs it on every PR. It covers headless logic only — tests must not require a display, CUDA, audio hardware, or model weights. Autolume is a desktop GUI app (imgui + GLFW + GPU), and an agent cannot drive the UI, see rendered frames, or verify visual output. Be explicit about this limit instead of pretending to have tested.
 
 What an agent **can and should** do:
 
-1. **Static checks**
+1. **Write unit tests for new modules**
+   - When you add a module with headless-testable logic (state, parsing, math, protocols, file I/O), add a matching `tests/test_<module>.py` covering its core behavior and edge cases. Structure new code so that logic is separated from GUI/GPU glue and stays testable.
+   - When you fix a bug in headless logic, add a regression test that reproduces it.
+   - Run `uv run pytest` and confirm the suite passes before declaring the change done.
+2. **Static checks**
    - Confirm imports resolve and types are sane using whatever static analysis is available to you.
    - Read the surrounding code paths and trace how the change interacts with callers.
-2. **Smoke launch (optional, only when the user is at the desktop)**
+3. **Smoke launch (optional, only when the user is at the desktop)**
    - `uv run main.py` will attempt to open a GLFW window. It will fail outright in any headless or sandboxed shell. If you do try, run it in the background, watch stderr for a crash within ~5–10 seconds, then stop it. A successful launch only proves the app starts — it proves nothing about the changed feature.
-3. **Hand off GUI verification to a human**
+4. **Hand off GUI verification to a human**
    - In the PR's "How was this tested?" section, write what you *did* verify (e.g. "imports resolve, pyright clean, traced callers in `modules/X`") and explicitly call out what still needs human testing (e.g. "needs manual verification: load a model, change the noise widget, save preset, reload — confirm OSC mapping persists").
 
 Do not claim to have tested a UI workflow you could not actually perform. Honest hand-off is more useful to maintainers than a fabricated checklist.
@@ -91,7 +72,7 @@ Do not claim to have tested a UI workflow you could not actually perform. Honest
 - **CUDA 12.8 is mandatory.** `pyproject.toml` pins `torch==2.8.0+cu128` against a custom uv index. Do not suggest CPU torch, do not relax the pin to test a fix locally — it will break the release.
 - **Custom CUDA ops are JIT-compiled** under `torch_utils/ops/`. Cache busting and runtime MSVC autoresolution exist (commits `8f806ee`, `da2b384`) — do not re-introduce env-var-based MSVC selection or break the cache key.
 - **PyInstaller bundle is the shipped artifact.** New runtime files (help texts, models, assets) must be added to [release.py](release.py) — either to the shared `datas`/`binaries` lists, a per-platform branch, or the `post_build()` copy step. The auto-generated `Autolume.spec` is gitignored — never edit it, the change will be lost on the next build. The bundle also needs to load resources conditionally depending on whether the app is running from source or bundled — use the `utils/resource_paths.py` helpers. Note: app code that loads files via hardcoded `./relative/...` paths (e.g. `sr_models/`) resolves against the CWD, which is unreliable inside `Autolume.app` — prefer `resource_paths.resource_path(...)`.
-- **No test suite** — relying on type checks or static analysis alone is not enough; you must exercise the UI manually.
+- **Tests cover headless logic only** — a passing suite says nothing about the GUI; type checks and static analysis alone are not enough either. UI changes must be exercised manually.
 - **Vendored NVIDIA code** in `dnnlib/` and `torch_utils/` carries the [Nvidia Source Code License](https://github.com/NVlabs/stylegan2-ada-pytorch/blob/main/LICENSE.txt). Treat those modules as upstream — do not refactor them, and minimize edits.
 
 ## Workflow

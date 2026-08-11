@@ -22,6 +22,7 @@ Quick reference once your environment is ready:
 ```bash
 uv sync                  # install/update dependencies
 uv run main.py           # run the application
+uv run pytest            # run the unit test suite
 uv run zensical serve    # serve the docs locally at http://127.0.0.1:8000
 ```
 
@@ -54,7 +55,8 @@ uv run zensical serve    # serve the docs locally at http://127.0.0.1:8000
 - **Update the docs** in [docs/](docs/) when you change user-visible behavior. The site is rebuilt automatically on push to `main`.
 - **Update [release.py](release.py)** if you add new runtime files (help texts, models, assets) — add them to the shared `datas`/`binaries` lists, a per-platform branch, or the `post_build()` copy step, otherwise they will be missing from the packaged release. The auto-generated `Autolume.spec` is gitignored; do not edit it.
 - **Put user preferences in [utils/user_data.py](utils/user_data.py)** if your change needs a persistent, user-facing setting (e.g. the data folder or UI font size). Add an accessor pair following the existing ones — preferences persist to a single JSON file (`~/.config/autolume/config.json`) — and expose the control in the Settings modal ([modules/settings.py](modules/settings.py)) rather than inventing a new config file.
-- **No automated test suite exists.** Verify your change manually by running `uv run main.py` and exercising the affected UI path. Describe what you tested in the PR.
+- **Add unit tests for new modules.** The pytest suite in `tests/` runs with `uv run pytest` and covers headless logic only (no GPU, no window, no audio hardware). When you add a new module, ship a matching `tests/test_<module>.py` covering its core behavior and edge cases; keep the logic separate from GUI/GPU glue so it stays testable. When you fix a bug in headless logic, add a regression test that reproduces it.
+- **Verify GUI changes manually.** Automated tests cannot exercise the imgui/GLFW/GPU paths. Run `uv run main.py`, exercise the affected UI path, and describe what you tested in the PR.
 
 ## Commit message convention
 
@@ -118,6 +120,7 @@ Fixed bug.                             ← past tense, capitalized, no type
 ## Pull requests
 
 - The PR title must follow the commit convention above (`<type>: <subject>`, no scope).
+- CI runs the unit test suite (`uv run pytest`) on every pull request; it must pass before merge.
 - Link the related issue with `Closes #N` or `Refs #N`.
 - Fill out [the PR template](.github/PULL_REQUEST_TEMPLATE.md) — especially the "How was this tested?" section.
 - Attach a screenshot or short clip for any UI change.
