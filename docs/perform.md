@@ -127,8 +127,8 @@ The first time you load a model, Autolume automatically extracts a bank of 64 me
 Each of the eight slots combines a direction, a zone, and a slider:
 
 - Direction: Picks what the slot controls. f1 to f64 are the extracted directions, ordered from strongest to most subtle. Pick random to give the slot a random direction instead. The same direction can be used in several slots.
-- Zone: Applies the direction to a part of the model. Form changes pose and geometry. Texture changes structure and materials. Color changes lighting and palette. All applies the direction everywhere. Custom applies it to a hand picked set of layers. The same direction on different zones gives genuinely different controls.
-- Customize: Opens a grid of the model's layers, grouped by resolution, to hand pick exactly where the direction applies. It starts from the current zone's layers. The checkbox in front of each row selects a whole resolution, and None and All clear or select everything. Any selection here sets the zone to Custom.
+- Zone: Applies the direction to a part of the model. Form changes pose and geometry. Texture changes structure and materials. Color changes lighting and palette. All applies the direction everywhere. The same direction on different zones gives genuinely different controls. The zone always names the layers the slot uses. It reads Custom when the layers are hand picked and match no preset.
+- Customize: Opens a grid of the model's layers, grouped by resolution, to hand pick exactly where the direction applies. It starts from the current zone's layers. The checkbox in front of each row selects a whole resolution, and None and All clear or select everything. The zone follows the selection. Picking exactly the layers of a preset shows that preset, anything else shows Custom.
 - Slider: Moves the image along the direction. Sliders are scaled to each direction's natural strength, so every slot responds consistently.
 - Randomize: Replaces the slot's direction with a new random one. Press repeatedly to explore.
 - Reset: Restores the slot's extracted direction and returns the slider to zero.

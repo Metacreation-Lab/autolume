@@ -3,7 +3,7 @@ import torch
 
 from features.zones import (CUSTOM_ZONE, ZONES, ZONE_LABELS, block_count,
                             block_labels, blocks_to_mask, layer_mask,
-                            zone_blocks)
+                            match_zone, zone_blocks)
 
 
 def test_zone_names():
@@ -69,3 +69,22 @@ def test_zone_blocks_roundtrip_through_mask():
 def test_unknown_zone_raises():
     with pytest.raises(ValueError):
         layer_mask("bass", 18)
+
+
+def test_match_zone_recovers_presets():
+    for num_ws in range(3, 19):
+        for zone in ZONES:
+            assert match_zone(layer_mask(zone, num_ws).tolist(), num_ws) == zone
+
+
+def test_match_zone_falls_back_to_custom():
+    layers = layer_mask("texture", 18).tolist()
+    layers[0] = True
+    assert match_zone(layers, 18) == CUSTOM_ZONE
+    assert match_zone([], 18) == CUSTOM_ZONE
+    assert match_zone(None, 18) == CUSTOM_ZONE
+
+
+def test_match_zone_pads_and_truncates():
+    assert match_zone([True] * 4, 18) == CUSTOM_ZONE
+    assert match_zone([True] * 30, 18) == "all"

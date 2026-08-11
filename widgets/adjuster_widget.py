@@ -21,7 +21,7 @@ except ModuleNotFoundError:
 from features import store
 from features.worker import FeatureExtractionJob
 from features.zones import (CUSTOM_ZONE, ZONE_LABELS, ZONES, block_labels,
-                            layer_mask)
+                            layer_mask, match_zone)
 from utils.gui_utils import imgui_utils
 from widgets.adjuster_state import NUM_SLOTS, make_slot, pack_state, unpack_state
 from widgets.osc_menu import osc_address_picker
@@ -32,7 +32,7 @@ DEFAULT_DIM = 512
 DEFAULT_NUM_WS = 18
 SLIDER_RANGE = 3.0
 
-ZONE_ITEMS = [ZONE_LABELS[zone] for zone in ZONES] + [ZONE_LABELS[CUSTOM_ZONE]]
+ZONE_ITEMS = [ZONE_LABELS[zone] for zone in ZONES]
 
 
 def _random_direction(dim):
@@ -324,7 +324,8 @@ class AdjusterWidget:
                     self._start_job(owns_slots=True)
         imgui.separator()
 
-    def _make_custom(self, i):
+    def _seed_layers(self, i):
+        """Fill the slot's layer list from its zone so the grid shows it."""
         slot = self.slots[i]
         num_ws = max(1, self._current_num_ws())
         if slot["zone"] == CUSTOM_ZONE:
@@ -334,7 +335,11 @@ class AdjusterWidget:
             zone = slot["zone"] if slot["zone"] in ZONES else "all"
             layers = layer_mask(zone, num_ws).tolist()
         slot["layers"] = layers
-        slot["zone"] = CUSTOM_ZONE
+
+    def _sync_zone(self, i):
+        """The zone always names the selected layers: a preset or custom."""
+        slot = self.slots[i]
+        slot["zone"] = match_zone(slot["layers"], max(1, self._current_num_ws()))
 
     def _zone_popup(self, i, enabled):
         slot = self.slots[i]
@@ -360,6 +365,7 @@ class AdjusterWidget:
                 for layer in row:
                     layers[layer] = value
                 slot["layers"] = list(layers)
+                self._sync_zone(i)
             imgui.same_line()
             imgui.text(label)
             imgui.same_line(label_col)
@@ -371,14 +377,17 @@ class AdjusterWidget:
                 if changed and enabled:
                     layers[layer] = value
                     slot["layers"] = list(layers)
+                    self._sync_zone(i)
         imgui.separator()
         content_w = label_col + 2 * frame + spacing
         half = (content_w - spacing) / 2
         if imgui_utils.button(f"None##zone{i}", width=half, enabled=enabled):
             slot["layers"] = [False] * num_ws
+            self._sync_zone(i)
         imgui.same_line()
         if imgui_utils.button(f"All##zone{i}", width=half, enabled=enabled):
             slot["layers"] = [True] * num_ws
+            self._sync_zone(i)
         imgui.end_popup()
 
     def _slot_osc(self, i, enabled, slot_w):
@@ -445,16 +454,17 @@ class AdjusterWidget:
                 else:
                     self._select_component(i, new_index - 1)
 
-            zone_index = (ZONES.index(slot["zone"]) if slot["zone"] in ZONES
-                          else len(ZONES))
+            # Custom is shown when the layers match no preset, never offered.
+            if slot["zone"] in ZONES:
+                items, zone_index = ZONE_ITEMS, ZONES.index(slot["zone"])
+            else:
+                items = ZONE_ITEMS + [ZONE_LABELS[CUSTOM_ZONE]]
+                zone_index = len(ZONES)
             with imgui_utils.item_width(button_w):
-                changed, new_index = imgui.combo(f"##zone{i}", zone_index,
-                                                 ZONE_ITEMS)
-            if changed and enabled:
-                if new_index < len(ZONES):
-                    slot["zone"] = ZONES[new_index]
-                else:
-                    self._make_custom(i)
+                changed, new_index = imgui.combo(f"##zone{i}", zone_index, items)
+            if changed and enabled and new_index < len(ZONES):
+                slot["zone"] = ZONES[new_index]
+                slot["layers"] = None
 
             changed, value = imgui.v_slider_float(
                 f"##slot{i}", button_w, viz.app.content_height / 10,
@@ -464,7 +474,7 @@ class AdjusterWidget:
 
             if imgui_utils.button(f"Customize##slot{i}", width=button_w,
                                   enabled=enabled):
-                self._make_custom(i)
+                self._seed_layers(i)
                 imgui.open_popup(f"zone_layers{i}")
             self._zone_popup(i, enabled)
             if imgui_utils.button(f"Randomize##slot{i}", width=button_w,
