@@ -566,6 +566,7 @@ class Renderer:
                     if vec.shape[0] == 1:
                         try:
                             all_cs = np.zeros([len(vec), G.c_dim], dtype=np.float32)
+                            all_cs = self.to_device(torch.from_numpy(all_cs))
                             w = self.to_device(vec)
                             if project:
                                 w = mapping_net(z=w, c=all_cs, truncation_psi=trunc_psi, truncation_cutoff=trunc_cutoff)
@@ -864,6 +865,7 @@ class Renderer:
         latent = self.to_device(latent[None, ...])
         if project and len(latent.shape) == 2:
             all_cs = np.zeros([len(latent), G.c_dim], dtype=np.float32)
+            all_cs = self.to_device(torch.from_numpy(all_cs))
             latent = mapping_net(latent, all_cs, truncation_psi=trunc_psi,
                                truncation_cutoff=trunc_cutoff)
 
