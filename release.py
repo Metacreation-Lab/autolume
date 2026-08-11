@@ -398,6 +398,20 @@ def precompile_ops() -> None:
     )
 
 
+def sync_environment() -> None:
+    """Bring the venv exactly in line with the lockfile before bundling.
+
+    `uv run` installs missing dependencies but never removes extraneous ones,
+    so a package dropped from pyproject.toml survives in the venv and could
+    leak into the bundle. An explicit `uv sync` (exact by default) prunes it.
+    """
+    print("Syncing environment (uv sync)...")
+    uv = shutil.which("uv")
+    if uv is None:
+        fail("uv not found on PATH; run `uv sync` manually before building")
+    subprocess.run([uv, "sync"], check=True, cwd=REPO)
+
+
 def clean() -> None:
     for name in ("dist", "build"):
         target = REPO / name
@@ -783,6 +797,7 @@ def main() -> None:
         package()
     elif opts.package or not post_only:
         print(f"Building Autolume for {SYSTEM}...")
+        sync_environment()
         clean()
         if NEEDS_JIT_TOOLCHAIN:
             precompile_ops()
