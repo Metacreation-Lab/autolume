@@ -87,6 +87,8 @@ if __name__ == "__main__":
     from utils import crash_report
     crash_report.process_startup()
 
+    from utils import opengl_support
+
     import logging
     logger = logging.getLogger("autolume")
 
@@ -99,6 +101,13 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         crash_report.mark_clean_exit()
         raise
+    except opengl_support.OpenGLUnsupportedError as err:
+        # Not a crash: tell the user what their machine is missing instead of
+        # offering a crash report.
+        logger.critical("Unsupported graphics environment: %s", err)
+        crash_report.mark_clean_exit()
+        opengl_support.show_unsupported_dialog(str(err))
+        sys.exit(1)
     except BaseException:
         logger.critical("Fatal error", exc_info=True)
         crash_report.handle_fatal_exception()
