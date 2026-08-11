@@ -15,6 +15,7 @@ import OpenGL.GL as gl
 import PIL.Image
 from . import gl_utils
 from . import dpi
+from utils import opengl_support
 from utils.resource_paths import resource_path
 
 
@@ -43,7 +44,7 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
         self._captured_frame        = None
 
         # Create window.
-        glfw.init()
+        opengl_support.checked_init()
         glfw.window_hint(glfw.VISIBLE, False)
         # Windows measures windows in physical pixels and keeps their pixel size
         # when dragged across monitors, while the UI font follows the monitor's
@@ -56,10 +57,11 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
         # buggy GLX one) picks it up.
         if _wayland_session():
             glfw.window_hint(glfw.CONTEXT_CREATION_API, glfw.EGL_CONTEXT_API)
-        self._glfw_window = glfw.create_window(width=window_width, height=window_height, title=title, monitor=None, share=None)
+        self._glfw_window = opengl_support.checked_create_window(width=window_width, height=window_height, title=title)
         self._set_window_icon()
         self._attach_glfw_callbacks()
         self.make_context_current()
+        opengl_support.check_context_version()
 
         # Adjust window.
         self.set_vsync(False)
