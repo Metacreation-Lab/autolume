@@ -203,10 +203,16 @@ class LoopingWidget:
 
     def get_params(self):
         return self.params.num_keyframes, self.keyframes, self.alpha, self.params.index, self.params.mode, self.params.anim, self.params.looptime, \
-            self.expand_vec, self.seeds, self.modes, self.project, self.paths
+            self.expand_vec, self.seeds, self.modes, self.project, self.paths, self.loop_type, self.radius, self.noise_seed
 
     def set_params(self, params):
-        self.params.num_keyframes, self.keyframes, self.alpha, self.params.index, self.params.mode, self.params.anim, self.params.looptime, self.expand_vec, self.seeds, self.modes, self.project, self.paths = params
+        # Presets saved before the noise loop state was included hold 12 values.
+        self.params.num_keyframes, self.keyframes, self.alpha, self.params.index, self.params.mode, self.params.anim, self.params.looptime, self.expand_vec, self.seeds, self.modes, self.project, self.paths, *rest = params
+        if rest:
+            self.loop_type, self.radius, self.noise_seed = rest
+            # The noise loop features live in a worker process. Resync it, the
+            # same way the UI does when the seed or radius fields change.
+            self.args_queue.put((self.noise_seed, self.radius))
 
     def drag(self, idx, dx, dy):
         viz = self.viz
