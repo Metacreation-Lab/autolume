@@ -8,12 +8,14 @@ from utils import crash_report
 
 @pytest.fixture
 def marker(tmp_path, monkeypatch):
-    """Point the markers at a temp dir and reset the module's run state."""
-    runs = tmp_path / "logs" / "runs"
+    """Point markers at a temp config dir, logs at a temp data root, and
+    reset the module's run state."""
+    runs = tmp_path / "config" / "runs"
     runs.mkdir(parents=True)
+    (tmp_path / "logs").mkdir()
+    monkeypatch.setattr(crash_report.user_data, "config_dir",
+                        lambda: tmp_path / "config")
     monkeypatch.setattr(crash_report.user_data, "data_path",
-                        lambda *parts: tmp_path.joinpath(*parts))
-    monkeypatch.setattr(crash_report.user_data, "ensure_data_path",
                         lambda *parts: tmp_path.joinpath(*parts))
     monkeypatch.setattr(crash_report, "_marker_base", None)
     monkeypatch.setattr(crash_report, "_exit_reason", None)
@@ -32,13 +34,23 @@ def shutdown_clock(monkeypatch):
     return install
 
 
-def test_reads_back_what_it_wrote(marker):
+def test_reads_back_what_it_wrote(marker, tmp_path):
     crash_report.mark_running()
     info = crash_report._read_marker()
     assert info["version"] == crash_report.MARKER_VERSION
     assert info["exit"] is None
     assert info["heartbeat"] >= info["started"]
     assert info["crashes_size"] == 0
+    assert info["logs"] == str(tmp_path / "logs")
+
+
+def test_marker_lives_in_the_config_dir_not_the_data_root(marker, tmp_path):
+    # The data root may be a slow, removable or fragile mount; per-run state
+    # written every heartbeat and scanned at startup must stay local.
+    crash_report.mark_running()
+    assert marker.exists()
+    assert marker.is_relative_to(tmp_path / "config")
+    assert not marker.is_relative_to(tmp_path / "logs")
 
 
 def test_legacy_pid_marker_is_not_mistaken_for_session_data(marker):
@@ -113,10 +125,10 @@ def test_marker_write_is_atomic(marker):
 class TestCrashEvidence:
     """A death only becomes a report when the crash handler left a trace."""
 
-    def test_a_grown_crash_log_is_evidence(self, marker):
+    def test_a_grown_crash_log_is_evidence(self, marker, tmp_path):
         crash_report.mark_running()
         info = crash_report._read_marker()
-        (marker.parent.parent / "crashes.log").write_text(
+        (tmp_path / "logs" / "crashes.log").write_text(
             "Windows fatal exception: access violation", encoding="utf-8")
         assert crash_report._crash_evidence(info)
 
@@ -124,30 +136,30 @@ class TestCrashEvidence:
         crash_report.mark_running()
         assert not crash_report._crash_evidence(crash_report._read_marker())
 
-    def test_process_start_banners_are_not_evidence(self, marker):
+    def test_process_start_banners_are_not_evidence(self, marker, tmp_path):
         # Normal runs append banners for themselves and their workers, so the
         # log growing is business as usual, not a fault.
         crash_report.mark_running()
         info = crash_report._read_marker()
-        (marker.parent.parent / "crashes.log").write_text(
+        (tmp_path / "logs" / "crashes.log").write_text(
             "--- pid 123 (MainProcess) started ---\n"
             "--- pid 456 (renderer) started ---\n", encoding="utf-8")
         assert not crash_report._crash_evidence(info)
 
-    def test_a_fault_after_banners_is_evidence(self, marker):
+    def test_a_fault_after_banners_is_evidence(self, marker, tmp_path):
         crash_report.mark_running()
         info = crash_report._read_marker()
-        (marker.parent.parent / "crashes.log").write_text(
+        (tmp_path / "logs" / "crashes.log").write_text(
             "--- pid 123 (renderer) started ---\n"
             "Windows fatal exception: access violation\n", encoding="utf-8")
         assert crash_report._crash_evidence(info)
 
-    def test_a_truncated_crash_log_is_not_evidence(self, marker):
-        (marker.parent.parent / "crashes.log").write_text(
+    def test_a_truncated_crash_log_is_not_evidence(self, marker, tmp_path):
+        (tmp_path / "logs" / "crashes.log").write_text(
             "old fatal content from before this run", encoding="utf-8")
         crash_report.mark_running()
         info = crash_report._read_marker()
-        (marker.parent.parent / "crashes.log").write_text(
+        (tmp_path / "logs" / "crashes.log").write_text(
             "short", encoding="utf-8")
         assert not crash_report._crash_evidence(info)
 
@@ -155,6 +167,21 @@ class TestCrashEvidence:
         # Markers from builds that predate the evidence gate: at worst one
         # leftover crash goes unreported once, at the upgrade.
         assert not crash_report._crash_evidence({"version": 1})
+
+    def test_evidence_follows_the_recorded_logs_dir(self, marker, tmp_path,
+                                                    monkeypatch):
+        # The marker outlives the run that wrote it; if the data root pref
+        # changes in between, evidence must be read from where that run
+        # actually logged, not from the new root.
+        crash_report.mark_running()
+        info = crash_report._read_marker()
+        (tmp_path / "logs" / "crashes.log").write_text(
+            "Fatal Python error: Segmentation fault", encoding="utf-8")
+        moved = tmp_path / "elsewhere"
+        (moved / "logs").mkdir(parents=True)
+        monkeypatch.setattr(crash_report.user_data, "data_path",
+                            lambda *parts: moved.joinpath(*parts))
+        assert crash_report._crash_evidence(info)
 
 
 class TestShutdownClassification:
@@ -209,10 +236,10 @@ def test_shutdown_marker_is_dropped_without_a_pending_report(
 
 
 def test_a_native_fault_still_produces_a_pending_report(
-        marker, shutdown_clock, monkeypatch):
+        marker, shutdown_clock, monkeypatch, tmp_path):
     shutdown_clock(None)
     crash_report.mark_running()
-    (marker.parent.parent / "crashes.log").write_text(
+    (tmp_path / "logs" / "crashes.log").write_text(
         "Windows fatal exception: access violation", encoding="utf-8")
     crash_report._marker_base = None
     monkeypatch.setattr(crash_report, "_still_running", lambda m: False)
@@ -268,11 +295,12 @@ def test_a_live_instances_marker_is_left_alone(marker, shutdown_clock):
     assert marker.exists()
 
 
-def test_legacy_shared_marker_is_swept_without_a_report(marker, shutdown_clock):
+def test_legacy_shared_marker_is_swept_without_a_report(
+        marker, shutdown_clock, tmp_path):
     # Pre-upgrade markers carry no crash-log size, so they cannot clear the
     # evidence gate; the file still has to go or it would be rescanned forever.
     shutdown_clock(None)
-    legacy = marker.parent.parent / "last_run"
+    legacy = tmp_path / "logs" / "last_run"
     legacy.write_text("12345", encoding="utf-8")
 
     assert crash_report.check_unclean_exit() is None
