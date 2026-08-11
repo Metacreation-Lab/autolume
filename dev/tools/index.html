@@ -472,17 +472,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#feature-extractor" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Feature Extractor
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#super-resolution" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -578,17 +567,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#feature-extractor" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Feature Extractor
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#super-resolution" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -629,7 +607,7 @@
 
 
 <h1 id="tools">Tools<a class="headerlink" href="#tools" title="Permanent link">&para;</a></h1>
-<p>The Tools screen gathers four utilities in a single grid: <a href="#projection">Projection</a>, <a href="#feature-extractor">Feature Extractor</a>, <a href="#super-resolution">Super Resolution</a>, and <a href="#model-mixing">Model Mixing</a>.</p>
+<p>The Tools screen gathers three utilities in a single grid: <a href="#projection">Projection</a>, <a href="#super-resolution">Super Resolution</a>, and <a href="#model-mixing">Model Mixing</a>.</p>
 <h2 id="projection">Projection<a class="headerlink" href="#projection" title="Permanent link">&para;</a></h2>
 <p>The Projection tool allows loading a target image, a text prompt, or a combination of both, to find the closest corresponding latent vector of a trained model. Different methods are provided to search for the corresponding latent vector that you can choose from. The output is the calculated vector plus a process video showing the search process.</p>
 <p><img alt="" src="../assets/offline-modules-projection-module-01.png" /></p>
@@ -649,20 +627,6 @@
 <li>Use Penalty: Enable this option to penalize large update steps, resulting in a smoother projection and avoiding local minimums.</li>
 <li>Use Center: Enable this option to use an additional center crop as the target image. This can improve matching accuracy but may reduce overall accuracy.</li>
 </ul>
-<h2 id="feature-extractor">Feature Extractor<a class="headerlink" href="#feature-extractor" title="Permanent link">&para;</a></h2>
-<p>This tool identifies and extracts interpretable feature directions in the latent space of a trained model based on Principal Component Analysis (PCA), using the GANSpace method. These extracted feature directions can then be used on the Perform screen (see <a href="../perform/#adjust-input">Adjust Input</a>).</p>
-<p><img alt="" src="../assets/offline-modules-ganspace-01.png" /></p>
-<p>The tool provides the following options:</p>
-<ul>
-<li>Models: Select the .pkl file of the model for feature extraction.</li>
-<li>PCA Estimator: Choose an algorithm to find salient directions in the latent space. Different algorithms result in slightly different extracted directions. Experiment with each option to find the best fit for your model.</li>
-<li>Features: Specify the number of features to extract. More features result in more adjustable directions on the Perform screen but also increase file size. Often, extracting around 10 features is recommended.</li>
-<li>Sparsity: This parameter adjusts the sparsity of the extracted directions. Leave it at the default if you are unsure about its impact.</li>
-<li>Save Path: Choose the path to save the results, which include the extracted directions. These directions can be loaded in the "<a href="../perform/#adjust-input">Adjust Input</a>" widget on the Perform screen.</li>
-</ul>
-<p>For more technical information on GANSpace, please refer to the following resources:</p>
-<p><a href="https://www.google.com/url?q=https://arxiv.org/abs/2004.02546&amp;sa=D&amp;source=editors&amp;ust=1769724592296454&amp;usg=AOvVaw1GSkgPNlwUg633Ht9d3zn6">GANSpace Paper</a></p>
-<p><a href="https://www.google.com/url?q=https://github.com/harskish/ganspace&amp;sa=D&amp;source=editors&amp;ust=1769724592296788&amp;usg=AOvVaw3Xsw5-fahRCc_ZXrq6FtT5">GANSpace Repository on GitHub</a></p>
 <h2 id="super-resolution">Super Resolution<a class="headerlink" href="#super-resolution" title="Permanent link">&para;</a></h2>
 <p>The Super Resolution tool provides the feature to upscale images and videos for higher resolution distribution of your work. There are three different models available: Quality, Balance, and Fast. While the Processing speeds of the models differ, Quality being the slowest and Fast being the fastest, the slower models tend to preserve more details from the original image/video. However, the quality of the results also depends on the type of visual content and is better to be tested with all three models to find the desired option.</p>
 <p><img alt="" src="../assets/offline-modules-super-resolution-01.png" /></p>
