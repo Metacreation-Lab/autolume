@@ -196,6 +196,35 @@ def popup_button(label, width=0, enabled=True):
 
 # ----------------------------------------------------------------------------
 
+def begin_popup_modal(title, visible=True, flags=0, dim_background=False,
+                      clamp_to_display=True, close_on_click_away=True):
+    """imgui.begin_popup_modal that by default keeps the window on screen,
+    does not dim the background, and closes on a click outside it."""
+    if not dim_background:
+        imgui.push_style_color(imgui.COLOR_MODAL_WINDOW_DIM_BACKGROUND,
+                               0, 0, 0, 0)
+    opened, visible = imgui.begin_popup_modal(title, visible=visible,
+                                              flags=flags)
+    if not dim_background:
+        imgui.pop_style_color()
+    if opened and clamp_to_display:
+        display = imgui.get_io().display_size
+        pos = imgui.get_window_position()
+        size = imgui.get_window_size()
+        x = min(max(pos.x, 0), max(0, display.x - size.x))
+        y = min(max(pos.y, 0), max(0, display.y - size.y))
+        if x != pos.x or y != pos.y:
+            # New windows stay hidden for a frame while imgui sizes them,
+            # so clamping here lands before the popup is ever shown.
+            imgui.set_window_position(x, y)
+    if (opened and close_on_click_away and not imgui.is_window_appearing()
+            and imgui.is_mouse_clicked(0) and not imgui.is_window_hovered()):
+        imgui.close_current_popup()
+    return opened, visible
+
+
+# ----------------------------------------------------------------------------
+
 def input_text(label, value, buffer_length, flags, width=None, help_text=''):
     old_value = value
     color = list(imgui.get_style().colors[imgui.COLOR_TEXT])
