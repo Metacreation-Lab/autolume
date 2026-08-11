@@ -59,3 +59,13 @@ def blocks_to_mask(blocks, num_ws):
 def layer_mask(zone, num_ws):
     """Boolean (num_ws,) tensor of the synthesis layers a zone covers."""
     return blocks_to_mask(zone_blocks(zone, num_ws), num_ws)
+
+
+def match_zone(layers, num_ws):
+    """Name of the zone covering exactly these layers, or the custom zone."""
+    n = int(num_ws)
+    padded = ([bool(v) for v in (layers or [])] + [False] * n)[:n]
+    for zone in ZONES:
+        if padded == layer_mask(zone, n).tolist():
+            return zone
+    return CUSTOM_ZONE
