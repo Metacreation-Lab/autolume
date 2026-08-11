@@ -152,6 +152,10 @@ class Autolume(imgui_window.ImguiWindow):
         self._adjust_font_size()
         self.skip_frame()  # Layout may change after first frame.
 
+        # Windows announces a shutdown to the window, so this can only be
+        # hooked once there is one.
+        crash_report.install_session_end_hook(self.native_handle())
+
     @classmethod
     def _clamp_ui_font_size(cls, size):
         return int(min(max(size, cls.MIN_UI_FONT_SIZE), cls.MAX_UI_FONT_SIZE))
@@ -179,6 +183,8 @@ class Autolume(imgui_window.ImguiWindow):
             self.skip_frame() # Layout changed.
 
     def close(self):
+        crash_report.remove_session_end_hook()
+
         if self.data_preprocessing is not None:
             self.data_preprocessing.cleanup()
             self.data_preprocessing = None

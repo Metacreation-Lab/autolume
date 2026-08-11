@@ -80,6 +80,19 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
         except Exception as err: # pylint: disable=broad-except
             logger.warning('Failed to set window icon: %s', err)
 
+    def native_handle(self):
+        # Win32 HWND, for the few things GLFW does not expose. None elsewhere,
+        # and on a GLFW built without the Win32 native access header.
+        if sys.platform != 'win32' or not hasattr(glfw, 'get_win32_window'):
+            return None
+        if self._glfw_window is None:
+            return None
+        try:
+            return glfw.get_win32_window(self._glfw_window)
+        except Exception as err: # pylint: disable=broad-except
+            logger.warning('Failed to get the native window handle: %s', err)
+            return None
+
     def close(self):
         if self._drawing_frame:
             self.end_frame()
