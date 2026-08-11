@@ -4,10 +4,18 @@ Two catch paths feed this module:
 - Path A: ``main.py``'s top-level ``except BaseException`` calls
   :func:`handle_fatal_exception`, which shows a native OS dialog (imgui is
   dead at that point) and uploads on consent.
-- Path B: a per-process marker under ``logs/runs`` left behind by a hard
-  native crash (segfault, driver death) is detected on the next launch by
-  :func:`process_startup`; the imgui popup in ``modules/autolume_live``
-  offers to send the previous run's logs.
+- Path B: a per-process marker left behind by a hard native crash (segfault,
+  driver death) is detected on the next launch by :func:`process_startup`;
+  the imgui popup in ``modules/autolume_live`` offers to send the previous
+  run's logs.
+
+Markers live under the local config dir (beside ``config.json``), not the
+data root: the data root is user-configurable and may sit on a removable,
+NTFS or network mount, and the marker system writes a heartbeat every few
+seconds and is scanned before the UI exists — startup must never block on a
+slow or wedged mount for it. Each marker records the logs directory its run
+wrote to, so crash evidence is checked against the right ``crashes.log``
+even if the data root pref changes between runs.
 
 Many things besides a crash can kill the process uncleanly — an OS shutdown,
 a closed terminal, Task Manager — so path B only reports on positive crash
@@ -295,7 +303,8 @@ def send_report(zip_path, meta):
 
 
 def _runs_dir():
-    return user_data.data_path("logs", "runs")
+    """Per-run markers, beside config.json — never on the data root mount."""
+    return user_data.config_dir() / "runs"
 
 
 def _marker_path():
@@ -379,12 +388,13 @@ def mark_running():
     """Arm the unclean-exit marker for this run and start its heartbeat."""
     global _marker_base
     try:
-        user_data.ensure_data_path("logs", "runs")
+        _runs_dir().mkdir(parents=True, exist_ok=True)
         # Recording the shutdown clock as it stands now is what lets the next
         # launch tell a *new* shutdown from the one before this run started.
         base = {"version": MARKER_VERSION, "pid": os.getpid(),
                 "create": _own_create_time(),
                 "started": time.time(),
+                "logs": str(user_data.data_path("logs")),
                 "os_shutdown": _last_os_shutdown_time(),
                 "crashes_size": _crashes_log_size()}
         with _marker_lock:
@@ -452,6 +462,15 @@ def _crashes_log_size():
         return 0
 
 
+def _marker_logs_dir(marker):
+    """The logs directory the marker's run wrote to. Falls back to the current
+    data root for markers that predate the recorded path."""
+    logs = marker.get("logs")
+    if isinstance(logs, str) and logs:
+        return Path(logs)
+    return user_data.data_path("logs")
+
+
 def _crash_evidence(marker):
     """True when faulthandler dumped a fault while the marker's run was alive.
 
@@ -468,7 +487,7 @@ def _crash_evidence(marker):
     if not isinstance(offset, int):
         return False
     try:
-        with open(user_data.data_path("logs", "crashes.log"), "rb") as fh:
+        with open(_marker_logs_dir(marker) / "crashes.log", "rb") as fh:
             fh.seek(0, os.SEEK_END)
             if fh.tell() < offset:
                 # Truncated or replaced since the run armed; nothing left in
@@ -674,14 +693,14 @@ def check_unclean_exit():
                 stale.unlink()
         except OSError:
             pass
-        crashed = False
+        crashed_logs = None
         for path, marker in _dead_markers():
             shutdown = _shutdown_evidence(marker)
             if shutdown is not None:
                 logger.info("Previous run ended with the OS session (%s); "
                             "not reporting it as a crash", shutdown)
             elif _crash_evidence(marker):
-                crashed = True
+                crashed_logs = _marker_logs_dir(marker)
             else:
                 logger.info("Previous run ended without a trace in the crash "
                             "log (killed?); not reporting it as a crash")
@@ -689,10 +708,10 @@ def check_unclean_exit():
                 path.unlink(missing_ok=True)
             except OSError:
                 pass
-        if not crashed:
+        if crashed_logs is None:
             _pending = None
             return None
-        log_dir = user_data.data_path("logs")
+        log_dir = crashed_logs
         log_tail = _read_tail(log_dir / "autolume.log", LOG_TAIL_BYTES)
         if len(log_tail) < 50_000:
             # Fresh file after midnight rotation: the crashed run's output
