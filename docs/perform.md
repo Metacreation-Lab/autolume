@@ -190,11 +190,11 @@ When mixing, you can choose to select features based on resolution or by layer. 
 
 It is possible to save presets of the current state of all widgets and load them again. This allows you to quickly switch between different settings.
 
-The checkboxes allow you to choose which preset you want to load or save to. If a checkbox is grayed out, it means nothing is saved to that preset.
+To create a preset, type a name in the field at the top and press "Save New" or Enter. Presets are stored in the "presets" folder of your data folder and listed alphabetically.
 
-At the bottom you can define the path where the presets are saved to and loaded from. Using the "Preset Path" opens a file browser to select a folder. While the "Recent" button opens a popup with the most recently used folders.
+Each preset in the list can be loaded or overwritten with a single click using its "Load" and "Save" buttons. The preset you loaded last is highlighted. To rename a preset, edit its name in the list and press Enter. "Delete" removes a preset after a confirmation.
 
-The OSC controls of this widget allow you to switch between presets in the current folder, by sending the name of the preset. Please note that you can rename your presets.
+The OSC controls of this widget allow you to switch between presets by sending the name of the preset to the configured address, "/preset" by default.
 
 ## Audio Module
 
