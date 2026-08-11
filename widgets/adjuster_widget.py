@@ -11,7 +11,7 @@ import threading
 import imgui
 import torch
 
-from assets import ACTIVE_RED
+from assets import ACTIVE_RED, OPAQUEGREEN
 
 try:
     import cPickle as pickle
@@ -343,7 +343,17 @@ class AdjusterWidget:
 
     def _zone_popup(self, i, enabled):
         slot = self.slots[i]
-        if not imgui.begin_popup(f"zone_layers{i}"):
+        mouse = imgui.get_mouse_position()
+        imgui.set_next_window_position(mouse.x, mouse.y,
+                                       condition=imgui.APPEARING)
+        imgui.push_style_color(imgui.COLOR_TITLE_BACKGROUND, *OPAQUEGREEN)
+        imgui.push_style_color(imgui.COLOR_TITLE_BACKGROUND_ACTIVE, *OPAQUEGREEN)
+        imgui.push_style_color(imgui.COLOR_TITLE_BACKGROUND_COLLAPSED, *OPAQUEGREEN)
+        opened, visible = imgui_utils.begin_popup_modal(
+            f"Layers##zone{i}", visible=True,
+            flags=imgui.WINDOW_NO_RESIZE | imgui.WINDOW_ALWAYS_AUTO_RESIZE)
+        imgui.pop_style_color(3)
+        if not opened:
             return
         num_ws = max(1, self._current_num_ws())
         labels = block_labels(num_ws)
@@ -354,6 +364,7 @@ class AdjusterWidget:
         label_col = (frame + 2 * spacing
                      + max(imgui.calc_text_size(label).x for label in labels)
                      + spacing)
+        content_w = label_col + 2 * frame + spacing
         for b, label in enumerate(labels):
             first = 2 * b
             if first >= num_ws:
@@ -379,7 +390,6 @@ class AdjusterWidget:
                     slot["layers"] = list(layers)
                     self._sync_zone(i)
         imgui.separator()
-        content_w = label_col + 2 * frame + spacing
         half = (content_w - spacing) / 2
         if imgui_utils.button(f"None##zone{i}", width=half, enabled=enabled):
             slot["layers"] = [False] * num_ws
@@ -388,6 +398,8 @@ class AdjusterWidget:
         if imgui_utils.button(f"All##zone{i}", width=half, enabled=enabled):
             slot["layers"] = [True] * num_ws
             self._sync_zone(i)
+        if not visible:
+            imgui.close_current_popup()
         imgui.end_popup()
 
     def _slot_osc(self, i, enabled, slot_w):
@@ -475,7 +487,7 @@ class AdjusterWidget:
             if imgui_utils.button(f"Customize##slot{i}", width=button_w,
                                   enabled=enabled):
                 self._seed_layers(i)
-                imgui.open_popup(f"zone_layers{i}")
+                imgui.open_popup(f"Layers##zone{i}")
             self._zone_popup(i, enabled)
             if imgui_utils.button(f"Randomize##slot{i}", width=button_w,
                                   enabled=enabled):
