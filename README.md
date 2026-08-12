@@ -10,6 +10,20 @@ For detailed documentation and demos look at the [Metacreation Lab Website](http
 
 [➡️ Download for Windows, macOS and Linux](https://github.com/Metacreation-Lab/autolume/releases/latest)
 
+### Winget (Windows)
+
+Install the app
+
+```
+winget install MetacreationLab.Autolume
+```
+
+Update the app
+
+```
+winget upgrade MetacreationLab.Autolume
+```
+
 ### Brew (macOS)
 
 Add and trust the brew tap (one time)
