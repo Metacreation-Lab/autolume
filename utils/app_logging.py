@@ -30,6 +30,7 @@ import re
 import sys
 import tempfile
 import threading
+import time
 import traceback
 
 LOG_DIR_NAME = "logs"
@@ -114,6 +115,56 @@ class _StreamToLogger:
         return False
 
 
+class _ResilientTimedRotatingFileHandler(logging.handlers.TimedRotatingFileHandler):
+    """Rotation failure must not take logging down with it.
+
+    On Windows the midnight rename fails with WinError 32 whenever any other
+    process holds the log file (a second Autolume instance, an antivirus
+    scan, a backup tool). The stock handler leaves ``rolloverAt`` in the past
+    on failure, so every subsequent record retries the rename, fails, and is
+    dropped. Instead, keep writing to the current file and retry the
+    rotation later.
+    """
+
+    ROTATE_RETRY_SECONDS = 300
+
+    def doRollover(self):
+        try:
+            super().doRollover()
+        except OSError as exc:
+            self.rolloverAt = int(time.time()) + self.ROTATE_RETRY_SECONDS
+            logging.getLogger("autolume").warning(
+                "Log rotation postponed for %ds: %s",
+                self.ROTATE_RETRY_SECONDS, exc)
+        else:
+            # When another process already created the dated backup, the
+            # stock doRollover returns early without scheduling the next
+            # rollover; catch up so we don't re-enter it on every record.
+            now = int(time.time())
+            if self.rolloverAt <= now:
+                self.rolloverAt = self.computeRollover(now)
+
+
+def _mute_handler_feedback(handler):
+    """Keep a handler's own failures out of the logging pipeline.
+
+    The default ``Handler.handleError`` prints to ``sys.stderr``, which this
+    module redirects back into logging. For the handlers driven by the
+    QueueListener thread that is a feedback loop: a persistently failing
+    handler turns each failure report into ~17 new records, each of which
+    fails again, snowballing until memory runs out (autolume#63). Report to
+    the real console instead, or drop the report when there is none.
+    """
+    def handle_error(record):
+        if sys.__stderr__ is not None:
+            try:
+                traceback.print_exc(file=sys.__stderr__)
+            except Exception:
+                pass
+    handler.handleError = handle_error
+    return handler
+
+
 def _configure_root(log_queue, level):
     root = logging.getLogger()
     root.handlers.clear()
@@ -175,17 +226,17 @@ def setup_main_logging(level=None):
     log_dir = _resolve_log_dir()
     if log_dir is not None:
         try:
-            file_handler = logging.handlers.TimedRotatingFileHandler(
+            file_handler = _ResilientTimedRotatingFileHandler(
                 str(log_dir / LOG_FILE_NAME), when="midnight",
                 backupCount=BACKUP_DAYS, encoding="utf-8", delay=True)
             file_handler.setFormatter(formatter)
-            handlers.append(file_handler)
+            handlers.append(_mute_handler_feedback(file_handler))
         except Exception:
             log_dir = None
     if sys.__stderr__ is not None:
         console_handler = logging.StreamHandler(sys.__stderr__)
         console_handler.setFormatter(formatter)
-        handlers.append(console_handler)
+        handlers.append(_mute_handler_feedback(console_handler))
 
     _log_queue = multiprocessing.get_context("spawn").Queue(-1)
     _listener = logging.handlers.QueueListener(
