@@ -1,4 +1,5 @@
 name,resolution,architecture,author,license,filename,url
+Dahlias,64,stylegan2,Lionel Ringenbach,CC BY-NC 4.0,dahlias-64-kimg7459.pkl,https://drive.google.com/uc?export=download&id=1j4L1uQCvI7JeHjyj0NpT6T_C4nlhF8mt
 Dahlias,1024,stylegan2,Lionel Ringenbach,CC BY-NC 4.0,dahlias-1024-kimg2560.pkl,https://drive.google.com/uc?export=download&id=1-T7_IJq1j-Bu5loRf0Jcf_-ClxgdzAf6
 Rivers,1024,stylegan2,Philippe Pasquier,CC BY-NC 4.0,rivers-1024.pkl,https://drive.google.com/uc?export=download&id=1ajIHlAtm97ooMIZCiQILS0guz4uBDHqY
 WikiArt,1024,stylegan2,Peter Baylies,Not specified,wikiart-1024.pkl,https://archive.org/download/wikiart-stylegan2-conditional-model/WikiArt5.pkl
