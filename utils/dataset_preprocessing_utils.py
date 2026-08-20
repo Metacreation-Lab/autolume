@@ -1,5 +1,7 @@
 import logging
 import os
+import queue
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -12,6 +14,59 @@ import ffmpeg
 from utils.user_data import data_path
 
 logger = logging.getLogger(__name__)
+
+
+class VideoDurationProber:
+    """Probes video durations on background threads so the GUI never blocks
+    on ffprobe subprocess spawns (issue #62: each spawn of the bundled
+    ffprobe.exe can stall for hundreds of ms in the frozen Windows build).
+
+    Same executor/queue/generation idiom as ThumbnailWidget: start() submits
+    probes, poll() drains finished ones, and bumping the generation makes
+    in-flight results stale so they are silently dropped.
+    """
+
+    def __init__(self, probe_fn=None):
+        self._probe_fn = probe_fn or DatasetPreprocessingUtils.calculate_video_duration
+        self._executor = None
+        self._results = queue.Queue()  # (generation, path, duration)
+        self._generation = 0
+
+    def start(self, paths):
+        """Probe each path in the background; results arrive via poll()."""
+        self._generation += 1
+        if self._executor is None:
+            self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="duration-probe")
+        for path in paths:
+            self._executor.submit(self._probe, path, self._generation)
+
+    def poll(self):
+        """Return {path: duration} for probes finished since the last call."""
+        fresh = {}
+        while True:
+            try:
+                generation, path, duration = self._results.get_nowait()
+            except queue.Empty:
+                return fresh
+            if generation == self._generation:
+                fresh[path] = duration
+
+    def cancel(self):
+        """Discard results from probes still in flight."""
+        self._generation += 1
+
+    def shutdown(self):
+        if self._executor is not None:
+            self._executor.shutdown(wait=False, cancel_futures=True)
+            self._executor = None
+
+    def _probe(self, path, generation):
+        try:
+            duration = self._probe_fn(path)
+        except Exception as e:
+            logger.warning("Could not probe duration of %s: %s", path, e)
+            duration = 0
+        self._results.put((generation, path, duration))
 
 
 class DatasetPreprocessingUtils:

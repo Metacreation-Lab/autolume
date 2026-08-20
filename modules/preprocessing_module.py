@@ -10,7 +10,7 @@ from widgets.thumbnail_widget import ThumbnailWidget
 from widgets.image_preview_widget import ImagePreviewWidget
 from widgets.loading_widget import LoadingOverlayManager
 from widgets.help_icon_widget import HelpIconWidget
-from utils.dataset_preprocessing_utils import DatasetPreprocessingUtils
+from utils.dataset_preprocessing_utils import DatasetPreprocessingUtils, VideoDurationProber
 
 resize_mode = ['stretch','center crop']
 padding_color = ['black', 'white', 'bleeding']
@@ -40,6 +40,7 @@ class DataPreprocessing:
         # Video frame extraction
         self.fps = self.settings.fps
         self.video_durations = {}
+        self.duration_prober = VideoDurationProber()
         self.video_extraction_queue = mp.Queue()
         self.video_extraction_reply = mp.Queue()
         self.is_processing_video = False
@@ -166,14 +167,10 @@ class DataPreprocessing:
         if imgui.button("Import Videos", width=parameter_column_width, height=30):
             self.selected_video_files = self.data_browser.select_video_files()
             if self.selected_video_files:
-                # Reset cache variables when opening popup with new videos
                 if hasattr(self, 'last_video_count'):
                     delattr(self, 'last_video_count')
-                if hasattr(self, 'last_fps'):
-                    delattr(self, 'last_fps')
-                if hasattr(self, 'last_expected_frames'):
-                    delattr(self, 'last_expected_frames')
                 self.video_durations = {}
+                self.duration_prober.start(self.selected_video_files)
                 imgui.open_popup("Video Frame Extraction")
 
         # Video Frame Extraction Popup
@@ -251,7 +248,9 @@ class DataPreprocessing:
                             self.thumbnail_widget.update_thumbnails(self.imported_files)
 
                             # Reset variables
-                            self.selected_video_files = [] 
+                            self.selected_video_files = []
+                            self.video_durations = {}
+                            self.duration_prober.cancel()
                             self.is_processing_video = False
                             self.loading_widget.hide()
                             self.fps = self.settings.fps 
@@ -273,14 +272,10 @@ class DataPreprocessing:
 
             if imgui_utils.button("Close", width=left_popup_width - 10, enabled=True):
                 self.selected_video_files = []
-                # Reset cache variables when closing popup
                 if hasattr(self, 'last_video_count'):
                     delattr(self, 'last_video_count')
-                if hasattr(self, 'last_fps'):
-                    delattr(self, 'last_fps')
-                if hasattr(self, 'last_expected_frames'):
-                    delattr(self, 'last_expected_frames')
                 self.video_durations = {}
+                self.duration_prober.cancel()
                 imgui.close_current_popup()
             imgui.end_child()
 
@@ -312,20 +307,16 @@ class DataPreprocessing:
             
             imgui.end_child() # Thumbnail Video Scroll
                         
-            # Only recalculate frames if FPS or video list changed
-            if (not hasattr(self, 'last_fps') or self.fps != self.last_fps or 
-                not hasattr(self, 'last_video_count') or len(self.selected_video_files) != self.last_video_count):
-                expected_frames = 0
-                for video_path in self.selected_video_files:
-                    if video_path not in self.video_durations:
-                        self.video_durations[video_path] = DatasetPreprocessingUtils.calculate_video_duration(video_path)
-                    duration = self.video_durations[video_path]
-                    expected_frames += int(duration * self.fps) if duration > 0 else 0
-                self.last_expected_frames = expected_frames
-                self.last_fps = self.fps
-                self.last_video_count = len(self.selected_video_files)
-            
-            imgui.text(f"Expected frames extracted: {getattr(self, 'last_expected_frames', 0)}")
+            # Durations are probed on background threads (ffprobe spawns are
+            # too slow for the GUI thread in the frozen build); the count
+            # fills in as results arrive.
+            self.video_durations.update(self.duration_prober.poll())
+            expected_frames = sum(int(self.video_durations[p] * self.fps)
+                                  for p in self.selected_video_files
+                                  if self.video_durations.get(p, 0) > 0)
+            pending = any(p not in self.video_durations for p in self.selected_video_files)
+            imgui.text(f"Expected frames extracted: {expected_frames}"
+                       + (" (calculating...)" if pending else ""))
 
             imgui.same_line(position=video_available_width - 50)
             if imgui.button("Remove"):
@@ -339,11 +330,6 @@ class DataPreprocessing:
 
                 self.video_thumbnail_widget.update_thumbnails(self.selected_video_files)
                 self.video_thumbnail_widget.clear_selected()
-
-                if hasattr(self, 'last_fps'):
-                    delattr(self, 'last_fps')
-                if hasattr(self, 'last_expected_frames'):
-                    delattr(self, 'last_expected_frames')
 
             imgui.end_child() # Video popup right
 
@@ -883,6 +869,8 @@ class DataPreprocessing:
                 self.loading_widget.cleanup()
             if hasattr(self, 'help_icon') and self.help_icon is not None:
                 self.help_icon.cleanup()
+            if hasattr(self, 'duration_prober') and self.duration_prober is not None:
+                self.duration_prober.shutdown()
                 
         except Exception as e:
             logger.warning("Error during cleanup: %s", e)
