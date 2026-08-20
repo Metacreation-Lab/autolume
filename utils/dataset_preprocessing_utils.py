@@ -11,6 +11,7 @@ import PIL.ImageOps
 import torchvision.transforms as transforms
 import ffmpeg
 
+from utils import ffmpeg_utils
 from utils.user_data import data_path
 
 logger = logging.getLogger(__name__)
@@ -184,7 +185,7 @@ class DatasetPreprocessingUtils:
 
     @staticmethod
     def calculate_video_duration(video_path):
-        probe = ffmpeg.probe(video_path)
+        probe = ffmpeg_utils.probe(video_path)
         video_info = next(s for s in probe['streams'] if s['codec_type'] == 'video')
 
         duration = None
@@ -275,12 +276,12 @@ class DatasetPreprocessingUtils:
                 'percentage': start_pct,
             })
 
-            process = (
+            process = ffmpeg_utils.run_async(
                 ffmpeg
                 .input(video_path)
                 .output(output_pattern, vf=f"fps={fps}")
-                .global_args('-progress', 'pipe:1', '-nostats')
-                .run_async(pipe_stdout=True)
+                .global_args('-progress', 'pipe:1', '-nostats'),
+                pipe_stdout=True,
             )
 
             cancelled = False

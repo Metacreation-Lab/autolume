@@ -7,6 +7,7 @@ import os
 import argparse
 import ffmpeg
 import cv2
+from utils import ffmpeg_utils
 from torchvision import transforms
 from super_res.net_base import SRVGGNetPlus, SRVGGNetCompact, RRDBNet
 from utils.device_utils import get_device
@@ -91,14 +92,14 @@ def check_width_height(args):
 
 
 def get_resolution(video_path):
-  probe = ffmpeg.probe(video_path)
+  probe = ffmpeg_utils.probe(video_path)
   video_streams = [stream for stream in probe['streams'] if stream['codec_type'] == 'video']
   w = video_streams[0]['width']
   h = video_streams[0]['height']
   return w,h
 
 def get_audio(video_path):
-  probe = ffmpeg.probe(video_path)
+  probe = ffmpeg_utils.probe(video_path)
   has_audio = any(stream['codec_type'] == 'audio' for stream in probe['streams'])
   audio=ffmpeg.input(video_path).audio if has_audio else None
   return audio
@@ -107,10 +108,10 @@ class Reader:
     def __init__(self, width, height, video_path):
       self.width=width
       self.height=height
-      self.stream_reader = (
+      self.stream_reader = ffmpeg_utils.run_async(
                 ffmpeg.input(video_path).output('pipe:', format='rawvideo', pix_fmt='bgr24',
-                                                loglevel='error').run_async(
-                                                    pipe_stdin=True, pipe_stdout=True))
+                                                loglevel='error'),
+                pipe_stdin=True, pipe_stdout=True)
     def get_frame_from_stream(self):
         img_bytes = self.stream_reader.stdout.read(self.width * self.height * 3)  # 3 bytes for one pixel
         if not img_bytes:
@@ -133,7 +134,7 @@ class Writer:
           out_width, out_height = int(args.out_width), int(args.out_width)
 
         if audio is not None:
-            self.stream_writer = (
+            self.stream_writer = ffmpeg_utils.run_async(
                 ffmpeg.input('pipe:', format='rawvideo', pix_fmt='bgr24', s=f'{out_width}x{out_height}',
                              framerate=fps).output(
                                  audio,
@@ -141,17 +142,17 @@ class Writer:
                                  pix_fmt='yuv420p',
                                  vcodec='libx264',
                                  loglevel='error',
-                                 acodec='copy').overwrite_output().run_async(
-                                     pipe_stdin=True, pipe_stdout=True,cmd='ffmpeg'))
+                                 acodec='copy').overwrite_output(),
+                pipe_stdin=True, pipe_stdout=True)
         else:
-            self.stream_writer = (
+            self.stream_writer = ffmpeg_utils.run_async(
                 ffmpeg.input('pipe:', format='rawvideo',
                 pix_fmt='bgr24',
                 s=f'{out_width}x{out_height}',
                              framerate=fps).output(
                                  video_save_path, pix_fmt='yuv420p',vcodec='libx264',
-                                 loglevel='error').overwrite_output().run_async(
-                                     pipe_stdin=True, pipe_stdout=True,cmd='ffmpeg'))
+                                 loglevel='error').overwrite_output(),
+                pipe_stdin=True, pipe_stdout=True)
 
     def write_frame(self, frame):
         frame = frame.tobytes()
