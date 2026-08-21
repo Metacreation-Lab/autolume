@@ -5,6 +5,7 @@ import torch
 from PIL import ImageFilter
 
 from utils.app_logging import LoggedProcess
+from utils.user_data import data_path
 from utils.gui_utils import imgui_utils, gl_utils
 import multiprocessing as mp
 
@@ -28,7 +29,7 @@ class ProjectionModule:
         self.target_fname = ""
         self.target_text = ""
         self.initial_latent = None
-        self.outdir = ""
+        self.outdir = str(data_path("projection"))
         self.save_video = False
         self.seed = 300
         self.lr = 0.1
