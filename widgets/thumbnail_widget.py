@@ -12,6 +12,7 @@ import imgui
 import PIL.Image
 import PIL.ImageOps
 
+from utils import video_io
 from utils.gui_utils import gl_utils
 
 logger = logging.getLogger(__name__)
@@ -42,16 +43,7 @@ def _render_thumbnail(file_path, size, padding):
     video_ext = ('.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm')
     try:
         if file_path.lower().endswith(video_ext):
-            cap = cv2.VideoCapture(file_path)
-            ok, frame = (cap.read() if cap.isOpened() else (False, None))
-            cap.release()
-            if not ok:
-                return None
-            if frame.ndim == 3 and frame.shape[2] == 3:
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            elif frame.ndim == 3 and frame.shape[2] == 4:
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2RGBA)
-            img = frame
+            img = video_io.first_frame(file_path)
         else:
             # Decode JPEGs at reduced resolution: draft() lets libjpeg downsample
             # while decoding (e.g. a 4K source straight to ~1/8 size), a big win

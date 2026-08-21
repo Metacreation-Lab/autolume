@@ -1,9 +1,12 @@
 import logging
+import queue
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import imgui
 from utils.gui_utils import imgui_utils
 import multiprocessing as mp
 
+from utils import video_io
 from utils.app_logging import LoggedProcess
 from widgets.native_browser_widget import NativeBrowserWidget
 from widgets.thumbnail_widget import ThumbnailWidget
@@ -16,6 +19,59 @@ resize_mode = ['stretch','center crop']
 padding_color = ['black', 'white', 'bleeding']
 
 logger = logging.getLogger(__name__)
+
+
+class _DurationProber:
+    """Probes video durations on worker threads.
+
+    Media I/O never runs on the render thread: a probe that stalls on a network
+    share or a corrupt file would freeze the UI (issue #62).
+    """
+
+    WORKERS = 2
+
+    def __init__(self):
+        self._executor = None
+        self._done = queue.Queue()   # (generation, path, duration)
+        self._generation = 0         # bumped when the pending set is discarded
+
+    def start(self, paths):
+        """Queue probes for ``paths``, discarding anything still in flight."""
+        self._generation += 1
+        if self._executor is None:
+            self._executor = ThreadPoolExecutor(max_workers=self.WORKERS,
+                                                thread_name_prefix='duration-probe')
+        for path in paths:
+            self._executor.submit(self._probe, path, self._generation)
+
+    def poll(self):
+        """Return {path: duration} for the probes that finished since last call."""
+        durations = {}
+        while True:
+            try:
+                generation, path, duration = self._done.get_nowait()
+            except queue.Empty:
+                return durations
+            if generation == self._generation:
+                durations[path] = duration
+
+    def cancel(self):
+        """Drop the results of any probe still in flight."""
+        self._generation += 1
+
+    def shutdown(self):
+        self.cancel()
+        if self._executor is not None:
+            self._executor.shutdown(wait=False, cancel_futures=True)
+            self._executor = None
+
+    def _probe(self, path, generation):
+        try:
+            duration = video_io.probe(path).duration
+        except video_io.VideoIOError as e:
+            logger.warning("Could not determine duration for video %s: %s", path, e)
+            duration = 0.0
+        self._done.put((generation, path, duration))
 
 class DataPreprocessing:
     """Data Preprocessing UI"""
@@ -40,10 +96,12 @@ class DataPreprocessing:
         # Video frame extraction
         self.fps = self.settings.fps
         self.video_durations = {}
+        self.duration_prober = _DurationProber()
+        self.last_video_count = None  # gates video thumbnail refreshes
         self.video_extraction_queue = mp.Queue()
         self.video_extraction_reply = mp.Queue()
         self.is_processing_video = False
-        
+
         self.min_res = 8
         self.max_res = 1024
         self.img_res = self.settings.size # current image resolution
@@ -166,19 +224,15 @@ class DataPreprocessing:
         if imgui.button("Import Videos", width=parameter_column_width, height=30):
             self.selected_video_files = self.data_browser.select_video_files()
             if self.selected_video_files:
-                # Reset cache variables when opening popup with new videos
-                if hasattr(self, 'last_video_count'):
-                    delattr(self, 'last_video_count')
-                if hasattr(self, 'last_fps'):
-                    delattr(self, 'last_fps')
-                if hasattr(self, 'last_expected_frames'):
-                    delattr(self, 'last_expected_frames')
-                self.video_durations = {}
+                self._reset_video_selection_state()
+                self.duration_prober.start(self.selected_video_files)
                 imgui.open_popup("Video Frame Extraction")
 
         # Video Frame Extraction Popup
         imgui.set_next_window_size(self.app.content_width // 2.5, self.app.content_height // 2.5, imgui.ONCE)
         if imgui.begin_popup_modal("Video Frame Extraction", flags=imgui.WINDOW_NO_SCROLLBAR)[0]:
+            self.video_durations.update(self.duration_prober.poll())
+
             popup_width = imgui.get_window_width()
             popup_height = imgui.get_window_height() - 50
 
@@ -251,7 +305,8 @@ class DataPreprocessing:
                             self.thumbnail_widget.update_thumbnails(self.imported_files)
 
                             # Reset variables
-                            self.selected_video_files = [] 
+                            self.selected_video_files = []
+                            self._reset_video_selection_state()
                             self.is_processing_video = False
                             self.loading_widget.hide()
                             self.fps = self.settings.fps 
@@ -273,14 +328,7 @@ class DataPreprocessing:
 
             if imgui_utils.button("Close", width=left_popup_width - 10, enabled=True):
                 self.selected_video_files = []
-                # Reset cache variables when closing popup
-                if hasattr(self, 'last_video_count'):
-                    delattr(self, 'last_video_count')
-                if hasattr(self, 'last_fps'):
-                    delattr(self, 'last_fps')
-                if hasattr(self, 'last_expected_frames'):
-                    delattr(self, 'last_expected_frames')
-                self.video_durations = {}
+                self._reset_video_selection_state()
                 imgui.close_current_popup()
             imgui.end_child()
 
@@ -300,7 +348,7 @@ class DataPreprocessing:
 
             if self.selected_video_files:
                 # Only update thumbnails if video list changed
-                if not hasattr(self, 'last_video_count') or len(self.selected_video_files) != self.last_video_count:
+                if len(self.selected_video_files) != self.last_video_count:
                     self.video_thumbnail_widget.update_thumbnails(self.selected_video_files)
                     self.last_video_count = len(self.selected_video_files)
 
@@ -311,21 +359,11 @@ class DataPreprocessing:
                 imgui.text("No videos selected.")
             
             imgui.end_child() # Thumbnail Video Scroll
-                        
-            # Only recalculate frames if FPS or video list changed
-            if (not hasattr(self, 'last_fps') or self.fps != self.last_fps or 
-                not hasattr(self, 'last_video_count') or len(self.selected_video_files) != self.last_video_count):
-                expected_frames = 0
-                for video_path in self.selected_video_files:
-                    if video_path not in self.video_durations:
-                        self.video_durations[video_path] = DatasetPreprocessingUtils.calculate_video_duration(video_path)
-                    duration = self.video_durations[video_path]
-                    expected_frames += int(duration * self.fps) if duration > 0 else 0
-                self.last_expected_frames = expected_frames
-                self.last_fps = self.fps
-                self.last_video_count = len(self.selected_video_files)
-            
-            imgui.text(f"Expected frames extracted: {getattr(self, 'last_expected_frames', 0)}")
+
+            durations = [self.video_durations.get(p) for p in self.selected_video_files]
+            expected_frames = sum(int(d * self.fps) for d in durations if d)
+            pending = " (calculating...)" if any(d is None for d in durations) else ""
+            imgui.text(f"Expected frames extracted: {expected_frames}{pending}")
 
             imgui.same_line(position=video_available_width - 50)
             if imgui.button("Remove"):
@@ -339,11 +377,7 @@ class DataPreprocessing:
 
                 self.video_thumbnail_widget.update_thumbnails(self.selected_video_files)
                 self.video_thumbnail_widget.clear_selected()
-
-                if hasattr(self, 'last_fps'):
-                    delattr(self, 'last_fps')
-                if hasattr(self, 'last_expected_frames'):
-                    delattr(self, 'last_expected_frames')
+                self.last_video_count = len(self.selected_video_files)
 
             imgui.end_child() # Video popup right
 
@@ -807,6 +841,12 @@ class DataPreprocessing:
         self.last_selected_file = None
     # ------------------------------
 
+    def _reset_video_selection_state(self):
+        """Drop probed durations and thumbnail state of the video popup."""
+        self.duration_prober.cancel()
+        self.video_durations = {}
+        self.last_video_count = None
+
     # ---Helper functions for preview updates
     def _get_settings_hash(self):
         """Create a hash of current settings for change detection."""
@@ -870,6 +910,8 @@ class DataPreprocessing:
         """Clean up multiprocessing resources before destroying the object"""
         try:
             self.reset_progress_variables()
+
+            self.duration_prober.shutdown()
 
             if hasattr(self, 'thumbnail_widget') and self.thumbnail_widget is not None:
                 self.thumbnail_widget.cleanup()

@@ -1,4 +1,5 @@
 import ctypes
+import importlib
 import sys
 import types
 
@@ -30,6 +31,10 @@ def gl_stub(monkeypatch):
             glGetString=lambda name: {"version": version,
                                       "renderer": renderer}[name])
         monkeypatch.setitem(sys.modules, "OpenGL.GL", stub)
+        # ``import OpenGL.GL as gl`` binds the package attribute when the real
+        # module has already been imported, bypassing the sys.modules entry.
+        monkeypatch.setattr(importlib.import_module("OpenGL"), "GL", stub,
+                            raising=False)
     return install
 
 
