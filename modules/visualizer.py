@@ -14,6 +14,7 @@ import imgui
 import cv2
 
 import dnnlib
+from utils import video_io
 from utils.gui_utils import imgui_utils
 from utils.gui_utils import gl_utils
 from utils.gui_utils import text_utils
@@ -422,19 +423,30 @@ class Visualizer:
             self.recording_thread = None
 
     def _record_frames(self):
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # H.264 codec
-        out = None
-        while self.is_recording or not self.frame_queue.empty():
-            if not self.frame_queue.empty():
-                frame = self.frame_queue.get()
-                if out is None:
-                    height, width, channels = frame.shape
-                    os.makedirs(os.path.dirname(self.recording_file_path), exist_ok=True)
-                    out = cv2.VideoWriter(self.recording_file_path, fourcc, 30.0, (width, height))
-                out.write(frame)
-        if out is not None:
-            out.release()
-            logger.info("Recording saved to %s", self.recording_file_path)
+        writer = None
+        height = width = 0
+        try:
+            while self.is_recording or not self.frame_queue.empty():
+                if not self.frame_queue.empty():
+                    frame = self.frame_queue.get()
+                    if writer is None:
+                        # yuv420p needs even dimensions; crop any stray odd row/column
+                        height, width = frame.shape[0] & ~1, frame.shape[1] & ~1
+                        os.makedirs(os.path.dirname(self.recording_file_path), exist_ok=True)
+                        writer = video_io.VideoWriter(
+                            self.recording_file_path, width, height, fps=30,
+                            options={'preset': 'veryfast'})
+                    writer.write(frame[:height, :width])
+            if writer is not None:
+                writer.close()
+                logger.info("Recording saved to %s", self.recording_file_path)
+        except video_io.VideoIOError as e:
+            logger.error("Recording failed: %s", e)
+            if writer is not None:
+                try:
+                    writer.close()
+                except video_io.VideoIOError:
+                    pass
 
     def capture_screenshot(self, file_path):
         if 'image' in self.result:

@@ -176,10 +176,12 @@ class VideoWriter:
     """H.264/yuv420p mp4 encoder; usable as a context manager.
 
     ``audio_from`` names a source file whose audio stream, if any, is remuxed
-    by packet copy. ``bit_rate`` is in bits per second.
+    by packet copy. ``bit_rate`` is in bits per second. ``options`` are passed
+    to the libx264 encoder (e.g. {'preset': 'veryfast'}).
     """
 
-    def __init__(self, path, width, height, fps, audio_from=None, bit_rate=None):
+    def __init__(self, path, width, height, fps, audio_from=None, bit_rate=None,
+                 options=None):
         self.path = str(path)
         if width % 2 or height % 2:
             raise VideoIOError(
@@ -188,7 +190,8 @@ class VideoWriter:
         self._container = _open(self.path, mode='w')
         try:
             self._stream = self._container.add_stream(
-                'libx264', rate=Fraction(fps).limit_denominator(65535))
+                'libx264', rate=Fraction(fps).limit_denominator(65535),
+                options=options or {})
             self._stream.width = width
             self._stream.height = height
             self._stream.pix_fmt = 'yuv420p'

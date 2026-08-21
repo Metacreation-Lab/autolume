@@ -170,6 +170,19 @@ def test_video_writer_roundtrip(tmp_path):
     assert int(frames[0][0, -1, 2]) - int(frames[0][0, 0, 2]) > 200
 
 
+def test_video_writer_accepts_encoder_options(tmp_path):
+    out = tmp_path / 'preset.mp4'
+    with VideoWriter(str(out), WIDTH, HEIGHT, 30,
+                     options={'preset': 'veryfast'}) as writer:
+        for i in range(10):
+            writer.write(gradient(i)[:, :, ::-1])
+
+    info = probe(str(out))
+    assert (info.width, info.height) == (WIDTH, HEIGHT)
+    with VideoReader(str(out)) as reader:
+        assert len(list(reader.frames())) == 10
+
+
 def test_video_writer_copies_audio(tmp_path):
     source = make_video(tmp_path / 'source.mp4', with_audio=True)
     out = tmp_path / 'with_audio.mp4'
