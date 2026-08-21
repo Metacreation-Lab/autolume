@@ -138,6 +138,12 @@ def test_video_reader_yields_bgr_frames(video):
 
     assert len(frames) == 30
     assert all(f.shape == (HEIGHT, WIDTH, 3) and f.dtype == np.uint8 for f in frames)
+    # gradient() ramps red along x and holds blue constant; in bgr24 the ramp
+    # must land on channel 2 — a silent RGB/BGR swap would corrupt every
+    # consumer's colors while passing shape checks.
+    first = frames[0]
+    assert int(first[0, -1, 2]) - int(first[0, 0, 2]) > 200
+    assert abs(int(first[0, -1, 0]) - int(first[0, 0, 0])) < 30
 
 
 def test_video_reader_rejects_non_video(junk):
@@ -158,7 +164,10 @@ def test_video_writer_roundtrip(tmp_path):
     assert info.has_audio is False
 
     with VideoReader(str(out)) as reader:
-        assert len(list(reader.frames())) == 30
+        frames = list(reader.frames())
+    assert len(frames) == 30
+    # the red x-ramp written on bgr channel 2 must come back on channel 2
+    assert int(frames[0][0, -1, 2]) - int(frames[0][0, 0, 2]) > 200
 
 
 def test_video_writer_copies_audio(tmp_path):
@@ -169,7 +178,11 @@ def test_video_writer_copies_audio(tmp_path):
         for i in range(30):
             writer.write(gradient(i)[:, :, ::-1])
 
-    assert probe(str(out)).has_audio is True
+    info = probe(str(out))
+    assert info.has_audio is True
+    # the source carries 1.0s of audio; a bug dropping most packets would
+    # still report has_audio, but not the full duration
+    assert info.duration == pytest.approx(1.0, abs=0.2)
 
 
 def test_video_writer_ignores_silent_audio_source(tmp_path, video):

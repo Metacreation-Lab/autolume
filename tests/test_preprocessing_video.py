@@ -149,7 +149,12 @@ def test_extract_videos_cancels_mid_video(tmp_path):
     source = make_video(tmp_path / 'clip.mp4', seconds=3)
 
     class CancelAfter:
-        """queue_in stand-in that answers "cancel" once probed often enough."""
+        """queue_in stand-in that answers "cancel" once probed often enough.
+
+        Counting empty() calls couples this to how often extract_videos polls
+        for cancellation (currently once per decoded frame); if that cadence
+        is ever throttled, adjust the probe budget rather than the design.
+        """
 
         def __init__(self, probes):
             self.probes = probes
