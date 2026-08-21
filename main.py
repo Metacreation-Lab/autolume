@@ -27,29 +27,15 @@ from utils.user_data import init_data_root
 
 
 def get_runtime_bin_dir():
-    # PyInstaller frozen app: bundled ffmpeg/ffprobe/ninja live in _MEIPASS/bin
-    # (a subdir, to avoid colliding with same-named Python packages at the root).
+    # PyInstaller frozen app: the bundled ninja lives in _MEIPASS/bin.
     if IS_FROZEN:
         return os.path.join(sys._MEIPASS, "bin")
 
-    # Development mode
-    base = os.path.dirname(os.path.abspath(__file__))
-    bin_root = os.path.join(base, "bin")
-    for root, dirs, files in os.walk(bin_root):
-        if "ffmpeg.exe" in files:
-            return root
-    return bin_root
+    # Development mode: bin/ at the repository root, for any local tooling.
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "bin")
 
 BIN_DIR = get_runtime_bin_dir()
 os.environ["PATH"] = BIN_DIR + os.pathsep + os.environ.get("PATH", "")
-
-if IS_FROZEN:
-    # imageio-ffmpeg's own binary is pruned from the bundle (release.py);
-    # route it to the ffmpeg already shipped in bin/.
-    os.environ.setdefault(
-        "IMAGEIO_FFMPEG_EXE",
-        os.path.join(BIN_DIR, "ffmpeg.exe" if os.name == "nt" else "ffmpeg"),
-    )
 
 
 def main():

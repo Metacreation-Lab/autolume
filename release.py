@@ -22,8 +22,8 @@ right PyInstaller invocation:
   store-credentials``). It can be combined with ``--package`` or run alone
   against an already-built ``.dmg``.
 
-ffmpeg/ffprobe are bundled on every platform via ffmpeg-downloader so the
-artifact is self-contained (Windows uses gyan.dev's essentials build).
+Video I/O needs no external binary: the PyAV wheel carries its own FFmpeg
+libraries, which PyInstaller collects with the package.
 
 Pass ``--package`` to additionally wrap the build into the platform's
 distributable format: ``.AppImage`` (zstd) on Linux, ``.dmg`` (lzma) on macOS,
@@ -54,8 +54,6 @@ import tarfile
 import tempfile
 import urllib.request
 from pathlib import Path
-
-import ffmpeg_downloader as ffdl
 
 from utils.resource_paths import get_version
 
@@ -110,39 +108,6 @@ def package_dir(name: str) -> Path:
 def spec_arg(src: Path, dest: str) -> str:
     """Build a PyInstaller add-data/add-binary value using the host separator."""
     return f"{src}{os.pathsep}{dest}"
-
-
-# Windows bundles gyan.dev's "essentials" ffmpeg (~97 MB/exe vs ~136 MB for
-# the default full build); libx264 + aac is all Autolume uses. The major
-# version is pinned because "release@essentials" resolves the latest version
-# across all providers, usually a btbn post-release with no essentials build.
-FFMPEG_WIN_SPEC = "8@essentials"
-
-
-def ensure_ffmpeg() -> tuple[Path, Path]:
-    """Make sure ffmpeg + ffprobe are downloaded and return their paths."""
-    if IS_WINDOWS and ffdl.installed():
-        banner = subprocess.run(
-            [ffdl.ffmpeg_path, "-version"], capture_output=True, text=True
-        ).stdout.partition("\n")[0]
-        if "essentials_build" not in banner:
-            print(f"Cached ffmpeg is not the essentials build ({banner}); replacing...")
-            subprocess.run(
-                [sys.executable, "-m", "ffmpeg_downloader", "uninstall", "-y"], check=True
-            )
-    if not ffdl.installed():
-        print("Installing ffmpeg via ffmpeg-downloader...")
-        cmd = [sys.executable, "-m", "ffmpeg_downloader", "install", "-y"]
-        if IS_WINDOWS:
-            cmd.append(FFMPEG_WIN_SPEC)
-        else:
-            cmd.append("--no-simlinks")  # don't touch the user's ~/.local/bin
-        subprocess.run(cmd, check=True)
-    ffmpeg = ffdl.ffmpeg_path and Path(ffdl.ffmpeg_path)
-    ffprobe = ffdl.ffprobe_path and Path(ffdl.ffprobe_path)
-    if not ffmpeg or not ffmpeg.exists() or not ffprobe or not ffprobe.exists():
-        fail("ffmpeg/ffprobe not found after install; run `uv run ffdl install` manually")
-    return ffmpeg, ffprobe
 
 
 def bake_crash_endpoint() -> str:
@@ -295,14 +260,7 @@ def build_args(disable_crash_reporting: bool = False) -> tuple[list[str], str | 
             ]
 
     # --- Binaries shipped on every platform -------------------------------
-    # ffmpeg/ffprobe (and ninja below) go in a bin/ subdir, not the bundle root:
-    # on macOS/Linux the extensionless `ffmpeg` binary would otherwise collide
-    # with the `ffmpeg` (ffmpeg-python) package PyInstaller packs at the root.
-    # main.py adds this bin/ dir to PATH at runtime.
-    ffmpeg, ffprobe = ensure_ffmpeg()
-    binaries = [
-        (ffmpeg, "bin"), (ffprobe, "bin"), *glfw_native_libs(), *sounddevice_native_libs(),
-    ]
+    binaries = [*glfw_native_libs(), *sounddevice_native_libs()]
 
     # --- Data files shipped on every platform -----------------------------
     clip = package_dir("clip")
@@ -327,7 +285,9 @@ def build_args(disable_crash_reporting: bool = False) -> tuple[list[str], str | 
     if NEEDS_JIT_TOOLCHAIN:
         datas.append((PRECOMPILED_OPS_DIR, "torch_extensions"))
 
-        binaries.append((ninja_binary(), "bin"))  # same collision risk as ffmpeg
+        # ninja goes in a bin/ subdir rather than the bundle root; main.py
+        # prepends that dir to PATH so the JIT fallback finds it.
+        binaries.append((ninja_binary(), "bin"))
 
         torch_lib = package_dir("torch") / "lib"
         if IS_WINDOWS:
@@ -430,9 +390,6 @@ PRUNE_PATTERNS = [
     # Multi-GPU cusolver backend (150 MB); torch_cuda.dll does not import it
     # and nothing in Autolume reaches the cusolverMg APIs.
     "_internal/torch/lib/cusolverMg64_*.dll",
-    # imageio-ffmpeg's own ffmpeg (62 MB); main.py points IMAGEIO_FFMPEG_EXE
-    # at the ffmpeg already shipped in bin/.
-    "_internal/imageio_ffmpeg/binaries/ffmpeg-*",
     # cuRAND (69 MB); nothing in the bundle references it, torch uses its own
     # Philox RNG on CUDA. Verified by training + inference with it removed.
     "_internal/torch/lib/curand64_*.dll",

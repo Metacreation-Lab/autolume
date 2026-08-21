@@ -5,12 +5,11 @@ import numpy as np
 import torchvision.transforms.functional as F
 import os
 import argparse
-import ffmpeg
 import cv2
 from torchvision import transforms
 from super_res.net_base import SRVGGNetPlus, SRVGGNetCompact, RRDBNet
 from utils.device_utils import get_device
-from utils import device_utils
+from utils import device_utils, video_io
 from utils.resource_paths import resource_path
 from utils.user_data import cache_path
 from utils.downloads import download_file
@@ -90,77 +89,11 @@ def check_width_height(args):
   return args.out_width is not None and args.out_height is not None
 
 
-def get_resolution(video_path):
-  probe = ffmpeg.probe(video_path)
-  video_streams = [stream for stream in probe['streams'] if stream['codec_type'] == 'video']
-  w = video_streams[0]['width']
-  h = video_streams[0]['height']
-  return w,h
-
-def get_audio(video_path):
-  probe = ffmpeg.probe(video_path)
-  has_audio = any(stream['codec_type'] == 'audio' for stream in probe['streams'])
-  audio=ffmpeg.input(video_path).audio if has_audio else None
-  return audio
-
-class Reader:
-    def __init__(self, width, height, video_path):
-      self.width=width
-      self.height=height
-      self.stream_reader = (
-                ffmpeg.input(video_path).output('pipe:', format='rawvideo', pix_fmt='bgr24',
-                                                loglevel='error').run_async(
-                                                    pipe_stdin=True, pipe_stdout=True))
-    def get_frame_from_stream(self):
-        img_bytes = self.stream_reader.stdout.read(self.width * self.height * 3)  # 3 bytes for one pixel
-        if not img_bytes:
-            return None
-        img = np.frombuffer(img_bytes, np.uint8).reshape([self.height, self.width, 3])
-        return img
-
-    def get_frame(self):
-        return self.get_frame_from_stream()
-
-class Writer:
-
-    def __init__(self, args, audio, height, width, video_save_path, fps):
-        logger.info("Saving video to %s", video_save_path)
-        if args.scale_mode:
-          out_width, out_height = int(width * args.outscale), int(height * args.outscale)
-        else:
-          assert (args.out_width is not None and args.out_height is not None) # width and height should be specify together
-
-          out_width, out_height = int(args.out_width), int(args.out_width)
-
-        if audio is not None:
-            self.stream_writer = (
-                ffmpeg.input('pipe:', format='rawvideo', pix_fmt='bgr24', s=f'{out_width}x{out_height}',
-                             framerate=fps).output(
-                                 audio,
-                                 video_save_path,
-                                 pix_fmt='yuv420p',
-                                 vcodec='libx264',
-                                 loglevel='error',
-                                 acodec='copy').overwrite_output().run_async(
-                                     pipe_stdin=True, pipe_stdout=True,cmd='ffmpeg'))
-        else:
-            self.stream_writer = (
-                ffmpeg.input('pipe:', format='rawvideo',
-                pix_fmt='bgr24',
-                s=f'{out_width}x{out_height}',
-                             framerate=fps).output(
-                                 video_save_path, pix_fmt='yuv420p',vcodec='libx264',
-                                 loglevel='error').overwrite_output().run_async(
-                                     pipe_stdin=True, pipe_stdout=True,cmd='ffmpeg'))
-
-    def write_frame(self, frame):
-        frame = frame.tobytes()
-        self.stream_writer.stdin.write(frame)
-
-    def close(self):
-        self.stream_writer.stdin.close()
-        self.stream_writer.wait()
-
+def output_size(args, width, height):
+  if args.scale_mode:
+    return int(width * args.outscale), int(height * args.outscale)
+  assert check_width_height(args)  # width and height should be specified together
+  return int(args.out_width), int(args.out_height)
 
 
 def base_args():
@@ -185,33 +118,29 @@ def process(args,file):
   upsampler=load_model(args.model_type,model_path)
   head, tail = os.path.split(file)
   if file[-3:] == 'mp4' or file[-3:] == 'avi' or file[-3:] == 'mov':
-    width, height = get_resolution(file)
+    info = video_io.probe(file)
+    width, height = info.width, info.height
 
     if args.outscale > 4 or (check_width_height(args) and (args.out_width > 4*width or args.out_height > 4*height)):
       logger.warning('Super-res scale larger than x4 requires non-model inference with interpolation and can be slower')
 
-
-    audio = get_audio(file)
+    out_width, out_height = output_size(args, width, height)
     if args.scale_mode:
       video_save_path = os.path.join(args.result_path, tail[
-                                                         :-4] + f'_result_{args.model_type}_{int(width * args.outscale)}x{int(height * args.outscale)}_Sharpness{args.sharpen_scale}.mp4')
+                                                         :-4] + f'_result_{args.model_type}_{out_width}x{out_height}_Sharpness{args.sharpen_scale}.mp4')
     else:
       video_save_path = os.path.join(args.result_path, tail[
-                                                         :-4] + f'_result_{args.model_type}_x{int(args.out_width)}x{int(args.out_height)}_Sharpness{args.sharpen_scale}.mp4')
+                                                         :-4] + f'_result_{args.model_type}_x{out_width}x{out_height}_Sharpness{args.sharpen_scale}.mp4')
 
-    cap = cv2.VideoCapture(file)
-    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    frame_count = int(info.duration * info.fps)
     logger.debug("Frame count: %d", frame_count)
     pbar = tqdm(total=frame_count, unit='frame', desc='inference', disable=None)
 
-    fps = cap.get(cv2.CAP_PROP_FPS)
-
-    reader= Reader(width,height,file)
-    writer = Writer(args, audio, height, width, video_save_path, fps=fps)
-
-    while True:
-      img = reader.get_frame()
-      if img is not None:
+    logger.info("Saving video to %s", video_save_path)
+    with video_io.VideoReader(file) as reader, video_io.VideoWriter(
+        video_save_path, out_width, out_height, info.fps,
+        audio_from=file if info.has_audio else None) as writer:
+      for img in reader.frames():
         input=torch.tensor(img).permute(2,0,1).float().to(get_device())/255
         input=torch.unsqueeze(input,0).to(next(upsampler.parameters()).dtype)
         with torch.inference_mode():
@@ -219,32 +148,15 @@ def process(args,file):
           output=F.adjust_sharpness(output,args.sharpen_scale)*255
 
           output = output[0].permute(1,2,0).cpu().numpy().astype(np.uint8)
-        
+
           if args.scale_mode:
             if args.outscale != 4:
-              output = cv2.resize(
-                output, (
-                    int(width * args.outscale),
-                    int(height * args.outscale),
-                ), interpolation=cv2.INTER_LINEAR)
-
-
+              output = cv2.resize(output, (out_width, out_height), interpolation=cv2.INTER_LINEAR)
           else:
-            output = cv2.resize(
-                output, (
-                    int(args.out_width),
-                    int(args.out_height),
-                ), interpolation=cv2.INTER_LINEAR)
+            output = cv2.resize(output, (out_width, out_height), interpolation=cv2.INTER_LINEAR)
 
-      
-        writer.write_frame(output)
+        writer.write(output)
         pbar.update(1)
-        ret, img = cap.read()
-
-      else:
-        break
-
-    writer.close()
 
   elif file[-3:] == 'jpg' or file[-3:] == 'png':
     data_transformer = transforms.Compose([transforms.ToTensor()])
@@ -314,46 +226,33 @@ def _sr_image(model, args, file, tail, file_idx, reply_queue):
 
 
 def _sr_video(model, args, file, tail, file_idx, reply_queue):
-    audio = get_audio(file)
-    video = cv2.VideoCapture(file)
-    fps = video.get(cv2.CAP_PROP_FPS)
-    total_frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
-    video_width = int(video.get(cv2.CAP_PROP_FRAME_WIDTH))
-    video_height = int(video.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    video.release()
-    if args.scale_mode:
-        video_save_path = os.path.join(args.result_path, tail[:-4] + f'_result_{args.model_type}_{int(video_width * args.outscale)}x{int(video_height * args.outscale)}_Sharpness{args.sharpen_scale}.mp4')
-    else:
-        video_save_path = os.path.join(args.result_path, tail[:-4] + f'_result_{args.model_type}_{int(args.out_width)}x{int(args.out_height)}_Sharpness{args.sharpen_scale}.mp4')
+    info = video_io.probe(file)
+    total_frames = int(info.duration * info.fps)
+    out_width, out_height = output_size(args, info.width, info.height)
+    video_save_path = os.path.join(args.result_path, tail[:-4] + f'_result_{args.model_type}_{out_width}x{out_height}_Sharpness{args.sharpen_scale}.mp4')
     logger.info("Saving video to %s", video_save_path)
-    writer = Writer(args, audio, video_height, video_width, video_save_path=video_save_path, fps=fps)
-    reader = Reader(video_width, video_height, file)
     model_dtype = next(model.parameters()).dtype
     start_time = time.time()
     last_put = start_time
     super_res_idx = 0
     reply_queue.put([file_idx, super_res_idx, total_frames, -1, False])
-    while True:
-        img = reader.get_frame()
-        if img is None:
-            break
-        with torch.inference_mode():
-            sr_input = (torch.tensor(img).permute(2, 0, 1).unsqueeze(0).float().to(get_device()) / 255).to(model_dtype)
-            sr_output = model(sr_input).float()
-            sr_output = F.adjust_sharpness(sr_output, args.sharpen_scale) * 255
-            sr_output = sr_output[0].permute(1, 2, 0).cpu().numpy().astype(np.uint8)
-            if args.scale_mode:
-                sr_output = cv2.resize(sr_output, (int(video_width * args.outscale), int(video_height * args.outscale)), interpolation=cv2.INTER_LINEAR)
-            else:
-                sr_output = cv2.resize(sr_output, (int(args.out_width), int(args.out_height)), interpolation=cv2.INTER_LINEAR)
-            writer.write_frame(sr_output)
-        super_res_idx += 1
-        now = time.time()
-        if now - last_put >= 0.15 or super_res_idx >= total_frames:
-            eta = (now - start_time) / super_res_idx * max(total_frames - super_res_idx, 0)
-            reply_queue.put([file_idx, super_res_idx, total_frames, eta, False])
-            last_put = now
-    writer.close()
+    with video_io.VideoReader(file) as reader, video_io.VideoWriter(
+            video_save_path, out_width, out_height, info.fps,
+            audio_from=file if info.has_audio else None) as writer:
+        for img in reader.frames():
+            with torch.inference_mode():
+                sr_input = (torch.tensor(img).permute(2, 0, 1).unsqueeze(0).float().to(get_device()) / 255).to(model_dtype)
+                sr_output = model(sr_input).float()
+                sr_output = F.adjust_sharpness(sr_output, args.sharpen_scale) * 255
+                sr_output = sr_output[0].permute(1, 2, 0).cpu().numpy().astype(np.uint8)
+                sr_output = cv2.resize(sr_output, (out_width, out_height), interpolation=cv2.INTER_LINEAR)
+                writer.write(sr_output)
+            super_res_idx += 1
+            now = time.time()
+            if now - last_put >= 0.15 or super_res_idx >= total_frames:
+                eta = (now - start_time) / super_res_idx * max(total_frames - super_res_idx, 0)
+                reply_queue.put([file_idx, super_res_idx, total_frames, eta, False])
+                last_put = now
 
 
 def run_super_res(queue, reply_queue):

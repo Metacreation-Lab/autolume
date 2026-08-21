@@ -18,7 +18,6 @@ from time import perf_counter
 
 import multiprocessing as mp
 import clip
-import imageio
 
 logger = logging.getLogger(__name__)
 import numpy as np
@@ -29,6 +28,7 @@ import torch.nn.functional as F
 
 import dnnlib
 from torch_utils import legacy
+from utils import video_io
 from utils.device_utils import get_device
 
 import unicodedata
@@ -438,25 +438,27 @@ def run_projection(
     if save_video:
         logger.info('Generating optimization progress video...')
 
-        video = imageio.get_writer(f'{save_path}/proj.mp4', mode='I', fps=10, codec='libx264', bitrate='16M')
-        reply_queue.put([f'Saving optimization progress video "{save_path}/proj.mp4"', None, True, False])
-        for i, projected_w in enumerate(projected_w_steps):
-            halt = False
-            if not queue.empty():
-                halt = queue.get()
-                while not queue.empty():
+        width = G.img_resolution * (2 if target_fname else 1)
+        with video_io.VideoWriter(f'{save_path}/proj.mp4', width, G.img_resolution,
+                                  fps=10, bit_rate=16_000_000) as video:
+            reply_queue.put([f'Saving optimization progress video "{save_path}/proj.mp4"', None, True, False])
+            for i, projected_w in enumerate(projected_w_steps):
+                halt = False
+                if not queue.empty():
                     halt = queue.get()
-            if halt:
-                break
-            reply_queue.put([f'Generating frame {i}/{len(projected_w_steps)-1}...', None, True, False])
-            synth_image = G.synthesis(projected_w.unsqueeze(0), noise_mode='const')[0]
-            synth_image = (synth_image + 1) * (255/2)
-            synth_image = synth_image.permute(0, 2, 3, 1).clamp(0, 255).to(torch.uint8)[0].cpu().numpy()
-            if target_fname:
-                video.append_data(np.concatenate([target_uint8, synth_image], axis=1))
-            else:
-                video.append_data(synth_image)
-        video.close()
+                    while not queue.empty():
+                        halt = queue.get()
+                if halt:
+                    break
+                reply_queue.put([f'Generating frame {i}/{len(projected_w_steps)-1}...', None, True, False])
+                synth_image = G.synthesis(projected_w.unsqueeze(0), noise_mode='const')[0]
+                synth_image = (synth_image + 1) * (255/2)
+                synth_image = synth_image.permute(0, 2, 3, 1).clamp(0, 255).to(torch.uint8)[0].cpu().numpy()
+                if target_fname:
+                    frame = np.concatenate([target_uint8, synth_image], axis=1)
+                else:
+                    frame = synth_image
+                video.write(frame[:, :, ::-1])
         reply_queue.put(['Done Saving Video', None, True, True])
 
 #----------------------------------------------------------------------------

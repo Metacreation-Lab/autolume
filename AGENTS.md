@@ -19,7 +19,7 @@ Autolume is a no-coding generative AI system for real-time visual performances u
 | `uv run zensical serve` | Serve docs locally at http://127.0.0.1:8000 |
 | `uv run release.py` | Build the PyInstaller release (cross-platform): `dist/Autolume/` on Windows/Linux, `dist/Autolume.app` on macOS. Run it on the target OS — PyInstaller cannot cross-compile |
 
-Initial setup also requires CUDA 12.8, MSVC build tools (Windows), `ffmpeg` (Linux), pre-trained Real-ESRGAN/face-parsing models, and an FFmpeg binary on Windows. Full details in the [README](README.md#development-instructions).
+Initial setup also requires CUDA 12.8, MSVC build tools (Windows), and pre-trained Real-ESRGAN/face-parsing models. Full details in the [README](README.md#development-instructions).
 
 There is no architecture overview here on purpose (see the maintenance principle above) — explore the tree directly; [CONTRIBUTING.md](CONTRIBUTING.md#project-layout) has a directory table if you want one.
 

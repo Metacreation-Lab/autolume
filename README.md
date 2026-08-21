@@ -61,18 +61,15 @@ For examples of artworks created with Autolume see: https://www.metacreation.net
   - Minimum components: CUDA Development + CUDA Runtime
 - Microsoft C++ Build Tools ([download link](https://download.visualstudio.microsoft.com/download/pr/13907dbe-8bb3-4cfe-b0ae-147e70f8b2f3/a3193e6e6135ef7f598d6a9e429b010d77260dba33dddbee343a47494b5335a3/vs_BuildTools.exe))
   - Minimum components: Desktop development with C++
-- FFmpeg: `winget install Gyan.FFmpeg`
 
 #### Linux (Ubuntu 24+)
 
 - CUDA ([download link](https://developer.nvidia.com/cuda-12-8-0-download-archive))
   - Minimum components: CUDA Development + CUDA Runtime
-- FFmpeg: `sudo apt install ffmpeg`
 - PortAudio runtime (for audio input): `sudo apt install libportaudio2`
 
 #### macOS
 
-- FFmpeg: `brew install ffmpeg`
 - Command Line Tools for Xcode: `xcode-select --install`
 
 On macOS and Windows, PortAudio ships inside the `sounddevice` wheel, so no extra install is needed for audio input.
@@ -111,9 +108,6 @@ The script requires a `.env` at the repo root with the crash report endpoint
 values (it fails fast without one). Copy `.env.example` and fill it in — see
 [tools/crash_endpoint/README.md](tools/crash_endpoint/README.md). Forks without
 their own endpoint can build with `--disable-crash-reporting` instead.
-
-ffmpeg/ffprobe are downloaded and bundled into the release automatically via
-`ffmpeg-downloader`.
 
 - **Windows / Linux:** output is the `dist/Autolume/` folder.
 - **macOS:** output is `dist/Autolume.app`, code-signed automatically — see
