@@ -400,6 +400,11 @@ PRUNE_PATTERNS = [
     # Alternate nvrtc build (83 MB); nothing references it and the primary
     # nvrtc ships alongside.
     "_internal/torch/lib/nvrtc64_*.alt.dll",
+    # OpenCV's private FFmpeg backend (25 MB), loaded lazily and only by
+    # cv2.VideoCapture/VideoWriter; all video I/O goes through PyAV and no
+    # call site remains (cv2 does image ops only). Verified by thumbnail
+    # rendering + dataset build with it removed.
+    "_internal/cv2/opencv_videoio_ffmpeg*.dll",
 ]
 
 
