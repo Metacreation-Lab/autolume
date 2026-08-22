@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from utils.video_io import (MediaInfo, VideoIOError, VideoReader, VideoWriter,
-                            extract_frames, first_frame, probe)
+                            extract_frames, first_frame, preview_frame, probe)
 
 WIDTH, HEIGHT = 64, 48
 SAMPLE_RATE = 48000
@@ -256,3 +256,18 @@ def test_first_frame_returns_none_for_garbage(junk):
 
 def test_first_frame_returns_none_for_missing_file(tmp_path):
     assert first_frame(str(tmp_path / 'nope.mp4')) is None
+
+
+def test_preview_frame_picks_a_middle_frame(tmp_path):
+    # 30 frames at 30 fps with keyframes every 10: seeking to t=0.5 lands on
+    # the keyframe at frame 10, whose blue channel is 10 * 7 = 70.
+    path = make_video(tmp_path / 'clip.mp4', frames=30, fps=30, gop=10)
+
+    frame = preview_frame(path)
+
+    assert frame is not None and frame.shape == (HEIGHT, WIDTH, 3)
+    assert abs(int(frame[0, 0, 2]) - 70) <= 20   # not the first frame (blue 0)
+
+
+def test_preview_frame_returns_none_for_garbage(junk):
+    assert preview_frame(junk) is None
