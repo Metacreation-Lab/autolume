@@ -302,7 +302,7 @@ class DataPreprocessing:
                             
                             for frames_dir in frames_paths:
                                 frame_path = Path(frames_dir)
-                                frame_files = [str(f) for f in frame_path.iterdir()]
+                                frame_files = [str(f) for f in sorted(frame_path.iterdir())]
                                 self.imported_files.extend(frame_files)
 
                             self.thumbnail_widget.update_thumbnails(self.imported_files)

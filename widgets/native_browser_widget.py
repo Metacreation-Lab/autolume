@@ -185,7 +185,8 @@ class NativeBrowserWidget:
     def _load_directory_files(self, directory: str) -> List[str]:
         """Return filenames (non-recursive) in directory; skips subdirectories."""
         try:
-            return [f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f))]
+            return sorted(f for f in os.listdir(directory)
+                          if os.path.isfile(os.path.join(directory, f)))
         except (OSError, PermissionError) as e:
             logger.warning("Error reading directory %s: %s", directory, e)
             return []
