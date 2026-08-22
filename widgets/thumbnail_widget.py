@@ -86,6 +86,7 @@ class ThumbnailWidget:
         self.selected_indices = []
         self.last_selected_idx = None
         self.delete_pressed = False
+        self.badges = {}   # path -> tooltip text for a warning badge overlay
 
         self._textures = collections.OrderedDict()  # path -> Texture, recent at end (LRU)
         self._futures = {}                           # path -> Future for decodes in flight
@@ -104,6 +105,10 @@ class ThumbnailWidget:
         keep = set(file_paths)
         for path in [p for p in self._textures if p not in keep]:
             self._trash.append(self._textures.pop(path))
+
+    def set_badges(self, badges):
+        """Overlay a warning badge on the given paths. badges: path -> tooltip."""
+        self.badges = badges or {}
 
     def render_thumbnails(self, available_width, available_height):
         self._flush_trash()
@@ -166,6 +171,7 @@ class ThumbnailWidget:
         self.selected_files = []
         self.selected_indices = []
         self.last_selected_idx = None
+        self.badges = {}
 
     # --- Selection ----------------------------------------------------------
 
@@ -228,6 +234,12 @@ class ThumbnailWidget:
                           imgui.get_color_u32_rgba(*color), rounding=6,
                           thickness=3 if selected else 2)
 
+        tooltip = self.badges.get(path)
+        if tooltip is not None:
+            self._draw_badge(draw, sx, sy, thumb)
+            if hovered:
+                imgui.set_tooltip(tooltip)
+
         name = os.path.basename(path)
         if len(name) > 15:
             name = name[:12] + "..."
@@ -236,6 +248,18 @@ class ThumbnailWidget:
         imgui.text(name)
 
         imgui.pop_id()
+
+    def _draw_badge(self, draw, sx, sy, thumb):
+        """Small warning circle with an exclamation mark, top right corner."""
+        radius = max(9.0, thumb / 14.0)
+        margin = radius * 0.7
+        cx = sx + thumb - margin - radius
+        cy = sy + margin + radius
+        fill = imgui.get_color_u32_rgba(1.0, 0.75, 0.15, 1.0)
+        dark = imgui.get_color_u32_rgba(0.15, 0.1, 0.0, 1.0)
+        draw.add_circle_filled(cx, cy, radius, fill)
+        text_w, text_h = imgui.calc_text_size("!")
+        draw.add_text(cx - text_w / 2, cy - text_h / 2, dark, "!")
 
     def _draw_empty_message(self, width, height):
         message = "No images imported"
