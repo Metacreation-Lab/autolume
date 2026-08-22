@@ -1,5 +1,6 @@
 import logging
 import os
+import sys
 import math
 import collections
 import queue
@@ -243,13 +244,18 @@ class ThumbnailWidget:
                               (height - imgui.get_text_line_height()) / 2))
         imgui.text_colored(message, 0.5, 0.5, 0.5, 1.0)
 
+    def _shortcut_mod_down(self):
+        # Cmd on macOS, Ctrl elsewhere.
+        io = imgui.get_io()
+        return io.key_super if sys.platform == 'darwin' else io.key_ctrl
+
     def _select(self, idx):
-        ctrl = imgui.is_key_down(341) or imgui.is_key_down(345)
+        mod = self._shortcut_mod_down()
         shift = imgui.is_key_down(340) or imgui.is_key_down(344)
         if shift and self.last_selected_idx is not None:
             lo, hi = sorted((self.last_selected_idx, idx))
             self.selected_indices = list(range(lo, hi + 1))
-        elif ctrl:
+        elif mod:
             if idx in self.selected_indices:
                 self.selected_indices.remove(idx)
             else:
@@ -260,8 +266,7 @@ class ThumbnailWidget:
             self.last_selected_idx = idx
 
     def _handle_shortcuts(self):
-        ctrl = imgui.is_key_down(341) or imgui.is_key_down(345)
-        if ctrl and imgui.is_key_pressed(65):                       # Ctrl+A
+        if self._shortcut_mod_down() and imgui.is_key_pressed(65):  # Cmd/Ctrl+A
             self.select_all()
         if imgui.is_key_pressed(261) or imgui.is_key_pressed(259):  # Delete / Backspace
             if self.selected_indices or self.last_selected_idx is not None:
