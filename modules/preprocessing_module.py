@@ -268,7 +268,12 @@ class DataPreprocessing:
             if not self.is_processing_video:
                 if imgui.button("Extract Frames", width=left_popup_width - 10):
                     self.is_processing_video = True
-                    self.loading_widget.show_simple("Extracting frames...", show_progress=True)
+                    # A cancel token the previous worker never consumed would
+                    # stop this run at its first poll.
+                    self._drain_queue(self.video_extraction_queue)
+                    self._drain_extraction_replies()
+                    self.loading_widget.show_simple("Extracting frames...", show_progress=True,
+                                                    on_cancel=self._cancel_video_extraction)
                     self.loading_widget.update_progress(0, len(self.selected_video_files))
                     LoggedProcess(
                         target=DatasetPreprocessingUtils.extract_videos,
@@ -310,13 +315,8 @@ class DataPreprocessing:
                             self.extraction_interval = self.settings.extraction_interval
                             self.last_selected_file = None
                             
-                            # Clear the queue
-                            while not self.video_extraction_reply.empty():
-                                try:
-                                    self.video_extraction_reply.get_nowait()
-                                except:
-                                    break
-                            
+                            self._drain_extraction_replies()
+
                             imgui.close_current_popup() 
                             
                     except:
@@ -846,6 +846,28 @@ class DataPreprocessing:
         self.video_prober.cancel()
         self.video_infos = {}
         self.last_video_count = None
+
+    @staticmethod
+    def _drain_queue(q):
+        while not q.empty():
+            try:
+                q.get_nowait()
+            except:
+                break
+
+    def _drain_extraction_replies(self):
+        self._drain_queue(self.video_extraction_reply)
+
+    def _cancel_video_extraction(self):
+        """Stop the extraction worker and return to the settings popup.
+
+        Frames already written stay on disk but are not imported: a cancelled
+        worker never sends the completed message.
+        """
+        self.video_extraction_queue.put("cancel")
+        self.is_processing_video = False
+        self.loading_widget.hide()
+        self._drain_extraction_replies()
 
     # ---Helper functions for preview updates
     def _get_settings_hash(self):
