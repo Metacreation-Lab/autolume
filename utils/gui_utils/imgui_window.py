@@ -44,6 +44,9 @@ class ImguiWindow(glfw_window.GlfwWindow):
         self._attach_glfw_callbacks()
         imgui.get_io().ini_saving_rate = 0 # Disable creating imgui.ini at runtime.
         imgui.get_io().mouse_drag_threshold = 0 # Improve behavior with imgui_utils.drag_custom().
+        if sys.platform == 'darwin':
+            # Cmd instead of Ctrl for text editing shortcuts (Cmd+A/C/V/X/Z).
+            imgui.get_io().config_mac_osx_behaviors = True
         self._font_path  = font
         self._font_sizes = font_sizes
         self._pending_font_sizes = None
