@@ -8,6 +8,7 @@ class LoadingOverlayManager:
         self.is_visible = False
         self.message = ""
         self.popup_id = "LoadingOverlay"
+        self.on_cancel = None
         
         # Progress tracking
         self.show_progress = False
@@ -19,12 +20,17 @@ class LoadingOverlayManager:
         # Render mode: 'simple' or 'detailed'
         self.render_mode = 'simple'
     
-    def show_simple(self, message, show_progress=False):
-        """Show simple loading overlay for basic processes like video extraction"""
+    def show_simple(self, message, show_progress=False, on_cancel=None):
+        """Show simple loading overlay for basic processes like video extraction
+
+        When ``on_cancel`` is given, the overlay shows a Cancel button that
+        invokes it and closes the overlay.
+        """
         self.message = message
         self.is_visible = True
         self.show_progress = show_progress
         self.render_mode = 'simple'
+        self.on_cancel = on_cancel
         if not show_progress:
             self.reset_progress()
     
@@ -34,6 +40,7 @@ class LoadingOverlayManager:
         self.is_visible = True
         self.show_progress = show_progress
         self.render_mode = 'detailed'
+        self.on_cancel = None
         if not show_progress:
             self.reset_progress()
     
@@ -41,6 +48,7 @@ class LoadingOverlayManager:
         """Hide the loading overlay"""
         self.is_visible = False
         self.message = ""
+        self.on_cancel = None
         self.reset_progress()
     
     def update_progress(self, current, total, current_file="", percentage=None):
@@ -100,9 +108,20 @@ class LoadingOverlayManager:
                 text_width = imgui.calc_text_size(f"{self.progress_percentage:.1f}%")[0]
                 imgui.set_cursor_pos_x((progress_width - text_width) / 2)
                 imgui.text(f"{self.progress_percentage:.1f}%")
-            
+
+            if self.on_cancel is not None:
+                imgui.spacing()
+                button_width = 100
+                imgui.set_cursor_pos_x((popup_width - button_width) / 2)
+                if imgui.button("Cancel", width=button_width):
+                    on_cancel = self.on_cancel
+                    # Close from inside the modal's own scope so the nested
+                    # popup stack unwinds cleanly back to the window below.
+                    imgui.close_current_popup()
+                    on_cancel()
+
             imgui.end_popup()
-    
+
     def render_detailed(self):
         """Render detailed loading overlay for complex processes with full progress details"""
         if not self.is_visible or not self.message:
