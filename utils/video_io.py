@@ -12,6 +12,7 @@ import av
 import cv2
 import numpy as np
 
+
 logger = logging.getLogger(__name__)
 
 # Tolerance when comparing decoded timestamps against emission boundaries.
@@ -80,15 +81,18 @@ def first_frame(path):
     return None
 
 
-def extract_frames(path, fps, out_dir, name_prefix, on_progress=None, should_cancel=None):
-    """Write JPEG frames sampled at ``fps`` into ``out_dir``; return how many.
+def extract_frames(path, interval, out_dir, name_prefix, on_progress=None,
+                   should_cancel=None):
+    """Write one JPEG at most every ``interval`` seconds; return how many.
 
-    Files are named ``{name_prefix}_frame_{n:05d}.jpg`` with ``n`` starting at 1.
-    Emission is driven by decoded timestamps, so variable frame rate sources and
-    sources slower than the target rate still yield the expected frame count.
+    The first frame at or past each interval boundary is written; an interval
+    of 0 writes every frame. Files are named
+    ``{name_prefix}_frame_{n:05d}.jpg`` with ``n`` starting at 1.
+    ``on_progress`` receives the running written count and the frame's
+    timestamp in seconds.
     """
-    if fps <= 0:
-        raise VideoIOError(f'Invalid target fps {fps} for "{path}"')
+    if interval < 0:
+        raise VideoIOError(f'Invalid frame interval {interval} for "{path}"')
     os.makedirs(out_dir, exist_ok=True)
 
     written = 0
@@ -96,46 +100,30 @@ def extract_frames(path, fps, out_dir, name_prefix, on_progress=None, should_can
         stream = _video_stream(container, path)
         stream.thread_type = 'AUTO'
         source_rate = float(stream.average_rate) if stream.average_rate else 0.0
-        step = 1.0 / source_rate if source_rate else 1.0 / fps
 
-        def emit(image):
-            nonlocal written
-            written += 1
-            cv2.imwrite(os.path.join(out_dir, f'{name_prefix}_frame_{written:05d}.jpg'),
-                        image, [cv2.IMWRITE_JPEG_QUALITY, 90])
-            if on_progress is not None:
-                on_progress(written)
-
-        cancelled = False
-        last_image = None
-        end_time = 0.0
+        next_sample = 0.0
         try:
             for index, frame in enumerate(container.decode(stream)):
                 if should_cancel is not None and should_cancel():
-                    cancelled = True
                     break
                 if frame.pts is not None and stream.time_base is not None:
                     timestamp = float(frame.pts * stream.time_base)
                 elif source_rate:
                     timestamp = index / source_rate
                 else:
-                    timestamp = written / fps
-                duration = (float(frame.duration * stream.time_base)
-                            if frame.duration and stream.time_base is not None else step)
-                end_time = timestamp + duration
-                if timestamp + _EPS < written / fps:
+                    timestamp = float(index)
+                if timestamp + _EPS < next_sample:
                     continue
-                last_image = frame.to_ndarray(format='bgr24')
-                while timestamp + _EPS >= written / fps:
-                    emit(last_image)
+                next_sample = timestamp + interval
+                written += 1
+                cv2.imwrite(
+                    os.path.join(out_dir, f'{name_prefix}_frame_{written:05d}.jpg'),
+                    frame.to_ndarray(format='bgr24'),
+                    [cv2.IMWRITE_JPEG_QUALITY, 90])
+                if on_progress is not None:
+                    on_progress(written, timestamp)
         except av.FFmpegError as e:
             raise VideoIOError(f'Failed to decode "{path}": {e}') from e
-
-        # The last frame stays on screen for its own duration; holding it there
-        # keeps the count matching the ffmpeg fps filter on slow sources.
-        if not cancelled and last_image is not None:
-            while written / fps < end_time - _EPS:
-                emit(last_image)
     return written
 
 

@@ -21,8 +21,8 @@ padding_color = ['black', 'white', 'bleeding']
 logger = logging.getLogger(__name__)
 
 
-class _DurationProber:
-    """Probes video durations on worker threads.
+class _VideoInfoProber:
+    """Probes video media info on worker threads.
 
     Media I/O never runs on the render thread: a probe that stalls on a network
     share or a corrupt file would freeze the UI (issue #62).
@@ -32,7 +32,7 @@ class _DurationProber:
 
     def __init__(self):
         self._executor = None
-        self._done = queue.Queue()   # (generation, path, duration)
+        self._done = queue.Queue()   # (generation, path, info)
         self._generation = 0         # bumped when the pending set is discarded
 
     def start(self, paths):
@@ -40,20 +40,20 @@ class _DurationProber:
         self._generation += 1
         if self._executor is None:
             self._executor = ThreadPoolExecutor(max_workers=self.WORKERS,
-                                                thread_name_prefix='duration-probe')
+                                                thread_name_prefix='video-probe')
         for path in paths:
             self._executor.submit(self._probe, path, self._generation)
 
     def poll(self):
-        """Return {path: duration} for the probes that finished since last call."""
-        durations = {}
+        """Return {path: MediaInfo} for the probes that finished since last call."""
+        infos = {}
         while True:
             try:
-                generation, path, duration = self._done.get_nowait()
+                generation, path, info = self._done.get_nowait()
             except queue.Empty:
-                return durations
+                return infos
             if generation == self._generation:
-                durations[path] = duration
+                infos[path] = info
 
     def cancel(self):
         """Drop the results of any probe still in flight."""
@@ -67,11 +67,12 @@ class _DurationProber:
 
     def _probe(self, path, generation):
         try:
-            duration = video_io.probe(path).duration
+            info = video_io.probe(path)
         except video_io.VideoIOError as e:
-            logger.warning("Could not determine duration for video %s: %s", path, e)
-            duration = 0.0
-        self._done.put((generation, path, duration))
+            logger.warning("Could not probe video %s: %s", path, e)
+            info = video_io.MediaInfo(duration=0.0, width=0, height=0, fps=0.0,
+                                      has_audio=False)
+        self._done.put((generation, path, info))
 
 class DataPreprocessing:
     """Data Preprocessing UI"""
@@ -94,9 +95,9 @@ class DataPreprocessing:
         self.preview_original = False
 
         # Video frame extraction
-        self.fps = self.settings.fps
-        self.video_durations = {}
-        self.duration_prober = _DurationProber()
+        self.extraction_interval = self.settings.extraction_interval
+        self.video_infos = {}
+        self.video_prober = _VideoInfoProber()
         self.last_video_count = None  # gates video thumbnail refreshes
         self.video_extraction_queue = mp.Queue()
         self.video_extraction_reply = mp.Queue()
@@ -225,13 +226,13 @@ class DataPreprocessing:
             self.selected_video_files = self.data_browser.select_video_files()
             if self.selected_video_files:
                 self._reset_video_selection_state()
-                self.duration_prober.start(self.selected_video_files)
+                self.video_prober.start(self.selected_video_files)
                 imgui.open_popup("Video Frame Extraction")
 
         # Video Frame Extraction Popup
         imgui.set_next_window_size(self.app.content_width // 2.5, self.app.content_height // 2.5, imgui.ONCE)
         if imgui.begin_popup_modal("Video Frame Extraction", flags=imgui.WINDOW_NO_SCROLLBAR)[0]:
-            self.video_durations.update(self.duration_prober.poll())
+            self.video_infos.update(self.video_prober.poll())
 
             popup_width = imgui.get_window_width()
             popup_height = imgui.get_window_height() - 50
@@ -245,24 +246,21 @@ class DataPreprocessing:
 
             imgui.separator() 
 
-            # --- Frame Extraction FPS ---
-            imgui.text("FPS for Video Extraction:")
-            self.help_icon.render(self.help_texts.get("fps_video_extraction"))
-            
-            min_fps = 1
-            max_fps = 120
+            # --- Frame Extraction Interval ---
+            imgui.text("Seconds Between Frames:")
+            self.help_icon.render(self.help_texts.get("interval_video_extraction"))
+
             with imgui_utils.item_width(left_popup_width - 10):
-                _, self.fps = imgui.input_int("##fps_input", self.fps)
-                if self.fps < min_fps:
-                    self.fps = 1
-                elif self.fps > max_fps:
-                    self.fps = 120
+                _, self.extraction_interval = imgui.input_float(
+                    "##interval_input", self.extraction_interval, format='%.1f')
+                self.extraction_interval = min(max(self.extraction_interval, 0.0),
+                                               3600.0)
 
             imgui.spacing()
 
             # Note
             imgui.push_text_wrap_pos(left_popup_width - 20)
-            imgui.text_colored("Note: All selected videos will be extracted using the same frame rate you choose here.\nIf you want to use different frame rates for individual videos, please go back and extract them one by one.", 0.8, 0.8, 0.8)
+            imgui.text_colored("Note: All selected videos use the same settings. If you want different settings for individual videos, please go back and extract them one by one.", 0.8, 0.8, 0.8)
             imgui.pop_text_wrap_pos()
 
             imgui.spacing()
@@ -274,7 +272,7 @@ class DataPreprocessing:
                     self.loading_widget.update_progress(0, len(self.selected_video_files))
                     LoggedProcess(
                         target=DatasetPreprocessingUtils.extract_videos,
-                        args=(self.selected_video_files, self.fps, self.video_extraction_queue, self.video_extraction_reply),
+                        args=(self.selected_video_files, self.extraction_interval, self.video_extraction_queue, self.video_extraction_reply),
                         name='video-extract'
                     ).start()
             else:
@@ -309,7 +307,7 @@ class DataPreprocessing:
                             self._reset_video_selection_state()
                             self.is_processing_video = False
                             self.loading_widget.hide()
-                            self.fps = self.settings.fps 
+                            self.extraction_interval = self.settings.extraction_interval
                             self.last_selected_file = None
                             
                             # Clear the queue
@@ -360,10 +358,12 @@ class DataPreprocessing:
             
             imgui.end_child() # Thumbnail Video Scroll
 
-            durations = [self.video_durations.get(p) for p in self.selected_video_files]
-            expected_frames = sum(int(d * self.fps) for d in durations if d)
-            pending = " (calculating...)" if any(d is None for d in durations) else ""
-            imgui.text(f"Expected frames extracted: {expected_frames}{pending}")
+            infos = [self.video_infos.get(p) for p in self.selected_video_files]
+            expected = sum(self.settings.estimate_extracted_frames(info,
+                                                                   self.extraction_interval)
+                           for info in infos if info)
+            pending = " (calculating...)" if any(info is None for info in infos) else ""
+            imgui.text(f"Expected frames extracted: up to {expected}{pending}")
 
             imgui.same_line(position=video_available_width - 50)
             if imgui.button("Remove"):
@@ -372,7 +372,7 @@ class DataPreprocessing:
                 for idx in sorted(selected_videos, reverse=True):
                     if 0 <= idx < len(self.selected_video_files):
                         removed_path = self.selected_video_files[idx]
-                        self.video_durations.pop(removed_path, None)
+                        self.video_infos.pop(removed_path, None)
                         del self.selected_video_files[idx]
 
                 self.video_thumbnail_widget.update_thumbnails(self.selected_video_files)
@@ -842,9 +842,9 @@ class DataPreprocessing:
     # ------------------------------
 
     def _reset_video_selection_state(self):
-        """Drop probed durations and thumbnail state of the video popup."""
-        self.duration_prober.cancel()
-        self.video_durations = {}
+        """Drop probed media info and thumbnail state of the video popup."""
+        self.video_prober.cancel()
+        self.video_infos = {}
         self.last_video_count = None
 
     # ---Helper functions for preview updates
@@ -911,7 +911,7 @@ class DataPreprocessing:
         try:
             self.reset_progress_variables()
 
-            self.duration_prober.shutdown()
+            self.video_prober.shutdown()
 
             if hasattr(self, 'thumbnail_widget') and self.thumbnail_widget is not None:
                 self.thumbnail_widget.cleanup()
