@@ -74,6 +74,12 @@ class _VideoInfoProber:
                                       has_audio=False)
         self._done.put((generation, path, info))
 
+def _format_interval(value):
+    """Seconds value with trailing zeros trimmed but at least one decimal."""
+    text = f"{value:.3f}".rstrip('0')
+    return text + '0' if text.endswith('.') else text
+
+
 class DataPreprocessing:
     """Data Preprocessing UI"""
     def __init__(self, app):
@@ -96,6 +102,7 @@ class DataPreprocessing:
 
         # Video frame extraction
         self.extraction_interval = self.settings.extraction_interval
+        self.extraction_interval_text = _format_interval(self.extraction_interval)
         self.video_infos = {}
         self.video_prober = _VideoInfoProber()
         self.last_video_count = None  # gates video thumbnail refreshes
@@ -230,43 +237,55 @@ class DataPreprocessing:
                 imgui.open_popup("Video Frame Extraction")
 
         # Video Frame Extraction Popup
-        imgui.set_next_window_size(self.app.content_width // 2.5, self.app.content_height // 2.5, imgui.ONCE)
-        if imgui.begin_popup_modal("Video Frame Extraction", flags=imgui.WINDOW_NO_SCROLLBAR)[0]:
+        imgui.set_next_window_position(self.app.content_width / 2, self.app.content_height / 2,
+                                       imgui.APPEARING, 0.5, 0.5)
+        imgui.set_next_window_size(840, 520, imgui.APPEARING)
+        popup_opened, popup_visible = imgui.begin_popup_modal(
+            "Video Frame Extraction", True,
+            flags=imgui.WINDOW_NO_SCROLLBAR | imgui.WINDOW_NO_RESIZE)
+        if popup_opened:
             self.video_infos.update(self.video_prober.poll())
 
-            popup_width = imgui.get_window_width()
-            popup_height = imgui.get_window_height() - 50
-
-            left_popup_width = popup_width // 3 
-            right_popup_width = popup_width - left_popup_width
+            left_popup_width = imgui.get_window_width() // 3
 
             # --- LEFT SECTION: Controls ---
-            imgui.begin_child("VideoPopupLeft", width=left_popup_width, height=popup_height, border=False)
+            # Bordered panes, as in the training module's settings/output split.
+            imgui.begin_child("VideoPopupLeft", width=left_popup_width, height=0, border=True)
+            pane_width = imgui.get_content_region_available()[0]
             imgui.text("Frame Extraction Option")
 
-            imgui.separator() 
+            imgui.separator()
+            imgui.spacing()
 
             # --- Frame Extraction Interval ---
             imgui.text("Seconds Between Frames:")
             self.help_icon.render(self.help_texts.get("interval_video_extraction"))
 
-            with imgui_utils.item_width(left_popup_width - 10):
-                _, self.extraction_interval = imgui.input_float(
-                    "##interval_input", self.extraction_interval, format='%.1f')
-                self.extraction_interval = min(max(self.extraction_interval, 0.0),
-                                               3600.0)
+            # Text backed like the training learning rate field: the buffer
+            # keeps exactly what was typed, so no display format can lie
+            # about the stored value.
+            with imgui_utils.item_width(pane_width):
+                changed, self.extraction_interval_text = imgui_utils.input_text(
+                    "##interval_input", self.extraction_interval_text,
+                    buffer_length=16, flags=imgui.INPUT_TEXT_CHARS_DECIMAL)
+                if changed:
+                    try:
+                        self.extraction_interval = min(max(
+                            float(self.extraction_interval_text), 0.0), 3600.0)
+                    except ValueError:
+                        pass
 
             imgui.spacing()
 
             # Note
-            imgui.push_text_wrap_pos(left_popup_width - 20)
+            imgui.push_text_wrap_pos(imgui.get_cursor_pos_x() + pane_width)
             imgui.text_colored("Note: All selected videos use the same settings. If you want different settings for individual videos, please go back and extract them one by one.", 0.8, 0.8, 0.8)
             imgui.pop_text_wrap_pos()
 
             imgui.spacing()
 
             if not self.is_processing_video:
-                if imgui.button("Extract Frames", width=left_popup_width - 10):
+                if imgui.button("Extract Frames", width=pane_width):
                     self.is_processing_video = True
                     # A cancel token the previous worker never consumed would
                     # stop this run at its first poll.
@@ -313,36 +332,31 @@ class DataPreprocessing:
                             self.is_processing_video = False
                             self.loading_widget.hide()
                             self.extraction_interval = self.settings.extraction_interval
+                            self.extraction_interval_text = _format_interval(self.extraction_interval)
                             self.last_selected_file = None
                             
                             self._drain_extraction_replies()
 
-                            imgui.close_current_popup() 
+                            imgui.close_current_popup()
                             
                     except:
                         pass
 
-            imgui.spacing()
-
-            if imgui_utils.button("Close", width=left_popup_width - 10, enabled=True):
-                self.selected_video_files = []
-                self._reset_video_selection_state()
-                imgui.close_current_popup()
             imgui.end_child()
 
             imgui.same_line()
 
             # --- RIGHT SECTION: Video Thumbnails ---
-            imgui.begin_child("VideoPopupRight", width=right_popup_width - 30, height=popup_height, border=False)
+            imgui.begin_child("VideoPopupRight", width=0, height=0, border=True)
             imgui.text("Selected Videos")
             imgui.separator()
+            imgui.spacing()
 
-            scroll_height = popup_height - 80
-            
+            scroll_height = imgui.get_content_region_available()[1] - 40
+
             imgui.begin_child("VideoThumbnailsScroll", width=0, height=scroll_height, border=False)
 
-            video_available_width = right_popup_width - 50
-            video_available_height = scroll_height - 60 
+            video_available_width, video_available_height = imgui.get_content_region_available()
 
             if self.selected_video_files:
                 # Only update thumbnails if video list changed
@@ -365,8 +379,8 @@ class DataPreprocessing:
             pending = " (calculating...)" if any(info is None for info in infos) else ""
             imgui.text(f"Expected frames extracted: up to {expected}{pending}")
 
-            imgui.same_line(position=video_available_width - 50)
-            if imgui.button("Remove"):
+            imgui.same_line(position=imgui.get_window_width() - 110)
+            if imgui.button("Remove", width=100):
                 selected_videos = self.video_thumbnail_widget.get_selected_indices()
 
                 for idx in sorted(selected_videos, reverse=True):
@@ -380,6 +394,12 @@ class DataPreprocessing:
                 self.last_video_count = len(self.selected_video_files)
 
             imgui.end_child() # Video popup right
+
+            # Title bar close icon pressed
+            if not popup_visible:
+                self.selected_video_files = []
+                self._reset_video_selection_state()
+                imgui.close_current_popup()
 
             imgui.end_popup() # Video popup end
 

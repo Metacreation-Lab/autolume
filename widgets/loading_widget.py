@@ -1,5 +1,9 @@
 import imgui
 
+# Width of the overlay's content column (progress bar and text lines).
+_CONTENT_WIDTH = 520
+
+
 class LoadingOverlayManager:
     """Enhanced loading overlay manager with two different render modes for different types of processes"""
     
@@ -76,18 +80,16 @@ class LoadingOverlayManager:
             
         imgui.open_popup(self.popup_id)
         
-        # Position the popup in the center of the screen
-        popup_width = self.app.content_width // 2.5
-        popup_height = self.app.content_height // 2.5
+        # Center the popup and let it size to its content.
         imgui.set_next_window_position(
-            self.app.content_width / 2 - popup_width / 2, 
-            self.app.content_height / 2 - popup_height / 2
+            self.app.content_width / 2, self.app.content_height / 2,
+            imgui.ALWAYS, 0.5, 0.5
         )
-        imgui.set_next_window_size(popup_width, popup_height, imgui.ONCE)
         
         if imgui.begin_popup_modal(
             self.popup_id, 
             flags=imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_MOVE
+                  | imgui.WINDOW_ALWAYS_AUTO_RESIZE
         )[0]:
             imgui.text(self.message)
             
@@ -101,7 +103,7 @@ class LoadingOverlayManager:
                     imgui.text(f"Current file: {self.current_file}")
                 
                 # Progress bar
-                progress_width = popup_width - 40
+                progress_width = _CONTENT_WIDTH
                 imgui.progress_bar(self.progress_percentage / 100.0, (progress_width, 20))
                 
                 # Percentage text centered on progress bar
@@ -112,7 +114,7 @@ class LoadingOverlayManager:
             if self.on_cancel is not None:
                 imgui.spacing()
                 button_width = 100
-                imgui.set_cursor_pos_x((popup_width - button_width) / 2)
+                imgui.set_cursor_pos_x((imgui.get_window_width() - button_width) / 2)
                 if imgui.button("Cancel", width=button_width):
                     on_cancel = self.on_cancel
                     # Close from inside the modal's own scope so the nested
@@ -129,18 +131,16 @@ class LoadingOverlayManager:
             
         imgui.open_popup(self.popup_id)
         
-        # Position the popup in the center of the screen
-        popup_width = self.app.content_width // 2.5
-        popup_height = self.app.content_height // 2.5
+        # Center the popup and let it size to its content.
         imgui.set_next_window_position(
-            self.app.content_width / 2 - popup_width / 2, 
-            self.app.content_height / 2 - popup_height / 2
+            self.app.content_width / 2, self.app.content_height / 2,
+            imgui.ALWAYS, 0.5, 0.5
         )
-        imgui.set_next_window_size(popup_width, popup_height, imgui.ONCE)
         
         if imgui.begin_popup_modal(
             self.popup_id, 
             flags=imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_MOVE
+                  | imgui.WINDOW_ALWAYS_AUTO_RESIZE
         )[0]:
             imgui.text(self.message)
             
@@ -154,7 +154,7 @@ class LoadingOverlayManager:
                     imgui.text(f"Current file: {self.current_file}")
                 
                 # Progress bar
-                progress_width = popup_width - 40
+                progress_width = _CONTENT_WIDTH
                 imgui.progress_bar(self.progress_percentage / 100.0, (progress_width, 20))
                 
                 # Percentage text centered on progress bar
