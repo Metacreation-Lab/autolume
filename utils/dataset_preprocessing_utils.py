@@ -14,9 +14,6 @@ from utils.user_data import data_path
 
 logger = logging.getLogger(__name__)
 
-# Frames between progress messages, so the queue is not flooded.
-PROGRESS_INTERVAL = 10
-
 
 class DatasetPreprocessingUtils:
     """Utility class to support dataset preprocessing functions."""
@@ -25,7 +22,7 @@ class DatasetPreprocessingUtils:
         self.resizeMode = 1 # 0 = stretch, 1 = center crop
         self.size = 128
         self.nonSquare = False
-        self.fps = 10
+        self.extraction_interval = 1.0
         self.nonSquareSettings = {
             "widthRatio": 16,
             "heightRatio": 9,
@@ -141,16 +138,20 @@ class DatasetPreprocessingUtils:
             return 0
 
     @staticmethod
-    def calculate_expected_video_frames(video_path, fps=10):
-        duration = DatasetPreprocessingUtils.calculate_video_duration(video_path)
-        return int(duration * fps) if duration > 0 else 0
+    def estimate_extracted_frames(info, interval):
+        """Upper bound on the frames extraction will write for one video."""
+        if info.duration <= 0:
+            return 0
+        if interval > 0:
+            return int(info.duration / interval) + 1
+        return int(info.duration * info.fps)
 
     @staticmethod
-    def extract_videos(video_paths, fps, queue_in, queue_out):
+    def extract_videos(video_paths, interval, queue_in, queue_out):
         """Extract JPEG frames from each video into a sibling directory.
 
-        Reports progress on ``queue_out`` as a fraction of the frame count
-        expected across all videos, and stops when ``queue_in`` says "cancel".
+        Progress on ``queue_out`` is weighted by video duration so long files
+        advance the bar smoothly; stops when ``queue_in`` says "cancel".
         """
         cancelled = False
 
@@ -167,9 +168,11 @@ class DatasetPreprocessingUtils:
             return
 
         total_videos = len(video_paths)
-        total_expected = sum(DatasetPreprocessingUtils.calculate_expected_video_frames(p, fps)
-                             for p in video_paths)
-        frames_done = 0
+        durations = [DatasetPreprocessingUtils.calculate_video_duration(p)
+                     for p in video_paths]
+        total_duration = sum(durations)
+        seconds_done = 0.0
+        last_reported = -1.0
         results = []
 
         for i, video_path in enumerate(video_paths):
@@ -177,13 +180,17 @@ class DatasetPreprocessingUtils:
                 return
 
             source = Path(video_path)
-            save_path = source.parent / f"{source.stem}_frames @ {fps} fps"
+            save_path = source.parent / f"{source.stem}_frames @ {interval:g}s"
 
-            def report(done, index=i, name=source.name):
-                if total_expected > 0:
-                    percentage = min(done / total_expected * 100.0, 100.0)
+            def report(seconds, index=i, name=source.name, force=False):
+                nonlocal last_reported
+                if total_duration > 0:
+                    percentage = min(seconds / total_duration * 100.0, 100.0)
                 else:
-                    percentage = (index / total_videos * 100.0) if total_videos > 0 else 0.0
+                    percentage = (index / total_videos * 100.0) if total_videos else 0.0
+                if not force and percentage - last_reported < 0.5:
+                    return
+                last_reported = percentage
                 queue_out.put({
                     'type': 'progress',
                     'current': index,
@@ -192,23 +199,23 @@ class DatasetPreprocessingUtils:
                     'percentage': percentage,
                 })
 
-            def on_progress(written_here, base=frames_done):
-                if written_here % PROGRESS_INTERVAL == 0:
-                    report(base + written_here)
+            def on_progress(written, timestamp, base=seconds_done):
+                report(base + timestamp)
 
-            report(frames_done)
+            report(seconds_done, force=True)
             try:
-                written = video_io.extract_frames(video_path, fps, str(save_path), source.stem,
-                                                  on_progress=on_progress,
-                                                  should_cancel=should_cancel)
+                video_io.extract_frames(video_path, interval, str(save_path),
+                                        source.stem,
+                                        on_progress=on_progress,
+                                        should_cancel=should_cancel)
             except video_io.VideoIOError as e:
                 logger.error("Frame extraction failed for %s: %s", video_path, e)
                 continue
 
-            frames_done += written
+            seconds_done += durations[i]
             if cancelled:
                 return
-            report(frames_done)
+            report(seconds_done, force=True)
             results.append(str(save_path))
 
         queue_out.put({'type': 'completed', 'results': results})

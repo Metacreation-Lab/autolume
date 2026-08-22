@@ -21,9 +21,12 @@ def gradient(index, width=WIDTH, height=HEIGHT):
     return image
 
 
-def make_video(path, frames=30, fps=30, width=WIDTH, height=HEIGHT, with_audio=False):
+def make_video(path, frames=30, fps=30, width=WIDTH, height=HEIGHT, with_audio=False,
+               gop=None):
+    options = ({'g': str(gop), 'keyint_min': str(gop), 'sc_threshold': '0'}
+               if gop else {})
     with av.open(str(path), mode='w') as container:
-        video = container.add_stream('libx264', rate=fps)
+        video = container.add_stream('libx264', rate=fps, options=options)
         video.width = width
         video.height = height
         video.pix_fmt = 'yuv420p'
@@ -46,6 +49,23 @@ def make_video(path, frames=30, fps=30, width=WIDTH, height=HEIGHT, with_audio=F
                 container.mux(packet)
             for packet in audio.encode():
                 container.mux(packet)
+    return str(path)
+
+
+def make_box_video(path, frames=30, fps=30):
+    """Frames with distinct dHash structure: a white box that moves each frame."""
+    with av.open(str(path), mode='w') as container:
+        video = container.add_stream('libx264', rate=fps)
+        video.width, video.height, video.pix_fmt = WIDTH, HEIGHT, 'yuv420p'
+        for i in range(frames):
+            image = np.zeros((HEIGHT, WIDTH, 3), dtype=np.uint8)
+            x = (i * 11) % (WIDTH - 16)
+            image[8:40, x:x + 16] = 255
+            frame = av.VideoFrame.from_ndarray(image, format='rgb24')
+            for packet in video.encode(frame):
+                container.mux(packet)
+        for packet in video.encode():
+            container.mux(packet)
     return str(path)
 
 
@@ -87,48 +107,55 @@ def test_probe_non_video_raises(junk):
         probe(junk)
 
 
-def test_extract_frames_count_and_naming(tmp_path):
-    path = make_video(tmp_path / 'two_seconds.mp4', frames=60, fps=30)
-    out_dir = tmp_path / 'frames'
+def test_extract_frames_samples_by_interval(tmp_path):
+    path = make_box_video(tmp_path / 'clip.mp4', frames=30, fps=30)  # 1 s long
 
-    written = extract_frames(path, 10, str(out_dir), 'clip')
+    written = extract_frames(path, 0.25, str(tmp_path / 'out'), 'clip')
 
-    assert written == 20
-    names = sorted(p.name for p in out_dir.iterdir())
-    assert names[0] == 'clip_frame_00001.jpg'
-    assert names[-1] == 'clip_frame_00020.jpg'
-    assert len(names) == 20
+    # candidates at t = 0, 0.25, 0.5, 0.75
+    assert written == 4
+    names = sorted(p.name for p in (tmp_path / 'out').iterdir())
+    assert names == [f'clip_frame_{n:05d}.jpg' for n in range(1, 5)]
 
 
-def test_extract_frames_upsamples_slow_source(tmp_path):
-    path = make_video(tmp_path / 'slow.mp4', frames=10, fps=5)
-    out_dir = tmp_path / 'frames'
+def test_extract_frames_interval_zero_takes_every_frame(tmp_path):
+    path = make_video(tmp_path / 'clip.mp4', frames=10, fps=30)
 
-    written = extract_frames(path, 10, str(out_dir), 'slow')
+    written = extract_frames(path, 0, str(tmp_path / 'out'), 'clip')
 
-    assert written == 20
-    assert len(list(out_dir.iterdir())) == 20
+    assert written == 10
 
 
-def test_extract_frames_reports_progress(tmp_path, video):
+def test_extract_frames_rejects_negative_interval(tmp_path):
+    path = make_video(tmp_path / 'clip.mp4')
+    with pytest.raises(VideoIOError):
+        extract_frames(path, -1, str(tmp_path / 'out'), 'clip')
+
+
+def test_extract_frames_reports_written_and_timestamp(tmp_path):
+    path = make_box_video(tmp_path / 'clip.mp4', frames=30, fps=30)
     seen = []
-    written = extract_frames(video, 10, str(tmp_path / 'out'), 'clip',
-                             on_progress=seen.append)
 
-    assert seen == list(range(1, written + 1))
+    written = extract_frames(path, 0.25, str(tmp_path / 'out'), 'clip',
+                             on_progress=lambda n, t: seen.append((n, t)))
+
+    assert written == 4
+    assert [n for n, _ in seen] == [1, 2, 3, 4]
+    timestamps = [t for _, t in seen]
+    assert timestamps == sorted(timestamps)
+    assert timestamps[0] == pytest.approx(0.0, abs=0.05)
 
 
 def test_extract_frames_cancels_early(tmp_path):
-    path = make_video(tmp_path / 'long.mp4', frames=90, fps=30)
-    out_dir = tmp_path / 'out'
+    path = make_box_video(tmp_path / 'clip.mp4', frames=30, fps=30)
     seen = []
 
-    written = extract_frames(path, 30, str(out_dir), 'long',
-                             on_progress=seen.append,
+    written = extract_frames(path, 0, str(tmp_path / 'out'), 'clip',
+                             on_progress=lambda n, t: seen.append(n),
                              should_cancel=lambda: len(seen) >= 5)
 
-    assert 5 <= written < 90
-    assert len(list(out_dir.iterdir())) == written
+    assert 5 <= written < 30
+    assert len(list((tmp_path / 'out').iterdir())) == written
 
 
 def test_video_reader_yields_bgr_frames(video):

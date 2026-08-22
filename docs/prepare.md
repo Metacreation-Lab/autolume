@@ -1,6 +1,6 @@
 # Prepare
 
-The Prepare screen is where datasets are created prior to model training. It supports importing image and video files and formatting data into the consistent structure required for training. When a video file is imported, frames are automatically extracted based on the specified frame rate, converting motion footage into a sequence of still images suitable for training.
+The Prepare screen is where datasets are created prior to model training. It supports importing image and video files and formatting data into the consistent structure required for training. When a video file is imported, frames are automatically extracted at a set interval in seconds, converting motion footage into a sequence of still images suitable for training. Lower the interval to extract more frames.
 
 The screen offers fine control over dataset creation: options such as non-square framing to preserve image aspect ratios, image augmentations to expand dataset size and diversity, and integrated tools for managing and organizing data directly within the application. Data can be imported, refined, and compiled entirely in-app. A built-in preview panel displays preprocessing results in real time, allowing visual verification of all applied changes before processing and saving.
 
