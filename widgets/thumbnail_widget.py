@@ -44,7 +44,7 @@ def _render_thumbnail(file_path, size, padding):
     video_ext = ('.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm')
     try:
         if file_path.lower().endswith(video_ext):
-            img = video_io.first_frame(file_path)
+            img = video_io.preview_frame(file_path)
         else:
             # Decode JPEGs at reduced resolution: draft() lets libjpeg downsample
             # while decoding (e.g. a 4K source straight to ~1/8 size), a big win

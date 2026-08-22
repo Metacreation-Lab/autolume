@@ -81,6 +81,26 @@ def first_frame(path):
     return None
 
 
+def preview_frame(path):
+    """Frame near the middle of a video as rgb24, or None if unreadable.
+
+    Openings are routinely black, so thumbnails seek to the midpoint; the
+    first frame is the fallback when the duration is unknown or seeking fails.
+    """
+    try:
+        with _open(path) as container:
+            stream = _video_stream(container, path)
+            info = _media_info(container, stream, path)
+            if info.duration <= 0:
+                return first_frame(path)
+            container.seek(int(info.duration / 2 * av.time_base))
+            for frame in container.decode(stream):
+                return frame.to_ndarray(format='rgb24')
+    except (VideoIOError, av.FFmpegError, OSError, ValueError, IndexError) as e:
+        logger.warning('Cannot read preview frame of "%s": %s', path, e)
+    return first_frame(path)
+
+
 def extract_frames(path, interval, out_dir, name_prefix, on_progress=None,
                    should_cancel=None):
     """Write one JPEG at most every ``interval`` seconds; return how many.
