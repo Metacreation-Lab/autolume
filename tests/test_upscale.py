@@ -161,25 +161,6 @@ def test_load_upscaler_returns_none_when_blend_partner_missing(monkeypatch):
     assert load_upscaler(denoise=0.5) is None
 
 
-def test_load_upscaler_quality_dispatch(monkeypatch):
-    calls = []
-    monkeypatch.setattr(core, "ensure_weight",
-                        lambda name, progress_cb=None, cancel_event=None:
-                        (calls.append(name) or "weights.pth"))
-    monkeypatch.setattr(core, "get_device", lambda: torch.device("cpu"))
-    loaded, descriptor = _stub_spandrel(monkeypatch)
-    model = load_upscaler(denoise=0.3, model_type="Quality")
-    assert calls == ["Quality"]
-    assert loaded == ["weights.pth"]
-    assert model is descriptor.model
-
-
-def test_load_upscaler_quality_none_when_weight_missing(monkeypatch):
-    monkeypatch.setattr(core, "ensure_weight",
-                        lambda name, progress_cb=None, cancel_event=None: None)
-    assert load_upscaler(model_type="Quality") is None
-
-
 def test_loader_stays_fp32_on_cpu(monkeypatch):
     _stub_weight_loading(monkeypatch)
     _, descriptor = _stub_spandrel(monkeypatch)
@@ -214,16 +195,14 @@ def test_spandrel_detects_compact_arch():
 
 
 def test_weights_registry():
-    assert set(WEIGHTS) == {"Balance", "BalanceWDN", "Quality"}
+    assert set(WEIGHTS) == {"Balance", "BalanceWDN"}
     assert WEIGHTS["Balance"][0] == "realesr-general-x4v3.pth"
     assert WEIGHTS["BalanceWDN"][0] == "realesr-general-wdn-x4v3.pth"
-    assert WEIGHTS["Quality"][0] == "RealESRGAN_x4plus.pth"
     for _, url in WEIGHTS.values():
         assert url.startswith("https://github.com/xinntao/Real-ESRGAN/releases/download/")
 
 
 def test_required_weights():
-    assert required_weights("Quality", 0.5) == ["Quality"]
-    assert required_weights("Balance", 1.0) == ["Balance"]
-    assert required_weights("Balance", 0.0) == ["BalanceWDN"]
-    assert required_weights("Balance", 0.5) == ["Balance", "BalanceWDN"]
+    assert required_weights(1.0) == ["Balance"]
+    assert required_weights(0.0) == ["BalanceWDN"]
+    assert required_weights(0.5) == ["Balance", "BalanceWDN"]

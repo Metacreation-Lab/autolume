@@ -528,29 +528,15 @@ class DataPreprocessing:
                     self._request_upscale_weights(previous)
                 ai_on = ai_new
 
-            model_names = ["Balance", "Quality"]
-            model_index = model_names.index(self.settings.upscaleSettings["model"])
             control_width = parameter_column_width - imgui.calc_text_size("Denoise")[0] - 20
             with imgui_utils.grayed_out(not ai_on):
-                imgui.text("Model")
-                imgui.same_line(position=imgui.calc_text_size("Denoise")[0] + 18)
-                with imgui_utils.item_width(control_width):
-                    model_changed, new_model_index = imgui.combo(
-                        "##upscale_model", model_index, model_names)
-            if model_changed and ai_on and new_model_index != model_index:
-                previous = dict(self.settings.upscaleSettings)
-                self.settings.upscaleSettings["model"] = model_names[new_model_index]
-                self._request_upscale_weights(previous)
-
-            balance_on = ai_on and self.settings.upscaleSettings["model"] == "Balance"
-            with imgui_utils.grayed_out(not balance_on):
                 imgui.text("Denoise")
                 imgui.same_line()
                 with imgui_utils.item_width(control_width):
                     denoise_changed, new_denoise = imgui.slider_float(
                         "##upscale_denoise", self.settings.upscaleSettings["denoise"],
                         0.0, 1.0, "%.2f")
-            if denoise_changed and balance_on:
+            if denoise_changed and ai_on:
                 previous = dict(self.settings.upscaleSettings)
                 self.settings.upscaleSettings["denoise"] = new_denoise
                 self._request_upscale_weights(previous)
@@ -689,9 +675,7 @@ class DataPreprocessing:
 
                 if self.settings.upscaleSettings["aiUpscale"]:
                     imgui.text(f"AI Upscaling: {self._below_count} of {len(self.settings.images)} images")
-                    imgui.text(f"Model: {self.settings.upscaleSettings['model']}")
-                    if self.settings.upscaleSettings["model"] == "Balance":
-                        imgui.text(f"Denoise: {self.settings.upscaleSettings['denoise']:.2f}")
+                    imgui.text(f"Denoise: {self.settings.upscaleSettings['denoise']:.2f}")
 
                 imgui.text(f"Output: {self.settings.output_path}")
 
@@ -766,9 +750,7 @@ class DataPreprocessing:
 
                 if self.settings.upscaleSettings["aiUpscale"]:
                     imgui.text(f"AI Upscaling: {self._below_count} of {len(self.settings.images)} images")
-                    imgui.text(f"Model: {self.settings.upscaleSettings['model']}")
-                    if self.settings.upscaleSettings["model"] == "Balance":
-                        imgui.text(f"Denoise: {self.settings.upscaleSettings['denoise']:.2f}")
+                    imgui.text(f"Denoise: {self.settings.upscaleSettings['denoise']:.2f}")
 
                 imgui.text(f"Output: {self.settings.output_path}")
 
@@ -1033,7 +1015,7 @@ class DataPreprocessing:
         change. It is restored if a queued download fails or is cancelled.
         """
         current = self.settings.upscaleSettings
-        needed = [key for key in required_weights(current["model"], current["denoise"])
+        needed = [key for key in required_weights(current["denoise"])
                   if not os.path.exists(weight_path(key))
                   and key != self.upscale_download_kind
                   and key not in self.upscale_download_queue]
@@ -1045,9 +1027,9 @@ class DataPreprocessing:
         if not self.upscale_download_active:
             self._start_upscale_download(self.upscale_download_queue.pop(0))
 
-    def _start_upscale_download(self, model_type):
+    def _start_upscale_download(self, weight_key):
         """Download one weight in a thread with a progress overlay."""
-        self.upscale_download_kind = model_type
+        self.upscale_download_kind = weight_key
         self.upscale_download_result = None
         self.upscale_download_cancel = threading.Event()
         self.upscale_download_active = True
@@ -1071,7 +1053,7 @@ class DataPreprocessing:
         def run():
             try:
                 self.upscale_download_result = ensure_weight(
-                    model_type, on_progress, self.upscale_download_cancel)
+                    weight_key, on_progress, self.upscale_download_cancel)
             except Exception:
                 logger.exception("Upscaling weight download failed")
                 self.upscale_download_result = None

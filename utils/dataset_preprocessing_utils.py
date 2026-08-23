@@ -34,8 +34,7 @@ class DatasetPreprocessingUtils:
         }
         self.upscaleSettings = {
             "aiUpscale": False,
-            "denoise": 0.0,
-            "model": "Balance"
+            "denoise": 0.0
         }
         self.folder_name = "training_dataset"
         self.output_path = data_path("datasets")
@@ -340,8 +339,7 @@ class DatasetPreprocessingUtils:
         if ai_upscale:
             try:
                 upscaler = upscale.load_upscaler(
-                    upscale_settings.get('denoise', 0.0),
-                    upscale_settings.get('model', 'Balance'))
+                    upscale_settings.get('denoise', 0.0))
             except Exception:
                 logger.exception("Could not load the upscaler")
                 upscaler = None

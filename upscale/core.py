@@ -1,9 +1,8 @@
 """Real-ESRGAN upscaling for dataset preprocessing.
 
-Two model choices. Balance is realesr-general-x4v3 with the official
-denoise blend: strength 1.0 is the plain model (strongest denoise), lower
-values interpolate toward the weak-denoise wdn weights, which keep more
-grain. Quality is RealESRGAN_x4plus, much slower, no denoise control.
+The model is realesr-general-x4v3 with the official denoise blend:
+strength 1.0 is the plain model (strongest denoise), lower values
+interpolate toward the weak-denoise wdn weights, which keep more grain.
 
 Network architectures come from spandrel, which detects them from the
 weights, so this package carries no model definitions of its own.
@@ -22,14 +21,11 @@ logger = logging.getLogger(__name__)
 
 MODEL_KEY = "Balance"
 WDN_MODEL_KEY = "BalanceWDN"
-QUALITY_MODEL_KEY = "Quality"
 MAX_PASSES = 3
 
 
-def required_weights(model_type, denoise):
+def required_weights(denoise):
     """WEIGHTS keys the given settings need on disk."""
-    if model_type == QUALITY_MODEL_KEY:
-        return [QUALITY_MODEL_KEY]
     if denoise >= 1.0:
         return [MODEL_KEY]
     if denoise <= 0.0:
@@ -69,8 +65,8 @@ def _finalize(descriptor):
     """Move a spandrel descriptor to the inference device, return its module.
 
     On GPU the forward pass runs in fp16 when the architecture supports it,
-    which roughly halves activation memory and keeps the Quality model inside
-    the VRAM budget instead of spilling to system RAM (a ~13x slowdown on
+    which roughly halves activation memory and keeps the model inside the
+    VRAM budget instead of spilling to system RAM (a ~13x slowdown on
     Windows/CUDA). CPU stays fp32, where fp16 buys nothing.
     """
     device = get_device()
@@ -80,15 +76,10 @@ def _finalize(descriptor):
     return descriptor.model
 
 
-def load_upscaler(denoise=0.0, model_type=MODEL_KEY, progress_cb=None, cancel_event=None):
+def load_upscaler(denoise=0.0, progress_cb=None, cancel_event=None):
     """Build the dataset upscaler. Returns None if a download was cancelled."""
-    if model_type == QUALITY_MODEL_KEY:
-        path = ensure_weight(QUALITY_MODEL_KEY, progress_cb, cancel_event)
-        if path is None:
-            return None
-        return _finalize(spandrel.ModelLoader().load_from_file(path))
-    # Balance: blend of the x4v3 endpoints, loading only the files the
-    # denoise value actually uses.
+    # Blend of the x4v3 endpoints, loading only the files the denoise value
+    # actually uses.
     if denoise >= 1.0:
         path = ensure_weight(MODEL_KEY, progress_cb, cancel_event)
         if path is None:

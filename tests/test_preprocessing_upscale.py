@@ -26,7 +26,7 @@ def _make_settings(tmp_path, image_size, target, ai_upscale):
     settings.resizeMode = 1
     settings.nonSquare = False
     settings.output_path = str(tmp_path / "out")
-    settings.upscaleSettings = {"aiUpscale": ai_upscale, "denoise": 1.0, "model": "Balance"}
+    settings.upscaleSettings = {"aiUpscale": ai_upscale, "denoise": 1.0}
     return settings
 
 
@@ -42,13 +42,13 @@ def _run(settings):
 
 def test_default_settings_have_upscale_fields():
     settings = DatasetPreprocessingUtils()
-    assert settings.upscaleSettings == {"aiUpscale": False, "denoise": 0.0, "model": "Balance"}
+    assert settings.upscaleSettings == {"aiUpscale": False, "denoise": 0.0}
 
 
 def test_upscaler_called_for_below_target_image(tmp_path, monkeypatch):
     calls = []
     fake = Fake4x().eval()
-    monkeypatch.setattr(upscale, "load_upscaler", lambda denoise, model_type: fake)
+    monkeypatch.setattr(upscale, "load_upscaler", lambda denoise: fake)
     real_upscale = upscale.upscale_to_target
     def spy(image, model, target_size):
         calls.append(image.shape)
@@ -65,7 +65,7 @@ def test_upscaler_called_for_below_target_image(tmp_path, monkeypatch):
 
 
 def test_upscaler_not_loaded_when_disabled(tmp_path, monkeypatch):
-    def boom(denoise, model_type):
+    def boom(denoise):
         raise AssertionError("load_upscaler must not be called when aiUpscale is off")
     monkeypatch.setattr(upscale, "load_upscaler", boom)
     settings = _make_settings(tmp_path, image_size=64, target=128, ai_upscale=False)
@@ -75,7 +75,7 @@ def test_upscaler_not_loaded_when_disabled(tmp_path, monkeypatch):
 
 def test_at_target_image_skips_upscaler(tmp_path, monkeypatch):
     fake = Fake4x().eval()
-    monkeypatch.setattr(upscale, "load_upscaler", lambda denoise, model_type: fake)
+    monkeypatch.setattr(upscale, "load_upscaler", lambda denoise: fake)
     calls = []
     monkeypatch.setattr(upscale, "upscale_to_target",
                         lambda image, model, target_size: (calls.append(1) or image))
@@ -86,7 +86,7 @@ def test_at_target_image_skips_upscaler(tmp_path, monkeypatch):
 
 def test_upscale_failure_keeps_the_image(tmp_path, monkeypatch):
     fake = Fake4x().eval()
-    monkeypatch.setattr(upscale, "load_upscaler", lambda denoise, model_type: fake)
+    monkeypatch.setattr(upscale, "load_upscaler", lambda denoise: fake)
 
     def boom(image, model, target_size):
         raise RuntimeError("out of memory")
@@ -101,7 +101,7 @@ def test_upscale_failure_keeps_the_image(tmp_path, monkeypatch):
 
 
 def test_load_upscaler_failure_falls_back_to_resizing(tmp_path, monkeypatch):
-    def boom(denoise, model_type):
+    def boom(denoise):
         raise RuntimeError("download failed")
     monkeypatch.setattr(upscale, "load_upscaler", boom)
 
@@ -124,19 +124,18 @@ def test_settings_without_upscale_field_still_work(tmp_path):
     assert any(m.get("type") == "completed" for m in messages if isinstance(m, dict))
 
 
-def test_model_and_denoise_forwarded_to_loader(tmp_path, monkeypatch):
+def test_denoise_forwarded_to_loader(tmp_path, monkeypatch):
     seen = {}
     fake = Fake4x().eval()
 
-    def fake_load(denoise, model_type):
-        seen["args"] = (denoise, model_type)
+    def fake_load(denoise):
+        seen["args"] = (denoise,)
         return fake
     monkeypatch.setattr(upscale, "load_upscaler", fake_load)
 
     settings = _make_settings(tmp_path, image_size=64, target=128, ai_upscale=True)
-    settings.upscaleSettings["model"] = "Quality"
     settings.upscaleSettings["denoise"] = 0.25
     messages = _run(settings)
 
-    assert seen["args"] == (0.25, "Quality")
+    assert seen["args"] == (0.25,)
     assert any(m.get("type") == "completed" for m in messages if isinstance(m, dict))

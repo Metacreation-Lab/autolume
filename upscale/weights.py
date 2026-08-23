@@ -16,8 +16,6 @@ WEIGHTS = {
                 "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-general-x4v3.pth"),
     "BalanceWDN": ("realesr-general-wdn-x4v3.pth",
                    "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-general-wdn-x4v3.pth"),
-    "Quality": ("RealESRGAN_x4plus.pth",
-                "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth"),
 }
 
 
