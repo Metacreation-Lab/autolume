@@ -519,14 +519,18 @@ class DataPreprocessing:
 
         if upscaling_header_opened:
             ai_on = self.settings.upscaleSettings["aiUpscale"]
-            ai_clicked, ai_new = imgui.checkbox("AI Upscaling", ai_on)
-            if ai_clicked:
+            total_count = len(self.imported_files)
+            imgui.text(f"{self._below_count} of {total_count} images will be upscaled.")
+
+            if imgui.radio_button("Standard##upscale_method", not ai_on) and ai_on:
+                self.settings.upscaleSettings["aiUpscale"] = False
+                ai_on = False
+            imgui.same_line(spacing=self.app.spacing * 2)
+            if imgui.radio_button("AI Enhanced##upscale_method", ai_on) and not ai_on:
                 previous = dict(self.settings.upscaleSettings)
-                self.settings.upscaleSettings["aiUpscale"] = ai_new
-                self._refresh_badges()
-                if ai_new:
-                    self._request_upscale_weights(previous)
-                ai_on = ai_new
+                self.settings.upscaleSettings["aiUpscale"] = True
+                self._request_upscale_weights(previous)
+                ai_on = True
 
             control_width = parameter_column_width - imgui.calc_text_size("Denoise")[0] - 20
             with imgui_utils.grayed_out(not ai_on):
@@ -540,16 +544,6 @@ class DataPreprocessing:
                 previous = dict(self.settings.upscaleSettings)
                 self.settings.upscaleSettings["denoise"] = new_denoise
                 self._request_upscale_weights(previous)
-
-            total_count = len(self.imported_files)
-            target_width, target_height = self._target_dims()
-            imgui.text(f"{self._below_count} of {total_count} images are below "
-                       f"{target_width}x{target_height}.")
-            if ai_on:
-                imgui.text("They will be upscaled with Real ESRGAN.")
-            else:
-                imgui.text("They will be upscaled by resizing.")
-
         # End of Upscaling options
 
         augmentation_header_opened = imgui.collapsing_header("Augmentation", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]
@@ -993,13 +987,11 @@ class DataPreprocessing:
 
     def _refresh_badges(self):
         target_width, target_height = self._target_dims()
-        ai_on = self.settings.upscaleSettings["aiUpscale"]
-        method = "with Real ESRGAN" if ai_on else "by resizing"
         badges = {}
         for path in self._below_target_paths():
             width, height = self.image_dims[path]
-            badges[path] = (f"{width}x{height}. Below the {target_width}x{target_height} "
-                            f"target. It will be upscaled {method}.")
+            badges[path] = (f"This {width}x{height} image will be upscaled "
+                            f"to {target_width}x{target_height}.")
         self.thumbnail_widget.set_badges(badges)
         self._below_count = len(badges)
 
