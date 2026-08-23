@@ -9,8 +9,7 @@ import PIL.Image
 from utils.gui_utils import imgui_utils
 import multiprocessing as mp
 
-from super_res.dataset_upscale import required_weights
-from super_res.super_res import ensure_sr_weight, sr_weight_path
+from upscale import ensure_weight, required_weights, weight_path
 from utils import video_io
 from utils.app_logging import LoggedProcess
 from widgets.native_browser_widget import NativeBrowserWidget
@@ -125,8 +124,8 @@ class DataPreprocessing:
         self._below_count = 0                # cached below-target image count
         self.upscale_download_thread = None
         self.upscale_download_cancel = None
-        self.upscale_download_kind = None    # SR_WEIGHTS key being downloaded
-        self.upscale_download_queue = []     # SR_WEIGHTS keys waiting to download
+        self.upscale_download_kind = None    # WEIGHTS key being downloaded
+        self.upscale_download_queue = []     # WEIGHTS keys waiting to download
         self.upscale_download_result = None
         self.upscale_download_active = False
         self.upscale_download_cancelling = False
@@ -1035,7 +1034,7 @@ class DataPreprocessing:
         """
         current = self.settings.upscaleSettings
         needed = [key for key in required_weights(current["model"], current["denoise"])
-                  if not os.path.exists(sr_weight_path(key))
+                  if not os.path.exists(weight_path(key))
                   and key != self.upscale_download_kind
                   and key not in self.upscale_download_queue]
         if not needed:
@@ -1071,7 +1070,7 @@ class DataPreprocessing:
 
         def run():
             try:
-                self.upscale_download_result = ensure_sr_weight(
+                self.upscale_download_result = ensure_weight(
                     model_type, on_progress, self.upscale_download_cancel)
             except Exception:
                 logger.exception("Upscaling weight download failed")
@@ -1109,7 +1108,7 @@ class DataPreprocessing:
             return
         while self.upscale_download_queue:
             next_type = self.upscale_download_queue.pop(0)
-            if not os.path.exists(sr_weight_path(next_type)):
+            if not os.path.exists(weight_path(next_type)):
                 self._start_upscale_download(next_type)
                 return
         self._finish_upscale_downloads()

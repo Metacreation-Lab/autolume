@@ -4,15 +4,18 @@ Two model choices. Balance is realesr-general-x4v3 with the official
 denoise blend: strength 1.0 is the plain model (strongest denoise), lower
 values interpolate toward the weak-denoise wdn weights, which keep more
 grain. Quality is RealESRGAN_x4plus, much slower, no denoise control.
+
+Network architectures come from spandrel, which detects them from the
+weights, so this package carries no model definitions of its own.
 """
 
 import logging
 
 import numpy as np
+import spandrel
 import torch
 
-from super_res.net_base import SRVGGNetCompact
-from super_res.super_res import ensure_sr_weight, load_model
+from upscale.weights import ensure_weight
 from utils.device_utils import get_device
 
 logger = logging.getLogger(__name__)
@@ -24,7 +27,7 @@ MAX_PASSES = 3
 
 
 def required_weights(model_type, denoise):
-    """SR_WEIGHTS keys the given settings need on disk."""
+    """WEIGHTS keys the given settings need on disk."""
     if model_type == QUALITY_MODEL_KEY:
         return [QUALITY_MODEL_KEY]
     if denoise >= 1.0:
@@ -62,35 +65,50 @@ def blend_state_dicts(sd_a, sd_b, alpha):
     return {k: alpha * sd_a[k] + (1.0 - alpha) * sd_b[k] for k in sd_a}
 
 
+def _finalize(descriptor):
+    """Move a spandrel descriptor to the inference device, return its module.
+
+    On GPU the forward pass runs in fp16 when the architecture supports it,
+    which roughly halves activation memory and keeps the Quality model inside
+    the VRAM budget instead of spilling to system RAM (a ~13x slowdown on
+    Windows/CUDA). CPU stays fp32, where fp16 buys nothing.
+    """
+    device = get_device()
+    descriptor = descriptor.to(device).eval()
+    if device.type in ("cuda", "mps") and descriptor.supports_half:
+        descriptor = descriptor.half()
+    return descriptor.model
+
+
 def load_upscaler(denoise=0.0, model_type=MODEL_KEY, progress_cb=None, cancel_event=None):
     """Build the dataset upscaler. Returns None if a download was cancelled."""
     if model_type == QUALITY_MODEL_KEY:
-        path = ensure_sr_weight(QUALITY_MODEL_KEY, progress_cb, cancel_event)
+        path = ensure_weight(QUALITY_MODEL_KEY, progress_cb, cancel_event)
         if path is None:
             return None
-        return load_model(QUALITY_MODEL_KEY, path).eval()
+        return _finalize(spandrel.ModelLoader().load_from_file(path))
     # Balance: blend of the x4v3 endpoints, loading only the files the
     # denoise value actually uses.
-    sd = None
-    if denoise > 0.0:
-        path = ensure_sr_weight(MODEL_KEY, progress_cb, cancel_event)
+    if denoise >= 1.0:
+        path = ensure_weight(MODEL_KEY, progress_cb, cancel_event)
         if path is None:
             return None
-        sd = torch.load(path, map_location="cpu")["params"]
-    if denoise < 1.0:
-        wdn_path = ensure_sr_weight(WDN_MODEL_KEY, progress_cb, cancel_event)
+        return _finalize(spandrel.ModelLoader().load_from_file(path))
+    if denoise <= 0.0:
+        wdn_path = ensure_weight(WDN_MODEL_KEY, progress_cb, cancel_event)
         if wdn_path is None:
             return None
-        wdn_sd = torch.load(wdn_path, map_location="cpu")["params"]
-        sd = wdn_sd if sd is None else blend_state_dicts(sd, wdn_sd, denoise)
-    device = get_device()
-    model = SRVGGNetCompact(num_in_ch=3, num_out_ch=3, num_feat=64, num_conv=32,
-                            upscale=4, act_type="prelu").eval().to(device)
-    model.load_state_dict(sd)
-    # Same fp16 rationale as load_model in super_res.py.
-    if device.type in ("cuda", "mps"):
-        model = model.half()
-    return model
+        return _finalize(spandrel.ModelLoader().load_from_file(wdn_path))
+    path = ensure_weight(MODEL_KEY, progress_cb, cancel_event)
+    if path is None:
+        return None
+    wdn_path = ensure_weight(WDN_MODEL_KEY, progress_cb, cancel_event)
+    if wdn_path is None:
+        return None
+    sd = torch.load(path, map_location="cpu")["params"]
+    wdn_sd = torch.load(wdn_path, map_location="cpu")["params"]
+    blended = blend_state_dicts(sd, wdn_sd, denoise)
+    return _finalize(spandrel.ModelLoader().load_from_state_dict(blended))
 
 
 def _upscale_once(image, model):

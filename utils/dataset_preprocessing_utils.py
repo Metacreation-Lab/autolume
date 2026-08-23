@@ -332,14 +332,14 @@ class DatasetPreprocessingUtils:
         augmentationSettings = settings.augmentationSettings
         output_path = settings.output_path
 
-        import super_res.dataset_upscale as dataset_upscale
+        import upscale
 
         upscale_settings = getattr(settings, 'upscaleSettings', None) or {}
         ai_upscale = upscale_settings.get('aiUpscale', False)
         upscaler = None
         if ai_upscale:
             try:
-                upscaler = dataset_upscale.load_upscaler(
+                upscaler = upscale.load_upscaler(
                     upscale_settings.get('denoise', 0.0),
                     upscale_settings.get('model', 'Balance'))
             except Exception:
@@ -382,11 +382,11 @@ class DatasetPreprocessingUtils:
 
                 if upscaler is not None:
                     h, w = image.shape[:2]
-                    if dataset_upscale.needs_upscale(w, h, size):
+                    if upscale.needs_upscale(w, h, size):
                         # An upscale failure (out of memory above all) must not
                         # drop the image: keep it and let the resize handle it.
                         try:
-                            image = dataset_upscale.upscale_to_target(image, upscaler, size)
+                            image = upscale.upscale_to_target(image, upscaler, size)
                         except Exception:
                             logger.exception("Upscale failed for %s, falling back to resize",
                                              image_path)
