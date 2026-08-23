@@ -26,6 +26,10 @@ SR_WEIGHTS = {
                 "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth"),
     "Balance": ("realesr-general-x4v3.pth",
                 "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-general-x4v3.pth"),
+    # Weak-denoise sibling of Balance, used only for the dataset upscaler's
+    # denoise blend (never listed as a selectable model type).
+    "BalanceWDN": ("realesr-general-wdn-x4v3.pth",
+                   "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-general-wdn-x4v3.pth"),
 }
 
 

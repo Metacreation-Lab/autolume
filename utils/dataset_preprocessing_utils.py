@@ -32,6 +32,11 @@ class DatasetPreprocessingUtils:
             "xFlip": False,
             "yFlip": False
         }
+        self.upscaleSettings = {
+            "aiUpscale": False,
+            "denoise": 0.0,
+            "model": "Balance"
+        }
         self.folder_name = "training_dataset"
         self.output_path = data_path("datasets")
 
@@ -326,13 +331,31 @@ class DatasetPreprocessingUtils:
         nonSquare = settings.nonSquare
         augmentationSettings = settings.augmentationSettings
         output_path = settings.output_path
-        
+
+        import super_res.dataset_upscale as dataset_upscale
+
+        upscale_settings = getattr(settings, 'upscaleSettings', None) or {}
+        ai_upscale = upscale_settings.get('aiUpscale', False)
+        upscaler = None
+        if ai_upscale:
+            try:
+                upscaler = dataset_upscale.load_upscaler(
+                    upscale_settings.get('denoise', 0.0),
+                    upscale_settings.get('model', 'Balance'))
+            except Exception:
+                logger.exception("Could not load the upscaler")
+                upscaler = None
+            if upscaler is None:
+                logger.warning("Upscaler unavailable, falling back to standard resizing")
+                ai_upscale = False
+
         os.makedirs(output_path, exist_ok=True)
-        
+
         logger.info("Dataset preprocessing: %d images, resolution=%dx%d, resize_mode=%s, "
-                    "non_square=%s, xflip=%s, yflip=%s",
+                    "non_square=%s, xflip=%s, yflip=%s, ai_upscale=%s",
                     len(images), size, size, resizeMode, nonSquare,
-                    augmentationSettings['xFlip'], augmentationSettings['yFlip'])
+                    augmentationSettings['xFlip'], augmentationSettings['yFlip'],
+                    ai_upscale)
         
         processed_count = 0
         total_source_images = len(images)
@@ -342,7 +365,7 @@ class DatasetPreprocessingUtils:
         total_images = total_source_images * (1 + num_augmentations)
         
         # Update progress more frequently for better responsiveness
-        update_interval = max(1, min(10, total_images // 500))
+        update_interval = 1 if ai_upscale else max(1, min(10, total_images // 500))
         
         for i, image_path in enumerate(images):
             try:
@@ -356,7 +379,18 @@ class DatasetPreprocessingUtils:
                         pass
                 
                 image = utils.load_images(image_path)
-                
+
+                if upscaler is not None:
+                    h, w = image.shape[:2]
+                    if dataset_upscale.needs_upscale(w, h, size):
+                        # An upscale failure (out of memory above all) must not
+                        # drop the image: keep it and let the resize handle it.
+                        try:
+                            image = dataset_upscale.upscale_to_target(image, upscaler, size)
+                        except Exception:
+                            logger.exception("Upscale failed for %s, falling back to resize",
+                                             image_path)
+
                 images_to_process = [image]
                 if any(settings.augmentationSettings.values()): 
                     images_to_process.extend(utils.augment_image(image, settings))

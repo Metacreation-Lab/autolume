@@ -1,11 +1,16 @@
 import logging
+import os
 import queue
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import imgui
+import PIL.Image
 from utils.gui_utils import imgui_utils
 import multiprocessing as mp
 
+from super_res.dataset_upscale import required_weights
+from super_res.super_res import ensure_sr_weight, sr_weight_path
 from utils import video_io
 from utils.app_logging import LoggedProcess
 from widgets.native_browser_widget import NativeBrowserWidget
@@ -82,6 +87,10 @@ def _format_interval(value):
 
 class DataPreprocessing:
     """Data Preprocessing UI"""
+
+    # Image headers read per frame while a large import is being probed.
+    PROBE_CHUNK = 200
+
     def __init__(self, app):
         self.app = app
 
@@ -109,6 +118,19 @@ class DataPreprocessing:
         self.video_extraction_queue = mp.Queue()
         self.video_extraction_reply = mp.Queue()
         self.is_processing_video = False
+
+        # Upscaling section state
+        self.image_dims = {}                 # path -> (width, height) or None
+        self._pending_dims = []              # paths still waiting to be probed
+        self._below_count = 0                # cached below-target image count
+        self.upscale_download_thread = None
+        self.upscale_download_cancel = None
+        self.upscale_download_kind = None    # SR_WEIGHTS key being downloaded
+        self.upscale_download_queue = []     # SR_WEIGHTS keys waiting to download
+        self.upscale_download_result = None
+        self.upscale_download_active = False
+        self.upscale_download_cancelling = False
+        self.upscale_settings_revert = None  # snapshot restored if a download fails
 
         self.min_res = 8
         self.max_res = 1024
@@ -144,7 +166,10 @@ class DataPreprocessing:
     def __call__(self):
         """Preprocessing content"""
         imgui_utils.set_default_style()
-        
+
+        self._poll_upscale_download()
+        self._probe_pending_dims()
+
         navbar_h = self.app.navbar_height
         available_height = self.app.content_height - navbar_h
 
@@ -187,7 +212,7 @@ class DataPreprocessing:
                 imgui.open_popup("Duplicates")
             else:
                 self.imported_files.extend(selected_images)
-                self.thumbnail_widget.update_thumbnails(self.imported_files)
+                self._refresh_imported_thumbnails()
                 self.last_selected_file = None
 
         imgui.set_next_window_size(self.app.content_width // 2.5, self.app.content_height // 2.5, imgui.ONCE)
@@ -324,7 +349,7 @@ class DataPreprocessing:
                                 frame_files = [str(f) for f in sorted(frame_path.iterdir())]
                                 self.imported_files.extend(frame_files)
 
-                            self.thumbnail_widget.update_thumbnails(self.imported_files)
+                            self._refresh_imported_thumbnails()
 
                             # Reset variables
                             self.selected_video_files = []
@@ -436,18 +461,22 @@ class DataPreprocessing:
             if imgui.button("-##img_res", width=button_width):
                 self.img_res = max(self.img_res // 2, self.min_res)
                 self.settings.size = self.img_res
+                self._refresh_badges()
 
             imgui.same_line()
             if imgui.button("+##img_res", width=button_width):
                 self.img_res = min(self.img_res * 2, self.max_res)
                 self.settings.size = self.img_res
+                self._refresh_badges()
             
             # Non-square settings checkbox
             clicked, non_square = imgui.checkbox("Non-square Framing", not self.square)
             if clicked:
-                self.square = not non_square 
+                self.square = not non_square
                 self.settings.nonSquare = not self.square
-                       
+                self._refresh_badges()
+
+
             if not self.square:
                 imgui.text("Aspect Ratio:")
                 
@@ -456,12 +485,14 @@ class DataPreprocessing:
                 changed_width, new_width_ratio = imgui.input_int("##width_ratio", self.settings.nonSquareSettings["widthRatio"])
                 if changed_width and new_width_ratio >= 1:
                     self.settings.nonSquareSettings["widthRatio"] = new_width_ratio
+                    self._refresh_badges()
 
                 imgui.text("Height Ratio")
                 imgui.same_line()
                 changed_height, new_height_ratio = imgui.input_int("##height_ratio", self.settings.nonSquareSettings["heightRatio"])
                 if changed_height and new_height_ratio >= 1:
                     self.settings.nonSquareSettings["heightRatio"] = new_height_ratio
+                    self._refresh_badges()
                 
                 base_size = self.img_res
                 ratio = self.settings.nonSquareSettings["heightRatio"] / self.settings.nonSquareSettings["widthRatio"]
@@ -482,6 +513,59 @@ class DataPreprocessing:
                     self.settings.nonSquareSettings["paddingMode"] = new_padding_color      
 
         # End of Image options
+
+        upscaling_header_opened = imgui.collapsing_header("Upscaling", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]
+
+        self.help_icon.render(self.help_texts.get("upscaling"), align_right=True)
+
+        if upscaling_header_opened:
+            ai_on = self.settings.upscaleSettings["aiUpscale"]
+            ai_clicked, ai_new = imgui.checkbox("AI Upscaling", ai_on)
+            if ai_clicked:
+                previous = dict(self.settings.upscaleSettings)
+                self.settings.upscaleSettings["aiUpscale"] = ai_new
+                self._refresh_badges()
+                if ai_new:
+                    self._request_upscale_weights(previous)
+                ai_on = ai_new
+
+            model_names = ["Balance", "Quality"]
+            model_index = model_names.index(self.settings.upscaleSettings["model"])
+            control_width = parameter_column_width - imgui.calc_text_size("Denoise")[0] - 20
+            with imgui_utils.grayed_out(not ai_on):
+                imgui.text("Model")
+                imgui.same_line(position=imgui.calc_text_size("Denoise")[0] + 18)
+                with imgui_utils.item_width(control_width):
+                    model_changed, new_model_index = imgui.combo(
+                        "##upscale_model", model_index, model_names)
+            if model_changed and ai_on and new_model_index != model_index:
+                previous = dict(self.settings.upscaleSettings)
+                self.settings.upscaleSettings["model"] = model_names[new_model_index]
+                self._request_upscale_weights(previous)
+
+            balance_on = ai_on and self.settings.upscaleSettings["model"] == "Balance"
+            with imgui_utils.grayed_out(not balance_on):
+                imgui.text("Denoise")
+                imgui.same_line()
+                with imgui_utils.item_width(control_width):
+                    denoise_changed, new_denoise = imgui.slider_float(
+                        "##upscale_denoise", self.settings.upscaleSettings["denoise"],
+                        0.0, 1.0, "%.2f")
+            if denoise_changed and balance_on:
+                previous = dict(self.settings.upscaleSettings)
+                self.settings.upscaleSettings["denoise"] = new_denoise
+                self._request_upscale_weights(previous)
+
+            total_count = len(self.imported_files)
+            target_width, target_height = self._target_dims()
+            imgui.text(f"{self._below_count} of {total_count} images are below "
+                       f"{target_width}x{target_height}.")
+            if ai_on:
+                imgui.text("They will be upscaled with Real ESRGAN.")
+            else:
+                imgui.text("They will be upscaled by resizing.")
+
+        # End of Upscaling options
 
         augmentation_header_opened = imgui.collapsing_header("Augmentation", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]
 
@@ -603,13 +687,19 @@ class DataPreprocessing:
                     if self.settings.augmentationSettings['yFlip']:
                         imgui.text("Y-Flip: Yes")
                     imgui.unindent(20)
-                
+
+                if self.settings.upscaleSettings["aiUpscale"]:
+                    imgui.text(f"AI Upscaling: {self._below_count} of {len(self.settings.images)} images")
+                    imgui.text(f"Model: {self.settings.upscaleSettings['model']}")
+                    if self.settings.upscaleSettings["model"] == "Balance":
+                        imgui.text(f"Denoise: {self.settings.upscaleSettings['denoise']:.2f}")
+
                 imgui.text(f"Output: {self.settings.output_path}")
-                
+
                 imgui.spacing()
                 imgui.separator()
                 imgui.spacing()
-                
+
                 latest_progress = None
                 while not self.processing_reply.empty():
                     try:
@@ -674,7 +764,13 @@ class DataPreprocessing:
                     if self.settings.augmentationSettings['yFlip']:
                         imgui.text("Y-Flip: Yes")
                     imgui.unindent(20)
-                
+
+                if self.settings.upscaleSettings["aiUpscale"]:
+                    imgui.text(f"AI Upscaling: {self._below_count} of {len(self.settings.images)} images")
+                    imgui.text(f"Model: {self.settings.upscaleSettings['model']}")
+                    if self.settings.upscaleSettings["model"] == "Balance":
+                        imgui.text(f"Denoise: {self.settings.upscaleSettings['denoise']:.2f}")
+
                 imgui.text(f"Output: {self.settings.output_path}")
 
                 imgui.spacing()
@@ -735,7 +831,7 @@ class DataPreprocessing:
                 if 0 <= idx < len(self.imported_files):
                     del self.imported_files[idx]
 
-            self.thumbnail_widget.update_thumbnails(self.imported_files)
+            self._refresh_imported_thumbnails()
             self.thumbnail_widget.clear_selected()
             self.last_selected_file = None
 
@@ -857,8 +953,175 @@ class DataPreprocessing:
             files_to_add = self.clean_duplicate_files(self.selected_files)
             self.imported_files.extend(files_to_add)
         
-        self.thumbnail_widget.update_thumbnails(self.imported_files)
+        self._refresh_imported_thumbnails()
         self.last_selected_file = None
+    # ------------------------------
+
+    # --- Upscaling ---
+    def _probe_image_dims(self, paths):
+        """Header-only read of image dimensions, EXIF orientation aware."""
+        for path in paths:
+            if path in self.image_dims:
+                continue
+            try:
+                with PIL.Image.open(path) as img:
+                    width, height = img.size
+                    orientation = img.getexif().get(0x0112, 1)
+                if orientation in (5, 6, 7, 8):
+                    width, height = height, width
+                self.image_dims[path] = (width, height)
+            except Exception:
+                logger.debug("Could not read dimensions for %s", path, exc_info=True)
+                self.image_dims[path] = None
+
+    def _probe_pending_dims(self):
+        """Probe one bounded chunk of pending paths per frame.
+
+        Opening every file of a large import in a single frame stalls the UI
+        for seconds, so the work is spread over frames instead.
+        """
+        if not self._pending_dims:
+            return
+        chunk = self._pending_dims[:self.PROBE_CHUNK]
+        del self._pending_dims[:self.PROBE_CHUNK]
+        self._probe_image_dims(chunk)
+        self._refresh_badges()
+
+    def _target_dims(self):
+        """Output dimensions of the current settings, as the Image Options show them."""
+        base = self.settings.size
+        if not self.settings.nonSquare:
+            return base, base
+        width_ratio = max(self.settings.nonSquareSettings["widthRatio"], 1)
+        height_ratio = max(self.settings.nonSquareSettings["heightRatio"], 1)
+        ratio = height_ratio / width_ratio
+        if ratio <= 1:
+            return base, int(base * ratio)
+        return int(base / ratio), base
+
+    def _below_target_paths(self):
+        target_width, target_height = self._target_dims()
+        below = []
+        for path in self.imported_files:
+            dims = self.image_dims.get(path)
+            if not dims or not dims[0] or not dims[1]:
+                continue
+            if dims[0] < target_width or dims[1] < target_height:
+                below.append(path)
+        return below
+
+    def _refresh_badges(self):
+        target_width, target_height = self._target_dims()
+        ai_on = self.settings.upscaleSettings["aiUpscale"]
+        method = "with Real ESRGAN" if ai_on else "by resizing"
+        badges = {}
+        for path in self._below_target_paths():
+            width, height = self.image_dims[path]
+            badges[path] = (f"{width}x{height}. Below the {target_width}x{target_height} "
+                            f"target. It will be upscaled {method}.")
+        self.thumbnail_widget.set_badges(badges)
+        self._below_count = len(badges)
+
+    def _refresh_imported_thumbnails(self):
+        self.thumbnail_widget.update_thumbnails(self.imported_files)
+        self._pending_dims = [p for p in self.imported_files if p not in self.image_dims]
+        self._refresh_badges()
+
+    def _request_upscale_weights(self, previous_settings):
+        """Queue downloads for every weight the current settings need.
+
+        previous_settings is the upscaleSettings snapshot taken before the
+        change. It is restored if a queued download fails or is cancelled.
+        """
+        current = self.settings.upscaleSettings
+        needed = [key for key in required_weights(current["model"], current["denoise"])
+                  if not os.path.exists(sr_weight_path(key))
+                  and key != self.upscale_download_kind
+                  and key not in self.upscale_download_queue]
+        if not needed:
+            return
+        if self.upscale_settings_revert is None:
+            self.upscale_settings_revert = dict(previous_settings)
+        self.upscale_download_queue.extend(needed)
+        if not self.upscale_download_active:
+            self._start_upscale_download(self.upscale_download_queue.pop(0))
+
+    def _start_upscale_download(self, model_type):
+        """Download one weight in a thread with a progress overlay."""
+        self.upscale_download_kind = model_type
+        self.upscale_download_result = None
+        self.upscale_download_cancel = threading.Event()
+        self.upscale_download_active = True
+        self.upscale_download_cancelling = False
+        self.loading_widget.show_simple("Downloading upscaling model...", show_progress=True,
+                                        on_cancel=self._cancel_upscale_download,
+                                        count_label=None, file_label="Downloaded")
+
+        def on_progress(done, total):
+            # The overlay counts items by default. This one counts bytes, so
+            # the size goes in the detail line and the percentage is explicit.
+            if total:
+                text = f"{done / 1048576:.1f} of {total / 1048576:.1f} MB"
+                percentage = done / total * 100.0
+            else:
+                text = f"{done / 1048576:.1f} MB"
+                percentage = 0.0
+            self.loading_widget.update_progress(done, total, current_file=text,
+                                                percentage=percentage)
+
+        def run():
+            try:
+                self.upscale_download_result = ensure_sr_weight(
+                    model_type, on_progress, self.upscale_download_cancel)
+            except Exception:
+                logger.exception("Upscaling weight download failed")
+                self.upscale_download_result = None
+
+        self.upscale_download_thread = threading.Thread(target=run, daemon=True,
+                                                        name='upscale-weights')
+        self.upscale_download_thread.start()
+
+    def _cancel_upscale_download(self):
+        """Close the overlay at once and ask the worker to stop.
+
+        The worker only sees the cancel token on its next chunk, so polling
+        continues until it exits and the setting is reverted there.
+        """
+        self.upscale_download_cancelling = True
+        self.upscale_download_cancel.set()
+        self.loading_widget.hide()
+
+    def _poll_upscale_download(self):
+        """Render the overlay while downloading. Revert settings on failure."""
+        if not self.upscale_download_active:
+            return
+        if self.upscale_download_thread is not None and self.upscale_download_thread.is_alive():
+            if not self.upscale_download_cancelling:
+                self.loading_widget.render()
+            return
+        if self.upscale_download_result is None:
+            # Cancelled or failed: drop the queue and restore the settings
+            # from before the change that started these downloads.
+            if self.upscale_settings_revert is not None:
+                self.settings.upscaleSettings.update(self.upscale_settings_revert)
+            self._finish_upscale_downloads()
+            self._refresh_badges()
+            return
+        while self.upscale_download_queue:
+            next_type = self.upscale_download_queue.pop(0)
+            if not os.path.exists(sr_weight_path(next_type)):
+                self._start_upscale_download(next_type)
+                return
+        self._finish_upscale_downloads()
+
+    def _finish_upscale_downloads(self):
+        self.upscale_download_queue = []
+        self.upscale_download_active = False
+        self.upscale_download_kind = None
+        self.upscale_settings_revert = None
+        if not self.upscale_download_cancelling:
+            self.loading_widget.hide()
+        self.upscale_download_cancelling = False
     # ------------------------------
 
     def _reset_video_selection_state(self):
