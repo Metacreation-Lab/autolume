@@ -40,7 +40,7 @@ uv run zensical serve    # serve the docs locally at http://127.0.0.1:8000
 | `modules/` | UI modules and live performance widgets |
 | `widgets/` | Reusable imgui widgets |
 | `projection/` | Image-to-latent projection |
-| `super_res/`, `sr_models/` | Real-ESRGAN super-resolution pipeline |
+| `upscale/` | Real-ESRGAN dataset upscaling (weights, loader) |
 | `torch_utils/` | Vendored NVIDIA torch utilities (custom ops, persistence) |
 | `training/` | Model training and distillation |
 | `utils/` | Shared helpers (datasets, GUI, paths, version) |

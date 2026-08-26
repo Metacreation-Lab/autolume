@@ -1,7 +1,7 @@
 """GUI-free download helpers.
 
-Kept separate from the imgui download widget so headless code (super-resolution
-worker process, CLI entry points) can fetch files without importing imgui.
+Kept separate from the imgui download widget so headless code (upscaling
+weights, CLI entry points) can fetch files without importing imgui.
 """
 import csv
 import html

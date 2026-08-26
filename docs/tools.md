@@ -1,6 +1,6 @@
 # Tools
 
-The Tools screen gathers three utilities in a single grid: [Projection](#projection), [Super Resolution](#super-resolution), and [Model Mixing](#model-mixing).
+The Tools screen gathers two utilities in a single grid: [Projection](#projection) and [Model Mixing](#model-mixing).
 
 ## Projection
 
@@ -23,20 +23,6 @@ The following options are available for projection:
 - Use Pixel: Enable this option to use pixel distance for image comparison. This puts more weight on pixel similarity between the match and the target.
 - Use Penalty: Enable this option to penalize large update steps, resulting in a smoother projection and avoiding local minimums.
 - Use Center: Enable this option to use an additional center crop as the target image. This can improve matching accuracy but may reduce overall accuracy.
-
-## Super Resolution
-
-The Super Resolution tool provides the feature to upscale images and videos for higher resolution distribution of your work. There are three different models available: Quality, Balance, and Fast. While the Processing speeds of the models differ, Quality being the slowest and Fast being the fastest, the slower models tend to preserve more details from the original image/video. However, the quality of the results also depends on the type of visual content and is better to be tested with all three models to find the desired option.
-
-![](assets/offline-modules-super-resolution-01.png)
-
-The following options are available:
-
-- Input Files: Select the path to the images or videos that should be upscaled. Multiple files can be selected at once.
-- Result Path: Specify the path where the upscaled images or videos should be saved.
-- Model: Choose the upscaling model to be used: Fast, Balanced, or Quality. Fast is the quickest but provides lower quality, while Quality is the slowest but provides the highest quality.
-- Scale Mode: Choose between defining the exact Height and Width of the output or using a Scale Factor. If the scale factor is selected, the height and width will be automatically calculated based on the scale factor.
-- Sharpening: Adjust the sharpness of the upscaled image. Sharpening=1 means no added sharpness. Higher values result in sharper images but may introduce artifacts.
 
 ## Model Mixing
 

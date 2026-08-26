@@ -10,7 +10,9 @@ This widget controls how the visuals are displayed and lets you capture them.
 
 - Raw Scale: Shows the visuals at their native size.
 - Fit: Scales the visuals to fill the preview area.
-- Super Resolution: Upscales the generated images in real time.
+- Bilinear: Smooths the visuals when they are scaled. It is only available when Fit is selected and is off by default, so the visuals stay pixel exact. Display scaling never affects screenshots and recordings, which always capture the visuals at their native size.
+- Upscale: Runs an AI model on the rendered frames for a 4x larger output. It is off by default and has no cost while unchecked. The model weights are downloaded when a model is selected, so the first use needs an internet connection.
+  - Model: Fast (4xLSDIRCompactC3) is the default and keeps the frame rate high. Standard (4xNomosWebPhoto_RealPLKSR) is the same model as in [Prepare](prepare.md) and gives the best quality. It needs a fast GPU and runs at a few frames per second on Apple Silicon.
 - Fullscreen: Shows the visuals in full screen on the main display. Press Exit Fullscreen to return. This button is not available on macOS.
 - Screenshot: Saves a snapshot of the visuals as an image in the captures folder (under your [data folder](index.md#where-autolume-stores-your-data), `~/autolume/captures` by default).
 - Record: Records the visuals as a video in the captures folder. The button turns into a red Stop button while recording.
