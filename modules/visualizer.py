@@ -135,6 +135,7 @@ class Visualizer:
         self.window_created = False
 
         self.fit_screen = False
+        self.bilinear_display = False
 
         # reset scroll position on initialization
         self.reset_scroll = True
@@ -657,8 +658,10 @@ class Visualizer:
                     self.video_frame.data = img
                     self.video_frame.FourCC = ndi.FOURCC_VIDEO_TYPE_BGRX
                     ndi.send_send_video_v2(self.ndi_send, self.video_frame)
-                if self._tex_obj is None or not self._tex_obj.is_compatible(image=self._tex_img):
-                    self._tex_obj = gl_utils.Texture(image=self._tex_img, bilinear=False, mipmap=False)
+                bilinear = self.bilinear_display and self.fit_screen
+                if (self._tex_obj is None or not self._tex_obj.is_compatible(image=self._tex_img)
+                        or self._tex_obj.bilinear != bilinear):
+                    self._tex_obj = gl_utils.Texture(image=self._tex_img, bilinear=bilinear, mipmap=False)
                 else:
                     self._tex_obj.update(self._tex_img)
             
