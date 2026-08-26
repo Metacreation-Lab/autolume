@@ -26,7 +26,6 @@ class DisplayCaptureWidget:
         # textures with the main legacy context; macOS cannot share across those
         # profiles, so the button is omitted there.
         self.show_fullscreen = not device_utils.is_macos()
-        self.use_superres = False
 
     def _capture_basename(self):
         pkl = self.viz.pickle_widget.cur_pkl
@@ -45,7 +44,10 @@ class DisplayCaptureWidget:
             if imgui.radio_button('Fit', viz.fit_screen):
                 viz.fit_screen = True
             imgui.same_line(spacing=viz.app.spacing * 2)
-            _clicked, self.use_superres = imgui.checkbox('Super Resolution', self.use_superres)
+            with imgui_utils.grayed_out(not viz.fit_screen):
+                bilinear_clicked, bilinear_new = imgui.checkbox('Bilinear', viz.bilinear_display)
+            if bilinear_clicked and viz.fit_screen:
+                viz.bilinear_display = bilinear_new
 
             if self.show_fullscreen:
                 imgui.same_line(spacing=viz.app.spacing * 2)
@@ -75,7 +77,5 @@ class DisplayCaptureWidget:
                     viz.start_recording(str(data_path('captures', f'{self._capture_basename()}.mp4')))
                 else:
                     viz.stop_recording()
-
-        viz.args.use_superres = self.use_superres
 
 #----------------------------------------------------------------------------
