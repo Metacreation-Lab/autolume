@@ -25,17 +25,12 @@ from bending.transform_layers import ManipulationLayer
 from torch_utils.ops import upfirdn2d
 from torch_utils import legacy
 from architectures import custom_stylegan2
-from super_res.net_base import SRVGGNetPlus
 from modules.network_mixing import extract_conv_names, extract_mapping_names
 from utils.model_dir import ensure_models_dir
 import os
 import pickle
 
 logger = logging.getLogger(__name__)
-
-super_res = SRVGGNetPlus(num_in_ch=3, num_out_ch=3, num_feat=48, upscale=4, act_type='prelu').eval().to(device_utils.get_device())
-model_sd=torch.load(str(resource_path('sr_models', 'Fast.pt')), map_location=device_utils.get_device())
-super_res.load_state_dict(model_sd)
 
 # ----------------------------------------------------------------------------
 
@@ -425,7 +420,6 @@ class Renderer:
                      looping_index=0,
                      alpha=0,
                      looping_list=[],
-                     use_superres=False,
                      global_noise=1,
                      combined_layers = [],
                      mixing = True,
@@ -600,7 +594,7 @@ class Renderer:
             elif direction.shape[0] == int(G.w_dim):
                 w += direction
             out, manip_layers, = self.run_synthesis_net( w, capture_layer=layer_name, transforms=latent_transforms,
-                                                 adjustments=adjustments, noise_adjustments=noise_adjustments, ratios=ratios, use_superres=use_superres,global_noise=global_noise,
+                                                 adjustments=adjustments, noise_adjustments=noise_adjustments, ratios=ratios, global_noise=global_noise,
                                                  combined_layers=combined_layers,mixing=mixing,
                                                  build_layers=cache_key not in self._net_layers,
                                                  **synthesis_kwargs)
@@ -611,7 +605,7 @@ class Renderer:
                 layers = manip_layers
                 if layer_name is not None:
                     torch.manual_seed(random_seed)
-                    _out, layers = self.run_synthesis_net( w, use_superres=False,combined_layers=combined_layers, mixing=mixing, build_layers=True, **synthesis_kwargs)
+                    _out, layers = self.run_synthesis_net( w, combined_layers=combined_layers, mixing=mixing, build_layers=True, **synthesis_kwargs)
                 self._net_layers[cache_key] = layers
                 del layers
 
@@ -660,7 +654,7 @@ class Renderer:
 
 
     def run_synthesis_net(self,*args, capture_layer=None, transforms=None, ratios=None, adjustments=None,
-                          noise_adjustments=None, use_superres=False, global_noise=1, combined_layers=[], mixing=False,
+                          noise_adjustments=None, global_noise=1, combined_layers=[], mixing=False,
                           build_layers=False, **kwargs):
         """
         Run the synthesis network and capture the output of a specific layer.
@@ -831,15 +825,6 @@ class Renderer:
                 out = net(*args, **kwargs)
                 if isinstance(out, tuple):
                     out = out[0]
-                if use_superres:
-                    if self._device.type == "mps":
-                        # MPS has no autocast support; CPU autocast would corrupt
-                        # dtypes of operators that fall back to CPU.
-                        autocast_ctx = contextlib.nullcontext()
-                    else:
-                        autocast_ctx = torch.autocast("cuda" if self._device.type == "cuda" else "cpu")
-                    with autocast_ctx:
-                        out = super_res(out)
         except CaptureSuccess as e:
             out = e.out
         for hook in hooks:
