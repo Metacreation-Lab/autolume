@@ -3,6 +3,7 @@ import queue
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import imgui
+import PIL.Image
 from utils.gui_utils import imgui_utils
 import multiprocessing as mp
 
@@ -82,6 +83,10 @@ def _format_interval(value):
 
 class DataPreprocessing:
     """Data Preprocessing UI"""
+
+    # Image headers read per frame while a large import is being probed.
+    PROBE_CHUNK = 200
+
     def __init__(self, app):
         self.app = app
 
@@ -109,6 +114,11 @@ class DataPreprocessing:
         self.video_extraction_queue = mp.Queue()
         self.video_extraction_reply = mp.Queue()
         self.is_processing_video = False
+
+        # Below-target badge state
+        self.image_dims = {}                 # path -> (width, height) or None
+        self._pending_dims = []              # paths still waiting to be probed
+        self._below_count = 0                # cached below-target image count
 
         self.min_res = 8
         self.max_res = 1024
@@ -144,7 +154,9 @@ class DataPreprocessing:
     def __call__(self):
         """Preprocessing content"""
         imgui_utils.set_default_style()
-        
+
+        self._probe_pending_dims()
+
         navbar_h = self.app.navbar_height
         available_height = self.app.content_height - navbar_h
 
@@ -187,7 +199,7 @@ class DataPreprocessing:
                 imgui.open_popup("Duplicates")
             else:
                 self.imported_files.extend(selected_images)
-                self.thumbnail_widget.update_thumbnails(self.imported_files)
+                self._refresh_imported_thumbnails()
                 self.last_selected_file = None
 
         imgui.set_next_window_size(self.app.content_width // 2.5, self.app.content_height // 2.5, imgui.ONCE)
@@ -324,7 +336,7 @@ class DataPreprocessing:
                                 frame_files = [str(f) for f in sorted(frame_path.iterdir())]
                                 self.imported_files.extend(frame_files)
 
-                            self.thumbnail_widget.update_thumbnails(self.imported_files)
+                            self._refresh_imported_thumbnails()
 
                             # Reset variables
                             self.selected_video_files = []
@@ -436,18 +448,22 @@ class DataPreprocessing:
             if imgui.button("-##img_res", width=button_width):
                 self.img_res = max(self.img_res // 2, self.min_res)
                 self.settings.size = self.img_res
+                self._refresh_badges()
 
             imgui.same_line()
             if imgui.button("+##img_res", width=button_width):
                 self.img_res = min(self.img_res * 2, self.max_res)
                 self.settings.size = self.img_res
+                self._refresh_badges()
             
             # Non-square settings checkbox
             clicked, non_square = imgui.checkbox("Non-square Framing", not self.square)
             if clicked:
-                self.square = not non_square 
+                self.square = not non_square
                 self.settings.nonSquare = not self.square
-                       
+                self._refresh_badges()
+
+
             if not self.square:
                 imgui.text("Aspect Ratio:")
                 
@@ -456,12 +472,14 @@ class DataPreprocessing:
                 changed_width, new_width_ratio = imgui.input_int("##width_ratio", self.settings.nonSquareSettings["widthRatio"])
                 if changed_width and new_width_ratio >= 1:
                     self.settings.nonSquareSettings["widthRatio"] = new_width_ratio
+                    self._refresh_badges()
 
                 imgui.text("Height Ratio")
                 imgui.same_line()
                 changed_height, new_height_ratio = imgui.input_int("##height_ratio", self.settings.nonSquareSettings["heightRatio"])
                 if changed_height and new_height_ratio >= 1:
                     self.settings.nonSquareSettings["heightRatio"] = new_height_ratio
+                    self._refresh_badges()
                 
                 base_size = self.img_res
                 ratio = self.settings.nonSquareSettings["heightRatio"] / self.settings.nonSquareSettings["widthRatio"]
@@ -735,7 +753,7 @@ class DataPreprocessing:
                 if 0 <= idx < len(self.imported_files):
                     del self.imported_files[idx]
 
-            self.thumbnail_widget.update_thumbnails(self.imported_files)
+            self._refresh_imported_thumbnails()
             self.thumbnail_widget.clear_selected()
             self.last_selected_file = None
 
@@ -857,8 +875,78 @@ class DataPreprocessing:
             files_to_add = self.clean_duplicate_files(self.selected_files)
             self.imported_files.extend(files_to_add)
         
-        self.thumbnail_widget.update_thumbnails(self.imported_files)
+        self._refresh_imported_thumbnails()
         self.last_selected_file = None
+    # ------------------------------
+
+    # --- Upscaling ---
+    def _probe_image_dims(self, paths):
+        """Header-only read of image dimensions, EXIF orientation aware."""
+        for path in paths:
+            if path in self.image_dims:
+                continue
+            try:
+                with PIL.Image.open(path) as img:
+                    width, height = img.size
+                    orientation = img.getexif().get(0x0112, 1)
+                if orientation in (5, 6, 7, 8):
+                    width, height = height, width
+                self.image_dims[path] = (width, height)
+            except Exception:
+                logger.debug("Could not read dimensions for %s", path, exc_info=True)
+                self.image_dims[path] = None
+
+    def _probe_pending_dims(self):
+        """Probe one bounded chunk of pending paths per frame.
+
+        Opening every file of a large import in a single frame stalls the UI
+        for seconds, so the work is spread over frames instead.
+        """
+        if not self._pending_dims:
+            return
+        chunk = self._pending_dims[:self.PROBE_CHUNK]
+        del self._pending_dims[:self.PROBE_CHUNK]
+        self._probe_image_dims(chunk)
+        self._refresh_badges()
+
+    def _target_dims(self):
+        """Output dimensions of the current settings, as the Image Options show them."""
+        base = self.settings.size
+        if not self.settings.nonSquare:
+            return base, base
+        width_ratio = max(self.settings.nonSquareSettings["widthRatio"], 1)
+        height_ratio = max(self.settings.nonSquareSettings["heightRatio"], 1)
+        ratio = height_ratio / width_ratio
+        if ratio <= 1:
+            return base, int(base * ratio)
+        return int(base / ratio), base
+
+    def _below_target_paths(self):
+        target_width, target_height = self._target_dims()
+        below = []
+        for path in self.imported_files:
+            dims = self.image_dims.get(path)
+            if not dims or not dims[0] or not dims[1]:
+                continue
+            if dims[0] < target_width or dims[1] < target_height:
+                below.append(path)
+        return below
+
+    def _refresh_badges(self):
+        target_width, target_height = self._target_dims()
+        badges = {}
+        for path in self._below_target_paths():
+            width, height = self.image_dims[path]
+            badges[path] = (f"This {width}x{height} image will be upscaled "
+                            f"to {target_width}x{target_height}.")
+        self.thumbnail_widget.set_badges(badges)
+        self._below_count = len(badges)
+
+    def _refresh_imported_thumbnails(self):
+        self.thumbnail_widget.update_thumbnails(self.imported_files)
+        self._pending_dims = [p for p in self.imported_files if p not in self.image_dims]
+        self._refresh_badges()
+
     # ------------------------------
 
     def _reset_video_selection_state(self):
