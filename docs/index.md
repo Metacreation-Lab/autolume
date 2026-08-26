@@ -64,7 +64,7 @@ Autolume opens on the **Perform** screen after the startup splash. The navbar at
 - **[Prepare](prepare.md)** — import images and videos and turn them into a training dataset.
 - **[Train](train/index.md)** — train a model on a prepared dataset, from scratch or resuming from a checkpoint.
 - **[Perform](perform.md)** — load a model and play with it live, in real time.
-- **[Tools](tools.md)** — Projection, Super Resolution, and Model Mixing.
+- **[Tools](tools.md)** — Projection and Model Mixing.
 
 On the right side of the navbar, the cog icon opens **Settings** and the book icon opens this documentation. While a training run is active, navigation is locked to the Train screen until training finishes or is stopped.
 
