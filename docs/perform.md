@@ -45,6 +45,7 @@ In this mode, the latent space is controlled using seed numbers, each correspond
 
 - Project: StyleGAN has a feature that maps latent vectors into a more desirable space. By toggling this off, you might receive less consistent results.
 - Seed: The seed is a number that is used to generate a latent vector. By changing the seed you can explore different points in the latent space.
+- X and Y: The exact position in the latent space. Whole numbers land exactly on a seed. Values in between smoothly blend the neighboring seeds. These are the values to target when binding OSC for smooth latent motion.
 - Drag: By dragging after clicking the button you can explore the latent space. This incrementally changes the seed.
 - Anim/Stop: Starts/stops animating a continuous movement in the latent space.
 - Speed: Controls the speed of the animation.
