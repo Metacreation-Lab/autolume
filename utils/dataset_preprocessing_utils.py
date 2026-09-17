@@ -14,6 +14,11 @@ from utils.user_data import data_path
 
 logger = logging.getLogger(__name__)
 
+# Pixels of surrounding source image fed to the upscaler around a crop, so the
+# model does not read the crop border as an image edge. They are trimmed back
+# off the upscaled result before the final resize.
+CROP_CONTEXT_MARGIN = 16
+
 
 class DatasetPreprocessingUtils:
     """Utility class to support dataset preprocessing functions."""
@@ -31,6 +36,10 @@ class DatasetPreprocessingUtils:
         self.augmentationSettings = {
             "xFlip": False,
             "yFlip": False
+        }
+        self.upscaleSettings = {
+            "aiUpscale": False,
+            "model": "RealPLKSR"
         }
         self.folder_name = "training_dataset"
         self.output_path = data_path("datasets")
@@ -222,6 +231,114 @@ class DatasetPreprocessingUtils:
 
 
     @staticmethod
+    def _shrink_axes_to(image, target_size):
+        """Shrink any axis longer than target_size down to it, keeping the other."""
+        h, w = image.shape[:2]
+        if w <= target_size and h <= target_size:
+            return image
+        pil_image = PIL.Image.fromarray(image)
+        resized = pil_image.resize((min(w, target_size), min(h, target_size)),
+                                   PIL.Image.LANCZOS)
+        return np.array(resized)
+
+    @staticmethod
+    def _crop_with_margin(image, x0, y0, crop_w, crop_h, margin):
+        """Cut a crop widened by up to ``margin`` pixels on each side.
+
+        Returns the widened crop and the margin actually taken per side, which
+        is short wherever the crop sits against the source border.
+        """
+        h, w = image.shape[:2]
+        left = min(margin, x0)
+        top = min(margin, y0)
+        right = min(margin, w - (x0 + crop_w))
+        bottom = min(margin, h - (y0 + crop_h))
+        widened = image[y0 - top:y0 + crop_h + bottom,
+                        x0 - left:x0 + crop_w + right]
+        return widened, (left, top, right, bottom)
+
+    @staticmethod
+    def _trim_margins(image, margins, scale_x, scale_y):
+        """Remove the context margin from an upscaled crop, at its own scale."""
+        left, top, right, bottom = margins
+        h, w = image.shape[:2]
+        return image[round(top * scale_y):h - round(bottom * scale_y),
+                     round(left * scale_x):w - round(right * scale_x)]
+
+    @staticmethod
+    def _non_square_crop_box(image, settings):
+        """The ``non_square`` center crop box, at source resolution.
+
+        Mirrors the crop branch of ``non_square``: one axis is kept whole and
+        the other is cut to the target aspect ratio.
+        """
+        h, w = image.shape[:2]
+        target_ratio = (float(settings.nonSquareSettings["widthRatio"]) /
+                        float(settings.nonSquareSettings["heightRatio"]))
+        if w / h > target_ratio:
+            crop_w = int(h * target_ratio)
+            return (w - crop_w) // 2, 0, crop_w, h
+        crop_h = int(w / target_ratio)
+        return 0, (h - crop_h) // 2, w, crop_h
+
+    @staticmethod
+    def upscale_region(image, settings, upscaler):
+        """Upscale only the part of the image the final resize keeps.
+
+        Upscaling the whole source spends model passes on pixels the crop
+        throws away, and it pushes the input past the tile size far sooner,
+        which would leave a tile correlated pattern in the dataset. So the
+        region each resize mode keeps is cut at source resolution first and
+        only that region goes through the model:
+
+        - center crop: the centered short side square, widened by a context
+          margin that is trimmed back off after upscaling. The square is
+          smaller than the target whenever upscaling triggers, so the model
+          sees a single untiled pass.
+        - stretch: the image with any axis longer than the target shrunk to it,
+          detail the final stretch would discard anyway.
+        - non square: the aspect ratio region ``non_square`` keeps, widened by
+          the same context margin.
+
+        Returns the image untouched when it does not need upscaling. The result
+        still goes through ``resize_image_np`` to reach the final size.
+        """
+        import upscale
+
+        target_size = settings.size
+        h, w = image.shape[:2]
+        if not upscale.needs_upscale(w, h, target_size):
+            return image
+
+        margins = (0, 0, 0, 0)
+        if getattr(settings, 'nonSquare', False):
+            if settings.resizeMode == 0:
+                region = DatasetPreprocessingUtils._shrink_axes_to(image, target_size)
+            else:
+                x0, y0, crop_w, crop_h = \
+                    DatasetPreprocessingUtils._non_square_crop_box(image, settings)
+                region, margins = DatasetPreprocessingUtils._crop_with_margin(
+                    image, x0, y0, crop_w, crop_h, CROP_CONTEXT_MARGIN)
+        elif settings.resizeMode == 0:
+            region = DatasetPreprocessingUtils._shrink_axes_to(image, target_size)
+        else:
+            side = min(w, h)
+            # Cap the margin so the widened square still fits the target, which
+            # is what keeps the upscaler input below the tile size.
+            margin = min(CROP_CONTEXT_MARGIN, (target_size - side) // 2)
+            region, margins = DatasetPreprocessingUtils._crop_with_margin(
+                image, int(round((w - side) / 2.0)), int(round((h - side) / 2.0)),
+                side, side, margin)
+
+        upscaled = upscale.upscale_to_target(region, upscaler, target_size)
+        if any(margins):
+            upscaled = DatasetPreprocessingUtils._trim_margins(
+                upscaled, margins,
+                upscaled.shape[1] / region.shape[1],
+                upscaled.shape[0] / region.shape[0])
+        return upscaled
+
+    @staticmethod
     def resize_image_np(image: np.ndarray, settings):
         target_size = settings.size
         resize_mode = settings.resizeMode
@@ -326,13 +443,34 @@ class DatasetPreprocessingUtils:
         nonSquare = settings.nonSquare
         augmentationSettings = settings.augmentationSettings
         output_path = settings.output_path
-        
+
+        import upscale
+
+        upscale_settings = getattr(settings, 'upscaleSettings', None) or {}
+        ai_upscale = upscale_settings.get('aiUpscale', False)
+        # Dataset preparation has no model choice. A value stored by an older
+        # version, of a model this build no longer ships, falls back silently.
+        upscale_model = upscale_settings.get('model')
+        if upscale_model != upscale.PREPARE_MODEL:
+            upscale_model = upscale.PREPARE_MODEL
+        upscaler = None
+        if ai_upscale:
+            try:
+                upscaler = upscale.load_upscaler(upscale_model)
+            except Exception:
+                logger.exception("Could not load the upscaler")
+                upscaler = None
+            if upscaler is None:
+                logger.warning("Upscaler unavailable, falling back to standard resizing")
+                ai_upscale = False
+
         os.makedirs(output_path, exist_ok=True)
-        
+
         logger.info("Dataset preprocessing: %d images, resolution=%dx%d, resize_mode=%s, "
-                    "non_square=%s, xflip=%s, yflip=%s",
+                    "non_square=%s, xflip=%s, yflip=%s, ai_upscale=%s, upscale_model=%s",
                     len(images), size, size, resizeMode, nonSquare,
-                    augmentationSettings['xFlip'], augmentationSettings['yFlip'])
+                    augmentationSettings['xFlip'], augmentationSettings['yFlip'],
+                    ai_upscale, upscale_model)
         
         processed_count = 0
         total_source_images = len(images)
@@ -342,7 +480,7 @@ class DatasetPreprocessingUtils:
         total_images = total_source_images * (1 + num_augmentations)
         
         # Update progress more frequently for better responsiveness
-        update_interval = max(1, min(10, total_images // 500))
+        update_interval = 1 if ai_upscale else max(1, min(10, total_images // 500))
         
         for i, image_path in enumerate(images):
             try:
@@ -356,7 +494,16 @@ class DatasetPreprocessingUtils:
                         pass
                 
                 image = utils.load_images(image_path)
-                
+
+                if upscaler is not None:
+                    # An upscale failure (out of memory above all) must not
+                    # drop the image: keep it and let the resize handle it.
+                    try:
+                        image = utils.upscale_region(image, settings, upscaler)
+                    except Exception:
+                        logger.exception("Upscale failed for %s, falling back to resize",
+                                         image_path)
+
                 images_to_process = [image]
                 if any(settings.augmentationSettings.values()): 
                     images_to_process.extend(utils.augment_image(image, settings))

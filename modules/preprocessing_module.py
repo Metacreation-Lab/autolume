@@ -1,5 +1,7 @@
 import logging
+import os
 import queue
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import imgui
@@ -7,6 +9,7 @@ import PIL.Image
 from utils.gui_utils import imgui_utils
 import multiprocessing as mp
 
+from upscale import PREPARE_MODEL, ensure_weight, required_weights, weight_path
 from utils import video_io
 from utils.app_logging import LoggedProcess
 from widgets.native_browser_widget import NativeBrowserWidget
@@ -115,10 +118,19 @@ class DataPreprocessing:
         self.video_extraction_reply = mp.Queue()
         self.is_processing_video = False
 
-        # Below-target badge state
+        # Upscaling section state
         self.image_dims = {}                 # path -> (width, height) or None
         self._pending_dims = []              # paths still waiting to be probed
         self._below_count = 0                # cached below-target image count
+        self.upscale_download_thread = None
+        self.upscale_download_cancel = None
+        self.upscale_download_kind = None    # WEIGHTS key being downloaded
+        self.upscale_download_queue = []     # WEIGHTS keys waiting to download
+        self.upscale_download_result = None
+        self.upscale_download_active = False
+        self.upscale_download_cancelling = False
+        self.process_after_download = False   # weights are being fetched for a run
+        self.process_pending = False          # weights arrived, start the run
 
         self.min_res = 8
         self.max_res = 1024
@@ -155,6 +167,7 @@ class DataPreprocessing:
         """Preprocessing content"""
         imgui_utils.set_default_style()
 
+        self._poll_upscale_download()
         self._probe_pending_dims()
 
         navbar_h = self.app.navbar_height
@@ -501,6 +514,23 @@ class DataPreprocessing:
 
         # End of Image options
 
+        upscaling_header_opened = imgui.collapsing_header("Upscaling", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]
+
+        self.help_icon.render(self.help_texts.get("upscaling"), align_right=True)
+
+        if upscaling_header_opened:
+            ai_on = self.settings.upscaleSettings["aiUpscale"]
+            total_count = len(self.imported_files)
+            imgui.text(f"{self._below_count} of {total_count} images will be upscaled.")
+
+            if imgui.radio_button("Basic##upscale_method", not ai_on) and ai_on:
+                self.settings.upscaleSettings["aiUpscale"] = False
+                ai_on = False
+            imgui.same_line(spacing=self.app.spacing * 2)
+            if imgui.radio_button("AI Enhanced##upscale_method", ai_on) and not ai_on:
+                self.settings.upscaleSettings["aiUpscale"] = True
+        # End of Upscaling options
+
         augmentation_header_opened = imgui.collapsing_header("Augmentation", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]
 
         self.help_icon.render(self.help_texts.get("augmentation"), align_right=True)
@@ -547,20 +577,14 @@ class DataPreprocessing:
         if imgui.button("Process & Save Data", width=parameter_column_width, height=30):
             if not self.imported_files:
                 logger.warning("No images to process")
-            else:
-                self.settings.images = self.imported_files
+            elif not self._request_upscale_weights():
+                self._begin_processing()
 
-                proposed_output_path = self._construct_output_path()
-                self.settings.output_path = proposed_output_path
-                
-                if Path(proposed_output_path).exists():
-                    self.folder_exists_warning = True
-                else:
-                    self.folder_exists_warning = False
-                    self.is_processing_dataset = True
-                    self.process_dataset()
-                
-                imgui.open_popup("Processing Dataset")
+        # Resumes the run the button started once its weights finished
+        # downloading. It sits here so open_popup shares the button's window.
+        if self.process_pending:
+            self.process_pending = False
+            self._begin_processing()
 
         # Batch Preprocessing Popup ------------------------------------------------------------
         imgui.set_next_window_size(self.app.content_width // 2.5, self.app.content_height // 2.5, imgui.ONCE)
@@ -621,13 +645,16 @@ class DataPreprocessing:
                     if self.settings.augmentationSettings['yFlip']:
                         imgui.text("Y-Flip: Yes")
                     imgui.unindent(20)
-                
+
+                if self.settings.upscaleSettings["aiUpscale"]:
+                    imgui.text(f"AI Upscaling: {self._below_count} of {len(self.settings.images)} images")
+
                 imgui.text(f"Output: {self.settings.output_path}")
-                
+
                 imgui.spacing()
                 imgui.separator()
                 imgui.spacing()
-                
+
                 latest_progress = None
                 while not self.processing_reply.empty():
                     try:
@@ -692,7 +719,10 @@ class DataPreprocessing:
                     if self.settings.augmentationSettings['yFlip']:
                         imgui.text("Y-Flip: Yes")
                     imgui.unindent(20)
-                
+
+                if self.settings.upscaleSettings["aiUpscale"]:
+                    imgui.text(f"AI Upscaling: {self._below_count} of {len(self.settings.images)} images")
+
                 imgui.text(f"Output: {self.settings.output_path}")
 
                 imgui.spacing()
@@ -947,6 +977,97 @@ class DataPreprocessing:
         self._pending_dims = [p for p in self.imported_files if p not in self.image_dims]
         self._refresh_badges()
 
+    def _request_upscale_weights(self):
+        """Start downloading the weights a run needs, if any are missing.
+
+        Returns True when a download started, so the caller waits for it
+        instead of processing now.
+        """
+        if not self.settings.upscaleSettings["aiUpscale"]:
+            return False
+        needed = [key for key in required_weights(PREPARE_MODEL)
+                  if not os.path.exists(weight_path(key))]
+        if not needed:
+            return False
+        self.process_after_download = True
+        self.upscale_download_queue.extend(needed)
+        self._start_upscale_download(self.upscale_download_queue.pop(0))
+        return True
+
+    def _start_upscale_download(self, weight_key):
+        """Download one weight in a thread with a progress overlay."""
+        self.upscale_download_kind = weight_key
+        self.upscale_download_result = None
+        self.upscale_download_cancel = threading.Event()
+        self.upscale_download_active = True
+        self.upscale_download_cancelling = False
+        self.loading_widget.show_simple("Downloading upscaling model...", show_progress=True,
+                                        on_cancel=self._cancel_upscale_download,
+                                        count_label=None, file_label="Downloaded")
+
+        def on_progress(done, total):
+            # The overlay counts items by default. This one counts bytes, so
+            # the size goes in the detail line and the percentage is explicit.
+            if total:
+                text = f"{done / 1048576:.1f} of {total / 1048576:.1f} MB"
+                percentage = done / total * 100.0
+            else:
+                text = f"{done / 1048576:.1f} MB"
+                percentage = 0.0
+            self.loading_widget.update_progress(done, total, current_file=text,
+                                                percentage=percentage)
+
+        def run():
+            try:
+                self.upscale_download_result = ensure_weight(
+                    weight_key, on_progress, self.upscale_download_cancel)
+            except Exception:
+                logger.exception("Upscaling weight download failed")
+                self.upscale_download_result = None
+
+        self.upscale_download_thread = threading.Thread(target=run, daemon=True,
+                                                        name='upscale-weights')
+        self.upscale_download_thread.start()
+
+    def _cancel_upscale_download(self):
+        """Close the overlay at once and ask the worker to stop.
+
+        The worker only sees the cancel token on its next chunk, so polling
+        continues until it exits and the run is dropped there.
+        """
+        self.upscale_download_cancelling = True
+        self.upscale_download_cancel.set()
+        self.loading_widget.hide()
+
+    def _poll_upscale_download(self):
+        """Render the overlay while downloading, then resume the pending run."""
+        if not self.upscale_download_active:
+            return
+        if self.upscale_download_thread is not None and self.upscale_download_thread.is_alive():
+            if not self.upscale_download_cancelling:
+                self.loading_widget.render()
+            return
+        if self.upscale_download_result is None:
+            # Cancelled or failed: drop the queue and the run it was for.
+            self._finish_upscale_downloads()
+            return
+        while self.upscale_download_queue:
+            next_type = self.upscale_download_queue.pop(0)
+            if not os.path.exists(weight_path(next_type)):
+                self._start_upscale_download(next_type)
+                return
+        resume = self.process_after_download
+        self._finish_upscale_downloads()
+        self.process_pending = resume
+
+    def _finish_upscale_downloads(self):
+        self.upscale_download_queue = []
+        self.upscale_download_active = False
+        self.upscale_download_kind = None
+        self.process_after_download = False
+        if not self.upscale_download_cancelling:
+            self.loading_widget.hide()
+        self.upscale_download_cancelling = False
     # ------------------------------
 
     def _reset_video_selection_state(self):
@@ -1019,6 +1140,22 @@ class DataPreprocessing:
         folder_name_with_resolution = self.settings.folder_name + resolution_suffix
         return str(Path(self.save_path) / folder_name_with_resolution)
     
+    def _begin_processing(self):
+        """Run the Process & Save Data steps, weights already on disk."""
+        self.settings.images = self.imported_files
+
+        proposed_output_path = self._construct_output_path()
+        self.settings.output_path = proposed_output_path
+
+        if Path(proposed_output_path).exists():
+            self.folder_exists_warning = True
+        else:
+            self.folder_exists_warning = False
+            self.is_processing_dataset = True
+            self.process_dataset()
+
+        imgui.open_popup("Processing Dataset")
+
     def process_dataset(self):
         """Start the dataset processing in a separate process"""
         # Update output path

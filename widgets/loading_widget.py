@@ -20,21 +20,32 @@ class LoadingOverlayManager:
         self.progress_total = 0
         self.progress_percentage = 0
         self.current_file = ""
-        
+
+        # Labels of the two simple-mode progress lines.
+        self.count_label = "Processing video"
+        self.file_label = "Current file"
+
         # Render mode: 'simple' or 'detailed'
         self.render_mode = 'simple'
-    
-    def show_simple(self, message, show_progress=False, on_cancel=None):
+
+    def show_simple(self, message, show_progress=False, on_cancel=None,
+                    count_label="Processing video", file_label="Current file"):
         """Show simple loading overlay for basic processes like video extraction
 
         When ``on_cancel`` is given, the overlay shows a Cancel button that
         invokes it and closes the overlay.
+
+        ``count_label`` prefixes the item count line. Pass None when the
+        progress counts something other than items, such as bytes downloaded.
+        ``file_label`` prefixes the detail line.
         """
         self.message = message
         self.is_visible = True
         self.show_progress = show_progress
         self.render_mode = 'simple'
         self.on_cancel = on_cancel
+        self.count_label = count_label
+        self.file_label = file_label
         if not show_progress:
             self.reset_progress()
     
@@ -98,9 +109,10 @@ class LoadingOverlayManager:
                 imgui.spacing()
                 
                 # Display progress text
-                imgui.text(f"Processing video {min(self.progress_current + 1, self.progress_total)} of {self.progress_total}")
+                if self.count_label:
+                    imgui.text(f"{self.count_label} {min(self.progress_current + 1, self.progress_total)} of {self.progress_total}")
                 if self.current_file:
-                    imgui.text(f"Current file: {self.current_file}")
+                    imgui.text(f"{self.file_label}: {self.current_file}")
                 
                 # Progress bar
                 progress_width = _CONTENT_WIDTH
