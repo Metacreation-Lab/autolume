@@ -150,7 +150,7 @@ def cache_path(*parts: str) -> Path:
     """Resolve a path under ``~/.cache/autolume`` (folder may not exist yet).
 
     Honors ``XDG_CACHE_HOME``. Used for disposable, re-downloadable data
-    such as on-demand super-resolution weights.
+    such as on-demand upscaling weights.
     """
     base = os.environ.get("XDG_CACHE_HOME") or (Path.home() / ".cache")
     return Path(base, "autolume", *parts)

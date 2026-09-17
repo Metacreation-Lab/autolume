@@ -8,7 +8,9 @@ import imgui
 
 from utils.app_logging import LoggedProcess
 from utils.gui_utils import imgui_utils
-from super_res.super_res import run_super_res, sr_weight_path, ensure_sr_weight
+from upscale import ensure_weight, required_weights, weight_path
+from upscale.batch import (BATCH_DEFAULT_MODEL, BATCH_LABELS, BATCH_MODELS,
+                           run_batch_upscale)
 
 from dnnlib import EasyDict
 import multiprocessing as mp
@@ -17,46 +19,38 @@ import multiprocessing as mp
 from widgets.native_browser_widget import NativeBrowserWidget
 from widgets.help_icon_widget import HelpIconWidget
 
-args = EasyDict(result_path="", input_path=[""], model_type="Balance",
-                outscale=3, width=4096, height=4096, sharpen_scale=1, scale_mode=1)
-scale_factor = ['1', '2', '3', '4', '5', '6', '7', '8']
+args = EasyDict(result_path="", input_path=[""], model_type=BATCH_DEFAULT_MODEL)
 
 logger = logging.getLogger(__name__)
 
 
-class SuperResModule:
+class UpscaleModule:
     def __init__(self, menu):
         self.result_path = args.result_path
         self.input_path = args.input_path
-        self.models = ['Quality','Balance','Fast']
-        self.model_selected = 1
-        self.model_type = self.models[self.model_selected]
-        self.width = args.width
-        self.height = args.height
-        self.out_scale = args.outscale
-        self.sharpen = args.sharpen_scale
+        self.models = [BATCH_LABELS[key] for key in BATCH_MODELS]
+        self.model_selected = BATCH_MODELS.index(BATCH_DEFAULT_MODEL)
+        self.model_type = BATCH_MODELS[self.model_selected]
         self.menu = menu
         self.app = menu.app
-        # self.show_help = False  
         self.browser = NativeBrowserWidget()
-        self.scale_mode = args.scale_mode
         self.running = False
         self.writer = None
         self.reader = None
         self.queue = mp.Queue()
         self.reply = mp.Queue()
-        self.sr_process = None
+        self.upscale_process = None
         self.files = []
         self.file_idx = 0
-        self.super_res_idx = 0
+        self.upscale_idx = 0
         self.total_frames = -1
-        self.super_res_model = None
+        
         self.start_time = 0
         self.eta = -1
         self.video_width = 0
         self.video_height = 0
         self.help_icon = HelpIconWidget()
-        self.help_texts, self.help_urls = self.help_icon.load_help_texts("super_res")
+        self.help_texts, self.help_urls = self.help_icon.load_help_texts("upscale")
         # First-run weight download state.
         self.downloading = False
         self.download_thread = None
@@ -74,8 +68,8 @@ class SuperResModule:
             label += f": {os.path.basename(self.files[self.file_idx])}"
         imgui.text(label)
         if self.total_frames > 0:
-            frac = min(self.super_res_idx / self.total_frames, 1.0)
-            imgui.progress_bar(frac, (width, 0.0), f"{self.super_res_idx}/{self.total_frames}")
+            frac = min(self.upscale_idx / self.total_frames, 1.0)
+            imgui.progress_bar(frac, (width, 0.0), f"{self.upscale_idx}/{self.total_frames}")
         else:
             imgui.progress_bar(0.0, (width, 0.0), "preparing...")
         if self.eta != -1:
@@ -93,14 +87,14 @@ class SuperResModule:
         imgui.text(f"ETA: {eta_str}")
         imgui.spacing()
         if imgui.button("Cancel", width=width):
-            self.cancel_super_res()
+            self.cancel_upscale()
 
-    def cancel_super_res(self):
+    def cancel_upscale(self):
         # Stop the worker process; the partial output file is left as-is.
-        if self.sr_process is not None:
-            self.sr_process.terminate()
-            self.sr_process.join(timeout=1)
-            self.sr_process = None
+        if self.upscale_process is not None:
+            self.upscale_process.terminate()
+            self.upscale_process.join(timeout=1)
+            self.upscale_process = None
         self.running = False
 
 
@@ -110,34 +104,38 @@ class SuperResModule:
             msg = self.reply.get()
             while not self.reply.empty():
                 msg = self.reply.get()
-            self.file_idx, self.super_res_idx, self.total_frames, self.eta, done = msg
+            self.file_idx, self.upscale_idx, self.total_frames, self.eta, done = msg
             if done:
                 self.running = False
-                if self.sr_process is not None:
-                    self.sr_process.join()
-                    self.sr_process = None
-        help_width = imgui.calc_text_size("(?)").x + 10
+                if self.upscale_process is not None:
+                    self.upscale_process.join()
+                    self.upscale_process = None
         button_width = self.app.button_w
         spacing = self.app.spacing
-        input_width = -(button_width + spacing + help_width + 30)
+        # One label column for every row, sized by the widest label, and one
+        # right edge for every field, so the form reads as a grid.
+        labels = ("Input Files", "Save Path", "Model")
+        label_col = max(imgui.calc_text_size(l)[0] for l in labels) + spacing * 2
+        field_width = -(button_width + spacing)
 
         text = "Use AI to upscale your images and videos"
         imgui.text(text)
-        self.help_icon.render(self.help_texts.get("super_res_module"),
-                              url=self.help_urls.get("super_res_module"),
+        self.help_icon.render(self.help_texts.get("upscale_module"),
+                              url=self.help_urls.get("upscale_module"),
                               align_right=True)
 
         imgui.separator()
 
         # Input path
+        imgui.text("Input Files")
+        imgui.same_line(label_col)
         joined = '\n'.join(self.input_path)
-        imgui_utils.input_text("##SRINPUT", joined, 1024, 
-                              flags=imgui.INPUT_TEXT_READ_ONLY, 
-                              width=input_width, 
-                              help_text="Input Files")
-        
+        imgui_utils.input_text("##upscale_input_files", joined, 1024,
+                               flags=imgui.INPUT_TEXT_READ_ONLY,
+                               width=field_width,
+                               help_text="Select images or videos")
         imgui.same_line()
-        if imgui.button("Browse##super_res_input", width=button_width):
+        if imgui.button("Browse##upscale_input", width=button_width):
             files = self.browser.select_media_files(initial_dir=self.input_path[0] if self.input_path else "")
             if files:
                 self.input_path = [str(f) for f in files]
@@ -146,74 +144,40 @@ class SuperResModule:
 
         # Result path
         imgui.text("Save Path")
-        _, self.result_path = imgui_utils.input_text("##save_path", self.result_path, 1024, 0,
-                                                     width=imgui.get_window_width() - self.menu.app.button_w - imgui.calc_text_size("Browse")[0])
-        
+        imgui.same_line(label_col)
+        _, self.result_path = imgui_utils.input_text("##upscale_save_path", self.result_path, 1024, 0,
+                                                     width=field_width)
         imgui.same_line()
-        if imgui.button("Browse##super_res_result_path", width=button_width):
+        if imgui.button("Browse##upscale_result_path", width=button_width):
             directory_path = self.browser.select_directory("Select Save Directory", initial_dir=self.result_path)
             if directory_path:
                 self.result_path = directory_path.replace('\\', '/')
-        self.models = ['Quality','Balance','Fast']
-        if len(self.models) > 0:
-            # Model selection
-            imgui.text("Model")
-            imgui.same_line()
-            with imgui_utils.item_width(input_width):
-                _, self.model_selected = imgui.combo("##model", self.model_selected, self.models)
-            self.model_type = self.models[self.model_selected]
 
-        # Scale mode
-        imgui.text("Scale Mode")
-        imgui.same_line()
-        with imgui_utils.item_width(input_width):
-            clicked, self.scale_mode = imgui.combo("##scale_mode", self.scale_mode, ["Custom", "Scale"])
+        # Model selection
+        imgui.text("Model")
+        imgui.same_line(label_col)
+        with imgui_utils.item_width(field_width):
+            _, self.model_selected = imgui.combo("##upscale_model", self.model_selected, self.models)
+        self.model_type = BATCH_MODELS[self.model_selected]
 
-        # Scale factor or custom resolution
-        if self.scale_mode:
-            imgui.text("Scale Factor")
-            imgui.same_line()
-            with imgui_utils.item_width(input_width):
-                _, self.out_scale = imgui.combo("##scale_factor", self.out_scale, scale_factor)
-        else:
-            imgui.text("Height")
-            imgui.same_line()
-            with imgui_utils.item_width(input_width):
-                _, self.height = imgui.input_int("##height", self.height)
-            
-            imgui.text("Width")
-            imgui.same_line()
-            with imgui_utils.item_width(input_width):
-                _, self.width = imgui.input_int("##width", self.width)
-
-        # Sharpening
-        imgui.text("Sharpening")
-        imgui.same_line()
-        with imgui_utils.item_width(input_width):
-            _, self.sharpen = imgui.input_int("##sharpening", self.sharpen)
-        if self.sharpen < 1:
-            self.sharpen = 1
-
+        imgui.text_disabled("The output is 4 times the input resolution.")
 
         try:
-            if imgui.button("Super Resolution", width=imgui.get_content_region_available_width()) and not self.running and not self.downloading:
+            if imgui.button("Upscale", width=imgui.get_content_region_available_width()) and not self.running and not self.downloading:
                 args.result_path = self.result_path
                 args.input_path = self.input_path
                 args.model_type = self.model_type
-                args.outscale = self.out_scale + 1
-                args.out_height = self.height
-                args.out_width = self.width
-                args.sharpen_scale = self.sharpen
-                args.scale_mode = self.scale_mode
                 self.args = args
-                if os.path.exists(sr_weight_path(self.model_type)):
+                missing = [key for key in required_weights(self.model_type)
+                           if not os.path.exists(weight_path(key))]
+                if not missing:
                     self.running = True
-                    logger.info("Starting super resolution: input=%s output=%s model=%s",
+                    logger.info("Starting upscaling: input=%s output=%s model=%s",
                                 self.input_path, self.result_path, self.model_type)
-                    self.start_super_res()
-                    imgui.open_popup("Super Resolution")
+                    self.start_upscale()
+                    imgui.open_popup("Upscaling")
                 else:
-                    self._begin_download(self.model_type)
+                    self._begin_download(missing)
                     imgui.open_popup("Downloading Model")
 
         except Exception:
@@ -225,9 +189,9 @@ class SuperResModule:
 
         if self.pending_start:
             self.pending_start = False
-            imgui.open_popup("Super Resolution")
+            imgui.open_popup("Upscaling")
 
-        if imgui.begin_popup_modal("Super Resolution", flags=imgui.WINDOW_NO_SCROLLBAR | imgui.WINDOW_ALWAYS_AUTO_RESIZE)[0]:
+        if imgui.begin_popup_modal("Upscaling", flags=imgui.WINDOW_NO_SCROLLBAR | imgui.WINDOW_ALWAYS_AUTO_RESIZE)[0]:
             self.display_progress()
             if not self.running:
                 imgui.close_current_popup()
@@ -236,23 +200,26 @@ class SuperResModule:
 
 
 
-    def _begin_download(self, model_type):
+    def _begin_download(self, weight_keys):
         self.download_cancel = threading.Event()
         self.download_status = None
         self.dl_done = 0
         self.dl_total = 0
         self.downloading = True
         self.download_thread = threading.Thread(
-            target=self._download_weight, args=(model_type,), daemon=True)
+            target=self._download_weights, args=(weight_keys,), daemon=True)
         self.download_thread.start()
 
-    def _download_weight(self, model_type):
+    def _download_weights(self, weight_keys):
         def progress(done, total):
             self.dl_done, self.dl_total = done, total
         try:
-            result = ensure_sr_weight(model_type, progress_cb=progress,
-                                      cancel_event=self.download_cancel)
-            self.download_status = "ok" if result is not None else "cancelled"
+            for key in weight_keys:
+                if ensure_weight(key, progress_cb=progress,
+                                 cancel_event=self.download_cancel) is None:
+                    self.download_status = "cancelled"
+                    return
+            self.download_status = "ok"
         except Exception as e:
             self.download_status = f"error: {e}"
 
@@ -276,7 +243,7 @@ class SuperResModule:
                 imgui.close_current_popup()
             return
 
-        imgui.text(f"Downloading {self.model_type} model weights...")
+        imgui.text(f"Downloading {BATCH_LABELS[self.model_type]} model weights...")
         if self.dl_total > 0:
             fraction = min(self.dl_done / self.dl_total, 1.0)
             label = f"{self.dl_done / (1024 * 1024):.1f} / {self.dl_total / (1024 * 1024):.1f} MB"
@@ -296,12 +263,12 @@ class SuperResModule:
         imgui.close_current_popup()
         if status == "ok":
             self.running = True
-            self.start_super_res()
+            self.start_upscale()
             self.pending_start = True
         else:  # cancelled
             self.running = False
 
-    def start_super_res(self):
+    def start_upscale(self):
         self.start_time = time.time()
         self.files = self.input_path
 
@@ -309,7 +276,7 @@ class SuperResModule:
             os.makedirs(self.result_path)
 
         self.file_idx = 0
-        self.super_res_idx = 0
+        self.upscale_idx = 0
         self.total_frames = -1
         self.eta = -1
 
@@ -320,6 +287,6 @@ class SuperResModule:
         # Run upscaling in a separate process so it gets the GPU at full speed and the UI stays responsive
         self.queue = mp.Queue()
         self.reply = mp.Queue()
-        self.sr_process = LoggedProcess(target=run_super_res, args=(self.queue, self.reply), daemon=True, name='super-res')
-        self.sr_process.start()
+        self.upscale_process = LoggedProcess(target=run_batch_upscale, args=(self.queue, self.reply), daemon=True, name='upscale')
+        self.upscale_process.start()
         self.queue.put(self.args)

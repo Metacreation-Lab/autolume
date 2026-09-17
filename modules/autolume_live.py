@@ -117,7 +117,7 @@ class Autolume(imgui_window.ImguiWindow):
 
         self._training_module = None
         self._projection_module = None
-        self._super_res_module = None
+        self._upscale_module = None
         self._mixing_module = None
 
         self.splash = cv2.imread(str(resource_path("assets", "splashscreen.jpg")), cv2.IMREAD_UNCHANGED)
@@ -251,9 +251,9 @@ class Autolume(imgui_window.ImguiWindow):
         if self._projection_module is None:
             from modules.projection_module import ProjectionModule
             self._projection_module = ProjectionModule(ModuleHost(self))
-        if self._super_res_module is None:
-            from modules.super_res_module import SuperResModule
-            self._super_res_module = SuperResModule(ModuleHost(self))
+        if self._upscale_module is None:
+            from modules.upscale_module import UpscaleModule
+            self._upscale_module = UpscaleModule(ModuleHost(self))
         if self._mixing_module is None:
             from modules.network_mixing import MixingModule
             self._mixing_module = MixingModule(ModuleHost(self))
@@ -482,7 +482,7 @@ class Autolume(imgui_window.ImguiWindow):
 
         cells = [
             (0, 0, 'Projection', self._projection_module),
-            (1, 0, 'Super Resolution', self._super_res_module),
+            (1, 0, 'Upscaling', self._upscale_module),
             (0, 1, 'Model Mixing', self._mixing_module),
         ]
 
@@ -589,7 +589,7 @@ class Autolume(imgui_window.ImguiWindow):
 
             elif self.state == States.TOOLS:
                 if (self._projection_module is None
-                        or self._super_res_module is None or self._mixing_module is None):
+                        or self._upscale_module is None or self._mixing_module is None):
                     self.state = States.ERROR
                 else:
                     self._draw_tools_grid()
