@@ -11,6 +11,7 @@ This widget controls how the visuals are displayed and lets you capture them.
 - Raw Scale: Shows the visuals at their native size.
 - Fit: Scales the visuals to fill the preview area.
 - Bilinear: Smooths the visuals when they are scaled. It is only available when Fit is selected and is off by default, so the visuals stay pixel exact. Display scaling never affects screenshots and recordings, which always capture the visuals at their native size.
+- Upscale: Runs an AI model (4xLSDIRCompactC3) on the rendered frames for a 4x larger output. The model is the fastest one Autolume ships, so it keeps the frame rate high. It is off by default and has no cost while unchecked. The model weights are downloaded when the box is checked, so the first use needs an internet connection.
 - Fullscreen: Shows the visuals in full screen on the main display. Press Exit Fullscreen to return. This button is not available on macOS.
 - Screenshot: Saves a snapshot of the visuals as an image in the captures folder (under your [data folder](index.md#where-autolume-stores-your-data), `~/autolume/captures` by default).
 - Record: Records the visuals as a video in the captures folder. The button turns into a red Stop button while recording.

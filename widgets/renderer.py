@@ -19,6 +19,7 @@ import torch.fft
 import torch.nn
 import matplotlib.cm
 import dnnlib
+import upscale
 from utils import device_utils
 from utils.resource_paths import resource_path
 from bending.transform_layers import ManipulationLayer
@@ -246,6 +247,9 @@ class Renderer:
         self.model_changed = False
         self._applied_module_state = None  # (net, global_noise, noise_adjustments, ratios)
         self._submodule_names = (None, None)  # (net, {module: name})
+        self._upscaler = None
+        self._upscaler_key = None  # model the loaded upscaler was built for
+        self._upscaler_failed = None  # model that raised, skipped from then on
 
     def render(self, **args):
         self._is_timing = True
@@ -421,6 +425,7 @@ class Renderer:
                      alpha=0,
                      looping_list=[],
                      global_noise=1,
+                     upscale_model=None,
                      combined_layers = [],
                      mixing = True,
                      save_model = False,
@@ -593,8 +598,11 @@ class Renderer:
                 # Mismatched per-layer offsets are model-switch transients.
             elif direction.shape[0] == int(G.w_dim):
                 w += direction
+            if upscale_model is None and (self._upscaler is not None or self._upscaler_failed is not None):
+                self.release_upscaler(forget_failure=True)
             out, manip_layers, = self.run_synthesis_net( w, capture_layer=layer_name, transforms=latent_transforms,
                                                  adjustments=adjustments, noise_adjustments=noise_adjustments, ratios=ratios, global_noise=global_noise,
+                                                 upscale_model=upscale_model,
                                                  combined_layers=combined_layers,mixing=mixing,
                                                  build_layers=cache_key not in self._net_layers,
                                                  **synthesis_kwargs)
@@ -652,9 +660,59 @@ class Renderer:
     def get_layers(self, net):
         return [name for name, weight in net.named_parameters()]
 
+    def release_upscaler(self, forget_failure=False):
+        """Drop the loaded upscaler so its weights leave the GPU."""
+        self._upscaler = None
+        self._upscaler_key = None
+        if forget_failure:
+            self._upscaler_failed = None
+        device_utils.empty_cache()
+
+    def upscale_frame(self, out, model):
+        """Run one 4x upscaling pass on a rendered frame.
+
+        The upscaler is loaded on first use and kept until the model changes.
+        Missing weights are the UI's job to download, so a frame that arrives
+        before they land renders at native size. Any failure disables the pass
+        for that model instead of breaking the render loop.
+        """
+        key = model
+        if key == self._upscaler_failed:
+            return out
+        if key not in upscale.MODELS:
+            self._upscaler_failed = key
+            logger.warning('Unknown upscaling model "%s", skipping the live pass', model)
+            return out
+        try:
+            if key != self._upscaler_key:
+                self.release_upscaler()
+                if any(not os.path.exists(upscale.weight_path(name))
+                       for name in upscale.required_weights(key)):
+                    return out
+                # Built outside inference mode so the parameters stay usable
+                # from any context the render loop runs in.
+                with torch.inference_mode(False):
+                    module = upscale.load_upscaler(model=key)
+                if module is None:
+                    return out
+                self._upscaler = module
+                self._upscaler_key = key
+            params = next(self._upscaler.parameters(), None)
+            device = self._device if params is None else params.device
+            dtype = torch.float32 if params is None else params.dtype
+            frame = (out.to(torch.float32) * 0.5 + 0.5).clamp(0, 1)
+            frame = self._upscaler(frame.to(device=device, dtype=dtype))
+            return frame.to(torch.float32).clamp(0, 1) * 2 - 1
+        except Exception:
+            self.release_upscaler()
+            self._upscaler_failed = key
+            logger.exception("Live upscaling failed, skipping the pass")
+            return out
+
 
     def run_synthesis_net(self,*args, capture_layer=None, transforms=None, ratios=None, adjustments=None,
-                          noise_adjustments=None, global_noise=1, combined_layers=[], mixing=False,
+                          noise_adjustments=None, global_noise=1, upscale_model=None,
+                          combined_layers=[], mixing=False,
                           build_layers=False, **kwargs):
         """
         Run the synthesis network and capture the output of a specific layer.
@@ -825,6 +883,8 @@ class Renderer:
                 out = net(*args, **kwargs)
                 if isinstance(out, tuple):
                     out = out[0]
+                if upscale_model is not None:
+                    out = self.upscale_frame(out, upscale_model)
         except CaptureSuccess as e:
             out = e.out
         for hook in hooks:
