@@ -1,6 +1,6 @@
 # Tools
 
-The Tools screen gathers three utilities in a single grid: [Projection](#projection), [Super Resolution](#super-resolution), and [Model Mixing](#model-mixing).
+The Tools screen gathers three utilities in a single grid: [Projection](#projection), [Upscaling](#upscaling), and [Model Mixing](#model-mixing).
 
 ## Projection
 
@@ -24,19 +24,19 @@ The following options are available for projection:
 - Use Penalty: Enable this option to penalize large update steps, resulting in a smoother projection and avoiding local minimums.
 - Use Center: Enable this option to use an additional center crop as the target image. This can improve matching accuracy but may reduce overall accuracy.
 
-## Super Resolution
+## Upscaling
 
-The Super Resolution tool provides the feature to upscale images and videos for higher resolution distribution of your work. There are three different models available: Quality, Balance, and Fast. While the Processing speeds of the models differ, Quality being the slowest and Fast being the fastest, the slower models tend to preserve more details from the original image/video. However, the quality of the results also depends on the type of visual content and is better to be tested with all three models to find the desired option.
+The Upscaling tool, also called super resolution, upscales image and video files with an AI model for higher resolution distribution of your work. The output is always 4 times the input resolution. It works on any file, so a common workflow is to record a performance at the base resolution of your model on the [Perform](perform.md) screen and enlarge the recording here afterwards. This keeps the frame rate high while you play and moves the cost of upscaling to a step where time does not matter.
 
-![](assets/offline-modules-super-resolution-01.png)
+![](assets/offline-modules-upscaling-01.png)
 
 The following options are available:
 
-- Input Files: Select the path to the images or videos that should be upscaled. Multiple files can be selected at once.
-- Result Path: Specify the path where the upscaled images or videos should be saved.
-- Model: Choose the upscaling model to be used: Fast, Balanced, or Quality. Fast is the quickest but provides lower quality, while Quality is the slowest but provides the highest quality.
-- Scale Mode: Choose between defining the exact Height and Width of the output or using a Scale Factor. If the scale factor is selected, the height and width will be automatically calculated based on the scale factor.
-- Sharpening: Adjust the sharpness of the upscaled image. Sharpening=1 means no added sharpness. Higher values result in sharper images but may introduce artifacts.
+- Input Files: Select the images or videos to upscale. Multiple files can be selected at once and they are processed one after the other.
+- Save Path: Specify the directory where the results are written.
+- Model: Choose which model does the upscaling. Quality is the default and runs 4xNomosWebPhoto_RealPLKSR, the same model dataset preparation uses. It gives the sharpest results. Fast runs 4xLSDIRCompactC3, the same model the live display uses, and is several times faster. The model weights are downloaded when processing starts, so the first run with a given model needs an internet connection.
+
+Video files keep their frame rate and their audio track. Processing runs in the background and a progress dialog shows the current file and an estimated time remaining, so a long job can be cancelled.
 
 ## Model Mixing
 
