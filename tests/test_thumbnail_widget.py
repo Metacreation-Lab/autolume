@@ -29,3 +29,21 @@ def test_render_thumbnail_unreadable_video(tmp_path):
     path = tmp_path / 'junk.mp4'
     path.write_bytes(b'not a video, just some bytes' * 64)
     assert _render_thumbnail(str(path), SIZE, padding=0) is None
+
+
+def test_set_badges_stores_and_clears():
+    from widgets.thumbnail_widget import ThumbnailWidget
+    w = ThumbnailWidget()
+    assert w.badges == {}
+    w.set_badges({"a.png": "tip"})
+    assert w.badges == {"a.png": "tip"}
+    w.set_badges(None)
+    assert w.badges == {}
+
+
+def test_cleanup_clears_badges():
+    from widgets.thumbnail_widget import ThumbnailWidget
+    w = ThumbnailWidget()
+    w.set_badges({"a.png": "tip"})
+    w.cleanup()
+    assert w.badges == {}
