@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="../assets/logo.webp">
-      <meta name="generator" content="zensical-0.0.57">
+      <meta name="generator" content="zensical-0.0.65">
     
     
       
@@ -32,7 +32,7 @@
       
         
       
-      <link rel="stylesheet" href="../assets/stylesheets/classic/main.38807bfb.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/classic/main.1470d0a1.min.css">
       
         
           
@@ -392,20 +392,21 @@
             
           </div>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_3">
-            <span class="md-nav__icon md-icon"></span>
-            
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_3">
+              <span class="md-nav__icon md-icon"></span>
+              
   
   Train
 
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-            
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
               
                 
+              
+                
+                  
   
   
   
@@ -429,10 +430,11 @@
     </li>
   
 
+                
               
-            
-          </ul>
-        </nav>
+            </ul>
+          </nav>
+        
       
     </li>
   
@@ -617,6 +619,8 @@
 <li>Non-square Framing: Enables image resizing while maintaining the original aspect ratio instead of forcing a square crop.</li>
 <li>Aspect Ratio (Height &amp; Width): Sets custom height and width proportions for non-square datasets.</li>
 <li>Padding Mode: Determines how empty areas are filled when adjusting aspect ratios.</li>
+<li>Upscaling: Controls how images smaller than the target resolution are enlarged. The section shows how many of the imported images will be upscaled, and each of those images is marked with a small warning badge on its thumbnail.</li>
+<li>Method: Basic (the default) uses classic resizing, which is fast and faithful to the source. AI Enhanced uses an AI upscaling model (4xNomosWebPhoto_RealPLKSR) to recover sharp detail, which makes small sources usable at the target resolution. It works best when your sources are of similar sizes and takes noticeably longer. A large dataset can take minutes instead of seconds. The model weights are downloaded when processing starts, so the first run needs an internet connection.</li>
 <li>Augmentation: Applies augmentation techniques to the imported images during processing. These transformations are used to increase dataset size. It is important to select augmentation options carefully based on the nature of the data; for example, if the dataset contains orientation-sensitive subjects such as human faces, flip operations should be adjusted accordingly. The X-Flip and Y-Flip options permanently write flipped copies of each image to disk (enabling both produces all four flip orientations). Do not combine them with the Mirror option on the <a href="../train/">Train</a> screen, which flips images in memory during training: flipping already-flipped images adds no new samples and only wastes storage and compute. If you enable flips here, keep Mirror set to None during training.</li>
 </ul>
 <p>Once a dataset is prepared, head to the <a href="../train/">Train</a> screen to train a model on it.</p>
@@ -711,10 +715,14 @@
     
       
       
-      <script id="__config" type="application/json">{"annotate":null,"base":"..","features":["navigation.footer","navigation.indexes"],"search":"../assets/javascripts/workers/search.7d14d953.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"default":"latest","provider":"mike"}}</script>
+      
+      
+        
+        
+      <script id="__config" type="application/json">{"annotate":null,"base":"..","features":["navigation.footer","navigation.indexes"],"redirect":null,"search":"../assets/javascripts/workers/search.7d14d953.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"default":"latest","provider":"mike"}}</script>
     
     
-      <script src="../assets/javascripts/bundle.49251538.min.js"></script>
+      <script src="../assets/javascripts/bundle.c04ba553.min.js"></script>
       
     
   </body>

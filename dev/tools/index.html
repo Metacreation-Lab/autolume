@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="../assets/logo.webp">
-      <meta name="generator" content="zensical-0.0.57">
+      <meta name="generator" content="zensical-0.0.65">
     
     
       
@@ -32,7 +32,7 @@
       
         
       
-      <link rel="stylesheet" href="../assets/stylesheets/classic/main.38807bfb.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/classic/main.1470d0a1.min.css">
       
         
           
@@ -321,20 +321,21 @@
             
           </div>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_3">
-            <span class="md-nav__icon md-icon"></span>
-            
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_3">
+              <span class="md-nav__icon md-icon"></span>
+              
   
   Train
 
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-            
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
               
                 
+              
+                
+                  
   
   
   
@@ -358,10 +359,11 @@
     </li>
   
 
+                
               
-            
-          </ul>
-        </nav>
+            </ul>
+          </nav>
+        
       
     </li>
   
@@ -472,10 +474,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#super-resolution" class="md-nav__link">
+  <a href="#upscaling" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Super Resolution
+        Upscaling
       </span>
     </span>
   </a>
@@ -567,10 +569,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#super-resolution" class="md-nav__link">
+  <a href="#upscaling" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Super Resolution
+        Upscaling
       </span>
     </span>
   </a>
@@ -607,7 +609,7 @@
 
 
 <h1 id="tools">Tools<a class="headerlink" href="#tools" title="Permanent link">&para;</a></h1>
-<p>The Tools screen gathers three utilities in a single grid: <a href="#projection">Projection</a>, <a href="#super-resolution">Super Resolution</a>, and <a href="#model-mixing">Model Mixing</a>.</p>
+<p>The Tools screen gathers three utilities in a single grid: <a href="#projection">Projection</a>, <a href="#upscaling">Upscaling</a>, and <a href="#model-mixing">Model Mixing</a>.</p>
 <h2 id="projection">Projection<a class="headerlink" href="#projection" title="Permanent link">&para;</a></h2>
 <p>The Projection tool allows loading a target image, a text prompt, or a combination of both, to find the closest corresponding latent vector of a trained model. Different methods are provided to search for the corresponding latent vector that you can choose from. The output is the calculated vector plus a process video showing the search process.</p>
 <p><img alt="" src="../assets/offline-modules-projection-module-01.png" /></p>
@@ -627,17 +629,16 @@
 <li>Use Penalty: Enable this option to penalize large update steps, resulting in a smoother projection and avoiding local minimums.</li>
 <li>Use Center: Enable this option to use an additional center crop as the target image. This can improve matching accuracy but may reduce overall accuracy.</li>
 </ul>
-<h2 id="super-resolution">Super Resolution<a class="headerlink" href="#super-resolution" title="Permanent link">&para;</a></h2>
-<p>The Super Resolution tool provides the feature to upscale images and videos for higher resolution distribution of your work. There are three different models available: Quality, Balance, and Fast. While the Processing speeds of the models differ, Quality being the slowest and Fast being the fastest, the slower models tend to preserve more details from the original image/video. However, the quality of the results also depends on the type of visual content and is better to be tested with all three models to find the desired option.</p>
-<p><img alt="" src="../assets/offline-modules-super-resolution-01.png" /></p>
+<h2 id="upscaling">Upscaling<a class="headerlink" href="#upscaling" title="Permanent link">&para;</a></h2>
+<p>The Upscaling tool, also called super resolution, upscales image and video files with an AI model for higher resolution distribution of your work. The output is always 4 times the input resolution. It works on any file, so a common workflow is to record a performance at the base resolution of your model on the <a href="../perform/">Perform</a> screen and enlarge the recording here afterwards. This keeps the frame rate high while you play and moves the cost of upscaling to a step where time does not matter.</p>
+<p><img alt="" src="../assets/offline-modules-upscaling-01.png" /></p>
 <p>The following options are available:</p>
 <ul>
-<li>Input Files: Select the path to the images or videos that should be upscaled. Multiple files can be selected at once.</li>
-<li>Result Path: Specify the path where the upscaled images or videos should be saved.</li>
-<li>Model: Choose the upscaling model to be used: Fast, Balanced, or Quality. Fast is the quickest but provides lower quality, while Quality is the slowest but provides the highest quality.</li>
-<li>Scale Mode: Choose between defining the exact Height and Width of the output or using a Scale Factor. If the scale factor is selected, the height and width will be automatically calculated based on the scale factor.</li>
-<li>Sharpening: Adjust the sharpness of the upscaled image. Sharpening=1 means no added sharpness. Higher values result in sharper images but may introduce artifacts.</li>
+<li>Input Files: Select the images or videos to upscale. Multiple files can be selected at once and they are processed one after the other.</li>
+<li>Save Path: Specify the directory where the results are written.</li>
+<li>Model: Choose which model does the upscaling. Quality is the default and runs 4xNomosWebPhoto_RealPLKSR, the same model dataset preparation uses. It gives the sharpest results. Fast runs 4xLSDIRCompactC3, the same model the live display uses, and is several times faster. The model weights are downloaded when processing starts, so the first run with a given model needs an internet connection.</li>
 </ul>
+<p>Video files keep their frame rate and their audio track. Processing runs in the background and a progress dialog shows the current file and an estimated time remaining, so a long job can be cancelled.</p>
 <h2 id="model-mixing">Model Mixing<a class="headerlink" href="#model-mixing" title="Permanent link">&para;</a></h2>
 <p>This tool provides the ability to mix two trained models to make a new model. It works based on selecting parts of one model and parts of a different model, thereby mixing the features of the two models.</p>
 <p><img alt="" src="../assets/offline-modules-model-mixing-01.png" /></p>
@@ -741,10 +742,14 @@
     
       
       
-      <script id="__config" type="application/json">{"annotate":null,"base":"..","features":["navigation.footer","navigation.indexes"],"search":"../assets/javascripts/workers/search.7d14d953.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"default":"latest","provider":"mike"}}</script>
+      
+      
+        
+        
+      <script id="__config" type="application/json">{"annotate":null,"base":"..","features":["navigation.footer","navigation.indexes"],"redirect":null,"search":"../assets/javascripts/workers/search.7d14d953.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"default":"latest","provider":"mike"}}</script>
     
     
-      <script src="../assets/javascripts/bundle.49251538.min.js"></script>
+      <script src="../assets/javascripts/bundle.c04ba553.min.js"></script>
       
     
   </body>

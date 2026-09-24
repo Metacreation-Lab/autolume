@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="../assets/logo.webp">
-      <meta name="generator" content="zensical-0.0.57">
+      <meta name="generator" content="zensical-0.0.65">
     
     
       
@@ -32,7 +32,7 @@
       
         
       
-      <link rel="stylesheet" href="../assets/stylesheets/classic/main.38807bfb.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/classic/main.1470d0a1.min.css">
       
         
           
@@ -321,20 +321,21 @@
             
           </div>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_3">
-            <span class="md-nav__icon md-icon"></span>
-            
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_3">
+              <span class="md-nav__icon md-icon"></span>
+              
   
   Train
 
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-            
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
               
                 
+              
+                
+                  
   
   
   
@@ -358,10 +359,11 @@
     </li>
   
 
+                
               
-            
-          </ul>
-        </nav>
+            </ul>
+          </nav>
+        
       
     </li>
   
@@ -1014,7 +1016,8 @@
 <ul>
 <li>Raw Scale: Shows the visuals at their native size.</li>
 <li>Fit: Scales the visuals to fill the preview area.</li>
-<li>Super Resolution: Upscales the generated images in real time.</li>
+<li>Bilinear: Smooths the visuals when they are scaled. It is only available when Fit is selected and is off by default, so the visuals stay pixel exact. Display scaling never affects screenshots and recordings, which always capture the visuals at their native size.</li>
+<li>Upscale: Runs an AI model (4xLSDIRCompactC3) on the rendered frames for a 4x larger output. The model is the fastest one Autolume ships, so it keeps the frame rate high. It is off by default and has no cost while unchecked. The model weights are downloaded when the box is checked, so the first use needs an internet connection.</li>
 <li>Fullscreen: Shows the visuals in full screen on the main display. Press Exit Fullscreen to return. This button is not available on macOS.</li>
 <li>Screenshot: Saves a snapshot of the visuals as an image in the captures folder (under your <a href="../#where-autolume-stores-your-data">data folder</a>, <code>~/autolume/captures</code> by default).</li>
 <li>Record: Records the visuals as a video in the captures folder. The button turns into a red Stop button while recording.</li>
@@ -1293,10 +1296,14 @@
     
       
       
-      <script id="__config" type="application/json">{"annotate":null,"base":"..","features":["navigation.footer","navigation.indexes"],"search":"../assets/javascripts/workers/search.7d14d953.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"default":"latest","provider":"mike"}}</script>
+      
+      
+        
+        
+      <script id="__config" type="application/json">{"annotate":null,"base":"..","features":["navigation.footer","navigation.indexes"],"redirect":null,"search":"../assets/javascripts/workers/search.7d14d953.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"default":"latest","provider":"mike"}}</script>
     
     
-      <script src="../assets/javascripts/bundle.49251538.min.js"></script>
+      <script src="../assets/javascripts/bundle.c04ba553.min.js"></script>
       
     
   </body>
