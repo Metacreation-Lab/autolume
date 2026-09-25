@@ -36,17 +36,21 @@ modes = ["Stop", "Anim"]
 class LatentWidget:
     def __init__(self, viz):
         self.viz        = viz
-        self.latent = dnnlib.EasyDict(vec=torch.randn(1, 512), next=torch.randn(1, 512), x=0, y=0, frac_x=0., frac_y=0.,
+        self.latent = dnnlib.EasyDict(vec=torch.randn(1, 512), next=torch.randn(1, 512), x=0.0, y=0.0,
                                       update_mode=0, speed=0.25, mode=True, project=True)
         self.step_y = 100
-        funcs = dict(zip(["project", "seed",  "anim", "speed"],
-                         [self.osc_handler(param) for param in
-                          ["project", "x", "update_mode", "speed"]]))
-        funcs["speed"] = self.speed_handler()
-        funcs["model"] = self.model_handler()
+        funcs = {
+            "project": self.osc_handler("project", bool),
+            "seed": self.osc_handler("x", float),
+            "seed y": self.osc_handler("y", float),
+            "anim": self.osc_handler("update_mode", int),
+            "speed": self.speed_handler(),
+            "model": self.model_handler(),
+        }
         self.seed_osc_menu = osc_menu.OscMenu(self.viz, copy.deepcopy(funcs),
                                          label="##SeedOSC")
         del funcs["seed"]
+        del funcs["seed y"]
         funcs["vector"] = self.list_handler("vec")
         funcs["randomize"] = self.randomize_handler()
         self.vec_osc_menu = osc_menu.OscMenu(self.viz, copy.deepcopy(funcs),
@@ -84,11 +88,10 @@ class LatentWidget:
         self.latent.x += dx / viz.app.font_size * 4e-2
         self.latent.y += dy / viz.app.font_size * 4e-2
 
-    def osc_handler(self, param):
+    def osc_handler(self, param, ptype):
         def func(address, *args):
             try:
-                nec_type = type(self.latent[param])
-                self.latent[param] = nec_type(args[-1])
+                self.latent[param] = ptype(args[-1])
             except Exception as e:
                 self.viz.print_error(e)
         return func
@@ -122,17 +125,16 @@ class LatentWidget:
         with imgui_utils.item_width(viz.app.font_size * 8):
             _changed, seed = imgui.input_int("##seed", seed)
         if _changed:
-            self.latent.x = seed
-            self.latent.y = 0
+            self.latent.x = float(seed)
+            self.latent.y = 0.0
         imgui.same_line()
-        frac_x = self.latent.x - round(self.latent.x)
-        frac_y = self.latent.y - round(self.latent.y)
         with imgui_utils.item_width(viz.app.font_size * 5):
-            _changed, (new_frac_x, new_frac_y) = imgui.input_float2('##frac', frac_x, frac_y, format='%+.2f',
-                                                                    flags=imgui.INPUT_TEXT_ENTER_RETURNS_TRUE)
+            _changed, (new_x, new_y) = imgui.input_float2('##xy', self.latent.x, self.latent.y,
+                                                          format='%.2f',
+                                                          flags=imgui.INPUT_TEXT_ENTER_RETURNS_TRUE)
         if _changed:
-            self.latent.x += new_frac_x - frac_x
-            self.latent.y += new_frac_y - frac_y
+            self.latent.x = new_x
+            self.latent.y = new_y
         imgui.same_line(spacing=0)
         _clicked, dragging, dx, dy = imgui_utils.drag_button('Drag', width=viz.app.button_w)
         if dragging:

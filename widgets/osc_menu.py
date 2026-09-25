@@ -58,6 +58,12 @@ class OscMenu:
 
     def set_params(self, params):
         self.use_map, self.use_osc, self.osc_addresses, self.cached_osc_addresses, self.mappings = params
+        for key in self.funcs.keys():
+            self.use_map.setdefault(key, True)
+            self.use_osc.setdefault(key, False)
+            self.osc_addresses.setdefault(key, "...")
+            self.cached_osc_addresses.setdefault(key, "...")
+            self.mappings.setdefault(key, "x")
         for key, func in self.funcs.items():
             self.funcs[key] = self.check_osc(func, key)
         for key, func in self.funcs.items():
